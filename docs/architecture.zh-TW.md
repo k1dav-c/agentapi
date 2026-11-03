@@ -444,7 +444,8 @@ agent 忙碌時，訊息會在 `s.queue` 等待；對 agent 最後一則訊息�
 寫入 native stdin 的動作會隨呼叫的 context 結束，避免不再讀取的 agent 佔住 `s.mu`。
 
 native 訊息也能 steer 或中斷目前回合。佇列變更會在佇列鎖之外以 `queue_update` 送到 emitter，
-並帶版本號，供 emitter 捨棄晚到的舊變更。佇列會隨對話一起持久保存。
+並帶版本號，供 emitter 捨棄晚到的舊變更。佇列會隨對話一起持久保存，每次變更都會寫入（佇列的 `onChange` 呼叫 `storeQueue`）：
+當機後，已送出或已刪除的訊息不會再送一次。
 
 ## 持久保存
 

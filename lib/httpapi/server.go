@@ -48,18 +48,22 @@ type Server struct {
 	// snapshot don't take it. Locks are taken in this order, never the
 	// other way round: mu, the conversation's, the updater's, the
 	// emitter's, then the webhook dispatcher's and the state DB's.
-	mu                 sync.Mutex
-	stopOnce           sync.Once
-	stopping           bool        // set under mu once Stop closed the agent: no more restarts
-	restarting         atomic.Bool // set under mu while a restart runs without it (runRestartLocked)
-	updating           atomic.Bool // set under mu once an update restarts AgentAPI: messages wait in the queue, and no agent restart begins
-	logger             *slog.Logger
-	conversation       conv.Conversation
-	native             *native.Conversation // nil unless the transport is native
-	sessions           *sessions.Store      // the agent's sessions; nil unless native and it keeps logs
-	stateDB            *statedb.DB          // nil unless the conversation is kept
-	savedQueue         []QueuedMessage      // the queue as last stored in stateDB
+	mu           sync.Mutex
+	stopOnce     sync.Once
+	stopping     bool        // set under mu once Stop closed the agent: no more restarts
+	restarting   atomic.Bool // set under mu while a restart runs without it (runRestartLocked)
+	updating     atomic.Bool // set under mu once an update restarts AgentAPI: messages wait in the queue, and no agent restart begins
+	logger       *slog.Logger
+	conversation conv.Conversation
+	native       *native.Conversation // nil unless the transport is native
+	sessions     *sessions.Store      // the agent's sessions; nil unless native and it keeps logs
+	stateDB      *statedb.DB          // nil unless the conversation is kept
+	// queueStoreMu guards what storeQueue last stored in stateDB: the
+	// queue, its last ID and the version of the queue they are.
+	queueStoreMu       sync.Mutex
+	savedQueue         []QueuedMessage
 	savedNextQueueID   int
+	savedQueueVersion  uint64
 	agentio            st.AgentIO
 	agentType          mf.AgentType
 	emitter            *EventEmitter
@@ -394,8 +398,13 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		jsonlParentCtx: ctx,
 		stateDB:        stateDB,
 	}
-	// Clients follow the queue through queue_update events.
-	s.queue.onChange = emitter.SetQueue
+	// Clients follow the queue through queue_update events, and the state
+	// database has every change: a message that went out isn't sent again
+	// after a crash.
+	s.queue.onChange = func(queue []QueuedMessage, lastID int, version uint64) {
+		emitter.SetQueue(queue, version)
+		s.storeQueue(queue, lastID, version)
+	}
 	// The summary and the registry entry name the new address.
 	webhook.urlChanged = s.instanceChanged
 	if stateDB != nil {

@@ -561,7 +561,8 @@ the call's context, so an agent that stops reading can't hold `s.mu`.
 
 Native messages can also steer or interrupt a running turn. Queue changes reach the emitter as
 `queue_update` events outside the queue lock, with versions to discard late reports of older changes.
-The queue is persisted with the conversation.
+The queue is persisted with the conversation, on every change (`storeQueue`, from the queue's
+`onChange`): a message that went out or was deleted isn't sent again after a crash.
 
 ## Persistence
 

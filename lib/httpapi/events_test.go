@@ -890,7 +890,7 @@ func TestEmitterQueueUpdates(t *testing.T) {
 	t.Parallel()
 	e := NewEventEmitter()
 	var q messageQueue
-	q.onChange = e.SetQueue
+	q.onChange = func(queue []QueuedMessage, _ int, version uint64) { e.SetQueue(queue, version) }
 	_, ch, _ := e.SubscribeTo(AllEvents, 0, "")
 	at := time.Now()
 	first := q.Push("one", at, false)

@@ -30,21 +30,28 @@ type messageQueue struct {
 	// failures counts the failed sends in a row of the message failedID.
 	failedID int
 	failures int
-	// version counts the changes; onChange, if set, gets the queue after
-	// each, without q.mu held.
+	// version counts the changes; onChange, if set, gets the queue and
+	// the last ID after each, without q.mu held.
 	version  uint64
-	onChange func(queue []QueuedMessage, version uint64)
+	onChange func(queue []QueuedMessage, lastID int, version uint64)
 }
 
 // changed tells onChange about a change made with q.mu held, which it
 // releases.
 func (q *messageQueue) changed() {
 	q.version++
-	queue, version, onChange := append([]QueuedMessage{}, q.messages...), q.version, q.onChange
+	queue, lastID, version, onChange := append([]QueuedMessage{}, q.messages...), q.lastID, q.version, q.onChange
 	q.mu.Unlock()
 	if onChange != nil {
-		onChange(queue, version)
+		onChange(queue, lastID, version)
 	}
+}
+
+// state returns the queue, the last ID and the version as of one moment.
+func (q *messageQueue) state() ([]QueuedMessage, int, uint64) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return append([]QueuedMessage{}, q.messages...), q.lastID, q.version
 }
 
 // Len is how many messages wait.
@@ -66,13 +73,6 @@ func (q *messageQueue) LastID() int {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	return q.lastID
-}
-
-// Snapshot returns the queue and the last ID as of one moment.
-func (q *messageQueue) Snapshot() ([]QueuedMessage, int) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	return append([]QueuedMessage{}, q.messages...), q.lastID
 }
 
 // Push queues content, queued at at: last, or first with front.
@@ -278,7 +278,6 @@ func (s *Server) startMessageQueue() {
 	s.queueLoop = s.clock.TickerFunc(s.shutdownCtx, messageQueueDispatchInterval, func() error {
 		s.beforeQueue()
 		s.dispatchNextQueuedMessage()
-		s.persistQueue()
 		return nil
 	}, "messageQueueDispatch")
 }
