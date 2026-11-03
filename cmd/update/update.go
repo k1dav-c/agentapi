@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/coder/agentapi/cmd/restart"
 	"github.com/coder/agentapi/internal/version"
 	"github.com/coder/agentapi/lib/selfupdate"
@@ -23,9 +24,7 @@ var UpdateCmd = &cobra.Command{
 	Short: "Update agentapi to the latest version",
 	Long: "Check for the latest release on GitHub and update the agentapi binary in place. " +
 		"With --restart, the AgentAPIs running the binary then restart in place into the new version (see agentapi restart).",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runUpdate(cmd, args)
-	},
+	RunE: runUpdate,
 }
 
 func init() {
@@ -104,23 +103,30 @@ func runUpdate(_ *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	// Find the asset for this platform.
+	if err := install(source, info, program, currentVer, latestVer); err != nil {
+		return err
+	}
+	if restartFlag {
+		return restartAll(program)
+	}
+	return nil
+}
+
+// install downloads release info, the latest version, verified against
+// the release's checksums, and replaces program with it, under the lock
+// that AgentAPIs updating through their API take too.
+func install(source selfupdate.Source, info *selfupdate.Release, program selfupdate.Program, currentVer, latestVer *semver.Version) error {
 	assetName := selfupdate.PlatformAsset()
 	if _, err := info.Asset(assetName); err != nil {
 		return err
 	}
-
-	// Download the binary, verified against the release's checksums, and
-	// replace this one, under the lock that AgentAPIs updating through
-	// their API take too.
 	fmt.Printf("Downloading %s...\n", assetName)
-	installCtx, cancelInstall := context.WithTimeout(context.Background(), installTimeout)
-	defer cancelInstall()
-	installed, err := source.Install(installCtx, info, program, forceFlag)
+	ctx, cancel := context.WithTimeout(context.Background(), installTimeout)
+	defer cancel()
+	installed, err := source.Install(ctx, info, program, forceFlag)
 	if err != nil {
 		return err
 	}
-
 	switch {
 	case !installed:
 		fmt.Printf("Another process installed v%s meanwhile.\n", latestVer.String())
@@ -128,9 +134,6 @@ func runUpdate(_ *cobra.Command, _ []string) error {
 		fmt.Printf("Successfully updated agentapi from v%s to v%s\n", currentVer.String(), latestVer.String())
 	default:
 		fmt.Printf("Successfully updated agentapi to v%s\n", latestVer.String())
-	}
-	if restartFlag {
-		return restartAll(program)
 	}
 	return nil
 }
