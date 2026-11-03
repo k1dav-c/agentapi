@@ -1307,6 +1307,8 @@ export interface components {
              * @description The start of the hour, in UTC.
              */
             hour: string;
+            /** @description The tokens used, those of models without a known price included. */
+            tokens: components["schemas"]["Tokens"];
             /**
              * Format: double
              * @description API-equivalent cost in USD.
@@ -2382,6 +2384,8 @@ export interface components {
             title: string;
         };
         SummarySpend: {
+            /** @description The tokens the agent's sessions in this directory used over the last 24 hours, the calls day_usd adds up, each once; models without a known price included. Missing from earlier releases. */
+            day_tokens?: components["schemas"]["SummaryTokens"];
             /**
              * Format: double
              * @description API-equivalent cost in USD of the agent's sessions in this directory, subagents included, over the last 24 hours (the hours that end within them): the tokens at the model providers' list prices, which a subscription doesn't charge.
@@ -2391,14 +2395,43 @@ export interface components {
             scope: string;
             /**
              * Format: date-time
-             * @description When the amounts last changed: of AgentAPIs with one scope, the latest is the most recent.
+             * @description When the amounts or tokens last changed: of AgentAPIs with one scope, the latest is the most recent.
              */
             updated_at: string;
+            /** @description The same over the last 7 days. */
+            week_tokens?: components["schemas"]["SummaryTokens"];
             /**
              * Format: double
              * @description The same over the last 7 days.
              */
             week_usd: number;
+        };
+        SummaryTokens: {
+            /**
+             * Format: int64
+             * @description Input tokens read from the prompt cache.
+             */
+            cache_read: number;
+            /**
+             * Format: int64
+             * @description Input tokens written to the prompt cache, the five-minute and one-hour caches together.
+             */
+            cache_write: number;
+            /**
+             * Format: int64
+             * @description Uncached input tokens.
+             */
+            input: number;
+            /**
+             * Format: int64
+             * @description Output tokens, thinking included.
+             */
+            output: number;
+            /**
+             * Format: int64
+             * @description The sum of input, output, cache_write and cache_read.
+             */
+            total: number;
         };
         SummaryUpdateBody: {
             /** @description The agent's own session, as in GET /status. */

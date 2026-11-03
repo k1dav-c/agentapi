@@ -1,7 +1,8 @@
 import {describe, expect, test} from "bun:test";
 import {renderToStaticMarkup} from "react-dom/server";
 import type {HubInstance, InstanceUpdate, Summary} from "@/lib/hub";
-import {VersionsCard} from "./overview";
+import {FixedHubClock} from "./clock";
+import {TokensCard, VersionsCard, WorkCard} from "./overview";
 
 const running = (id: string, version: string, hostname: string, overrides: Partial<HubInstance> = {}): HubInstance => ({
   id,
@@ -115,5 +116,82 @@ describe("VersionsCard", () => {
     );
     expect(text(html)).toContain("2 updating now.");
     expect(html).not.toContain("Update the older ones");
+  });
+});
+
+describe("WorkCard", () => {
+  const now = Date.parse("2026-11-03T12:00:00Z");
+  const card = (instances: HubInstance[]) =>
+    renderToStaticMarkup(
+      <FixedHubClock now={now}>
+        <WorkCard instances={instances} onOpen={() => {}} />
+      </FixedHubClock>,
+    );
+
+  test("totals, the agents that worked the most and each group, with the span going on", () => {
+    const shown = text(
+      card([
+        running("a", "2.5.0", "dev-1", {name: "checkout-api", group: "Client work", work: {last_24h_seconds: 1800, last_7d_seconds: 4 * 3600}}),
+        running("b", "2.5.0", "dev-2", {name: "billing", state: "working", work: {last_24h_seconds: 0, last_7d_seconds: 3600, working_since: "2026-11-03T11:00:00Z"}}),
+        running("c", "2.5.0", "dev-3", {name: "docs", connection: "stopped", state: "stopped", group: "Client work", work: {last_24h_seconds: 0, last_7d_seconds: 600}}),
+        running("d", "2.4.0", "dev-4", {name: "older hub"}),
+      ]),
+    );
+    expect(shown).toContain("Last 24 hours 1.5h Last 7 days 6.1h");
+    expect(shown).toContain("3 of 4 agents worked this week");
+    expect(shown).toContain("Worked the most this week 24 hours 7 days checkout-api 30m 4h billing 1h 2h docs 0m 10m");
+    expect(shown).toContain("By group 24 hours 7 days Client work 30m 4.1h Ungrouped 1h 2h");
+  });
+
+  test("nothing without work time, and no groups when none is named", () => {
+    expect(card([running("a", "2.4.0", "dev-1")])).toBe("");
+    const shown = text(card([running("a", "2.5.0", "dev-1", {work: {last_24h_seconds: 60, last_7d_seconds: 60}})]));
+    expect(shown).not.toContain("By group");
+  });
+});
+
+describe("TokensCard", () => {
+  const tokens = (n: number) => ({input: n, output: 2 * n, cache_write: 3 * n, cache_read: 4 * n, total: 10 * n});
+  // An instance whose spend says n tokens of each kind today, 10n this week.
+  const using = (id: string, n: number, scope: string, overrides: Partial<HubInstance> = {}, updated_at = "2026-11-03T11:00:00Z"): HubInstance =>
+    running(id, "2.4.0", "dev-1", {
+      summary: {
+        instance: {id, server_id: "s", agent_type: "claude", transport: "native", agentapi_version: "2.4.0"},
+        status: "stable",
+        lifecycle: "ready",
+        attention: "none",
+        title: "",
+        pending_requests: 0,
+        queued_messages: 0,
+        tasks: 0,
+        unread: false,
+        seen_at: "2026-11-01T00:00:00Z",
+        spend: {day_usd: n, week_usd: 10 * n, scope, updated_at, day_tokens: tokens(n), week_tokens: tokens(10 * n)},
+      } as Summary,
+      ...overrides,
+    });
+  const card = (instances: HubInstance[]) => text(renderToStaticMarkup(<TokensCard instances={instances} onOpen={() => {}} />));
+
+  test("totals, each kind, the agents that used the most and each group, each scope once", () => {
+    const shown = card([
+      using("a", 120_000, "s1", {name: "checkout-api", group: "Client work"}),
+      // The same sessions as a, figured a minute earlier: not counted.
+      using("b", 99_000, "s1", {name: "checkout-api again", group: "Client work"}, "2026-11-03T10:59:00Z"),
+      using("c", 30_000, "s2", {name: "billing"}),
+      using("d", 1_000_000, "s3", {name: "stopped", connection: "stopped", state: "stopped"}),
+      running("e", "2.3.0", "dev-2", {name: "older"}),
+    ]);
+    expect(shown).toContain("Last 24 hours 1.5M Last 7 days 15M");
+    expect(shown).toContain("3 of 5 agents report it");
+    expect(shown).toContain("By kind 24 hours 7 days Input 150k 1.5M Output 300k 3M Cache write 450k 4.5M Cache read 600k 6M");
+    expect(shown).toContain("Used the most this week 24 hours 7 days checkout-api 1.2M 12M billing 300k 3M");
+    expect(shown).not.toContain("checkout-api again");
+    expect(shown).toContain("By group 24 hours 7 days Client work 1.2M 12M Ungrouped 300k 3M");
+  });
+
+  test("nothing without tokens, and no groups when none is named", () => {
+    expect(card([running("e", "2.3.0", "dev-2")])).toBe("");
+    expect(card([using("a", 0, "s1")])).toBe("");
+    expect(card([using("a", 5, "s1")])).not.toContain("By group");
   });
 });

@@ -49,6 +49,9 @@ type Instance struct {
 	// State is what the hub's page shows of it, from the three above and
 	// Muted.
 	State instanceapi.State `json:"state"`
+	// Work is how long the hub saw it working, as of when the hub sends it
+	// (sent); nil inside the store.
+	Work *WorkTime `json:"work,omitempty"`
 
 	// answeredBy is the ID of another AgentAPI that answers at URL, while
 	// it does: the proxy doesn't send it this instance's requests.
@@ -59,6 +62,14 @@ type Instance struct {
 	// activity is the last activityKey the hub knew of it, kept in the file:
 	// ChangedAt moves when that changes. Empty before the hub knew one.
 	activity string
+	// work is when the hub saw it working, kept in the file.
+	work workLog
+	// workSent is the work time the hub last told the subscribers of, to
+	// tell them again once its windows moved (refreshWork).
+	workSent workMinutes
+	// heard, set by a change that loses its summary stream, is when the
+	// stream last said anything: a span of work ends there.
+	heard time.Time
 }
 
 // record is what the hub keeps of an instance in its file: not its
@@ -100,6 +111,22 @@ type record struct {
 func (i Instance) public() Instance {
 	i.Token = ""
 	return i
+}
+
+// sent is the instance as the hub sends it to the browser at now: public,
+// with its work time.
+func (i Instance) sent(now time.Time) Instance {
+	i = i.public()
+	work := i.work.at(now)
+	i.Work = &work
+	return i
+}
+
+// working says the hub sees the instance working: its state, while the
+// hub follows its summary stream. One that is connecting again shows its
+// last summary, which the hub doesn't see go on.
+func (i Instance) working() bool {
+	return i.State == instanceapi.StateWorking && i.Connection == ConnectionConnected
 }
 
 // seen is the instance as browsers see it, to tell a change they would see
@@ -212,15 +239,19 @@ type storedInstance struct {
 	// Activity is its activityKey: after a restart, a summary that says
 	// what the last one did isn't a change.
 	Activity string `json:"activity,omitempty"`
+	// Work is when the hub saw it working; the store tells a change of it
+	// apart (workLog.track), so kept leaves it out.
+	Work *storedWork `json:"work,omitempty"`
 }
 
 func (i Instance) stored() storedInstance {
-	return storedInstance{record: i.record, Stopped: i.Connection == ConnectionStopped, Activity: i.activity}
+	return storedInstance{record: i.record, Stopped: i.Connection == ConnectionStopped, Activity: i.activity, Work: i.work.stored()}
 }
 
-// kept is what the file keeps of the instance, but when it was last seen.
+// kept is what the file keeps of the instance, but when it was last seen
+// and its work, to compare.
 func (i Instance) kept() storedInstance {
-	stored := i.stored()
+	stored := storedInstance{record: i.record, Stopped: i.Connection == ConnectionStopped, Activity: i.activity}
 	stored.LastSeen = time.Time{}
 	return stored
 }
@@ -236,12 +267,13 @@ func newStore(path string, logger *slog.Logger, clock quartz.Clock) (*store, err
 	if err != nil {
 		return nil, err
 	}
+	now := clock.Now()
 	for _, si := range stored {
 		connection := ConnectionConnecting
 		if si.Stopped {
 			connection = ConnectionStopped
 		}
-		i := &Instance{record: si.record, Connection: connection, activity: si.Activity}
+		i := &Instance{record: si.record, Connection: connection, activity: si.Activity, work: si.Work.log(si.LastSeen, now)}
 		i.Pin = max(i.Pin, 0)
 		i.State = i.state()
 		s.instances[si.ID] = i
@@ -271,8 +303,19 @@ func (s *store) changedLocked() {
 	}
 }
 
-// close writes what the file is behind on, and stops writing it.
+// close ends the spans of work going on, writes what the file is behind
+// on, and stops writing it. The hub saw the instances work until it
+// stopped; after it starts again, they count from their next summary.
 func (s *store) close() error {
+	s.mu.Lock()
+	now := s.clock.Now()
+	for _, i := range s.instances {
+		if !i.work.since.IsZero() {
+			i.work.end(now, now)
+			s.changedLocked()
+		}
+	}
+	s.mu.Unlock()
 	if s.persist == nil {
 		return nil
 	}
@@ -326,7 +369,9 @@ const pinLast = math.MaxInt
 // what it keeps changed; when the instance was last seen isn't worth a write of its own
 // and goes with the next one. ChangedAt moves when the change is one its
 // row shows of what it does (activityKey), and for a new instance. A
-// change of its Pin numbers the pinned ones again.
+// change of its Pin numbers the pinned ones again. A span of work starts or
+// ends when the instance starts or stops working (workLog.track); its
+// ChangedAt doesn't move for that.
 func (s *store) update(id string, create bool, change func(*Instance)) (Instance, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -350,17 +395,24 @@ func (s *store) update(id string, create bool, change func(*Instance)) (Instance
 	// One kept by a hub that didn't record changes has nothing to differ
 	// from until the hub knows what it does.
 	known := i.activity != "" || !i.ChangedAt.IsZero()
+	now := s.clock.Now()
 	if !ok || (activity != "" && activity != i.activity && known) {
-		i.ChangedAt = s.clock.Now()
+		i.ChangedAt = now
 	}
 	if activity != "" {
 		i.activity = activity
 	}
-	if !ok || i.kept() != before {
+	worked := i.work.track(i.working(), now, i.heard)
+	i.heard = time.Time{}
+	if !ok || worked || i.kept() != before {
 		s.changedLocked()
 	}
+	notify := !ok || worked || !bytes.Equal(i.seen(), seen)
+	if notify {
+		i.workSent = i.work.at(now).minutes()
+	}
 	changed := *i
-	if !ok || !bytes.Equal(changed.seen(), seen) {
+	if notify {
 		s.notifyLocked(storeEvent{Instance: &changed})
 	}
 	s.notifyEachLocked(renumbered, i)
@@ -457,6 +509,24 @@ func (s *store) setPins(ids []string) ([]string, error) {
 	s.changedLocked()
 	s.notifyEachLocked(renumbered, nil)
 	return slices.Clone(ids), nil
+}
+
+// refreshWork tells the subscribers of each instance whose work time, in
+// whole minutes, moved since they last heard of it: a span that slides out
+// of a window changes it without a change of the instance. The page adds
+// the span going on itself.
+func (s *store) refreshWork() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := s.clock.Now()
+	for _, i := range s.sortedLocked() {
+		minutes := i.work.at(now).minutes()
+		if minutes != i.workSent {
+			i.workSent = minutes
+			changed := *i
+			s.notifyLocked(storeEvent{Instance: &changed})
+		}
+	}
 }
 
 // subscribe returns the instances and a channel of the changes after them.

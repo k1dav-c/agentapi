@@ -84,13 +84,14 @@ describe("periodTotals", () => {
   test("sums hours into the viewer's days", () => {
     const now = new Date(2026, 9, 21, 15, 0);
     const hour = (daysAgo: number, h: number) => new Date(2026, 9, 21 - daysAgo, h).toISOString();
+    const tokens = {input: 0, cache_read: 0, cache_write: 0, output: 0};
     const totals = periodTotals(
       [
-        {hour: hour(40, 9), usd: 8},
-        {hour: hour(20, 9), usd: 4},
-        {hour: hour(6, 0), usd: 2},
-        {hour: hour(1, 23), usd: 1},
-        {hour: hour(0, 0), usd: 0.5},
+        {hour: hour(40, 9), usd: 8, tokens},
+        {hour: hour(20, 9), usd: 4, tokens},
+        {hour: hour(6, 0), usd: 2, tokens},
+        {hour: hour(1, 23), usd: 1, tokens},
+        {hour: hour(0, 0), usd: 0.5, tokens},
       ],
       now,
     );

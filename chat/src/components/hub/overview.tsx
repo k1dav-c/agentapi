@@ -6,16 +6,25 @@ import {AgentMark} from "@/components/agent-mark";
 import {
   activity,
   countedSpends,
+  countedTokens,
   displayName,
   formatAgo,
   formatElapsed,
+  formatTokens,
   formatUSD,
+  formatWork,
   instanceState,
   instanceVersion,
   parseVersion,
   spendTitle,
   spendTotals,
+  tokenKinds,
+  tokensTitle,
+  tokenTotals,
   versionTotals,
+  workSeconds,
+  workTitle,
+  workTotals,
   type HubFilter,
   type HubInstance,
   type InstanceState,
@@ -249,6 +258,242 @@ function SpendCard({instances, onOpen}: {instances: HubInstance[]; onOpen: (id: 
   );
 }
 
+// TokensCard is the tokens the instances used in the last 24 hours and 7
+// days, the calls their spend adds up: all of them by kind, the ones that
+// used the most this week, and each group.
+export function TokensCard({instances, onOpen}: {instances: HubInstance[]; onOpen: (id: string) => void}) {
+  const totals = tokenTotals(instances);
+  if (totals.week.total <= 0) return null;
+  // Each scope once, as the totals count them.
+  const counted = countedTokens(instances);
+  const top = counted
+    .filter(({week}) => week.total > 0)
+    .sort((a, b) => b.week.total - a.week.total)
+    .slice(0, 5);
+  const byGroup = new Map<string, {day: number; week: number}>();
+  for (const {instance, day, week} of counted) {
+    const name = instance.group?.trim() ?? "";
+    const group = byGroup.get(name) ?? {day: 0, week: 0};
+    group.day += day.total;
+    group.week += week.total;
+    byGroup.set(name, group);
+  }
+  // Subtotals only when some agents are in a group, named ones first.
+  const groups =
+    byGroup.size > 1 || !byGroup.has("")
+      ? [...byGroup.entries()].filter(([, group]) => group.week > 0).sort(([a], [b]) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b)))
+      : [];
+  const header = (first: string) => (
+    <thead>
+      <tr className="text-left text-xs text-muted-foreground">
+        <th className="pb-2 font-normal">{first}</th>
+        <th className="pb-2 text-right font-normal">24 hours</th>
+        <th className="pb-2 text-right font-normal">7 days</th>
+      </tr>
+    </thead>
+  );
+  return (
+    <section className="mt-10" aria-labelledby="hub-tokens">
+      <h3 id="hub-tokens" className="flex items-center gap-2 text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+        Tokens
+        <span className="font-normal tracking-normal normal-case text-muted-foreground/70">The calls the spend adds up, models without a price included</span>
+      </h3>
+      <div className="mt-3 grid gap-6 rounded-2xl border bg-card p-5 shadow-xs md:grid-cols-[auto_minmax(0,1fr)]">
+        <div className="flex flex-wrap items-end gap-x-8 gap-y-3 md:flex-col md:items-start md:border-r md:pr-8">
+          <dl className="flex gap-8 md:flex-col md:gap-4">
+            <div title={`${totals.day.total.toLocaleString()} tokens`}>
+              <dt className="text-xs text-muted-foreground">Last 24 hours</dt>
+              <dd className="text-3xl font-semibold tracking-tight tabular-nums">{formatTokens(totals.day.total)}</dd>
+            </div>
+            <div title={`${totals.week.total.toLocaleString()} tokens`}>
+              <dt className="text-xs text-muted-foreground">Last 7 days</dt>
+              <dd className="text-3xl font-semibold tracking-tight tabular-nums">{formatTokens(totals.week.total)}</dd>
+            </div>
+          </dl>
+          <p className="text-xs text-muted-foreground">
+            {totals.counted} of {instances.length} agents report it
+          </p>
+        </div>
+        <div className="min-w-0 space-y-5">
+          <table className="w-full text-sm">
+            {header("By kind")}
+            <tbody>
+              {tokenKinds.map(({key, label}) => (
+                <tr key={key} className="border-t" title={tokensTitle(totals.day[key], totals.week[key])}>
+                  <td className="py-2 pr-3">{label}</td>
+                  <td className="py-2 text-right tabular-nums">{formatTokens(totals.day[key])}</td>
+                  <td className="py-2 pl-4 text-right tabular-nums">{formatTokens(totals.week[key])}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <table className="w-full text-sm">
+            {header("Used the most this week")}
+            <tbody>
+              {top.map(({instance, day, week}) => (
+                <tr key={instance.id} className="border-t" title={tokensTitle(day.total, week.total)}>
+                  <td className="max-w-0 py-2 pr-3">
+                    <button
+                      type="button"
+                      onClick={() => onOpen(instance.id)}
+                      className="flex w-full min-w-0 items-center gap-2 rounded text-left outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                    >
+                      {instance.agent_type && <AgentMark agentType={instance.agent_type} className="size-3.5 shrink-0" />}
+                      <span className="truncate font-medium">{displayName(instance)}</span>
+                    </button>
+                  </td>
+                  <td className="py-2 text-right tabular-nums">{formatTokens(day.total)}</td>
+                  <td className="py-2 pl-4 text-right tabular-nums">{formatTokens(week.total)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {groups.length > 0 && (
+            <table className="w-full text-sm">
+              {header("By group")}
+              <tbody>
+                {groups.map(([name, group]) => (
+                  <tr key={name} className="border-t" title={tokensTitle(group.day, group.week)}>
+                    <td className={cn("max-w-0 truncate py-2 pr-3", name ? "font-medium" : "text-muted-foreground")}>{name || "Ungrouped"}</td>
+                    <td className="py-2 text-right tabular-nums">{formatTokens(group.day)}</td>
+                    <td className="py-2 pl-4 text-right tabular-nums">{formatTokens(group.week)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// The work time the card shows at a moment, its figures formatted: it
+// renders again when one of them changes, not at every tick of the clock.
+interface WorkView {
+  day: string;
+  week: string;
+  counted: number;
+  top: {id: string; day: string; week: string; title: string}[];
+  groups: {name: string; day: string; week: string; title: string}[];
+}
+
+function workView(instances: HubInstance[], now: number): WorkView | undefined {
+  const totals = workTotals(instances, now);
+  if (totals.week <= 0) return undefined;
+  const each = instances.map((instance) => ({instance, seconds: workSeconds(instance, now)}));
+  const top = each
+    .filter(({seconds}) => seconds.week > 0)
+    .sort((a, b) => b.seconds.week - a.seconds.week)
+    .slice(0, 5)
+    .map(({instance, seconds}) => ({id: instance.id, day: formatWork(seconds.day), week: formatWork(seconds.week), title: workTitle(seconds.day, seconds.week)}));
+  const byGroup = new Map<string, {day: number; week: number}>();
+  for (const {instance, seconds} of each) {
+    const name = instance.group?.trim() ?? "";
+    const group = byGroup.get(name) ?? {day: 0, week: 0};
+    group.day += seconds.day;
+    group.week += seconds.week;
+    byGroup.set(name, group);
+  }
+  // Subtotals only when some agents are in a group, named ones first.
+  const groups = byGroup.size > 1 || !byGroup.has("")
+    ? [...byGroup.entries()]
+        .filter(([, group]) => group.week > 0)
+        .sort(([a], [b]) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b)))
+        .map(([name, group]) => ({name, day: formatWork(group.day), week: formatWork(group.week), title: workTitle(group.day, group.week)}))
+    : [];
+  return {day: formatWork(totals.day), week: formatWork(totals.week), counted: totals.counted, top, groups};
+}
+
+const sameView = (a: WorkView | undefined, b: WorkView | undefined) => JSON.stringify(a) === JSON.stringify(b);
+
+// WorkCard is how long the agents worked in the last 24 hours and 7 days,
+// as the hub saw it: all of them, each group, and the ones that worked the
+// most this week. It reads the hub's clock for the spans going on.
+export function WorkCard({instances, onOpen}: {instances: HubInstance[]; onOpen: (id: string) => void}) {
+  const view = useHubTime((now) => workView(instances, now), sameView);
+  if (!view) return null;
+  const byID = new Map(instances.map((instance) => [instance.id, instance]));
+  return (
+    <section className="mt-10" aria-labelledby="hub-work">
+      <h3 id="hub-work" className="flex items-center gap-2 text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+        Work time
+        <span className="font-normal tracking-normal normal-case text-muted-foreground/70">How long the agents worked, as the hub saw it</span>
+      </h3>
+      <div className="mt-3 grid gap-6 rounded-2xl border bg-card p-5 shadow-xs md:grid-cols-[auto_minmax(0,1fr)]">
+        <div className="flex flex-wrap items-end gap-x-8 gap-y-3 md:flex-col md:items-start md:border-r md:pr-8">
+          <dl className="flex gap-8 md:flex-col md:gap-4">
+            <div>
+              <dt className="text-xs text-muted-foreground">Last 24 hours</dt>
+              <dd className="text-3xl font-semibold tracking-tight tabular-nums">{view.day}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">Last 7 days</dt>
+              <dd className="text-3xl font-semibold tracking-tight tabular-nums">{view.week}</dd>
+            </div>
+          </dl>
+          <p className="text-xs text-muted-foreground">
+            {view.counted} of {instances.length} agents worked this week
+          </p>
+        </div>
+        <div className="min-w-0 space-y-5">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs text-muted-foreground">
+                <th className="pb-2 font-normal">Worked the most this week</th>
+                <th className="pb-2 text-right font-normal">24 hours</th>
+                <th className="pb-2 text-right font-normal">7 days</th>
+              </tr>
+            </thead>
+            <tbody>
+              {view.top.map((row) => {
+                const instance = byID.get(row.id);
+                if (!instance) return null;
+                return (
+                  <tr key={row.id} className="border-t" title={row.title}>
+                    <td className="max-w-0 py-2 pr-3">
+                      <button
+                        type="button"
+                        onClick={() => onOpen(row.id)}
+                        className="flex w-full min-w-0 items-center gap-2 rounded text-left outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                      >
+                        {instance.agent_type && <AgentMark agentType={instance.agent_type} className="size-3.5 shrink-0" />}
+                        <span className="truncate font-medium">{displayName(instance)}</span>
+                      </button>
+                    </td>
+                    <td className="py-2 text-right tabular-nums">{row.day}</td>
+                    <td className="py-2 pl-4 text-right tabular-nums">{row.week}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {view.groups.length > 0 && (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-muted-foreground">
+                  <th className="pb-2 font-normal">By group</th>
+                  <th className="pb-2 text-right font-normal">24 hours</th>
+                  <th className="pb-2 text-right font-normal">7 days</th>
+                </tr>
+              </thead>
+              <tbody>
+                {view.groups.map((group) => (
+                  <tr key={group.name} className="border-t" title={group.title}>
+                    <td className={cn("max-w-0 truncate py-2 pr-3", group.name ? "font-medium" : "text-muted-foreground")}>{group.name || "Ungrouped"}</td>
+                    <td className="py-2 text-right tabular-nums">{group.day}</td>
+                    <td className="py-2 pl-4 text-right tabular-nums">{group.week}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 // What a version that isn't older is to the hub's, next to it in the
 // Versions card.
 const relationNote: Partial<Record<VersionRelation, string>> = {same: "the hub's", newer: "newer than the hub"};
@@ -418,6 +663,8 @@ export function Overview({
         </div>
 
         <SpendCard instances={instances} onOpen={onOpen} />
+        <TokensCard instances={instances} onOpen={onOpen} />
+        <WorkCard instances={instances} onOpen={onOpen} />
 
         {needs.length > 0 && (
           <Section title="Needs you" count={needs.length}>

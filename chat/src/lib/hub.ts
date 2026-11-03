@@ -3,6 +3,7 @@
 // row shows it, and in which order.
 
 import type {components} from "./api-schema";
+import {secondsBetween} from "./clock";
 
 // InstanceUpdate is the summary's update: whether the AgentAPI takes updates
 // through its API (POST /update) and how far one got; AgentAPIs that can't
@@ -53,6 +54,18 @@ export interface HubInstance {
   summary?: Summary | null;
   // state is as the hub sends it; instanceState reads it.
   state: string;
+  // work is how long the hub saw it working; none from an older hub.
+  work?: HubWork;
+}
+
+// HubWork is how long the hub saw an instance working, as of when it sent
+// it: the seconds of the last 24 hours and 7 days from the spans that
+// ended, and since when it works now. The page adds the time since then
+// (workSeconds), so the hub doesn't send it every second.
+export interface HubWork {
+  last_24h_seconds: number;
+  last_7d_seconds: number;
+  working_since?: string;
 }
 
 const stateRank: Record<InstanceState, number> = {
@@ -383,10 +396,143 @@ export function formatUSD(usd: number): string {
 }
 
 // spendTitle says what a spend is, for a tooltip; lastKnown, that it is an
-// instance's last, which doesn't count while the hub doesn't follow it.
-export function spendTitle(day: number, week: number, lastKnown = false): string {
-  const amounts = `${formatUSD(day)} in the last 24 hours, ${formatUSD(week)} in the last 7 days (API-equivalent, at list prices; a subscription doesn't charge it)`;
+// instance's last, which doesn't count while the hub doesn't follow it;
+// dayTokens, the tokens of its last 24 hours, where it says them.
+export function spendTitle(day: number, week: number, lastKnown = false, dayTokens?: number): string {
+  let amounts = `${formatUSD(day)} in the last 24 hours, ${formatUSD(week)} in the last 7 days (API-equivalent, at list prices; a subscription doesn't charge it)`;
+  if (dayTokens !== undefined) amounts += `; ${formatTokens(dayTokens)} tokens in the last 24 hours`;
   return lastKnown ? `Last known, not counted: ${amounts}` : amounts;
+}
+
+// The tokens of the calls a spend adds up, as AgentAPIs since this release
+// report them: the same calls, each once, models without a price included.
+
+export type Tokens = NonNullable<Spend["day_tokens"]>;
+
+// The kinds of tokens, in the order the page lists them.
+export const tokenKinds: {key: Exclude<keyof Tokens, "total">; label: string}[] = [
+  {key: "input", label: "Input"},
+  {key: "output", label: "Output"},
+  {key: "cache_write", label: "Cache write"},
+  {key: "cache_read", label: "Cache read"},
+];
+
+const noTokens = (): Tokens => ({input: 0, output: 0, cache_write: 0, cache_read: 0, total: 0});
+
+function addTokens(sum: Tokens, tokens: Tokens): void {
+  sum.input += tokens.input;
+  sum.output += tokens.output;
+  sum.cache_write += tokens.cache_write;
+  sum.cache_read += tokens.cache_read;
+  sum.total += tokens.total;
+}
+
+// countedTokens are the spends whose tokens add up to what the instances
+// used: those that say their tokens, each scope once with its most recent
+// figure, as countedSpends counts them.
+export function countedTokens(instances: Iterable<HubInstance>): {instance: HubInstance; spend: Spend; day: Tokens; week: Tokens}[] {
+  const reporting = [...instances].filter((instance) => currentSpend(instance)?.week_tokens);
+  return countedSpends(reporting).map(({instance, spend}) => ({instance, spend, day: spend.day_tokens ?? noTokens(), week: spend.week_tokens ?? noTokens()}));
+}
+
+// What the instances used recently, each kind and in all.
+export interface TokenTotals {
+  day: Tokens;
+  week: Tokens;
+  // How many connected instances report their tokens; the others (PTY,
+  // earlier AgentAPIs, those the hub doesn't follow now) don't count.
+  counted: number;
+}
+
+export function tokenTotals(instances: Iterable<HubInstance>): TokenTotals {
+  const all = [...instances];
+  const totals: TokenTotals = {day: noTokens(), week: noTokens(), counted: all.filter((instance) => currentSpend(instance)?.week_tokens).length};
+  for (const {day, week} of countedTokens(all)) {
+    addTokens(totals.day, day);
+    addTokens(totals.week, week);
+  }
+  return totals;
+}
+
+// formatTokens is a short count: "950", "1.2k", "12k", "3.4M", "1.2B".
+export function formatTokens(tokens: number): string {
+  const n = Math.max(0, Math.round(tokens));
+  if (n < 1000) return String(n);
+  const units: [number, string][] = [
+    [1e3, "k"],
+    [1e6, "M"],
+    [1e9, "B"],
+    [1e12, "T"],
+  ];
+  for (const [i, [unit, suffix]] of units.entries()) {
+    const scaled = n / unit;
+    if (scaled < 999.5 || i === units.length - 1) return `${scaled.toFixed(scaled < 9.95 ? 1 : 0).replace(/\.0$/, "")}${suffix}`;
+  }
+  return String(n);
+}
+
+// tokensTitle says what a count of tokens is, for a tooltip.
+export function tokensTitle(day: number, week: number): string {
+  return `${formatTokens(day)} tokens in the last 24 hours, ${formatTokens(week)} in the last 7 days`;
+}
+
+// The work time: how long the hub saw the instances working (the state
+// working, while it followed them), in the last 24 hours and 7 days. The
+// hub counts only what it saw: not while it was down, or couldn't reach an
+// instance.
+
+const DAY_MS = 24 * 3600 * 1000;
+const WEEK_MS = 7 * DAY_MS;
+
+export interface WorkSeconds {
+  day: number;
+  week: number;
+}
+
+// workSeconds is an instance's work time at now: what the hub sent, and the
+// span going on, within each window.
+export function workSeconds(instance: HubInstance, now: number): WorkSeconds {
+  const work = instance.work;
+  if (!work) return {day: 0, week: 0};
+  const seconds = {day: work.last_24h_seconds, week: work.last_7d_seconds};
+  const since = work.working_since ? Date.parse(work.working_since) : NaN;
+  if (!Number.isNaN(since)) {
+    seconds.day += secondsBetween(Math.max(since, now - DAY_MS), now);
+    seconds.week += secondsBetween(Math.max(since, now - WEEK_MS), now);
+  }
+  return seconds;
+}
+
+// What the instances worked: each one's own time, so all of them add up.
+export interface WorkTotals extends WorkSeconds {
+  // How many worked in the last 7 days.
+  counted: number;
+}
+
+export function workTotals(instances: Iterable<HubInstance>, now: number): WorkTotals {
+  const totals: WorkTotals = {day: 0, week: 0, counted: 0};
+  for (const instance of instances) {
+    const seconds = workSeconds(instance, now);
+    totals.day += seconds.day;
+    totals.week += seconds.week;
+    if (seconds.week > 0) totals.counted++;
+  }
+  return totals;
+}
+
+// formatWork is a short duration: "0m", "<1m", "45m", "2.3h", "31h".
+// Rounded down, so a figure grows as it runs.
+export function formatWork(seconds: number): string {
+  if (seconds <= 0) return "0m";
+  if (seconds < 60) return "<1m";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+  if (seconds < 36_000) return `${Math.floor(seconds / 360) / 10}h`;
+  return `${Math.floor(seconds / 3600)}h`;
+}
+
+// workTitle says what a work time is, for a tooltip.
+export function workTitle(day: number, week: number): string {
+  return `Worked ${formatWork(day)} in the last 24 hours, ${formatWork(week)} in the last 7 days (as the hub saw it)`;
 }
 
 // The AgentAPI versions: the hub's own and each instance's, to tell the

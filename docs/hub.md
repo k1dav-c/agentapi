@@ -241,6 +241,45 @@ keeps its logs). The totals count each scope once, with its latest figure (`upda
 the hub doesn't follow right now (stopped, unreachable, connecting) shows its last figure dimmed,
 as last known, and the totals leave it out.
 
+### Token usage
+
+![The tokens the agents used: the last 24 hours and 7 days, by kind, the agents that used the most, and each group](screenshots/hub-tokens.png)
+
+The spend's pass also counts the tokens of the same calls: `spend` has them for the last 24 hours
+(`day_tokens`) and 7 days (`week_tokens`), as `input`, `output`, `cache_write` (Anthropic's
+five-minute and one-hour caches together), `cache_read` and their `total`. A call counts once, where
+its cost does: a fork's copy of an earlier session's call counts in that session. Calls to a model
+without a known price count their tokens and no cost. What Claude Code counted but didn't log call
+by call (compacting the context) counts with the tokens its own count gives it.
+
+Below Spend, the overview's **Tokens** card has the 24 hours and 7 days of every agent that reports
+them, by kind, each group's when there are groups, and the five that used the most this week. They
+add up as the spend does: each scope once, connected agents only. AgentAPI 2.4.0 and older send
+their spend without tokens; the card says how many agents report them. Counts are short (`950`,
+`12k`, `3.4M`, `1.2B`); hover a total for the exact number. Rows have no room for another figure:
+hover a row's spend for its last 24 hours of tokens.
+
+### Work time
+
+![How long the agents worked: the last 24 hours and 7 days, each group, and the agents that worked the most](screenshots/hub-work.png)
+
+The hub times each agent while its row says it works (`working`): from the summary that starts a
+turn to the one that ends it or asks you something. Waiting for you, idle, connecting, unreachable
+and stopped don't count. The hub counts only what it saw, so time before the hub had this feature,
+while the hub was down, and while it couldn't reach the agent isn't there. A summary stream that
+drops ends the count at the last event it sent; a hub that stops ends it then. The agent counts
+again from its next summary.
+
+A row shows its agent's last 24 hours after the spend, with a timer (`2.3h`), unless it shows a
+usage limit; hover for the 7 days too. Below Tokens, the overview's **Work time** card has the 24
+hours and 7 days of all the agents, each group's when there are groups, and the five that worked the most this week. Figures are
+rounded down: minutes under an hour (`45m`), tenths of an hour under ten (`2.3h`), then hours
+(`31h`). Unlike spend, every agent counts, stopped ones too: the time is the hub's own record,
+per instance.
+
+The hub keeps the spans of the last 7 days in its file and sends what they add up to (`work`); the
+page adds the span going on.
+
 ### Versions
 
 ![The AgentAPI versions the agents run, on which machines, and how to update the older ones](screenshots/hub-versions.png)
@@ -316,8 +355,9 @@ update them. On the machine:
 
 Each row shows the agent's name (`--name`, by default its working directory's name) and AgentAPI
 version ([Versions](#versions)), what it waits for or does, how long ago, the agent and the machine;
-a queue that isn't empty, what the agent spent in the last 24 hours ([Spend](#spend)) and a usage
-limit above 60% join them. An AgentAPI update under way, or one that failed, gets a line of its own
+a queue that isn't empty, what the agent spent and how long it worked in the last 24 hours
+([Spend](#spend), [Work time](#work-time)) and a usage limit above 60% join them. An AgentAPI
+update under way, or one that failed, gets a line of its own
 ([Updating from the hub](#updating-from-the-hub)). [Pinned](#pinning) agents come first, in your
 order. Within a [group](#groups), the rows sort by state in this order, then by name;
 [Recent changes](#recent-changes) puts the agents with tasks first and sorts by the latest change
@@ -385,8 +425,9 @@ change; the open one stays selected. Each browser remembers its order.
 These count as changes: a new state (it needs you, works, finishes, waits, stops, or the hub loses
 or finds it), a new task, something new to wait for (a request, a login, a usage limit), a new
 title, a change in the queue, an update under way and a new version. These don't: heartbeats, what
-people do (a group, a pin, a mute, reading a finished task), the spend and usage figures, the
-agent's messages while it works, and a summary stream that drops and comes back within 10 s.
+people do (a group, a pin, a mute, reading a finished task), the spend, work time and usage
+figures, the agent's messages while it works, and a summary stream that drops and comes back
+within 10 s.
 
 The hub records when each instance last changed (`changed_at`) and keeps it in its file, so
 restarting the hub doesn't reorder the list. For a new instance, that is when the hub first saw it.
@@ -674,12 +715,12 @@ running AgentAPIs, which then no longer follow their conversation for the webhoo
 | `GET /api/session` | `{"authenticated": true}` when the request carries the session or the hub token |
 | `POST /api/session` | `{"token": …}` signs in and sets the session cookie |
 | `DELETE /api/session` | Signs out |
-| `GET /api/instances` | The instances: who each one is, its summary, its connection, the state its row shows (`state`: `needs-you`, `working`, `unread`, `idle`, `muted`, `connecting`, `unreachable` or `stopped`), when what its row shows last changed (`changed_at`, RFC 3339; see [Recent changes](#recent-changes)) and its place among the pinned ones (`pin`, from 1; none when it isn't pinned); and the hub's own version (`hub_version`) |
+| `GET /api/instances` | The instances: who each one is, its summary, its connection, the state its row shows (`state`: `needs-you`, `working`, `unread`, `idle`, `muted`, `connecting`, `unreachable` or `stopped`), when what its row shows last changed (`changed_at`, RFC 3339; see [Recent changes](#recent-changes)), its place among the pinned ones (`pin`, from 1; none when it isn't pinned) and how long the hub saw it working (`work`: `last_24h_seconds` and `last_7d_seconds` of the spans that ended, as of the response, and `working_since` while it works; see [Work time](#work-time)); and the hub's own version (`hub_version`) |
 | `POST /api/instances` | `{"url": …, "token": …}` adds an instance by its URL |
 | `PATCH /api/instances/{id}` | `{"group": …}` puts an instance in a group, `""` in none; `{"muted": true}` mutes what it waits for now, until that changes (409 when it waits for nothing), `false` ends the mute; `{"pinned": true}` pins it below the pinned ones, `false` unpins it |
 | `DELETE /api/instances/{id}` | Forgets an instance, and its pin |
 | `PUT /api/pins` | `{"ids": […]}` orders the pinned instances, from the top. It lists each pinned instance once and no other; 409, with the pinned ones in their order (`ids`), when it doesn't, such as after one was pinned, unpinned or forgotten; 404 for an instance the hub doesn't have |
-| `GET /api/events` | Server-sent events: `instances` (all of them and `hub_version`, as `GET /api/instances` has them), then `instance` (one changed what the page shows; when it was last heard of counts only while it is offline), `removed` (`{"id"}`) and a `heartbeat` every 15 s |
+| `GET /api/events` | Server-sent events: `instances` (all of them and `hub_version`, as `GET /api/instances` has them), then `instance` (one changed what the page shows, or its work time moved by a minute; when it was last heard of counts only while it is offline), `removed` (`{"id"}`) and a `heartbeat` every 15 s |
 | `GET /api/join` | Where machines join the hub: `urls`, each a webhook URL (`url`) with the interface of its address (`interface`; none for `--bind`'s), in the order the startup log has them; and the secret (`secret`, with `secret_shown: true`) only on a hub with a token |
 | `/i/{id}/…` | The instance's own API and chat, through the hub; the page updates an instance with `POST /i/{id}/update` and cancels with `DELETE` |
 
@@ -692,7 +733,7 @@ Every endpoint but `/hooks` and `/api/session` needs the session cookie or
 | --- | --- | --- |
 | `~/.agentapi/config.yaml` | `agentapi hub join` | The hub's webhook and `allow-update`, read by every `agentapi server` |
 | `~/.agentapi/instances/` | `agentapi server` | The AgentAPIs running on this machine, for `join` and `agentapi list` |
-| `~/.agentapi/hub/instances.json` | `agentapi hub serve` | The instances the hub knows, their groups and pins, when each last changed, and tokens of the ones added by hand |
+| `~/.agentapi/hub/instances.json` | `agentapi hub serve` | The instances the hub knows, their groups and pins, when each last changed, when each worked in the last 7 days, and tokens of the ones added by hand |
 | `~/.agentapi/hub/instances.json.bak` | `agentapi hub serve` | The file of instances as the hub found it when it last started |
 | `~/.agentapi/hub/instances.deliveries.json` | `agentapi hub serve` | The delivery IDs of the events the hub took whose signature still holds, to refuse copies |
 
@@ -704,11 +745,16 @@ starts empty. To go back to one, stop the hub and keep only the array first:
 cd ~/.agentapi/hub && jq .instances instances.json > instances.json.new && mv instances.json.new instances.json
 ```
 
+Each instance's work time is an extra field (`work`) inside the same version 1. A hub of 2.3 or 2.4
+ignores it, and drops it the next time it writes the file.
+
 ## Limits
 
 - The hub serves the chat of its own version to every instance. Run the same AgentAPI version on
   the hub and the instances; [Versions](#versions) shows the ones that differ.
 - One hub token for everyone: there are no per-user accounts or permissions.
+- [Work time](#work-time) is what the hub saw: not before it had the feature, nor while it was down
+  or couldn't reach an agent. One hub doesn't know what another counted.
 - The hub watches and opens AgentAPIs, and updates those whose machine allows it; it doesn't start
   or stop them.
 - Nothing reaches your phone while the hub's page is closed: the hub doesn't send push

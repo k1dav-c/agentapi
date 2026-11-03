@@ -922,12 +922,6 @@ try {
   const hubHome = path.join(root, 'hub-home');
   await mkdir(hubHome, {recursive: true});
   const hubEnv = {...env, HOME: hubHome};
-  startProcess('hub', root, hubEnv, ['hub', 'serve', '--bind', '127.0.0.1', '--port', String(hubPort),
-    '--token', 'docs-token', '--secret', 'docs-secret', '--state', path.join(hubHome, 'instances.json')]);
-  await poll(async () => (await fetch(`http://127.0.0.1:${hubPort}/api/session`)).ok, 'the hub');
-  // After the hub runs: join checks that it takes the events.
-  execFileSync(binary, ['hub', 'join', `http://127.0.0.1:${hubPort}/hooks`, '--secret', 'docs-secret',
-    '--public-url', 'http://127.0.0.1:{port}'], {env: hubEnv, stdio: 'ignore'});
   // Nine demo instances, posing as the agents they'd be: one asks for an approval, one asks
   // questions, one needs a login, one hit its usage limit, one works, one finished a task nobody
   // saw, one is idle, one stopped and one was killed, so the hub can't reach it. The one that asks
@@ -943,6 +937,29 @@ try {
     {name: 'legacy-cms', type: 'custom'},
     {name: 'prototype-2025', type: 'custom'},
   ];
+  // The hub's file as a hub that has watched them for a week keeps it: how long each one worked
+  // (hours in the last 24 hours, and in the 6 days before), which a demo can't run that long. The
+  // hub knows each instance by its ID, <hostname>:<port>, and takes it over when it joins.
+  const hubWork = {
+    'checkout-api': [1.6, 7.8], 'marketing-site': [0.75, 2.4], 'mobile-app': [0.3, 1.8], 'data-pipeline': [4.2, 9.8],
+    'billing-service': [2.4, 8.6], 'design-system': [0.5, 1], docs: [0, 0.8], 'legacy-cms': [1.1, 4.9], 'prototype-2025': [0, 4],
+  };
+  const seededAt = Math.floor(Date.now() / 1000);
+  const ago = hours => seededAt - Math.round(hours * 3600);
+  await writeFile(path.join(hubHome, 'instances.json'), JSON.stringify({version: 1, instances: hubSetup.map((instance, i) => {
+    const [day, before] = hubWork[instance.name];
+    const spans = [];
+    if (before > 0) spans.push([ago(72 + before), ago(72)]);
+    if (day > 0) spans.push([ago(3 + day), ago(3)]);
+    return {id: `${os.hostname()}:${port + 4 + i}`, url: `http://127.0.0.1:${port + 4 + i}`, source: 'webhook',
+      last_seen: new Date(seededAt * 1000).toISOString(), changed_at: new Date(seededAt * 1000).toISOString(), work: {spans}};
+  })}), {mode: 0o600});
+  startProcess('hub', root, hubEnv, ['hub', 'serve', '--bind', '127.0.0.1', '--port', String(hubPort),
+    '--token', 'docs-token', '--secret', 'docs-secret', '--state', path.join(hubHome, 'instances.json')]);
+  await poll(async () => (await fetch(`http://127.0.0.1:${hubPort}/api/session`)).ok, 'the hub');
+  // After the hub runs: join checks that it takes the events.
+  execFileSync(binary, ['hub', 'join', `http://127.0.0.1:${hubPort}/hooks`, '--secret', 'docs-secret',
+    '--public-url', 'http://127.0.0.1:{port}'], {env: hubEnv, stdio: 'ignore'});
   const hubInstances = {};
   for (const [i, instance] of hubSetup.entries()) {
     const dir = path.join(root, 'workspaces', instance.name);
@@ -959,6 +976,7 @@ try {
     return (await response.json()).instances;
   };
   await poll(async () => (await hubList()).filter(instance => instance.summary).length === hubSetup.length, 'the hub to follow the instances');
+  if ((await hubList()).some(instance => !instance.work?.last_7d_seconds)) throw new Error('the hub lost the seeded work time: the instances joined with other IDs');
   // Groups of one's own, and two agents pinned to the top, as the rows' menus set them.
   for (const instance of await hubList()) {
     const group = hubSetup.find(entry => entry.name === instance.name)?.group;
@@ -1044,6 +1062,10 @@ try {
       await elementShot(page, page.locator('aside'), 'hub-list.png');
       // What the agents spent: the overview's card.
       await elementShot(page, page.locator('section[aria-labelledby="hub-spend"]'), 'hub-spend.png');
+      // The tokens of the same calls: the card below it.
+      await elementShot(page, page.locator('section[aria-labelledby="hub-tokens"]'), 'hub-tokens.png');
+      // How long they worked: the card below that.
+      await elementShot(page, page.locator('section[aria-labelledby="hub-work"]'), 'hub-work.png');
       // The AgentAPI versions they run: the overview's last card.
       await elementShot(page, page.locator('section[aria-labelledby="hub-versions"]'), 'hub-versions.png');
       // The list by the agents' latest changes, without groups; then the groups again.

@@ -59,7 +59,7 @@ func (e *EventEmitter) summaryLocked() SummaryBody {
 	}
 	summary.SeenAt = e.seenAt
 	if e.summary.spend != nil {
-		spend := *e.summary.spend
+		spend := e.summary.spend.Clone()
 		summary.Spend = &spend
 	}
 	if e.summary.update != nil {
@@ -125,9 +125,10 @@ func (e *EventEmitter) MarkSeen() SummaryBody {
 func (e *EventEmitter) SetSpend(spend SummarySpend) {
 	e.mu.Lock()
 	defer e.unlock()
-	if e.summary.spend != nil && *e.summary.spend == spend {
+	if e.summary.spend != nil && e.summary.spend.Equal(spend) {
 		return
 	}
+	spend = spend.Clone()
 	e.summary.spend = &spend
 	e.summary.changed = true
 }

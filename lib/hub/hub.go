@@ -335,16 +335,16 @@ type instanceList struct {
 	HubVersion string     `json:"hub_version"`
 }
 
-func newInstanceList(instances []Instance) instanceList {
+func newInstanceList(instances []Instance, now time.Time) instanceList {
 	list := make([]Instance, len(instances))
 	for i, instance := range instances {
-		list[i] = instance.public()
+		list[i] = instance.sent(now)
 	}
 	return instanceList{Instances: list, HubVersion: version.Version}
 }
 
 func (h *Hub) listInstances(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, newInstanceList(h.store.list()))
+	writeJSON(w, http.StatusOK, newInstanceList(h.store.list(), h.clock.Now()))
 }
 
 // addInstance adds an instance by its URL (POST /api/instances): the hub
@@ -391,7 +391,7 @@ func (h *Hub) addInstance(w http.ResponseWriter, r *http.Request) {
 		i.Error = ""
 	})
 	h.watch(instance)
-	writeJSON(w, http.StatusOK, instance.public())
+	writeJSON(w, http.StatusOK, instance.sent(h.clock.Now()))
 }
 
 func (h *Hub) fetchSummary(ctx context.Context, base, token string) (*instanceapi.SummaryBody, error) {
@@ -483,7 +483,7 @@ func (h *Hub) updateInstance(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "it doesn't need you now: nothing to mute"})
 		return
 	}
-	writeJSON(w, http.StatusOK, updated.public())
+	writeJSON(w, http.StatusOK, updated.sent(h.clock.Now()))
 }
 
 // setPins orders the instances pinned to the top of the hub's page (PUT
@@ -559,7 +559,7 @@ func (h *Hub) streamEvents(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 		return true
 	}
-	if !send("instances", newInstanceList(instances)) {
+	if !send("instances", newInstanceList(instances, h.clock.Now())) {
 		return
 	}
 	heartbeat := h.clock.NewTicker(hubHeartbeat, "hub", "browser heartbeat")
@@ -572,6 +572,9 @@ func (h *Hub) streamEvents(w http.ResponseWriter, r *http.Request) {
 			if !send("heartbeat", map[string]time.Time{"time": h.clock.Now()}) {
 				return
 			}
+			// The work times that moved come as changes, to every
+			// subscriber; the store tells each instance once.
+			h.store.refreshWork()
 		case event, ok := <-ch:
 			if !ok {
 				return
@@ -582,7 +585,7 @@ func (h *Hub) streamEvents(w http.ResponseWriter, r *http.Request) {
 				}
 				continue
 			}
-			if !send("instance", event.Instance.public()) {
+			if !send("instance", event.Instance.sent(h.clock.Now())) {
 				return
 			}
 		}

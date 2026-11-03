@@ -206,9 +206,55 @@ type SummaryRequest struct {
 type SummarySpend struct {
 	DayUSD  float64 `json:"day_usd" doc:"API-equivalent cost in USD of the agent's sessions in this directory, subagents included, over the last 24 hours (the hours that end within them): the tokens at the model providers' list prices, which a subscription doesn't charge."`
 	WeekUSD float64 `json:"week_usd" doc:"The same over the last 7 days."`
+	// DayTokens and WeekTokens are the tokens of the same calls; nil from
+	// AgentAPIs that don't count them (earlier releases).
+	DayTokens  *SummaryTokens `json:"day_tokens,omitempty" doc:"The tokens the agent's sessions in this directory used over the last 24 hours, the calls day_usd adds up, each once; models without a known price included. Missing from earlier releases."`
+	WeekTokens *SummaryTokens `json:"week_tokens,omitempty" doc:"The same over the last 7 days."`
 	// Scope identifies what the amounts add up: two AgentAPIs of one agent
 	// in one directory of one machine read the same session logs.
 	Scope string `json:"scope" doc:"Identifies the sessions the amounts add up: those of one agent in one directory, as the session logs of one machine hold them (a hash of the machine's host name and ID, the agent, the directory's real path and where the agent keeps its logs). AgentAPIs that report the same scope report the same sessions; a client that adds up many counts each scope once."`
 	// UpdatedAt is when the amounts last changed.
-	UpdatedAt time.Time `json:"updated_at" doc:"When the amounts last changed: of AgentAPIs with one scope, the latest is the most recent."`
+	UpdatedAt time.Time `json:"updated_at" doc:"When the amounts or tokens last changed: of AgentAPIs with one scope, the latest is the most recent."`
+}
+
+// Clone returns a copy of s that shares none of its tokens.
+func (s SummarySpend) Clone() SummarySpend {
+	s.DayTokens, s.WeekTokens = cloneTokens(s.DayTokens), cloneTokens(s.WeekTokens)
+	return s
+}
+
+// Equal reports whether s and o say the same.
+func (s SummarySpend) Equal(o SummarySpend) bool {
+	return s.DayUSD == o.DayUSD && s.WeekUSD == o.WeekUSD && s.Scope == o.Scope && s.UpdatedAt.Equal(o.UpdatedAt) &&
+		s.SameTokens(o)
+}
+
+// SameTokens reports whether s and o count the same tokens.
+func (s SummarySpend) SameTokens(o SummarySpend) bool {
+	return equalTokens(s.DayTokens, o.DayTokens) && equalTokens(s.WeekTokens, o.WeekTokens)
+}
+
+func cloneTokens(t *SummaryTokens) *SummaryTokens {
+	if t == nil {
+		return nil
+	}
+	c := *t
+	return &c
+}
+
+func equalTokens(a, b *SummaryTokens) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+// SummaryTokens are the tokens of the model calls a spend adds up.
+type SummaryTokens struct {
+	Input  int `json:"input" doc:"Uncached input tokens."`
+	Output int `json:"output" doc:"Output tokens, thinking included."`
+	// CacheWrite counts both of Anthropic's caches.
+	CacheWrite int `json:"cache_write" doc:"Input tokens written to the prompt cache, the five-minute and one-hour caches together."`
+	CacheRead  int `json:"cache_read" doc:"Input tokens read from the prompt cache."`
+	Total      int `json:"total" doc:"The sum of input, output, cache_write and cache_read."`
 }

@@ -51,6 +51,8 @@ type fakeAgentAPI struct {
 	*httptest.Server
 	mu  sync.Mutex
 	run instanceapi.WebhookInstance
+	// spend is the summary's spend, if any.
+	spend *instanceapi.SummarySpend
 	// ended closes when the run ends, and its streams with it.
 	ended chan struct{}
 }
@@ -73,6 +75,7 @@ func (f *fakeAgentAPI) current() (instanceapi.SummaryBody, chan struct{}) {
 	return instanceapi.SummaryBody{
 		Instance: f.run, Status: instanceapi.AgentStatusStable,
 		Lifecycle: instanceapi.LifecycleReady, Attention: instanceapi.AttentionNone,
+		Spend: f.spend,
 	}, f.ended
 }
 

@@ -4,6 +4,26 @@
 
 ### Features
 
+- The hub shows how long the agents worked: a **Work time** card on the overview with the last 24
+  hours and 7 days, each group's share and the agents that worked the most, and each row's 24 hours
+  next to its spend (hidden while the row shows a usage-limit bar). Only `working` counts, and only
+  while the hub follows the agent: time before this version, while the hub was down or while it
+  couldn't reach the agent isn't counted. The hub keeps the spans of the last 7 days in its file of
+  instances; `GET /api/instances` and the `/api/events` stream carry them as `work`
+  (`last_24h_seconds`, `last_7d_seconds`, `working_since`). A hub of 2.4.0 or older reads the file
+  and drops the spans the next time it writes it.
+- The summary's `spend` has the tokens of the same calls, over the last 24 hours (`day_tokens`) and
+  7 days (`week_tokens`): `input`, `output`, `cache_write`, `cache_read` and their `total`, each
+  call once as for its cost (a fork's copied calls count in the earlier session), models without a
+  price included. Each hour of `GET /sessions` and `GET /cost` has its `tokens` too. The hub shows
+  them in a **Tokens** card below Spend (by kind, the agents that used the most, each group's
+  share, and how many agents report them) and in the title of a row's spend; counts read `950`,
+  `12k`, `3.4M`. AgentAPI 2.4.0 and older send no tokens, and don't count.
+
+## v2.4.0
+
+### Features
+
 - A restart in place (SIGUSR2, `POST /update`, `agentapi restart`) first runs the new program with
   the same arguments, variables and config file under a hidden `agentapi server --validate`. It
   checks the flags, values, placeholders, port, agent and transport, the prices file and the server

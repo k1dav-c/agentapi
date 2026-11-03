@@ -49,8 +49,9 @@ type ModelCost struct {
 
 // HourCost is what was spent in one hour.
 type HourCost struct {
-	Hour time.Time `json:"hour" doc:"The start of the hour, in UTC."`
-	USD  float64   `json:"usd" doc:"API-equivalent cost in USD."`
+	Hour   time.Time      `json:"hour" doc:"The start of the hour, in UTC."`
+	USD    float64        `json:"usd" doc:"API-equivalent cost in USD."`
+	Tokens pricing.Tokens `json:"tokens" doc:"The tokens used, those of models without a known price included."`
 }
 
 // SessionCost is what a session (or several) spent, its subagents
@@ -109,7 +110,9 @@ func (s *costSum) add(call ModelCall) {
 		}
 		s.hour, s.hourStart = j, hour.Unix()
 	}
-	c.Hourly[s.hour].USD += call.USD
+	h := &c.Hourly[s.hour]
+	h.USD += call.USD
+	h.Tokens = h.Tokens.Add(call.Tokens)
 }
 
 // sorted puts the models and hours in order.
@@ -158,7 +161,9 @@ func (s *costSum) merge(c SessionCost) {
 			j = len(s.c.Hourly) - 1
 			s.hours[h.Hour.Unix()] = j
 		}
-		s.c.Hourly[j].USD += h.USD
+		sh := &s.c.Hourly[j]
+		sh.USD += h.USD
+		sh.Tokens = sh.Tokens.Add(h.Tokens)
 	}
 }
 
