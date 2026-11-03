@@ -72,6 +72,10 @@ type PTYConversation struct {
 	messages                    []conv.Message
 	screenBeforeLastUserMessage string
 	lock                        sync.Mutex
+	// emitMu is held by a snapshot from reading the state until the
+	// Emitter has it, and by Reset: a snapshot of the old conversation
+	// reaches the Emitter before Reset's forget, never after.
+	emitMu sync.Mutex
 
 	// stableCount is the number of consecutive snapshots with an identical
 	// stability region (see PTYConversationConfig.StabilityScreen),
@@ -187,6 +191,8 @@ func (c *PTYConversation) Start(ctx context.Context) {
 // agent is ready, the initial prompt or a message can go out) and emits
 // the conversation's state.
 func (c *PTYConversation) snapshot() error {
+	c.emitMu.Lock()
+	defer c.emitMu.Unlock()
 	c.lock.Lock()
 	screen := c.cfg.AgentIO.ReadScreen()
 	c.snapshotLocked(screen)
@@ -311,9 +317,15 @@ func (c *PTYConversation) messagesLocked() []conv.Message {
 	return result
 }
 
-// Reset clears all conversation state back to the initial empty state.
-func (c *PTYConversation) Reset() {
+// Reset clears all conversation state back to the initial empty state,
+// after forget, once a snapshot under way has been emitted.
+func (c *PTYConversation) Reset(forget func()) {
 	defer c.wakeSnapshot()
+	c.emitMu.Lock()
+	defer c.emitMu.Unlock()
+	if forget != nil {
+		forget()
+	}
 	c.lock.Lock()
 	defer c.lock.Unlock()
 

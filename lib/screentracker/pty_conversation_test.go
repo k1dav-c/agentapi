@@ -1027,7 +1027,7 @@ func TestResetWhileTheInitialPromptWaits(t *testing.T) {
 	w.MustWait(ctx)
 	// A restart now (DELETE /messages) drops it; the next snapshot queues
 	// it again for the new agent, without blocking.
-	c.Reset()
+	c.Reset(nil)
 	agent.setScreen("ready-1")
 	_, w = mClock.AdvanceNext()
 	tickCtx, tickCancel := context.WithTimeout(ctx, 2*time.Second)
@@ -1123,4 +1123,91 @@ func TestSendAfterStopFails(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return errors.Is(c.Send(conv.MessagePartText{Content: "late"}), context.Canceled)
 	}, testTimeout, 10*time.Millisecond, "Send blocks or succeeds after the conversation stopped")
+}
+
+// blockingEmitter records what reaches it, and holds EmitStatus while
+// block is set, as an emit under way that a reset overtakes.
+type blockingEmitter struct {
+	mu      sync.Mutex
+	events  []string
+	block   chan struct{}
+	blocked chan struct{}
+}
+
+func (e *blockingEmitter) record(event string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.events = append(e.events, event)
+}
+
+func (e *blockingEmitter) recorded() []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return slices.Clone(e.events)
+}
+
+func (e *blockingEmitter) EmitMessages(messages []conv.Message) {
+	e.record("messages:" + messages[0].Message)
+}
+
+func (e *blockingEmitter) EmitStatus(conv.Status) {
+	e.mu.Lock()
+	block, blocked := e.block, e.blocked
+	e.block = nil
+	e.mu.Unlock()
+	if block != nil {
+		close(blocked)
+		<-block
+	}
+}
+func (e *blockingEmitter) EmitScreen(string)                     {}
+func (e *blockingEmitter) EmitError(_ string, _ conv.ErrorLevel) {}
+
+// A snapshot taken before a reset reaches the emitter before the reset's
+// forget, which clears what the emitter keeps: never after, where the old
+// conversation would land in the new one.
+func TestResetWaitsForTheSnapshotUnderWay(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	t.Cleanup(cancel)
+
+	agent := &testAgent{screen: "old"}
+	mClock := quartz.NewMock(t)
+	emitter := &blockingEmitter{}
+	c := st.NewPTY(ctx, st.PTYConversationConfig{
+		Clock:                 mClock,
+		AgentIO:               agent,
+		SnapshotInterval:      100 * time.Millisecond,
+		ScreenStabilityLength: 200 * time.Millisecond,
+		Logger:                slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}, emitter)
+	c.Start(ctx)
+	advanceFor(ctx, t, mClock, 300*time.Millisecond)
+	require.Equal(t, "old", c.Messages()[0].Message)
+
+	agent.setScreen("old, changed")
+	release, blocked := make(chan struct{}), make(chan struct{})
+	emitter.mu.Lock()
+	emitter.block, emitter.blocked = release, blocked
+	emitter.mu.Unlock()
+	_, w := mClock.AdvanceNext()
+	<-blocked
+
+	reset := make(chan struct{})
+	go func() {
+		c.Reset(func() { emitter.record("forget") })
+		close(reset)
+	}()
+	select {
+	case <-reset:
+		t.Fatal("the reset didn't wait for the snapshot under way")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	w.MustWait(ctx)
+	<-reset
+
+	events := emitter.recorded()
+	require.NotEmpty(t, events)
+	assert.Equal(t, "forget", events[len(events)-1], "nothing of the old conversation after forget: %q", events)
+	assert.Equal(t, "messages:old, changed", events[len(events)-2])
 }

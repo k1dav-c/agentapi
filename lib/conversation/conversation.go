@@ -113,7 +113,11 @@ type Conversation interface {
 	Start(context.Context)
 	Status() Status
 	// Reset clears all conversation state back to the initial empty state.
-	Reset()
+	// forget, if set, runs first, once no state of the old conversation
+	// can still reach the Emitter: what the caller keeps of it (the
+	// Emitter's own state) can be cleared there, and no snapshot taken
+	// before the reset arrives after.
+	Reset(forget func())
 }
 
 // Emitter receives conversation state updates.

@@ -461,11 +461,15 @@ func (c *Conversation) statusLocked() conv.Status {
 }
 
 // Reset implements conv.Conversation by clearing the messages. Use Restart to
-// also replace the agent.
-func (c *Conversation) Reset() {
+// also replace the agent. forget runs under the lock the conversation
+// reports to its Emitter under.
+func (c *Conversation) Reset(forget func()) {
 	c.mu.Lock()
+	defer c.mu.Unlock()
+	if forget != nil {
+		forget()
+	}
 	c.messages.reset()
-	c.mu.Unlock()
 }
 
 // Send implements conv.Conversation by sending the parts' text as a turn.

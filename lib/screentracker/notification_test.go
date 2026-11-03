@@ -80,7 +80,7 @@ func TestNotificationSnapshots(t *testing.T) {
 	}
 	stable()
 	idle()
-	c.Reset()
+	c.Reset(nil)
 	stable()
 	idle()
 	cancel()

@@ -36,7 +36,11 @@ func (c *handoffConversation) Send(p ...conv.MessagePart) error {
 func (c *handoffConversation) Start(context.Context) {}
 func (c *handoffConversation) Status() conv.Status   { return c.status }
 func (c *handoffConversation) Text() string          { return "" }
-func (c *handoffConversation) Reset()                {}
+func (c *handoffConversation) Reset(forget func()) {
+	if forget != nil {
+		forget()
+	}
+}
 
 type handoffIO struct {
 	writes []string

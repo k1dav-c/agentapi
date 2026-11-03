@@ -213,7 +213,7 @@ type Conversation interface {
 	Send(...MessagePart) error
 	Start(context.Context)
 	Status() Status // initializing, changing or stable
-	Reset()
+	Reset(forget func()) // forget 在舊對話的快照都不會再送到 Emitter 之後才執行
 }
 
 type Emitter interface {

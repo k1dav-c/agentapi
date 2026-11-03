@@ -244,7 +244,7 @@ type Conversation interface {
 	Send(...MessagePart) error
 	Start(context.Context)
 	Status() Status // initializing, changing or stable
-	Reset()
+	Reset(forget func()) // forget runs once no snapshot of the old conversation can reach the Emitter
 }
 
 type Emitter interface {
