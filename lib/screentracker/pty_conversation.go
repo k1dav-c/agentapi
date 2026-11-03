@@ -137,6 +137,12 @@ type PTYConversation struct {
 
 var _ conv.Conversation = &PTYConversation{}
 
+// initialMessages is a new conversation's: one empty agent message, which
+// the agent's first screen fills in.
+func initialMessages(now time.Time) []conv.Message {
+	return []conv.Message{{Role: conv.RoleAgent, Time: now}}
+}
+
 func NewPTY(ctx context.Context, cfg PTYConversationConfig, emitter conv.Emitter) *PTYConversation {
 	if cfg.Clock == nil {
 		cfg.Clock = quartz.NewReal()
@@ -149,17 +155,10 @@ func NewPTY(ctx context.Context, cfg PTYConversationConfig, emitter conv.Emitter
 		cfg:                      cfg,
 		emitter:                  emitter,
 		stableSnapshotsThreshold: threshold,
-		messages: []conv.Message{
-			{
-				Message: "",
-				Role:    conv.RoleAgent,
-				Time:    cfg.Clock.Now(),
-			},
-		},
-		stableSignal:       make(chan struct{}, 1),
-		snapshotWake:       make(chan struct{}, 1),
-		toolCallMessageSet: make(map[string]bool),
-		writingMessage:     false,
+		messages:                 initialMessages(cfg.Clock.Now()),
+		stableSignal:             make(chan struct{}, 1),
+		snapshotWake:             make(chan struct{}, 1),
+		toolCallMessageSet:       make(map[string]bool),
 	}
 	if len(cfg.InitialMessages) > 0 {
 		c.messages = slices.Clone(cfg.InitialMessages)
@@ -338,13 +337,7 @@ func (c *PTYConversation) Reset(forget func()) {
 		c.pending = nil
 		msg.finish(conv.ErrConversationReset)
 	}
-	c.messages = []conv.Message{
-		{
-			Message: "",
-			Role:    conv.RoleAgent,
-			Time:    c.cfg.Clock.Now(),
-		},
-	}
+	c.messages = initialMessages(c.cfg.Clock.Now())
 	c.screenBeforeLastUserMessage = ""
 	c.snapshots = 0
 	c.stableCount = 0

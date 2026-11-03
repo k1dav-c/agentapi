@@ -237,19 +237,13 @@ func (c *PTYConversation) writeStabilize(ctx context.Context, messageParts ...co
 		Clock:       c.cfg.Clock,
 	}, func() (bool, error) {
 		screen := readRegion()
-		if screen != screenBeforeMessage {
-			stabilityTimer := c.cfg.Clock.NewTimer(1 * time.Second)
-			select {
-			case <-ctx.Done():
-				stabilityTimer.Stop()
-				return false, ctx.Err()
-			case <-stabilityTimer.C:
-			}
-			stabilityTimer.Stop()
-			newScreen := readRegion()
-			return newScreen == screen, nil
+		if screen == screenBeforeMessage {
+			return false, nil
 		}
-		return false, nil
+		if err := c.sleep(ctx, 1*time.Second); err != nil {
+			return false, err
+		}
+		return readRegion() == screen, nil
 	}); err != nil {
 		if !errors.Is(err, util.WaitTimedOut) {
 			// Context cancellation or condition errors are fatal.
@@ -283,17 +277,10 @@ func (c *PTYConversation) writeStabilize(ctx context.Context, messageParts ...co
 				return false, fmt.Errorf("failed to write carriage return: %w", err)
 			}
 		}
-		crTimer := c.cfg.Clock.NewTimer(25 * time.Millisecond)
-		select {
-		case <-ctx.Done():
-			crTimer.Stop()
-			return false, ctx.Err()
-		case <-crTimer.C:
+		if err := c.sleep(ctx, 25*time.Millisecond); err != nil {
+			return false, err
 		}
-		crTimer.Stop()
-		screen := readRegion()
-
-		return screen != screenBeforeCarriageReturn, nil
+		return readRegion() != screenBeforeCarriageReturn, nil
 	}); err != nil {
 		if errors.Is(err, util.WaitTimedOut) {
 			return fmt.Errorf("failed to wait for processing to start: %w", conv.ErrMessageNotSubmitted)
@@ -302,4 +289,16 @@ func (c *PTYConversation) writeStabilize(ctx context.Context, messageParts ...co
 	}
 
 	return nil
+}
+
+// sleep waits d on the conversation's clock, or until ctx ends.
+func (c *PTYConversation) sleep(ctx context.Context, d time.Duration) error {
+	timer := c.cfg.Clock.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
