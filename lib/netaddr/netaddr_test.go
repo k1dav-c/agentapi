@@ -2,6 +2,7 @@ package netaddr
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"log/slog"
 	"net"
@@ -74,7 +75,7 @@ type fakeNet struct {
 	lists   int
 }
 
-func (f *fakeNet) dial(network, address string) (net.Conn, error) {
+func (f *fakeNet) dial(_ context.Context, network, address string) (net.Conn, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.dials = append(f.dials, network+" "+address)
@@ -205,4 +206,29 @@ func TestResolverKeepsTheLastAddress(t *testing.T) {
 	ip, err = r.Resolve("")
 	require.Error(t, err)
 	assert.Empty(t, ip)
+}
+
+// A route lookup that hangs (DNS for a hostname target) gives up when the
+// context ends, and within DialTimeout without one, falling back to the
+// interfaces.
+func TestResolverBoundsTheDial(t *testing.T) {
+	f := &fakeNet{ifaces: []Interface{{Name: "eth0", Up: true, Addrs: addrs("192.168.9.48")}}}
+	now := time.Unix(1_800_000_000, 0)
+	var logs bytes.Buffer
+	r := newResolver(f, &now, &logs)
+	var deadline time.Time
+	r.Dial = func(ctx context.Context, _, _ string) (net.Conn, error) {
+		deadline, _ = ctx.Deadline()
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	ip, err := r.ResolveContext(ctx, "hub.vpn:3290")
+	require.NoError(t, err)
+	assert.Equal(t, "192.168.9.48", ip)
+	assert.Less(t, time.Since(start), DialTimeout)
+	assert.False(t, deadline.IsZero(), "the dial has a deadline")
+	assert.LessOrEqual(t, time.Until(deadline), DialTimeout)
 }

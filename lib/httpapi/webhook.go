@@ -199,11 +199,17 @@ type webhookDispatcher struct {
 	configured func()
 	// configChanged wakes the heartbeat loop when the interval changes.
 	configChanged chan struct{}
-	// ip finds the address {ip} in the public URL stands for.
+	// ip finds the address {ip} in the public URL stands for. Only
+	// refreshIP asks it, outside any lock: a lookup may wait on DNS, and
+	// the events are built under the emitter's lock.
 	ip *netaddr.Resolver
-	// urlMu guards lastURL, the public URL the last snapshot had.
-	urlMu   sync.Mutex
-	lastURL string
+	// refreshMu makes the lookups take turns, so an older answer can't
+	// replace a newer one.
+	refreshMu sync.Mutex
+	// ipMu guards publicAddr, the address {ip} stands for in the events
+	// and summaries; empty until one is found.
+	ipMu       sync.Mutex
+	publicAddr string
 	// urlChanged, if set, is called (in a goroutine of its own) once the
 	// public URL changed because {ip} did.
 	urlChanged func()
@@ -337,42 +343,78 @@ func (d *webhookDispatcher) instanceSnapshot() WebhookInstance {
 }
 
 // publicURL is the public URL with its placeholders filled in. {ip} is
-// the address this machine reaches the webhook's receiver from, looked up
-// at most every 30 seconds: after DHCP gives the machine another address,
-// the next heartbeat names it. When no address is found it stays the last
-// one found; empty (no URL) when none was.
+// the address refreshIP last found: empty (no URL) until it found one.
 func (d *webhookDispatcher) publicURL(config WebhookConfig, port int) string {
 	expanded := instanceapi.ExpandPlaceholders(config.PublicURL, port)
 	if !instanceapi.HasIP(expanded) {
 		return expanded
 	}
-	ip, _ := d.ip.Resolve(netaddr.Target(config.URL))
+	ip := d.cachedIP()
 	if ip == "" {
 		return ""
 	}
-	expanded = instanceapi.ExpandIP(expanded, ip)
-	d.urlMu.Lock()
-	changed := d.lastURL != "" && d.lastURL != expanded
-	d.lastURL = expanded
-	d.urlMu.Unlock()
-	if changed {
-		d.logger.Info("The public URL changed with this machine's address", "url", expanded)
+	return instanceapi.ExpandIP(expanded, ip)
+}
+
+func (d *webhookDispatcher) cachedIP() string {
+	d.ipMu.Lock()
+	defer d.ipMu.Unlock()
+	return d.publicAddr
+}
+
+// refreshIP looks up the address {ip} in the public URL stands for: the
+// one this machine reaches the webhook's receiver from, looked up again
+// once the last answer is 30 seconds old, so after DHCP gives the machine
+// another address the next heartbeat names it. When no address is found
+// the last one stays. It may wait on DNS (for at most
+// netaddr.DialTimeout), so it runs before the first event, when the
+// configuration changes, before every heartbeat and on a loop of its own,
+// never under a lock the events are built under.
+func (d *webhookDispatcher) refreshIP(ctx context.Context) {
+	config := d.configSnapshot()
+	if !instanceapi.HasIP(config.PublicURL) {
+		return
+	}
+	d.refreshMu.Lock()
+	ip, _ := d.ip.ResolveContext(ctx, netaddr.Target(config.URL))
+	d.refreshMu.Unlock()
+	if ip == "" {
+		return
+	}
+	d.ipMu.Lock()
+	previous := d.publicAddr
+	d.publicAddr = ip
+	d.ipMu.Unlock()
+	if previous != "" && previous != ip {
+		d.logger.Info("The public URL changed with this machine's address", "ip", ip)
 		if d.urlChanged != nil {
 			go d.urlChanged()
 		}
 	}
-	return expanded
+}
+
+// refreshIPs keeps {ip} current between heartbeats, for the summary, the
+// registry and the allowed hosts, until ctx ends.
+func (d *webhookDispatcher) refreshIPs(ctx context.Context) {
+	ticker := d.clock.NewTicker(netaddr.DefaultTTL, "webhook", "ip")
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			d.refreshIP(ctx)
+		}
+	}
 }
 
 // publicIP is the address {ip} in the public URL stands for now; empty
 // when it holds no {ip}.
 func (d *webhookDispatcher) publicIP() string {
-	config := d.configSnapshot()
-	if !instanceapi.HasIP(config.PublicURL) {
+	if !instanceapi.HasIP(d.configSnapshot().PublicURL) {
 		return ""
 	}
-	ip, _ := d.ip.Resolve(netaddr.Target(config.URL))
-	return ip
+	return d.cachedIP()
 }
 
 func (d *webhookDispatcher) configSnapshot() WebhookConfig {
@@ -394,6 +436,8 @@ func (d *webhookDispatcher) updateConfig(config WebhookConfig) error {
 	d.config = config
 	d.tmpl = tmpl
 	d.mu.Unlock()
+	// The next events name the receiver's route.
+	d.refreshIP(context.Background())
 	select {
 	case d.configChanged <- struct{}{}:
 	default:
@@ -458,6 +502,8 @@ func (d *webhookDispatcher) enqueue(eventType string, data any, done chan struct
 // start delivers the queued events, in order, until ctx ends, and sends
 // instance.started and the heartbeats.
 func (d *webhookDispatcher) start(ctx context.Context) {
+	// instance.started names the address.
+	d.refreshIP(ctx)
 	d.emit(webhookEventInstanceStarted, d.snapshotData())
 	go func() {
 		for {
@@ -470,6 +516,7 @@ func (d *webhookDispatcher) start(ctx context.Context) {
 		}
 	}()
 	go d.heartbeats(ctx)
+	go d.refreshIPs(ctx)
 }
 
 func (d *webhookDispatcher) snapshotData() any {
@@ -492,6 +539,7 @@ func (d *webhookDispatcher) heartbeats(ctx context.Context) {
 		case <-ctx.Done():
 		case <-d.configChanged:
 		case <-tick:
+			d.refreshIP(ctx)
 			d.emit(webhookEventInstanceHeartbeat, d.snapshotData())
 		}
 		if timer != nil {

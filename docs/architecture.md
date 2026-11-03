@@ -129,8 +129,11 @@ answers write keys directly to the agent's terminal.
    stays: it changes while the server runs (DHCP), so the webhook dispatcher
    fills it in whenever it builds the instance for an event, the summary or
    the registry entry (`publicURL` in `lib/httpapi/webhook.go`), with the
-   source address of the route to the webhook URL, which `netaddr.Resolver`
-   looks up at most every 30 s. The agent type is `--type`, else the agent command
+   source address of the route to the webhook URL. `refreshIP` looks it up
+   through `netaddr.Resolver` (kept 30 s, each lookup bounded by
+   `netaddr.DialTimeout`) before `instance.started`, after a configuration
+   change, before each heartbeat and every 30 s, outside the emitter's lock;
+   the events only read the last address found. The agent type is `--type`, else the agent command
    when it is a type name, else `custom`. The transport is `--transport`, else
    native for an agent `hasNativeAdapter` covers (Claude Code, Codex, Pi and
    `native-demo`) unless the deprecated `--state-file` is set, else PTY.

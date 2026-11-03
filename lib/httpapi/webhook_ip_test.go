@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/logctx"
 	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native/nativetest"
@@ -54,7 +55,7 @@ func (f *fakeRoute) dials() []string {
 
 func (f *fakeRoute) resolver(clock quartz.Clock) *netaddr.Resolver {
 	return &netaddr.Resolver{
-		Dial: func(_, address string) (net.Conn, error) {
+		Dial: func(_ context.Context, _, address string) (net.Conn, error) {
 			f.mu.Lock()
 			defer f.mu.Unlock()
 			f.targets = append(f.targets, address)
@@ -87,6 +88,8 @@ func TestWebhookPublicURLFollowsTheAddress(t *testing.T) {
 	d.urlChanged = func() { changed.Add(1) }
 	d.snapshot = func() any { return WebhookInstanceState{Status: AgentStatusRunning} }
 	d.setInstance(WebhookInstance{ID: "dev-1:3285", Port: 3285})
+	assert.Empty(t, d.instanceSnapshot().URL, "not looked up yet")
+	d.refreshIP(t.Context())
 
 	for range 5 {
 		assert.Equal(t, "http://192.168.9.48:3285", d.instanceSnapshot().URL)
@@ -188,6 +191,7 @@ func TestPublicIPIsAnAllowedHost(t *testing.T) {
 	t.Cleanup(func() { _ = srv.Stop(context.Background()) })
 	route := &fakeRoute{source: "192.168.9.49"}
 	srv.webhook.ip = route.resolver(clock)
+	srv.webhook.refreshIP(t.Context())
 
 	status := func(host string) int {
 		req := httptest.NewRequest(http.MethodGet, "/status", nil)
@@ -200,4 +204,60 @@ func TestPublicIPIsAnAllowedHost(t *testing.T) {
 	assert.Equal(t, http.StatusOK, status("192.168.9.49:3285"))
 	assert.Equal(t, http.StatusBadRequest, status("192.168.9.48:3285"))
 	assert.Equal(t, http.StatusBadRequest, status("evil.example:3285"))
+}
+
+// A lookup of {ip} that hangs (DNS for the receiver's hostname) holds up
+// neither the events nor the summary, which the emitter builds under its
+// lock: they name the last address found.
+func TestSlowPublicIPLookupBlocksNoEvent(t *testing.T) {
+	t.Parallel()
+	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	factory := &nativetest.Factory{}
+	clock := quartz.NewMock(t)
+	srv, err := NewServer(ctx, ServerConfig{
+		AgentType:      mf.AgentTypeClaude,
+		Transport:      TransportNative,
+		Native:         NativeConfig{Factory: factory.New},
+		ChatBasePath:   "/chat",
+		AllowedHosts:   []string{"*"},
+		AllowedOrigins: []string{"*"},
+		Clock:          clock,
+		Webhook:        WebhookConfig{URL: "http://192.0.2.10:3290/hooks", PublicURL: "http://{ip}:3285", Events: []string{webhookEventRunStatusChanged}},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = srv.Stop(context.Background()) })
+	srv.webhook.ip = (&fakeRoute{source: "192.168.9.49"}).resolver(clock)
+	srv.webhook.refreshIP(t.Context())
+
+	// The next lookup hangs.
+	dialing := make(chan struct{})
+	release := make(chan struct{})
+	defer close(release)
+	srv.webhook.ip = &netaddr.Resolver{
+		Dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			close(dialing)
+			select {
+			case <-release:
+			case <-ctx.Done():
+			}
+			return nil, errors.New("lookup hub.vpn: i/o timeout")
+		},
+		Interfaces: func() ([]netaddr.Interface, error) { return nil, nil },
+		Now:        func() time.Time { return clock.Now() },
+	}
+	go srv.webhook.refreshIP(t.Context())
+	<-dialing
+
+	done := make(chan SummaryBody)
+	go func() {
+		srv.emitter.EmitStatus(conv.StatusChanging)
+		srv.emitter.EmitStatus(conv.StatusStable)
+		done <- srv.emitter.Summary()
+	}()
+	select {
+	case summary := <-done:
+		assert.Equal(t, "http://192.168.9.49:3285", summary.Instance.URL, "the last address")
+	case <-time.After(5 * time.Second):
+		t.Fatal("the emitter waited for the lookup")
+	}
 }

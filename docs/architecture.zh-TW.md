@@ -123,7 +123,9 @@ flowchart TB
    `--public-url` 中的 `{port}` 和 `{hostname}` 會被填入（`instanceapi.ExpandPlaceholders`）。`--public-url` 中的 `{ip}`
    保留不填：它在伺服器執行期間會變（DHCP），所以 webhook dispatcher 每次為事件、摘要或登記檔組出實例
    資料時才填入（`lib/httpapi/webhook.go` 的 `publicURL`），填的是通往 webhook 網址那條路由的來源位址，
-   由 `netaddr.Resolver` 最多每 30 秒查詢一次。agent 類型取自 `--type`；沒有指定時，
+   由 `refreshIP` 透過 `netaddr.Resolver` 查詢（結果保留 30 秒，每次查詢最多等 `netaddr.DialTimeout`）：
+   在 `instance.started` 之前、設定變更後、每次 heartbeat 之前，以及每 30 秒一次，都在 emitter 的鎖之外進行；
+   事件只讀取最後查到的位址。agent 類型取自 `--type`；沒有指定時，
    若 agent 指令符合已知類型別名，就採用該類型；否則使用 `custom`。transport 取自
    `--transport`；沒有指定時，`hasNativeAdapter` 涵蓋的 agent（Claude Code、Codex、Pi 和
    `native-demo`）使用 native（除非設定了已棄用的 `--state-file`），其他 agent 使用 PTY。
