@@ -1,8 +1,8 @@
 # Documentation screenshots
 
 The [chat UI guide](../chat-ui.md) and [README](../../README.md) use these screenshots and GIFs.
-Chromium captured them from an AgentAPI binary built from the source (`go build`, version `0.0.0-dev`)
-after v2.3.0, serving the production chat UI and API.
+Chromium captured them from AgentAPI 2.4.0, built from the source with `make build`, serving the
+production chat UI and API.
 
 [scripts/capture-docs.mjs](../../scripts/capture-docs.mjs) starts its own servers on a small sample
 project, `my-app` (a page with a stylesheet, a script and release notes, two commits and
