@@ -170,52 +170,11 @@ func (d *deliveries) close() error {
 // which a machine that joined with an earlier version still sends, only
 // says it is alive: the summary stream says what the instance does.
 func (h *Hub) receiveWebhook(w http.ResponseWriter, r *http.Request) {
-	rc := http.NewResponseController(w)
-	_ = rc.SetReadDeadline(time.Now().Add(webhookReadTimeout))
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxWebhookBody+1))
-	if err == nil && len(body) <= maxWebhookBody {
-		// Read whole. After a failure, or a body too large, the deadline
-		// stays: the server would wait for the rest before it answers.
-		_ = rc.SetReadDeadline(time.Time{})
-	}
-	if err != nil || len(body) > maxWebhookBody {
-		http.Error(w, "unreadable event", http.StatusBadRequest)
-		return
-	}
-	if err := instanceapi.Verify(h.config.Secret, r.Header, body, h.clock.Now()); err != nil {
-		// A wrong --secret on the instance's side shows here.
-		if ok, suppressed := h.badSignatures.allow(h.clock.Now(), badSignatureLogEvery); ok {
-			h.logger.Warn("Refused an event with an invalid or missing signature, or more than 10 minutes off",
-				"reason", err, "from", r.RemoteAddr,
-				"instance", r.Header.Get(instanceapi.HeaderInstance), "event", r.Header.Get(instanceapi.HeaderEvent),
-				"refused_since_last_logged", suppressed)
-		}
-		http.Error(w, "invalid or missing signature", http.StatusUnauthorized)
-		return
-	}
-	var event webhookEvent
-	if err := json.Unmarshal(body, &event); err != nil || event.Instance == nil || event.Instance.ID == "" {
-		http.Error(w, "not an AgentAPI event", http.StatusBadRequest)
-		return
-	}
-	if event.ID == "" {
-		// Every AgentAPI delivery has one. Without it the hub couldn't tell
-		// the event from a copy of it, which would work again for as long
-		// as its signature holds.
-		h.logger.Warn("Refused an event without a delivery ID", "instance", event.Instance.ID, "event", event.Type, "from", r.RemoteAddr)
-		http.Error(w, "the event has no delivery ID (id): is it AgentAPI?", http.StatusBadRequest)
+	event, ok := h.readEvent(w, r)
+	if !ok {
 		return
 	}
 	instance := *event.Instance
-	isInstanceEvent := event.Type == instanceapi.EventInstanceStarted || event.Type == instanceapi.EventInstanceHeartbeat ||
-		event.Type == instanceapi.EventInstanceStopped
-	if isInstanceEvent && instance.ServerID == "" {
-		// Every AgentAPI since 1.0 names its run. An event without one
-		// would pass for the run the hub follows, and move it.
-		h.logger.Warn("Refused an instance event that names no server ID", "instance", instance.ID, "event", event.Type, "from", r.RemoteAddr)
-		http.Error(w, "the event names no server_id: is it AgentAPI 1.0 or later?", http.StatusBadRequest)
-		return
-	}
 	// Verify read the timestamp; a copy is refused for as long as it
 	// would pass.
 	signedAt, _ := strconv.ParseInt(r.Header.Get(instanceapi.HeaderTimestamp), 10, 64)
@@ -246,6 +205,59 @@ func (h *Hub) receiveWebhook(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// readEvent reads the body of a webhook delivery: whole, signed with the
+// hub's secret, an AgentAPI event with an instance and a delivery ID, and
+// for an instance.* event the run it is of. Otherwise it answers why not,
+// and reports false.
+func (h *Hub) readEvent(w http.ResponseWriter, r *http.Request) (webhookEvent, bool) {
+	rc := http.NewResponseController(w)
+	_ = rc.SetReadDeadline(time.Now().Add(webhookReadTimeout))
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxWebhookBody+1))
+	if err == nil && len(body) <= maxWebhookBody {
+		// Read whole. After a failure, or a body too large, the deadline
+		// stays: the server would wait for the rest before it answers.
+		_ = rc.SetReadDeadline(time.Time{})
+	}
+	if err != nil || len(body) > maxWebhookBody {
+		http.Error(w, "unreadable event", http.StatusBadRequest)
+		return webhookEvent{}, false
+	}
+	if err := instanceapi.Verify(h.config.Secret, r.Header, body, h.clock.Now()); err != nil {
+		// A wrong --secret on the instance's side shows here.
+		if ok, suppressed := h.badSignatures.allow(h.clock.Now(), badSignatureLogEvery); ok {
+			h.logger.Warn("Refused an event with an invalid or missing signature, or more than 10 minutes off",
+				"reason", err, "from", r.RemoteAddr,
+				"instance", r.Header.Get(instanceapi.HeaderInstance), "event", r.Header.Get(instanceapi.HeaderEvent),
+				"refused_since_last_logged", suppressed)
+		}
+		http.Error(w, "invalid or missing signature", http.StatusUnauthorized)
+		return webhookEvent{}, false
+	}
+	var event webhookEvent
+	if err := json.Unmarshal(body, &event); err != nil || event.Instance == nil || event.Instance.ID == "" {
+		http.Error(w, "not an AgentAPI event", http.StatusBadRequest)
+		return webhookEvent{}, false
+	}
+	if event.ID == "" {
+		// Every AgentAPI delivery has one. Without it the hub couldn't tell
+		// the event from a copy of it, which would work again for as long
+		// as its signature holds.
+		h.logger.Warn("Refused an event without a delivery ID", "instance", event.Instance.ID, "event", event.Type, "from", r.RemoteAddr)
+		http.Error(w, "the event has no delivery ID (id): is it AgentAPI?", http.StatusBadRequest)
+		return webhookEvent{}, false
+	}
+	isInstanceEvent := event.Type == instanceapi.EventInstanceStarted || event.Type == instanceapi.EventInstanceHeartbeat ||
+		event.Type == instanceapi.EventInstanceStopped
+	if isInstanceEvent && event.Instance.ServerID == "" {
+		// Every AgentAPI since 1.0 names its run. An event without one
+		// would pass for the run the hub follows, and move it.
+		h.logger.Warn("Refused an instance event that names no server ID", "instance", event.Instance.ID, "event", event.Type, "from", r.RemoteAddr)
+		http.Error(w, "the event names no server_id: is it AgentAPI 1.0 or later?", http.StatusBadRequest)
+		return webhookEvent{}, false
+	}
+	return event, true
 }
 
 // sameRun reports whether an event of the run serverID is of the run the
