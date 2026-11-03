@@ -14,6 +14,9 @@
   never started: a turn waiting on a dialog could hang.
 - `agentapi update --force --check` says `Already up to date.` when it is; it said an update was
   available. `--check` only reports, with or without `--force`.
+- The check of the new program before a restart in place retries for about a second while Linux
+  says the program is busy (`text file busy`), as the update's own check does: a process forked
+  while the program was written holds it until it execs, and the restart failed.
 
 ## v2.5.0
 

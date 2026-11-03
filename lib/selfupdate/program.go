@@ -100,24 +100,35 @@ func (p Program) Lock(ctx context.Context) (unlock func(), err error) {
 	return filelock.Lock(ctx, p.lockPath())
 }
 
+// RetryTextBusy runs run, which runs a program, again while it fails
+// because the program is busy, for about a second or until ctx ends, and
+// returns its last error. A program just written can't run while a
+// process forked at the same time still holds the file open for writing,
+// until that one execs (Linux's ETXTBSY, golang.org/issue/22315). It is
+// let go within moments.
+func RetryTextBusy(ctx context.Context, run func() error) error {
+	err := run()
+	for wait := 10 * time.Millisecond; errors.Is(err, syscall.ETXTBSY) && wait < time.Second; wait *= 2 {
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(wait):
+		}
+		err = run()
+	}
+	return err
+}
+
 // ProgramVersion runs the program at path with --version and returns the
 // version it prints (agentapi version 1.2.3).
 func ProgramVersion(ctx context.Context, path string) (*semver.Version, error) {
 	ctx, cancel := context.WithTimeout(ctx, versionTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, path, "--version").Output()
-	// A program just written can't run while a process forked at the
-	// same time still holds the file open for writing, until that one
-	// execs (Linux's ETXTBSY, golang.org/issue/22315). It is let go
-	// within moments.
-	for wait := 10 * time.Millisecond; errors.Is(err, syscall.ETXTBSY) && wait < time.Second; wait *= 2 {
-		select {
-		case <-ctx.Done():
-			return nil, fmt.Errorf("%s --version: %w", path, err)
-		case <-time.After(wait):
-		}
+	var out []byte
+	err := RetryTextBusy(ctx, func() (err error) {
 		out, err = exec.CommandContext(ctx, path, "--version").Output()
-	}
+		return err
+	})
 	if err != nil {
 		return nil, fmt.Errorf("%s --version: %w", path, err)
 	}

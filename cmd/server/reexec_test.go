@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -99,6 +100,23 @@ func TestSelfExecCheck(t *testing.T) {
 
 	_, err = (&selfExec{}).check(context.Background())
 	assert.ErrorContains(t, err, "didn't find its program")
+}
+
+// A program still held open for writing runs once it is let go: Linux
+// refuses to run it until then (ETXTBSY), as when a process forked while
+// it was written (by an update, or another test) hasn't exec'd yet.
+func TestSelfExecCheckWaitsForAWriter(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no restart in place on Windows")
+	}
+	t.Parallel()
+	s := &selfExec{path: program(t, t.TempDir(), "agentapi", `echo "agentapi version 2.1.0"`), argv: []string{"agentapi", "server"}}
+	writer, err := os.OpenFile(s.path, os.O_WRONLY, 0)
+	require.NoError(t, err)
+	time.AfterFunc(100*time.Millisecond, func() { _ = writer.Close() })
+	got, err := s.check(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "agentapi version 2.1.0", got.version)
 }
 
 // fakeStateDB answers CheckWriter with err, and records what it was asked.
