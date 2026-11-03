@@ -37,6 +37,11 @@ type source struct {
 	// line, and reports false for a log that isn't a session's (a
 	// subagent's).
 	header func(line []byte) (id string, started time.Time, cwd string, ok bool)
+	// preamble reports a line that can come before the header, which is
+	// skipped, up to maxPreamble of them; nil when the header is the
+	// first line.
+	preamble    func(line []byte) bool
+	maxPreamble int
 	// prompt returns the user's message a line holds, if it holds one.
 	prompt func(line []byte) (string, time.Time, bool)
 	// scan reads a session's lines, as agentlog.ScanFile does; nil is
@@ -58,6 +63,8 @@ func sourceFor(agentType string) (source, bool) {
 			byID:           claudeLogsByID,
 			linesRecordCWD: true,
 			header:         claudeHeader,
+			preamble:       claudelog.Preamble,
+			maxPreamble:    claudelog.MaxPreambleLines,
 			prompt:         claudelog.Prompt,
 			roots:          func(*Store) []string { return home(agenthome.ClaudeConfigDir()) },
 		}, true

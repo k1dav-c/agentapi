@@ -94,3 +94,17 @@ func TestCallsWithoutIDsHaveNoKey(t *testing.T) {
 		assert.Empty(t, call.Key)
 	}
 }
+
+func TestPreamble(t *testing.T) {
+	t.Parallel()
+	for line, want := range map[string]bool{
+		`{"type":"file-history-snapshot","messageId":"m0","snapshot":{}}`:           true,
+		`{"type":"summary","summary":"Earlier work","leafUuid":"u0"}`:               true,
+		`{"type":"user","sessionId":"s1","message":{"role":"user","content":"Hi"}}`: false,
+		`{"type":"user","isSidechain":true,"message":{"role":"user"}}`:              false,
+		`{"type":"file-history-snapshot"`:                                           false,
+		`not json`:                                                                  false,
+	} {
+		assert.Equal(t, want, Preamble([]byte(line)), line)
+	}
+}

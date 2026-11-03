@@ -9,9 +9,10 @@ import (
 	"github.com/coder/agentapi/lib/agentlog"
 )
 
-// Header reads the session ID and start from the first line of a log,
-// and reports false for a subagent's log. The working directory is in the
-// lines that follow.
+// Header reads the session ID and start from the first line of a log
+// that has them, and reports false for a subagent's log. The working
+// directory is in the lines that follow. Lines without a session may come
+// first (Preamble).
 func Header(line []byte) (string, time.Time, bool) {
 	var entry struct {
 		SessionID   string `json:"sessionId"`
@@ -23,6 +24,19 @@ func Header(line []byte) (string, time.Time, bool) {
 	}
 	started, _ := time.Parse(time.RFC3339Nano, entry.Timestamp)
 	return entry.SessionID, started, entry.SessionID != ""
+}
+
+// MaxPreambleLines is how many lines may come before a log's header.
+const MaxPreambleLines = 50
+
+// Preamble reports whether a line can come before a session log's header:
+// one that belongs to no session, as Claude Code writes ahead of it (a
+// file-history snapshot, an earlier version's summary of a resumed
+// session).
+func Preamble(line []byte) bool {
+	sidechain, _ := agentlog.Field(line, "isSidechain")
+	id, _ := agentlog.StringField(line, "sessionId")
+	return id == "" && string(sidechain) != "true" && agentlog.Members(line, func(_, _ []byte) bool { return true })
 }
 
 // commandPrefixes start the user entries Claude Code logs for what the
