@@ -152,7 +152,9 @@ export default function MessageList({
             startup={timeline.prelude}
           />
         ) : (
-          <div className="mx-auto w-full max-w-[49rem] px-4 pb-10 pt-3 sm:px-6">
+          // A log: screen readers read what it adds, not each change of a
+          // streaming message.
+          <div role="log" aria-label="Conversation" aria-relevant="additions" className="mx-auto w-full max-w-[49rem] px-4 pb-10 pt-3 sm:px-6">
             {/* One reading column, centered: 46rem of text inside the padding.
                 The time rail and thinking notes sit in the margins beside it. */}
             {timeline.prelude.length > 0 && <StartupScreen messages={timeline.prelude} />}

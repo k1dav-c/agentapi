@@ -643,7 +643,8 @@ export function HubView() {
           )}
         </section>
 
-        <div className="sr-only" aria-live="assertive" role="status">
+        {/* Assertive: an agent that needs you. role="status" would make it polite. */}
+        <div className="sr-only" aria-live="assertive" aria-atomic="true">
           {announcement}
         </div>
         <AddInstance root={root} open={adding} onOpenChange={setAdding} onAdded={(id) => select(id)} />
