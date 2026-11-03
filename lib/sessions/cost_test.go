@@ -78,6 +78,8 @@ func TestClaudeCosts(t *testing.T) {
 	require.Len(t, s1.Hourly, 2)
 	assert.Equal(t, time.Date(2026, 10, 20, 10, 0, 0, 0, time.UTC), s1.Hourly[0].Hour)
 	assert.InDelta(t, opus.Cost(first)+sub, s1.Hourly[0].USD, 1e-9)
+	assert.Equal(t, first.Add(pricing.Tokens{Input: 3, CacheRead: 1000, Output: 100}), s1.Hourly[0].Tokens, "the call once, though logged on two lines, and the subagent's")
+	assert.Equal(t, second, s1.Hourly[1].Tokens)
 	require.Len(t, s1.Models, 1)
 	assert.True(t, s1.Models[0].Priced)
 
@@ -92,6 +94,32 @@ func TestClaudeCosts(t *testing.T) {
 	s2 := d.Cost("s2")
 	assert.Equal(t, 1, s2.Calls, "the copied call counts in s1")
 	assert.InDelta(t, s1.USD+s2.USD, d.Total.USD, 1e-9)
+	// The hours of all the sessions count each call's tokens once: the
+	// fork's copy of s1's call counts in s1.
+	assert.Equal(t, []pricing.Tokens{
+		first.Add(pricing.Tokens{Input: 3, CacheRead: 1000, Output: 100}),
+		second,
+		{Input: 7, CacheRead: 21000, Output: 300},
+	}, hourTokens(d.Total.Hourly))
+	assert.Equal(t, d.Total.Tokens, sumTokens(d.Total.Hourly))
+}
+
+// hourTokens are the tokens of each hour.
+func hourTokens(hourly []HourCost) []pricing.Tokens {
+	tokens := make([]pricing.Tokens, len(hourly))
+	for i, h := range hourly {
+		tokens[i] = h.Tokens
+	}
+	return tokens
+}
+
+// sumTokens adds up the hours' tokens.
+func sumTokens(hourly []HourCost) pricing.Tokens {
+	var sum pricing.Tokens
+	for _, h := range hourly {
+		sum = sum.Add(h.Tokens)
+	}
+	return sum
 }
 
 func TestClaudeCostReconciled(t *testing.T) {
@@ -124,6 +152,11 @@ func TestClaudeCostReconciled(t *testing.T) {
 	assert.InDelta(t, 0.5, unitemized[0].USD, 1e-6)
 	assert.Equal(t, time.Date(2026, 10, 20, 10, 5, 0, 0, time.UTC), unitemized[0].Time, "at the line before the report")
 	assert.Equal(t, pricing.Tokens{Input: 5000, Output: 400}, unitemized[0].Tokens)
+	// The tokens Claude Code counted but didn't log count in the hour, as
+	// their cost does.
+	require.Len(t, c.Hourly, 1)
+	assert.Equal(t, pricing.Tokens{Input: 5020, CacheRead: 40000, Output: 1400}, c.Hourly[0].Tokens)
+	assert.Equal(t, c.Tokens, c.Hourly[0].Tokens)
 }
 
 func TestCodexCosts(t *testing.T) {

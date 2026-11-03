@@ -555,6 +555,10 @@
             "format": "date-time",
             "type": "string"
           },
+          "tokens": {
+            "$ref": "#/components/schemas/Tokens",
+            "description": "The tokens used, those of models without a known price included."
+          },
           "usd": {
             "description": "API-equivalent cost in USD.",
             "format": "double",
@@ -563,6 +567,7 @@
         },
         "required": [
           "hour",
+          "tokens",
           "usd"
         ],
         "type": "object"
@@ -2782,6 +2787,10 @@
       "SummarySpend": {
         "additionalProperties": false,
         "properties": {
+          "day_tokens": {
+            "$ref": "#/components/schemas/SummaryTokens",
+            "description": "The tokens the agent's sessions in this directory used over the last 24 hours, the calls day_usd adds up, each once; models without a known price included. Missing from earlier releases."
+          },
           "day_usd": {
             "description": "API-equivalent cost in USD of the agent's sessions in this directory, subagents included, over the last 24 hours (the hours that end within them): the tokens at the model providers' list prices, which a subscription doesn't charge.",
             "format": "double",
@@ -2792,9 +2801,13 @@
             "type": "string"
           },
           "updated_at": {
-            "description": "When the amounts last changed: of AgentAPIs with one scope, the latest is the most recent.",
+            "description": "When the amounts or tokens last changed: of AgentAPIs with one scope, the latest is the most recent.",
             "format": "date-time",
             "type": "string"
+          },
+          "week_tokens": {
+            "$ref": "#/components/schemas/SummaryTokens",
+            "description": "The same over the last 7 days."
           },
           "week_usd": {
             "description": "The same over the last 7 days.",
@@ -2807,6 +2820,44 @@
           "scope",
           "updated_at",
           "week_usd"
+        ],
+        "type": "object"
+      },
+      "SummaryTokens": {
+        "additionalProperties": false,
+        "properties": {
+          "cache_read": {
+            "description": "Input tokens read from the prompt cache.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "cache_write": {
+            "description": "Input tokens written to the prompt cache, the five-minute and one-hour caches together.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "input": {
+            "description": "Uncached input tokens.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "output": {
+            "description": "Output tokens, thinking included.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "total": {
+            "description": "The sum of input, output, cache_write and cache_read.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cache_read",
+          "cache_write",
+          "input",
+          "output",
+          "total"
         ],
         "type": "object"
       },
