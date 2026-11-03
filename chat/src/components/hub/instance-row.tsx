@@ -26,6 +26,7 @@ import {
   olderThanHub,
   spendTitle,
   spendTotals,
+  tokenTotals,
   stateLabel,
   usagePercent,
   workSeconds,
@@ -175,10 +176,10 @@ export const InstanceRow = memo(function InstanceRow({instance, hubVersion, root
               {spend && spend.week_usd > 0 && (
                 <span
                   className={cn("shrink-0 tabular-nums", lastKnown && "opacity-55")}
-                  title={spendTitle(spend.day_usd, spend.week_usd, lastKnown)}
+                  title={spendTitle(spend.day_usd, spend.week_usd, lastKnown, spend.day_tokens?.total)}
                   data-spend-last-known={lastKnown || undefined}
                 >
-                  <span className="sr-only">{spendTitle(spend.day_usd, spend.week_usd, lastKnown)}</span>
+                  <span className="sr-only">{spendTitle(spend.day_usd, spend.week_usd, lastKnown, spend.day_tokens?.total)}</span>
                   <span aria-hidden="true">
                     {formatUSD(spend.day_usd)}
                     <span className="text-muted-foreground/60">/24h</span>
@@ -361,7 +362,8 @@ function RowWork({instance}: {instance: HubInstance}) {
 function GroupSpend({group}: {group: HubGroup}) {
   const totals = spendTotals(group.instances);
   if (totals.week <= 0) return null;
-  const title = spendTitle(totals.day, totals.week);
+  const tokens = tokenTotals(group.instances);
+  const title = spendTitle(totals.day, totals.week, false, tokens.counted > 0 ? tokens.day.total : undefined);
   return (
     <span className="shrink-0 text-[11px] text-muted-foreground/70 tabular-nums" title={title}>
       <span className="sr-only">{title}</span>

@@ -107,3 +107,22 @@ describe("InstanceRow's work time", () => {
     expect(limitedRow).not.toContain("data-hub-work");
   });
 });
+
+describe("InstanceRow's spend", () => {
+  const spend = {day_usd: 4.2, week_usd: 30, scope: "s1", updated_at: "2026-11-01T09:59:00Z"};
+  const spending = (s: Summary["spend"]): HubInstance => ({...finished, summary: {...finished.summary, spend: s} as Summary});
+
+  test("its title and screen reader text say the tokens of the last 24 hours", () => {
+    const tokens = {input: 1_000, output: 400_000, cache_write: 200_000, cache_read: 2_800_000, total: 3_401_000};
+    const html = row("groups", spending({...spend, day_tokens: tokens, week_tokens: tokens}));
+    const title = "$4.20 in the last 24 hours, $30 in the last 7 days (API-equivalent, at list prices; a subscription doesn&#x27;t charge it); 3.4M tokens in the last 24 hours";
+    expect(html).toContain(`title="${title}"`);
+    expect(html).toContain(`<span class="sr-only">${title}</span>`);
+    expect(html).toContain(">$4.20<");
+    expect(html).not.toContain("3.4M<");
+  });
+
+  test("from an AgentAPI that doesn't say its tokens, none", () => {
+    expect(row("groups", spending(spend))).not.toContain("tokens");
+  });
+});

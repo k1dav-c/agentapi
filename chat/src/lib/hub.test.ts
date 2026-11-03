@@ -1,5 +1,5 @@
 import {describe, expect, test} from "bun:test";
-import {activity, compareVersions, countedSpends, currentSpend, formatUSD, instanceVersion, olderThanHub, parseVersion, spendTitle, spendTotals, shortError, applyHubEvent, chatURL, countFilters, formatAgo, formatElapsed, matchesSearch, groupInstances, groupNames, hubRoot, instanceState, needsYou, sortInstances, stateLabel, usagePercent, versionTitle, versionTotals, formatWork, workSeconds, workTitle, workTotals, type HubInstance, type Spend, type Summary} from "./hub";
+import {activity, compareVersions, countedSpends, countedTokens, currentSpend, formatTokens, formatUSD, tokenTotals, tokensTitle, instanceVersion, olderThanHub, parseVersion, spendTitle, spendTotals, shortError, applyHubEvent, chatURL, countFilters, formatAgo, formatElapsed, matchesSearch, groupInstances, groupNames, hubRoot, instanceState, needsYou, sortInstances, stateLabel, usagePercent, versionTitle, versionTotals, formatWork, workSeconds, workTitle, workTotals, type HubInstance, type Spend, type Summary} from "./hub";
 
 const summary = (overrides: Partial<Summary> = {}): Summary =>
   ({
@@ -192,6 +192,39 @@ describe("hub", () => {
     expect(countedSpends(rows).map(({instance}) => instance.id)).toEqual(["a"]);
     expect(currentSpend(rows[1])).toBeUndefined();
     expect(spendTitle(20, 60, true)).toStartWith("Last known, not counted: $20 in the last 24 hours");
+  });
+
+  // A spend that says its tokens: each kind n, n*10 in the week.
+  const tokens = (n: number) => ({input: n, output: 2 * n, cache_write: 3 * n, cache_read: 4 * n, total: 10 * n});
+  const using = (day: number, scope: string, updated_at = "2026-10-26T00:00:00Z") =>
+    summary({spend: {day_usd: day, week_usd: 10 * day, scope, updated_at, day_tokens: tokens(day), week_tokens: tokens(10 * day)}});
+
+  test("tokens: totals of each kind, each scope once, of the instances that report them", () => {
+    const rows = [
+      instance("a", {summary: using(1, "same", "2026-10-26T10:00:00Z")}),
+      instance("b", {summary: using(2, "same", "2026-10-26T10:01:00Z")}),
+      instance("c", {summary: using(5, "other")}),
+      // An AgentAPI before 2.4: a spend, no tokens.
+      instance("d", {summary: spending(3, 30, "older")}),
+      instance("e", {state: "stopped", connection: "stopped", summary: using(100, "gone")}),
+      instance("f"),
+    ];
+    expect(tokenTotals(rows)).toEqual({day: tokens(7), week: tokens(70), counted: 3});
+    expect(countedTokens(rows).map(({instance}) => instance.id)).toEqual(["b", "c"]);
+    // Of one scope, a figure without tokens doesn't stand in for one with them.
+    const mixed = [instance("g", {summary: using(1, "s")}), instance("h", {summary: spending(9, 9, "s", "2026-10-27T00:00:00Z")})];
+    expect(tokenTotals(mixed)).toEqual({day: tokens(1), week: tokens(10), counted: 1});
+    expect(tokenTotals([])).toEqual({day: tokens(0), week: tokens(0), counted: 0});
+  });
+
+  test("tokens: short counts and titles", () => {
+    expect([0, 7.4, 950, 999, 1000, 1234, 9_949, 9_960, 12_345, 999_499, 999_999, 3_412_000, 45_600_000, 1_234_000_000, 2e15].map(formatTokens)).toEqual([
+      "0", "7", "950", "999", "1k", "1.2k", "9.9k", "10k", "12k", "999k", "1M", "3.4M", "46M", "1.2B", "2000T",
+    ]);
+    expect(tokensTitle(3_400_000, 21_000_000)).toBe("3.4M tokens in the last 24 hours, 21M in the last 7 days");
+    expect(spendTitle(4.2, 30, false, 3_400_000)).toBe("$4.20 in the last 24 hours, $30 in the last 7 days (API-equivalent, at list prices; a subscription doesn't charge it); 3.4M tokens in the last 24 hours");
+    expect(spendTitle(4.2, 30, true, 950)).toStartWith("Last known, not counted: $4.20");
+    expect(spendTitle(4.2, 30, true, 950)).toEndWith("; 950 tokens in the last 24 hours");
   });
 
   // An instance whose summary and events say it runs version, on host.
