@@ -157,7 +157,7 @@ func TestDialogTimersStop(t *testing.T) {
 		h.write(dialog)
 		h.settle()
 		h.pi.exit(nil)
-		<-h.a.loopDone
+		<-h.a.host.LoopDone()
 		_, timer := h.clock.Peek()
 		assert.False(t, timer)
 	})

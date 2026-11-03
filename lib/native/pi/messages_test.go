@@ -101,7 +101,7 @@ func TestExitSendsWhatWaits(t *testing.T) {
 	require.Len(t, h.sink.Snapshots("result-c1"), 1)
 
 	h.pi.exit(nil)
-	<-h.a.loopDone
+	<-h.a.host.LoopDone()
 	snaps := h.sink.Snapshots("assistant-5")
 	assert.Equal(t, []string{"abc"}, texts(snaps[len(snaps)-1], "text"))
 	results := h.sink.Snapshots("result-c1")

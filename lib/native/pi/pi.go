@@ -133,10 +133,9 @@ type Adapter struct {
 	// fork opens a copy of resumeRef's session under a new ID.
 	fork bool
 
-	// The timeouts and limits of the constants above, and the clock of
-	// the snapshot, dialog and interrupt timers; tests change them.
+	// The timeouts of the constants above, which tests change, and the
+	// clock of the snapshot, dialog and interrupt timers.
 	interruptTimeout time.Duration
-	interval         time.Duration
 	settleGrace      time.Duration
 	clock            quartz.Clock
 	// lineHandled, if set, is called after each stdout record is handled.
@@ -178,9 +177,6 @@ type Adapter struct {
 	// contextWindow is the context window of the session's model.
 	contextWindow int64
 
-	// loopDone is closed when the event loop has stopped.
-	loopDone <-chan struct{}
-
 	// Loop state; only the event loop goroutine touches it.
 	loop loopState
 }
@@ -211,7 +207,6 @@ func newAdapter(cfg Config, args []string, resumeRef string) *Adapter {
 		drift:            agentio.NewDrift("Pi", log),
 		resumeRef:        resumeRef,
 		interruptTimeout: interruptTimeout,
-		interval:         snapshotInterval,
 		settleGrace:      settleGrace,
 		writer:           agentio.NewWriter("pi"),
 		clock:            cfg.Clock,
@@ -226,7 +221,6 @@ func newAdapter(cfg Config, args []string, resumeRef string) *Adapter {
 		Start:  cfg.StartProcess,
 		Writer: a.writer,
 	})
-	a.loopDone = a.host.LoopDone()
 	return a
 }
 
@@ -491,8 +485,9 @@ func (a *Adapter) Respond(ctx context.Context, requestID string, response native
 	return err
 }
 
-// Capabilities reports steer, interrupt, resume and images. Images are
-// left out when Pi says its model doesn't take them.
+// Capabilities reports steer, interrupt, resume, images, settings and
+// compaction. Images are left out when Pi says its model doesn't take
+// them.
 func (a *Adapter) Capabilities() native.Capabilities {
 	a.mu.Lock()
 	defer a.mu.Unlock()
