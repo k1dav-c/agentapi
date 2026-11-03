@@ -284,9 +284,6 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	var conversation conv.Conversation
 	var nativeConversation *native.Conversation
 	if config.Transport == TransportNative {
-		if config.Native.Factory == nil {
-			return nil, fmt.Errorf("native transport requires an adapter factory")
-		}
 		nativeConversation = newNativeConversation(config, restored, emitter, uploads, logger)
 		conversation = nativeConversation
 	} else {
@@ -363,7 +360,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	// termexec.StartProcess() blocks until the PTY is created and the process
 	// is active. Agent readiness (waiting for the prompt) is handled
 	// asynchronously inside conversation.Start() via ReadyForInitialPrompt.
-	if s.agentio != nil || s.native != nil {
+	if s.agentio != nil || config.Native.Factory != nil {
 		s.conversation.Start(ctx)
 		s.startMessageQueue()
 		s.startUploadPruning()

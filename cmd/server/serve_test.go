@@ -60,7 +60,7 @@ func serveNativeWith(ctx context.Context, t *testing.T, factory *nativetest.Fact
 	srv, err := httpapi.NewServer(logctx.WithLogger(ctx, logger), config)
 	require.NoError(t, err)
 	served := make(chan error, 1)
-	go func() { served <- serve(ctx, logger, srv, &runningAgent{factory: factory.New}, self) }()
+	go func() { served <- serve(ctx, logger, srv, self) }()
 	// The registry entry has the port the server listens on.
 	var url string
 	require.Eventually(t, func() bool {

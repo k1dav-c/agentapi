@@ -40,8 +40,6 @@ type serverOptions struct {
 	apiToken string
 	pidFile  string
 
-	termWidth     uint16
-	termHeight    uint16
 	initialPrompt string
 	// stateFile is the deprecated --state-file: its conversation is
 	// imported into the state database, which keeps it from then on.
@@ -95,8 +93,6 @@ func loadServerOptions(flags flagSource, args []string) (serverOptions, error) {
 		allowedOrigins: flags.GetStringSlice(FlagAllowedOrigins),
 		apiToken:       flags.GetString(FlagAPIToken),
 		pidFile:        expandHome(instanceapi.ExpandPlaceholders(flags.GetString(FlagPidFile), port)),
-		termWidth:      flags.GetUint16(FlagTermWidth),
-		termHeight:     flags.GetUint16(FlagTermHeight),
 		initialPrompt:  flags.GetString(FlagInitialPrompt),
 		// One setting in the config file serves every server of the user,
 		// each with its own file (also pidFile).
@@ -125,15 +121,11 @@ func loadServerOptions(flags flagSource, args []string) (serverOptions, error) {
 		return serverOptions{}, fmt.Errorf("invalid --%s %d: a port is 0 to 65535", FlagPort, port)
 	}
 	var err error
-	opts.agentType, err = parseAgentType(opts.agent, flags.GetString(FlagType))
-	if err != nil {
-		return serverOptions{}, fmt.Errorf("failed to parse agent type: %w", err)
-	}
-	if opts.termWidth < 10 {
-		return serverOptions{}, fmt.Errorf("term width must be at least 10")
-	}
-	if opts.termHeight < 10 {
-		return serverOptions{}, fmt.Errorf("term height must be at least 10")
+	// The schema is the same for every agent; make gen names none.
+	if !opts.printOpenAPI {
+		if opts.agentType, err = parseAgentType(opts.agent, flags.GetString(FlagType)); err != nil {
+			return serverOptions{}, err
+		}
 	}
 	if opts.stateFile, opts.importState, err = stateFileOptions(flags); err != nil {
 		return serverOptions{}, err
@@ -149,7 +141,7 @@ func loadServerOptions(flags flagSource, args []string) (serverOptions, error) {
 			return serverOptions{}, fmt.Errorf("%w; set --registry-dir or --registry=false", err)
 		}
 	}
-	if opts.transport, err = transportOption(flags, opts.agentType, opts.agent, opts.stateFile != ""); err != nil {
+	if opts.transport, err = transportOption(flags); err != nil {
 		return serverOptions{}, err
 	}
 	if opts.bind, err = httpapi.ParseBindAddress(flags.GetString(FlagBind)); err != nil {
@@ -201,31 +193,26 @@ func stateDBForFile(path string) string {
 }
 
 // errACPRemoved answers --transport acp and --experimental-acp.
-var errACPRemoved = errors.New("the experimental ACP transport was removed: run the agent with --transport native (Claude Code, Codex, Pi) or --transport pty")
+var errACPRemoved = errors.New("the experimental ACP transport was removed: AgentAPI runs Claude Code, Codex and Pi natively")
 
-// transportOption reads --transport. Without it, an agent the native
-// transport can drive uses it, unless a state file (written by the PTY
-// transport, whose command lines keep working) is given, and every other
-// agent uses the PTY transport.
-func transportOption(flags flagSource, agentType AgentType, program string, stateFile bool) (httpapi.Transport, error) {
+// errPTYRemoved answers --transport pty.
+var errPTYRemoved = fmt.Errorf("AgentAPI 3 has no PTY transport: it runs Claude Code, Codex and Pi natively; drop --transport pty (or AGENTAPI_TRANSPORT=pty), or use AgentAPI %s, the last release with the PTY transport", lastPTYRelease)
+
+// transportOption reads the deprecated --transport, which only takes
+// native, the one transport.
+func transportOption(flags flagSource) (httpapi.Transport, error) {
 	if flags.GetBool(FlagExperimentalACP) {
 		return "", errACPRemoved
 	}
-	if !flags.IsSet(FlagTransport) {
-		if hasNativeAdapter(agentType, program) && !stateFile {
-			return httpapi.TransportNative, nil
-		}
-		return httpapi.TransportPTY, nil
-	}
 	switch value := flags.GetString(FlagTransport); value {
-	case "", "pty":
-		return httpapi.TransportPTY, nil
-	case "native":
+	case "", "native":
 		return httpapi.TransportNative, nil
+	case "pty":
+		return "", errPTYRemoved
 	case "acp":
 		return "", errACPRemoved
 	default:
-		return "", fmt.Errorf("unknown --%s %q (one of: pty, native)", FlagTransport, value)
+		return "", fmt.Errorf("unknown --%s %q: AgentAPI 3 drives every agent natively", FlagTransport, value)
 	}
 }
 

@@ -13,7 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -24,6 +23,7 @@ import (
 	"github.com/coder/agentapi/lib/httpapi"
 	"github.com/coder/agentapi/lib/logctx"
 	"github.com/coder/agentapi/lib/msgfmt"
+	"github.com/coder/agentapi/lib/native/demo"
 	"github.com/coder/agentapi/lib/pricing"
 	"github.com/coder/agentapi/lib/statedb"
 )
@@ -47,39 +47,47 @@ const (
 	AgentTypeCustom   AgentType = msgfmt.AgentTypeCustom
 )
 
-// agentTypeAliases contains the mapping of possible input agent type strings to their canonical AgentType values
+// agentTypeAliases are the agent types --type takes, and the programs
+// whose type is known without it. custom is native-demo's type
+// (lib/native/demo), which it reports.
 var agentTypeAliases = map[string]AgentType{
-	"claude":       AgentTypeClaude,
-	"goose":        AgentTypeGoose,
-	"aider":        AgentTypeAider,
-	"codex":        AgentTypeCodex,
-	"gemini":       AgentTypeGemini,
-	"copilot":      AgentTypeCopilot,
-	"amp":          AgentTypeAmp,
-	"auggie":       AgentTypeAuggie,
-	"cursor":       AgentTypeCursor,
-	"cursor-agent": AgentTypeCursor,
-	"q":            AgentTypeAmazonQ,
-	"amazonq":      AgentTypeAmazonQ,
-	"opencode":     AgentTypeOpencode,
-	"kimi":         AgentTypeKimi,
-	"pi":           AgentTypePi,
-	"custom":       AgentTypeCustom,
+	"claude":      AgentTypeClaude,
+	"codex":       AgentTypeCodex,
+	"pi":          AgentTypePi,
+	"native-demo": AgentTypeCustom,
+	"custom":      AgentTypeCustom,
 }
 
-func parseAgentType(firstArg string, agentTypeVar string) (AgentType, error) {
-	// if the agent type is provided, use it
-	if castedAgentType, ok := agentTypeAliases[agentTypeVar]; ok {
-		return castedAgentType, nil
+// agentNames are the agent types --type takes, as help names them.
+const agentNames = "claude, codex, pi, native-demo"
+
+// lastPTYRelease is the last release that drives other agents (through
+// their terminal UI).
+const lastPTYRelease = "v2.5.1"
+
+// unsupportedAgent is the error for an agent AgentAPI can't run.
+func unsupportedAgent(name string) error {
+	return fmt.Errorf("AgentAPI 3 runs Claude Code, Codex and Pi natively, not %s (--type %s); for other agents, use AgentAPI %s, the last release with the PTY transport", name, agentNames, lastPTYRelease)
+}
+
+// parseAgentType returns the agent type --type (typeFlag) names, or
+// without it the type of program, the agent's command. The custom type
+// runs native-demo only.
+func parseAgentType(program, typeFlag string) (AgentType, error) {
+	name := typeFlag
+	if name == "" {
+		name = strings.TrimSuffix(filepath.Base(program), ".exe")
 	}
-	if agentTypeVar != "" {
-		return AgentTypeCustom, fmt.Errorf("invalid agent type: %s", agentTypeVar)
+	agentType, ok := agentTypeAliases[name]
+	switch {
+	case !ok && typeFlag == "":
+		return "", fmt.Errorf("unknown agent %s: set --type (%s); AgentAPI 3 runs Claude Code, Codex and Pi natively, and for other agents AgentAPI %s is the last release with the PTY transport", program, agentNames, lastPTYRelease)
+	case !ok:
+		return "", unsupportedAgent(name)
+	case agentType == AgentTypeCustom && filepath.Base(program) != demo.Program:
+		return "", unsupportedAgent("a custom agent")
 	}
-	// if the agent type is not provided, guess it from the first argument
-	if castedFirstArg, ok := agentTypeAliases[firstArg]; ok {
-		return castedFirstArg, nil
-	}
-	return AgentTypeCustom, nil
+	return agentType, nil
 }
 
 // runServer runs the server for args until it stops. It returns errRestart
@@ -117,7 +125,7 @@ func runServer(ctx context.Context, logger *slog.Logger, args []string, self *se
 		}
 	}
 	cwd, _ := os.Getwd()
-	agent, err := startAgent(ctx, opts, cwd, logger)
+	agent, err := startAgent(opts, cwd, logger)
 	if err != nil {
 		return err
 	}
@@ -150,10 +158,10 @@ func runServer(ctx context.Context, logger *slog.Logger, args []string, self *se
 		fmt.Println(srv.GetOpenAPI())
 		return nil
 	}
-	if warning := exposureWarning(opts.bind, apiToken, opts.transport == httpapi.TransportNative && opts.terminal); warning != "" {
+	if warning := exposureWarning(opts.bind, apiToken, opts.terminal); warning != "" {
 		logger.Warn(warning)
 	}
-	return serve(ctx, logger, srv, agent, self)
+	return serve(ctx, logger, srv, self)
 }
 
 // generatedAPITokenEnv carries a generated API token to the program a
@@ -231,15 +239,7 @@ func serverConfig(opts serverOptions, agent *runningAgent, stateDB *statedb.DB, 
 			config.Update.Restart = func(ctx context.Context) error { return self.restart(ctx, "update") }
 		}
 	}
-	switch opts.transport {
-	case httpapi.TransportPTY:
-		config.PTY = httpapi.PTYConfig{
-			AgentIO:         agent.io,
-			TerminalColumns: opts.termWidth,
-			AgentPID:        agent.pid(),
-			RestartAgent:    agent.restart(),
-		}
-	case httpapi.TransportNative:
+	if !opts.printOpenAPI {
 		config.Native = httpapi.NativeConfig{
 			Factory:      agent.factory,
 			UpdateAgent:  agent.updateNative,
@@ -248,7 +248,7 @@ func serverConfig(opts serverOptions, agent *runningAgent, stateDB *statedb.DB, 
 			Prices:       prices,
 		}
 		if opts.agentType == AgentTypePi {
-			config.Native.PiSessionDir = piSessionOptions(opts.agentArgs).Dir
+			config.Native.PiSessionDir = piSessionDir(opts.agentArgs)
 		}
 	}
 	if stateDB != nil {
@@ -259,31 +259,17 @@ func serverConfig(opts serverOptions, agent *runningAgent, stateDB *statedb.DB, 
 	return config
 }
 
-// serve runs the server until a signal, a PTY agent's exit or a failed
-// listener stops it, then stops the server and the agent. A native agent
-// that exits is started again, and the server goes on serving. It returns
-// errRestart once SIGUSR2 stopped it to run self again; self may be nil.
-func serve(ctx context.Context, logger *slog.Logger, srv *httpapi.Server, agent *runningAgent, self *selfExec) error {
+// serve runs the server until a signal or a failed listener stops it, then
+// stops the server and the agent. An agent that exits is started again,
+// and the server goes on serving. It returns errRestart once SIGUSR2
+// stopped it to run self again; self may be nil.
+func serve(ctx context.Context, logger *slog.Logger, srv *httpapi.Server, self *selfExec) error {
 	gracefulCtx, gracefulCancel := context.WithCancel(ctx)
 	defer gracefulCancel()
 	// Signals and restarts in place end gracefulCtx.
 	self.arm(gracefulCtx, gracefulCancel, logger)
 	handleSignals(gracefulCtx, gracefulCancel, logger, srv, self)
 	logger.Info("Starting server", "address", srv.ListenAddr())
-
-	// A monitor waits for a PTY agent: its exit stops the server.
-	exitCh := make(chan error, 1)
-	if agent.process != nil {
-		go func() {
-			defer close(exitCh)
-			err := agent.waitForExit()
-			srv.MarkAgentExited(err)
-			if err != nil {
-				exitCh <- err
-			}
-			gracefulCancel()
-		}()
-	}
 
 	serverErrCh := make(chan error, 1)
 	go func() {
@@ -293,33 +279,20 @@ func serve(ctx context.Context, logger *slog.Logger, srv *httpapi.Server, agent 
 		}
 	}()
 
-	// stopServer stops the HTTP server and a native agent.
-	stopServer := func() {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := srv.Stop(shutdownCtx); err != nil {
-			logger.Error("Failed to stop HTTP server", "error", err)
-		}
-	}
+	var err error
 	select {
-	case err := <-serverErrCh:
-		if err != nil {
-			// The agent started before the listener failed.
-			stopServer()
-			agent.close(logger)
-			return fmt.Errorf("failed to start server: %w", err)
-		}
+	case err = <-serverErrCh:
 	case <-gracefulCtx.Done():
 	}
-
-	stopServer()
-	select {
-	case err := <-exitCh:
-		if err != nil {
-			return fmt.Errorf("agent exited with error: %w", err)
-		}
-	default:
-		agent.close(logger)
+	// Stops the HTTP server and the agent, which started before a
+	// listener that failed.
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if stopErr := srv.Stop(shutdownCtx); stopErr != nil {
+		logger.Error("Failed to stop HTTP server", "error", stopErr)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to start server: %w", err)
 	}
 	if self.restarting() {
 		return errRestart
@@ -362,15 +335,6 @@ func isLoopbackHost(host string) bool {
 	}
 	return strings.EqualFold(strings.TrimSuffix(host, "."), "localhost")
 }
-
-var agentNames = (func() []string {
-	names := make([]string, 0, len(agentTypeAliases))
-	for agentType := range agentTypeAliases {
-		names = append(names, agentType)
-	}
-	sort.Strings(names)
-	return names
-})()
 
 // writePIDFile writes the current process ID to the specified file
 func writePIDFile(pidFile string, logger *slog.Logger) error {
@@ -508,7 +472,7 @@ func CreateServerCmd() *cobra.Command {
 	serverCmd := &cobra.Command{
 		Use:   "server [agent]",
 		Short: "Run the server",
-		Long:  fmt.Sprintf("Run the server with the specified agent (one of: %s)", strings.Join(agentNames, ", ")),
+		Long:  "Run the server with the specified agent (one of: " + agentNames + ")",
 		Args:  cobra.MinimumNArgs(1),
 		RunE:  runServerCmd,
 	}
@@ -620,12 +584,12 @@ func runServerCmd(cmd *cobra.Command, _ []string) error {
 // serverFlagSpecs are the flags of agentapi server that viper binds.
 func serverFlagSpecs() []flagSpec {
 	return []flagSpec{
-		{FlagType, "t", "", fmt.Sprintf("Override the agent type (one of: %s, custom)", strings.Join(agentNames, ", ")), "string"},
+		{FlagType, "t", "", "The agent type (one of: " + agentNames + "); by default the agent command's name", "string"},
 		{FlagPort, "p", 3284, "Port to run the server on", "int"},
 		{FlagPrintOpenAPI, "P", false, "Print the OpenAPI schema to stdout and exit", "bool"},
 		{FlagChatBasePath, "c", "/chat", "Base path for assets and routes used in the static files of the chat interface", "string"},
-		{FlagTermWidth, "W", uint16(80), "Width of the emulated terminal", "uint16"},
-		{FlagTermHeight, "H", uint16(1000), "Height of the emulated terminal", "uint16"},
+		{FlagTermWidth, "W", uint16(80), "Deprecated and without effect: the PTY transport's terminal width", "uint16"},
+		{FlagTermHeight, "H", uint16(1000), "Deprecated and without effect: the PTY transport's terminal height", "uint16"},
 		// localhost is the default host for the server. Port is ignored during matching.
 		{FlagAllowedHosts, "a", []string{"localhost", "127.0.0.1", "[::1]"}, "HTTP allowed hosts (hostnames only, no ports). Use '*' for all, comma-separated list via flag, space-separated list via AGENTAPI_ALLOWED_HOSTS env var", "stringSlice"},
 		// localhost:3284 is the default origin when you open the chat interface in your browser. localhost:3000 and 3001 are used during development.
@@ -636,10 +600,10 @@ func serverFlagSpecs() []flagSpec {
 		{FlagSaveState, "", false, "Deprecated and without effect: the state database keeps every change", "bool"},
 		{FlagPidFile, "", "", "Path to file where the server process ID will be written for shutdown scripts; {port} and {hostname} are filled in", "string"},
 		{FlagExperimentalACP, "", false, "Removed: the ACP transport is no longer available", "bool"},
-		{FlagStateDB, "", "", "Path to a SQLite file that keeps the conversation (messages, tool calls, requests, queue) when AgentAPI restarts; with the native transport the agent also resumes its session, with PTY it starts anew below the conversation. {port} and {hostname} are filled in", "string"},
-		{FlagTransport, "", "native", "How to drive the agent: native (its own structured protocol; claude, codex and pi) or pty (its terminal UI). Without it, claude, codex and pi use native, other agents and --state-file pty", "string"},
-		{FlagTerminal, "", true, "Offer a shell in the agent's working directory to the chat (its Terminal button) and at GET /terminal. Native transport only, where the agent has no terminal of its own", "bool"},
-		{FlagAutoContinue, "", false, "When a usage limit stops the agent's turn, continue it once the limit resets, if the agent says when. Native transport only", "bool"},
+		{FlagStateDB, "", "", "Path to a SQLite file that keeps the conversation (messages, tool calls, requests, queue) when AgentAPI restarts, and the agent resumes its session. {port} and {hostname} are filled in", "string"},
+		{FlagTransport, "", "native", "Deprecated: native, the only transport, which drives the agent through its own structured protocol. AgentAPI 3 has no pty", "string"},
+		{FlagTerminal, "", true, "Offer a shell in the agent's working directory to the chat (its Terminal button) and at GET /terminal", "bool"},
+		{FlagAutoContinue, "", false, "When a usage limit stops the agent's turn, continue it once the limit resets, if the agent says when", "bool"},
 		{FlagPrices, "", "", "JSON file of model prices per million tokens, which add to or replace the built-in ones for the sessions' API-equivalent cost (GET /sessions, GET /cost)", "string"},
 		{FlagWebhookURL, "", "", "URL the webhook events are POSTed to (by default only run.status_changed; see --webhook-events)", "string"},
 		{FlagWebhookTimeout, "", 10 * time.Second, "Timeout for each webhook delivery attempt", "duration"},

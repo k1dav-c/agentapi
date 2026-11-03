@@ -1,7 +1,6 @@
-# End-to-End Testing Framework
+# End-to-End Tests
 
-AgentAPI's end-to-end (E2E) tests send scripted conversations through the server. A fake agent reads
-the JSON scripts and checks incoming messages before returning predefined responses.
+The end-to-end tests run the `agentapi` program against a fake agent.
 
 ## Run the tests
 
@@ -11,17 +10,7 @@ From the repository root:
 go test ./e2e
 ```
 
-## How it works
-
-For each test, `echo_test.go`:
-
-1. Selects a JSON conversation script from `testdata/`.
-2. Starts AgentAPI with the fake agent (`echo.go`), which reads that script.
-3. Sends messages through AgentAPI.
-4. Lets the fake agent check the messages and send predefined responses.
-5. Checks the responses against the expected results.
-
-## Native transport
+## How they work
 
 `native_test.go` runs `agentapi server -- claude` with a state database and `fakeclaude/` first on
 `PATH` as Claude Code. `fakeclaude` reports a login for `claude auth status`, answers the control
@@ -30,16 +19,7 @@ stream-json frames a real CLI writes. The tests take a turn, restart the server 
 `SIGUSR2`, and check that a new run (`server_id`) keeps the conversation and the API token. They
 need a Unix system.
 
-## Adding a new test
+## Adding a test
 
-1. Create a new JSON file in `testdata/` with a unique name.
-2. Define the conversation. Each message has these fields:
-   - `expectMessage`: The message from the user that the fake agent expects.
-   - `thinkDurationMS` (optional): The simulated thinking time in milliseconds before the agent
-     responds.
-   - `responseMessage`: The response the fake agent sends.
-3. Add a test case in `echo_test.go` that references the new JSON file.
-   By default, the framework loads `testdata/<test-case-name>.json`; the test
-   case name must match the filename without the `.json` extension. Tests that
-   set `scriptFilePath` explicitly can use another filename.
-4. Run the E2E tests to verify the new test case.
+Add a test to `native_test.go`. To test another reply, teach `fakeclaude/main.go` to send it: the
+frames it writes must match what the real CLI writes.

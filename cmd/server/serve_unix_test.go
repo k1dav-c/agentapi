@@ -80,7 +80,7 @@ func TestSIGUSR2BeforeServing(t *testing.T) {
 	require.NoError(t, err)
 	served := make(chan error, 1)
 	go func() {
-		served <- serve(ctx, logger, srv, &runningAgent{factory: factory.New}, self)
+		served <- serve(ctx, logger, srv, self)
 	}()
 	select {
 	case err := <-served:
