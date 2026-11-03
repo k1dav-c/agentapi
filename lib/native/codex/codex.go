@@ -272,28 +272,14 @@ func (a *Adapter) handshake(ctx context.Context) error {
 	}
 
 	if a.fork {
-		err := a.openThread(ctx, "thread/fork", threadResumeParams{
-			ThreadID:       a.resumeRef,
-			ExcludeTurns:   true,
-			CWD:            a.cwd(),
-			Model:          a.opts.model,
-			ApprovalPolicy: a.opts.approvalPolicy,
-			Sandbox:        a.opts.sandbox,
-		}, false)
+		err := a.openThread(ctx, "thread/fork", a.resumeParams(), false)
 		if err != nil {
 			return fmt.Errorf("fork codex thread %s: %w", a.resumeRef, err)
 		}
 		return nil
 	}
 	if a.resumeRef != "" {
-		err := a.openThread(ctx, "thread/resume", threadResumeParams{
-			ThreadID:       a.resumeRef,
-			ExcludeTurns:   true,
-			CWD:            a.cwd(),
-			Model:          a.opts.model,
-			ApprovalPolicy: a.opts.approvalPolicy,
-			Sandbox:        a.opts.sandbox,
-		}, true)
+		err := a.openThread(ctx, "thread/resume", a.resumeParams(), true)
 		if err == nil {
 			return nil
 		}
@@ -316,9 +302,22 @@ func (a *Adapter) handshake(ctx context.Context) error {
 	return nil
 }
 
+// resumeParams are the params of the thread/resume or thread/fork of
+// resumeRef.
+func (a *Adapter) resumeParams() threadResumeParams {
+	return threadResumeParams{
+		ThreadID:       a.resumeRef,
+		ExcludeTurns:   true,
+		CWD:            a.cwd(),
+		Model:          a.opts.model,
+		ApprovalPolicy: a.opts.approvalPolicy,
+		Sandbox:        a.opts.sandbox,
+	}
+}
+
 var errNoThread = errors.New("codex app-server returned no thread")
 
-// openThread starts or resumes the thread with method.
+// openThread starts, resumes or forks the thread with method.
 func (a *Adapter) openThread(ctx context.Context, method string, params any, resumed bool) error {
 	if _, err := a.call(ctx, method, params, a.loop.threadOpened(resumed)); err != nil {
 		return err

@@ -51,8 +51,8 @@ func policyMode(p policies) native.PermissionMode {
 	return ""
 }
 
-// threadSettings records the settings a thread/start or thread/resume
-// result reports.
+// threadSettings records the settings a thread/start, thread/resume or
+// thread/fork result reports.
 func (a *Adapter) threadSettings(resp threadStartResponse) {
 	var approval string
 	// A granular policy is an object: a combination of the user's own.

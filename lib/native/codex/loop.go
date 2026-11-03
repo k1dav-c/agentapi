@@ -44,8 +44,8 @@ func (s *loopState) sink() native.Sink { return s.a.sink }
 
 func (s *loopState) warn(message string) { s.sink().Error(message, conv.ErrorLevelWarning) }
 
-// threadOpened returns the handler of a thread/start or thread/resume
-// result.
+// threadOpened returns the handler of a thread/start, thread/resume or
+// thread/fork result.
 func (s *loopState) threadOpened(resumed bool) func(json.RawMessage, *rpcError) {
 	return func(result json.RawMessage, rpcErr *rpcError) {
 		if rpcErr != nil {
