@@ -801,7 +801,6 @@ func TestNative_RestartDoesntHoldTheServer(t *testing.T) {
 	n.do(http.MethodGet, "/status", nil, &status)
 	assert.Equal(t, httpapi.LifecycleRestarting, status.Lifecycle)
 	assert.Equal(t, http.StatusConflict, n.do(http.MethodDelete, "/messages", nil, nil), "one restart at a time")
-	assert.Equal(t, http.StatusConflict, n.do(http.MethodPut, "/mcp?restart=true", map[string]any{"servers": map[string]any{}}, nil))
 	assert.Len(t, n.factory.Adapters(), 1, "the new agent waits for the update")
 
 	close(release)
@@ -843,34 +842,6 @@ func TestNative_StopDuringARestart(t *testing.T) {
 		}
 		return true
 	}, 5*time.Second, 5*time.Millisecond, "no agent outlives Stop")
-}
-
-func TestNative_MCPRestartResumes(t *testing.T) {
-	dir := t.TempDir()
-	t.Chdir(dir)
-	n := newNativeServer(t, func(a *nativetest.Adapter) {
-		if a.ResumeRef == "" {
-			a.Ref = "session-1"
-		}
-	})
-	n.send("hello", "")
-	first := n.factory.Last()
-	// A turn runs: the agent can't restart now.
-	assert.Equal(t, http.StatusConflict, n.do(http.MethodPut, "/mcp?restart=true", map[string]any{"servers": map[string]any{}}, nil))
-	first.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonEndTurn})
-
-	var resp struct {
-		Restarted bool `json:"restarted"`
-	}
-	require.Equal(t, http.StatusOK, n.do(http.MethodPut, "/mcp?restart=true", map[string]any{"servers": map[string]any{}}, &resp))
-	assert.True(t, resp.Restarted)
-	require.Len(t, n.factory.Adapters(), 2)
-	assert.Equal(t, "session-1", n.factory.Last().ResumeRef)
-	var msgs struct {
-		Messages []httpapi.Message `json:"messages"`
-	}
-	n.do(http.MethodGet, "/messages", nil, &msgs)
-	assert.Len(t, msgs.Messages, 1, "the conversation stays")
 }
 
 func TestNative_CompactUnsupported(t *testing.T) {

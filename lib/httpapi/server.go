@@ -25,7 +25,6 @@ import (
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/logctx"
-	"github.com/coder/agentapi/lib/mcpconfig"
 	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/pricing"
@@ -80,8 +79,6 @@ type Server struct {
 	transport          Transport
 	queue              messageQueue  // guarded by mu
 	queueLoop          quartz.Waiter // the queue's loop, nil until it starts
-	mcpStore           mcpconfig.Store
-	mcpMu              sync.Mutex
 	webhook            *webhook.Dispatcher
 	registry           *instanceRegistry // nil without a registry directory
 	updater            *updater
@@ -336,13 +333,6 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	if stateDB != nil {
 		s.restoreQueue(restored.snapshot)
 		restoreWebhook(dispatcher, restored.snapshot, logger)
-	}
-	if mcpconfig.SupportedAgent(config.AgentType) {
-		store, err := mcpconfig.NewStore(config.AgentType, config.CWD)
-		if err != nil {
-			return nil, fmt.Errorf("create MCP config store: %w", err)
-		}
-		s.mcpStore = store
 	}
 
 	if config.Transport == TransportNative && sessions.Supported(string(config.AgentType)) {

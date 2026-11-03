@@ -314,13 +314,12 @@ func TestHandoffIgnoresStartupRunningAndQueuedMessages(t *testing.T) {
 	require.Nil(t, pendingHandoff(s))
 }
 
-func TestHandoffMCPRestartInvalidatesRequest(t *testing.T) {
+func TestHandoffRestartInvalidatesRequest(t *testing.T) {
 	s, c, _ := handoffServer()
 	pending := pendingHandoff(s)
 	s.restartAgent = func(context.Context) (int, error) { return 0, nil }
-	restarted, err := s.restartQuery(true)
+	_, err := s.deleteMessages(t.Context(), nil)
 	require.NoError(t, err)
-	require.True(t, restarted)
 	s.emitter.EmitStatus(conv.StatusStable)
 	result, err := s.replyHandoff(t.Context(), &HandoffReplyRequest{Body: handoff.Reply{RequestID: pending.ID, ID: "late", Content: "continue"}})
 	require.NoError(t, err)

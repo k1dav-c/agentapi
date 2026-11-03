@@ -68,20 +68,6 @@ func (b nativeBackend) beginRestart(bool) agentRestart {
 	}}
 }
 
-// beginReload begins restarting the agent on its session, which it
-// resumes. One whose session can't be resumed needs a restart, into a new
-// session.
-func (b nativeBackend) beginReload() (agentRestart, bool, error) {
-	replacement, err := b.s.native.BeginReload()
-	switch {
-	case errors.Is(err, native.ErrUnsupported):
-		return agentRestart{}, false, nil
-	case err != nil:
-		return agentRestart{}, false, err
-	}
-	return agentRestart{run: replacement.Start}, true, nil
-}
-
 func (b nativeBackend) close() error {
 	return b.s.native.Close()
 }

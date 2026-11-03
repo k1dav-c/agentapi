@@ -90,11 +90,6 @@ func (b ptyBackend) beginRestart(clear bool) agentRestart {
 	}
 }
 
-// beginReload: a terminal agent reads its configuration when it starts.
-func (b ptyBackend) beginReload() (agentRestart, bool, error) {
-	return agentRestart{}, false, nil
-}
-
 // close: the terminal agent's process is stopped by whoever started it.
 func (b ptyBackend) close() error {
 	return nil

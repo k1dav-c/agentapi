@@ -1249,9 +1249,7 @@ func TestServer_StartBindsLoopback(t *testing.T) {
 	}, 5*time.Second, 20*time.Millisecond)
 }
 
-// The endpoints of the native transport answer 400 on another transport,
-// and those of the MCP configuration 404 for an agent whose configuration
-// AgentAPI doesn't manage.
+// The endpoints of the native transport answer 400 on another transport.
 func TestGuardedEndpoints(t *testing.T) {
 	t.Parallel()
 	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -1274,10 +1272,6 @@ func TestGuardedEndpoints(t *testing.T) {
 		{http.MethodPost, "/login/retry", "", http.StatusBadRequest},
 		{http.MethodPost, "/requests/r1/respond", `{"option_id":"allow"}`, http.StatusBadRequest},
 		{http.MethodPost, "/queue/1/steer", "", http.StatusBadRequest},
-		{http.MethodGet, "/mcp", "", http.StatusNotFound},
-		{http.MethodPut, "/mcp", `{"servers":{}}`, http.StatusNotFound},
-		{http.MethodGet, "/mcp/profiles", "", http.StatusNotFound},
-		{http.MethodDelete, "/mcp/servers/x", "", http.StatusNotFound},
 	} {
 		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
 		if tc.body != "" {

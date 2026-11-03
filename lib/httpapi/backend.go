@@ -30,11 +30,6 @@ type agentBackend interface {
 	// clear the conversation starts over; a native agent's always does,
 	// since the new agent starts a new session.
 	beginRestart(clear bool) agentRestart
-	// beginReload begins restarting the agent on its session after its
-	// configuration (the MCP servers) changed, keeping the conversation.
-	// It reports false, having changed nothing, when the agent can't, and
-	// needs a restart instead.
-	beginReload() (agentRestart, bool, error)
 	// close stops the agent for good, when AgentAPI stops.
 	close() error
 

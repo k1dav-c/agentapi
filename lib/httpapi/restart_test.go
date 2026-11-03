@@ -84,7 +84,7 @@ func TestPTYRestartOffersNoHandoff(t *testing.T) {
 	require.NotNil(t, pendingHandoff(s), "the agent's last message is offered")
 	restarted := make(chan error, 1)
 	go func() {
-		_, err := s.restartQuery(true)
+		_, err := s.deleteMessages(t.Context(), nil)
 		restarted <- err
 	}()
 	<-restarting

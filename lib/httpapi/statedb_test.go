@@ -191,45 +191,6 @@ func TestStateDB_RestartStartsFresh(t *testing.T) {
 	assert.Empty(t, n.requests(), "the old session's request was not stored again")
 }
 
-// Restarting the agent to apply an MCP change resumes its session: the
-// conversation stays, also across an AgentAPI restart.
-func TestStateDB_MCPRestartResumes(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "state.db")
-	n, srv, db, err := persistentServer(t, path, dir)
-	require.NoError(t, err)
-	a := n.factory.Last()
-	n.send("hello", "")
-	a.Sink().RichMessage(transcript.RichMessage{MessageID: "m1", Role: "assistant", Content: []transcript.RichContentBlock{{Type: "text", Text: "Hi"}}})
-	a.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonEndTurn})
-	epoch := n.epoch()
-
-	var res struct {
-		Restarted bool `json:"restarted"`
-	}
-	require.Equal(t, http.StatusOK, n.do(http.MethodPut, "/mcp?restart=true", map[string]any{"servers": map[string]any{}}, &res))
-	require.True(t, res.Restarted)
-	assert.Equal(t, "session-1", n.factory.Last().ResumeRef)
-	assert.Equal(t, epoch, n.epoch(), "clients keep the conversation")
-	assertMessages(t, n, 2)
-	stop(t, srv, db)
-
-	n, srv, db, err = persistentServer(t, path, dir)
-	require.NoError(t, err)
-	defer stop(t, srv, db)
-	assert.Equal(t, "session-1", n.factory.Last().ResumeRef)
-	assertMessages(t, n, 2)
-}
-
-func assertMessages(t *testing.T, n *nativeServer, count int) {
-	t.Helper()
-	var msgs struct {
-		Messages []httpapi.Message `json:"messages"`
-	}
-	n.do(http.MethodGet, "/messages", nil, &msgs)
-	assert.Len(t, msgs.Messages, count)
-}
-
 // After a crash the changes of the last moments may be missing from the
 // file. Clients that saw them must not resume their cache, so the restored
 // conversation has a new epoch.
