@@ -37,7 +37,8 @@ hub never has to be on the public internet.
 1. An AgentAPI joins with its webhook. `agentapi hub join` writes the hub's address and secret into
    `~/.agentapi/config.yaml`, which every `agentapi server` of that user reads when it starts. Each
    AgentAPI then sends signed `instance.started`, `instance.heartbeat` (every minute) and
-   `instance.stopped` events, and the hub adds, updates or stops the instance. One the hub can't
+   `instance.stopped` events, and the hub adds, updates or stops the instance (`instance.stopped`
+   doesn't stop one added by hand: the hub keeps trying it). One the hub can't
    reach that also missed three heartbeats, such as one whose workspace was killed, counts as
    stopped, and the hub stops trying until its next heartbeat. These events only add instances
    and say where they are; what each one does comes from its summary. An event that names another

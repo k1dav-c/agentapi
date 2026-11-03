@@ -107,7 +107,7 @@ func (h *Hub) receiveWebhook(w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal(event.Data, &state)
 		h.upsertFromWebhook(instance, url, state.HeartbeatSeconds)
 	case instanceapi.EventInstanceStopped:
-		h.stopped(instance.ID, instance.ServerID, instanceURL(instance))
+		h.stopped(instance.ID, instance.ServerID)
 	default:
 		// The instance is alive; one the hub doesn't know yet is added
 		// with its next heartbeat.
@@ -193,12 +193,14 @@ func (h *Hub) refuseMove(i *Instance, instance instanceapi.WebhookInstance, url 
 }
 
 // stopped marks an instance stopped and stops watching it, unless a newer
-// run of it (another server ID) already started, or it was added by hand
-// at another URL than the event names.
-func (h *Hub) stopped(id, serverID, url string) {
+// run of it (another server ID) already started, or it was added by hand.
+// The hub watches one added by hand directly and keeps trying it: a
+// forged instance.stopped would otherwise stop it for good, since no
+// heartbeat of its own follows it again.
+func (h *Hub) stopped(id, serverID string) {
 	stopped := false
 	_, _, err := h.store.update(id, false, func(i *Instance) {
-		if !sameRun(i.ServerID, serverID) || (i.Source == SourceManual && i.URL != url) {
+		if !sameRun(i.ServerID, serverID) || i.Source == SourceManual {
 			return
 		}
 		h.logger.Info("An instance stopped", "instance", id)

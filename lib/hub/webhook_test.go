@@ -25,8 +25,9 @@ func TestSameRun(t *testing.T) {
 }
 
 // An instance added by hand keeps its URL and token: an event that names
-// another URL is refused, logged once per run, also when it says the
-// instance stopped. One at its URL counts.
+// another URL is refused, logged once per run. One at its URL updates its
+// run, but instance.stopped never stops it: the hub watches it directly,
+// and nothing would follow it again.
 func TestAddedInstanceKeepsItsURL(t *testing.T) {
 	var logs bytes.Buffer
 	h, err := New(Config{Token: "t", Secret: "s", Logger: slog.New(slog.NewTextHandler(&logs, nil))})
@@ -48,7 +49,7 @@ func TestAddedInstanceKeepsItsURL(t *testing.T) {
 	for range 3 {
 		h.upsertFromWebhook(instanceapi.WebhookInstance{ID: "dev:1", ServerID: "s2"}, "http://elsewhere:1", 60)
 	}
-	h.stopped("dev:1", "s1", "http://elsewhere:1")
+	h.stopped("dev:1", "s1")
 	instance := get()
 	assert.Equal(t, "http://dev:1", instance.URL)
 	assert.Equal(t, "its-own", instance.Token)
@@ -64,8 +65,8 @@ func TestAddedInstanceKeepsItsURL(t *testing.T) {
 	assert.Equal(t, 60, instance.HeartbeatSeconds)
 	assert.Equal(t, "its-own", instance.Token)
 	assert.Equal(t, SourceManual, instance.Source)
-	h.stopped("dev:1", "s4", "http://dev:1")
-	assert.Equal(t, ConnectionStopped, get().Connection)
+	h.stopped("dev:1", "s4")
+	assert.NotEqual(t, ConnectionStopped, get().Connection, "a forged instance.stopped would stop it for good")
 }
 
 // An instance that moves leaves behind the token given for its old URL;

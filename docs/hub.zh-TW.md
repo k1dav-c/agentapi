@@ -35,7 +35,8 @@ hub 和各個 AgentAPI 透過你掌控的網路互連，例如你自己的 VPN�
 1. AgentAPI 用 webhook 加入。`agentapi hub join` 把 hub 的位址和 secret 寫進
    `~/.agentapi/config.yaml`，這個使用者的每個 `agentapi server` 啟動時都會讀取。之後每個
    AgentAPI 都送出有簽章的 `instance.started`、`instance.heartbeat`（每分鐘一次）和
-   `instance.stopped`，hub 據此新增、更新或停止實例。hub 連不到、又錯過三次 heartbeat 的實例，
+   `instance.stopped`，hub 據此新增、更新或停止實例（手動加入的實例不會因 `instance.stopped`
+   停止，hub 會持續嘗試連線）。hub 連不到、又錯過三次 heartbeat 的實例，
    例如 workspace 被強制關掉的，視為已停止，hub 不再嘗試連線，直到它下一次送 heartbeat。這些事件
    只用來新增實例、告訴 hub 它在哪裡；每個實例在做什麼，以它的摘要為準。事件寫了另一個網址時，
    只有 hub 沒連上這個實例才會改用新網址，手動加入的實例則一律不改：機器換了位址的 AgentAPI
