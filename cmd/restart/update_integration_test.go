@@ -129,3 +129,63 @@ func TestUpdateThroughTheAPI(t *testing.T) {
 	default:
 	}
 }
+
+// agentapi update --restart restarts the AgentAPIs running the program
+// even when it is up to date: another update may have replaced it without
+// restarting them.
+func TestUpdateRestartsWhenUpToDate(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds AgentAPI")
+	}
+	if runtime.GOOS != "linux" {
+		t.Skip("checked on Linux")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	require.NoError(t, err)
+	scratch := t.TempDir()
+	release := selfupdatetest.NewRelease(t, "2.2.0", selfupdatetest.Script("2.2.0"))
+	bin := filepath.Join(scratch, "bin", "agentapi")
+	build(ctx, t, root, bin, "2.2.0", "-X github.com/coder/agentapi/lib/selfupdate.githubAPI="+release.URL)
+	home := filepath.Join(scratch, "home")
+	require.NoError(t, os.MkdirAll(home, 0o700))
+	// agentapi update --restart reads the default registry, in the
+	// scratch home.
+	reg := filepath.Join(home, ".agentapi", "instances")
+	port := freePort(t)
+	env := scratchEnv(home)
+
+	server := exec.Command(bin, "server", "--bind", "127.0.0.1", "--port", strconv.Itoa(port),
+		"--config", filepath.Join(home, "config.yaml"), "--type", "custom", "--", "native-demo")
+	server.Env = env
+	server.Dir = home
+	var logs bytes.Buffer
+	server.Stdout, server.Stderr = &logs, &logs
+	require.NoError(t, server.Start())
+	exited := make(chan error, 1)
+	go func() { exited <- server.Wait() }()
+	t.Cleanup(func() {
+		_ = server.Process.Signal(syscall.SIGTERM)
+		select {
+		case <-exited:
+		case <-time.After(15 * time.Second):
+			_ = server.Process.Kill()
+			<-exited
+		}
+		if t.Failed() {
+			t.Logf("server log:\n%s", logs.String())
+		}
+	})
+	pid := server.Process.Pid
+	before := awaitEntry(ctx, t, reg, pid, "")
+
+	update := exec.CommandContext(ctx, bin, "update", "--restart")
+	update.Env = env
+	out, err := update.CombinedOutput()
+	require.NoError(t, err, "%s", out)
+	assert.Contains(t, string(out), "Already up to date.")
+	after := awaitEntry(ctx, t, reg, pid, before.ServerID)
+	assert.Equal(t, "2.2.0", after.Version)
+	assert.Equal(t, 0, release.Downloads())
+}

@@ -1782,9 +1782,11 @@ agentapi update --restart  # 更新後讓執行中的 AgentAPI 改用新版本
 更新前，AgentAPI 會先依據該版本的 `checksums.txt` 清單，以 SHA-256 驗證下載的執行檔，
 通過後才取代目前的執行檔。若清單不存在、格式錯誤、檢查碼與下載檔案不符，或下載的執行檔執行起來
 不是該版本，就會拒絕更新。取代執行檔時，使用的鎖定檔和[透過 API 更新](#透過-api-更新)相同。
+查詢發行版最多 1 分鐘；等待鎖定檔、下載與取代執行檔則最多 10 分鐘。
 
 執行中的 AgentAPI 在重新啟動前仍是舊版本。`--restart` 會像
-[`agentapi restart --all`](#agentapi-restart) 一樣，重新啟動仍在執行舊執行檔的 AgentAPI。
+[`agentapi restart --all`](#agentapi-restart) 一樣，重新啟動仍在執行舊執行檔的 AgentAPI；
+執行檔已是最新版本時也會重新啟動，因為可能是其他更新取代了它。
 透過 `sudo` 執行時（安裝在 `/usr/local/bin`），重新啟動的是執行 `sudo` 那位使用者的 AgentAPI，
 依據該使用者的登記目錄。hub 不在其中：請用服務管理工具重新啟動，例如
 `systemctl restart agentapi-hub`。

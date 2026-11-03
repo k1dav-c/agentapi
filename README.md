@@ -2077,9 +2077,11 @@ Release binaries are verified against the release's `checksums.txt` SHA-256 mani
 running executable is replaced. An update is rejected if the manifest is missing, malformed, or does
 not match the download, or if the download doesn't run as the release's version. The binary is
 replaced under the lock file that [updates through the API](#updating-through-the-api) take too.
+The release lookup gets 1 minute; waiting for the lock, the download and the replacement get 10.
 
 Running AgentAPIs keep the old version until they restart. `--restart` restarts the ones that run
-the binary it replaced, as [`agentapi restart --all`](#agentapi-restart) does. Under `sudo` (an
+the binary it replaced, as [`agentapi restart --all`](#agentapi-restart) does, and restarts them
+when the binary is already up to date too: another update may have replaced it. Under `sudo` (an
 install in `/usr/local/bin`), it restarts the AgentAPIs of the user who ran `sudo`, from that user's
 registry. The hub isn't one of them: restart it with its service manager, such as
 `systemctl restart agentapi-hub`.
