@@ -46,13 +46,21 @@ var parentSessionEnv = map[string]bool{
 	"AI_AGENT":        true,
 }
 
-// apiToken is AgentAPI's own secret, which an agent and the commands it
-// runs have no use for.
-const apiToken = "AGENTAPI_API_TOKEN"
+// agentAPISecret reports whether name is one of AgentAPI's secrets, which an
+// agent and the commands it runs have no use for, and a prompt could have
+// them print: AGENTAPI_API_TOKEN, AGENTAPI_WEBHOOK_SECRET, the hub's
+// AGENTAPI_HUB_SECRET, AGENTAPI_HUB_TOKEN and AGENTAPI_HUB_INSTANCE_TOKEN,
+// the generated token a restart in place keeps; any AGENTAPI_*_TOKEN or
+// AGENTAPI_*_SECRET.
+func agentAPISecret(name string) bool {
+	return strings.HasPrefix(name, "AGENTAPI_") &&
+		(strings.HasSuffix(name, "_TOKEN") || strings.HasSuffix(name, "_SECRET"))
+}
 
 // ForAgent returns env (the process environment if nil) without the
-// variables a parent agent session leaves behind and AgentAPI's API token,
-// followed by set: the "NAME=value" entries the caller relies on.
+// variables a parent agent session leaves behind and AgentAPI's secrets,
+// followed by set: the "NAME=value" entries the caller relies on. The rest
+// of AgentAPI's variables stay (WithoutAgentAPI drops them too).
 func ForAgent(env []string, set ...string) []string {
 	if env == nil {
 		env = os.Environ()
@@ -60,7 +68,7 @@ func ForAgent(env []string, set ...string) []string {
 	out := make([]string, 0, len(env)+len(set))
 	for _, kv := range env {
 		name, _, _ := strings.Cut(kv, "=")
-		if !parentSessionEnv[name] && name != apiToken {
+		if !parentSessionEnv[name] && !agentAPISecret(name) {
 			out = append(out, kv)
 		}
 	}

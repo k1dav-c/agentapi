@@ -763,7 +763,8 @@ the same session for native agents.
   a hub with a token; the startup log never has it.
 - Agents, on every transport, don't inherit the variables (one of them a
   secret) that a parent agent session sets for the commands it runs, nor
-  AgentAPI's API token (`lib/procenv`).
+  AgentAPI's secrets: its API token, the webhook and hub secrets and tokens
+  (`lib/procenv`).
 
 ### Child process environment
 
@@ -810,7 +811,7 @@ markers. The filtering is implemented in [lib/procenv/procenv.go](../lib/procenv
 | --- |
 | `PI_CODING_AGENT` |
 | `AI_AGENT` |
-| `AGENTAPI_API_TOKEN` |
+| AgentAPI's secrets: `AGENTAPI_*_TOKEN` and `AGENTAPI_*_SECRET` (`AGENTAPI_API_TOKEN`, `AGENTAPI_WEBHOOK_SECRET`, `AGENTAPI_HUB_SECRET`, `AGENTAPI_HUB_TOKEN`, `AGENTAPI_HUB_INSTANCE_TOKEN`, `AGENTAPI_GENERATED_API_TOKEN`) |
 
 Configuration such as `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `PI_CODING_AGENT_DIR`,
 and `ANTHROPIC_*` is preserved. After filtering, the native Claude Code adapter

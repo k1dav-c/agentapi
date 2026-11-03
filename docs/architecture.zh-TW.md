@@ -594,7 +594,8 @@ agent 啟動時才讀取設定，因此變更需要重新啟動；native agent �
   讓機器加入用的 secret，只有設了 token 的 hub 才會交給已登入的瀏覽器（`GET /api/join`）；啟動時的
   log 一律不寫。
 - 上層 agent 工作階段會為它執行的指令設定環境變數（包含機密資訊）；不論使用哪種 transport，
-  agent 都不會繼承這些變數，也不會拿到 AgentAPI 的 API token（`lib/procenv`）。
+  agent 都不會繼承這些變數，也不會拿到 AgentAPI 的機密：API token、webhook 與 hub 的 secret 和
+  token（`lib/procenv`）。
 
 ### 子行程環境
 
@@ -640,7 +641,7 @@ AgentAPI 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
 | --- |
 | `PI_CODING_AGENT` |
 | `AI_AGENT` |
-| `AGENTAPI_API_TOKEN` |
+| AgentAPI 的機密：`AGENTAPI_*_TOKEN` 與 `AGENTAPI_*_SECRET`（`AGENTAPI_API_TOKEN`、`AGENTAPI_WEBHOOK_SECRET`、`AGENTAPI_HUB_SECRET`、`AGENTAPI_HUB_TOKEN`、`AGENTAPI_HUB_INSTANCE_TOKEN`、`AGENTAPI_GENERATED_API_TOKEN`） |
 
 `CLAUDE_CONFIG_DIR`、`CODEX_HOME`、`PI_CODING_AGENT_DIR` 與 `ANTHROPIC_*` 等設定會保留。
 清除之後，native Claude Code adapter 會再設定它的協定需要的 `CLAUDE_CODE_ENTRYPOINT=sdk-cli`
