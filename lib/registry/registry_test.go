@@ -56,7 +56,9 @@ func TestListRemovesStale(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	hostname, _ := os.Hostname()
-	cmd := exec.Command("true")
+	// The test binary itself, which runs no test: a program every
+	// platform has.
+	cmd := exec.Command(os.Args[0], "-test.run=^$")
 	require.NoError(t, cmd.Run())
 	gone := cmd.Process.Pid
 	_, err := Write(dir, Entry{WebhookInstance: instanceapi.WebhookInstance{ServerID: "gone", Hostname: hostname, PID: gone}})
