@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
+	"time"
 	"unicode"
 	"unicode/utf8"
 )
@@ -25,6 +27,12 @@ type uploadStore struct {
 	// keep: the directory outlives the server, with the conversation that
 	// refers to its files by path.
 	keep bool
+	// mu keeps prune from removing a directory save is storing a file in.
+	mu sync.Mutex
+	// saved is when each checksum directory was last saved to, in this
+	// run: a file that was there already isn't written again, and is new
+	// to whoever is about to refer to it. Guarded by mu.
+	saved map[string]time.Time
 }
 
 // uploadChecksumRe matches the directory a file is stored in.
@@ -108,6 +116,12 @@ func newUploadStore(dir string) (*uploadStore, error) {
 func (u *uploadStore) save(name string, data []byte) (string, string, error) {
 	hash := sha256.Sum256(data)
 	checksum := hex.EncodeToString(hash[:8])
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.saved == nil {
+		u.saved = make(map[string]time.Time)
+	}
+	u.saved[checksum] = time.Now()
 	root, err := os.OpenRoot(u.dir)
 	if err != nil {
 		return "", "", err

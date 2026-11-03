@@ -71,6 +71,8 @@ type Server struct {
 	emitter            *EventEmitter
 	chatBasePath       string
 	uploads            *uploadStore
+	uploadPruneNow     chan struct{} // nil until startUploadPruning
+	uploadPruneDone    chan struct{} // closed once pruning stopped; nil until it starts
 	cwd                string
 	clock              quartz.Clock
 	shutdownCtx        context.Context
@@ -122,7 +124,9 @@ type ServerConfig struct {
 	// (the native and PTY transports).
 	StateDB *statedb.DB
 	// UploadDir is where uploads and tool result images are kept. Empty
-	// means a temporary directory that is removed on stop.
+	// means a temporary directory that is removed on stop. Either way the
+	// files AgentAPI stored there (<checksum>/<name>) that the conversation
+	// no longer refers to are removed once they are old (uploadGrace).
 	UploadDir string
 	// APIToken, if non-empty, enables token authentication on all API
 	// endpoints: a Bearer header, or the session cookie POST /auth/session
@@ -481,6 +485,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	if s.agentio != nil || s.native != nil {
 		s.conversation.Start(ctx)
 		s.startMessageQueue()
+		s.startUploadPruning()
 	}
 
 	// Start the JSONL watcher to capture rich structured messages.
@@ -581,6 +586,9 @@ func (s *Server) Stop(ctx context.Context) error {
 			_ = s.terminal.Close()
 		}
 		s.persistQueue()
+		if s.uploadPruneDone != nil {
+			<-s.uploadPruneDone
+		}
 		s.cleanupUploadDir()
 	})
 	return err
