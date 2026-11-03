@@ -957,3 +957,27 @@ func TestHubChangedAt(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, postEvent(t, hubURL, heartbeat("c3"), hubSecret, clock.Now()))
 	assert.True(t, instances(t, hubURL)[0].ChangedAt.Equal(gone.ChangedAt), "heard of while unreachable")
 }
+
+// The hub keeps the delivery IDs it took next to its instances: a copy of
+// an event replayed just after it restarts is refused, as before it.
+func TestHubRefusesAReplayAfterARestart(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "instances.json")
+	first := startQuietHub(t, statePath)
+	event := map[string]any{
+		"id": "r1", "type": "instance.heartbeat", "created_at": time.Now(),
+		"instance": map[string]any{"id": "dev-1:3284", "server_id": "s1", "url": "http://127.0.0.1:1", "agent_type": "claude"},
+	}
+	signedAt := time.Now()
+	require.Equal(t, http.StatusNoContent, postEvent(t, first, event, hubSecret, signedAt))
+	require.Equal(t, http.StatusNoContent, request(t, http.MethodDelete, first+"/api/instances/dev-1:3284", hubToken, nil, nil))
+	flushHub(t, first)
+	_, err := os.Stat(strings.TrimSuffix(statePath, ".json") + ".deliveries.json")
+	require.NoError(t, err)
+
+	again := startQuietHub(t, statePath)
+	require.Equal(t, http.StatusNoContent, postEvent(t, again, event, hubSecret, signedAt))
+	assert.Empty(t, instances(t, again), "the copy is refused")
+	event["id"] = "r2"
+	require.Equal(t, http.StatusNoContent, postEvent(t, again, event, hubSecret, time.Now()))
+	assert.Len(t, instances(t, again), 1, "a new event counts")
+}

@@ -459,7 +459,9 @@ AgentAPI 1.1 以上。在這裡輸入的 token 會為這個實例保存，取代
 - hub 只接受具備有效 `X-AgentAPI-Signature-256`（`<timestamp>.<body>` 的 HMAC-SHA256）、
   timestamp 誤差不超過 10 分鐘、而且 delivery ID（`id`）沒處理過的事件。AgentAPI 一定會送
   delivery ID；沒有的事件一律拒絕，否則同一份事件在這 10 分鐘內重送也會生效。這很重要：事件裡的
-  網址，就是 hub 送出實例 token 的地方。hub 讀一個事件最多花 10 秒、最多讀 1 MiB。
+  網址，就是 hub 送出實例 token 的地方。hub 會把 delivery ID 保存在
+  `instances.deliveries.json`，直到事件的簽章失效，所以重新啟動後也照樣拒絕重送的事件。hub 讀一個
+  事件最多花 10 秒、最多讀 1 MiB。
 - 有簽章的事件可以新增 hub 還沒有的實例，也可以把 hub 目前沒在追蹤的實例（已停止，或摘要串流沒有
   連上）改到事件裡的網址。hub 正在追蹤的實例，不論事件寫的是哪一次執行，事件都改不了它的網址；手動
   加入的實例也一樣。`instance.*` 事件必須寫明是哪一次執行（`server_id`，AgentAPI 1.0 以後都會送）。
@@ -611,6 +613,7 @@ AgentAPI 的 webhook。當下無法修改的 AgentAPI，會在重新啟動時套
 | `~/.agentapi/instances/` | `agentapi server` | 這台機器上執行中的 AgentAPI，供 `join` 和 `agentapi list` 使用 |
 | `~/.agentapi/hub/instances.json` | `agentapi hub serve` | hub 記得的實例、它們的群組和釘選、各自最近一次變動的時間，以及手動加入的實例的 token |
 | `~/.agentapi/hub/instances.json.bak` | `agentapi hub serve` | hub 上次啟動時看到的實例檔案 |
+| `~/.agentapi/hub/instances.deliveries.json` | `agentapi hub serve` | hub 處理過、簽章仍有效的事件的 delivery ID，用來拒絕重送的事件 |
 
 `instances.json` 的格式是 `{"version": 1, "instances": [...]}`。2.2 以前的 hub 只寫、也只讀陣列：
 現在的 hub 讀得懂舊格式，但舊 hub 會把新格式當成損壞的檔案放到一旁，從空的清單開始。要改回舊

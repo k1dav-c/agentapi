@@ -470,7 +470,9 @@ hub（`lib/hub`，`persist.go`）把實例保存在 JSON 檔案裡，格式是
 由背景的寫入者每秒最多寫一次、`Hub.Close` 時再寫一次，經由先 sync 再改名的暫存檔寫入。hub 啟動時
 把讀到的檔案複製成 `instances.json.bak`。無法解析的檔案會改名放到一旁（`.corrupt-<時間>`），hub
 從空的清單開始；版本較新的檔案則讓 hub 停止啟動。舊 hub 會把新格式當成損壞的檔案放到一旁，所以
-改回舊 hub 前要先用 `jq .instances` 轉換（見 [hub.zh-TW.md](hub.zh-TW.md#檔案)）。
+改回舊 hub 前要先用 `jq .instances` 轉換（見 [hub.zh-TW.md](hub.zh-TW.md#檔案)）。hub 處理過的
+webhook 事件的 delivery ID 也以同樣方式寫入 `instances.deliveries.json`，保留到各自的簽章失效，所以
+重新啟動後重送的事件同樣會被拒絕。
 
 `--state-file` 是較早的 PTY 機制（關閉時寫出 JSON），已棄用：`cmd/server` 會把它一次性匯入
 旁邊的狀態資料庫（`statedb.ImportStateFile`，只匯入空的資料庫），之後由資料庫保存對話。SIGUSR1

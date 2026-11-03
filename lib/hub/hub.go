@@ -80,10 +80,10 @@ type Hub struct {
 	logger     *slog.Logger
 	store      *store
 	client     *http.Client
-	deliveries deliveries
+	deliveries *deliveries
 	// badSignatures limits the log of events refused for their signature.
 	badSignatures logLimiter
-	clock      quartz.Clock
+	clock         quartz.Clock
 	// interfaces lists the machine's network interfaces, for the join URLs.
 	interfaces func() ([]netaddr.Interface, error)
 
@@ -124,8 +124,13 @@ func New(config Config) (*Hub, error) {
 	if err != nil {
 		return nil, err
 	}
+	var deliveriesFile string
+	if config.StatePath != "" {
+		deliveriesFile = deliveriesPath(config.StatePath)
+	}
 	return &Hub{
 		config: config, logger: config.Logger, store: st, client: client, clock: config.Clock,
+		deliveries: newDeliveries(deliveriesFile, config.Logger, config.Clock.Now()),
 		interfaces: netaddr.Interfaces, watchers: map[string]context.CancelFunc{},
 	}, nil
 }
@@ -158,11 +163,11 @@ func (h *Hub) Run(ctx context.Context) {
 	h.watchWG.Wait()
 }
 
-// Close writes the changes the hub's file hasn't kept yet, and stops
-// writing it: it writes a change within a second, and on Close. Call it
+// Close writes the changes the hub's files haven't kept yet, and stops
+// writing them: it writes a change within a second, and on Close. Call it
 // once the hub stops, after Run returned.
 func (h *Hub) Close() error {
-	return h.store.close()
+	return errors.Join(h.store.close(), h.deliveries.close())
 }
 
 // tokenFor is the API token the hub sends to instance.

@@ -592,7 +592,9 @@ change marks the file behind, and a background writer writes it at most once a s
 `Hub.Close`, through a temporary file it syncs and renames. On startup the hub copies the file it
 read to `instances.json.bak`. A file that doesn't parse is moved aside (`.corrupt-<time>`) and the
 hub starts empty; one of a newer version stops the hub instead. An older hub moves the envelope aside
-as damaged, so going back to one takes `jq .instances` first ([hub.md](hub.md#files)).
+as damaged, so going back to one takes `jq .instances` first ([hub.md](hub.md#files)). The delivery
+IDs of the webhook events it took, each until its signature no longer holds, go the same way into
+`instances.deliveries.json`, so a copy replayed after a restart is refused too.
 
 `--state-file`, the older PTY mechanism (JSON written on shutdown), is deprecated: `cmd/server`
 imports it once into a state database next to it (`statedb.ImportStateFile`, only into an empty

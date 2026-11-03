@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -152,4 +153,24 @@ func TestWebhookBodyReadTimeout(t *testing.T) {
 	_ = resp.Body.Close()
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 	assert.Less(t, time.Since(start), 4*time.Second)
+}
+
+// A delivery ID is remembered until its signature no longer holds, also
+// across a restart; the file drops those that expired.
+func TestDeliveriesExpire(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "instances.deliveries.json")
+	logger := slog.New(slog.DiscardHandler)
+	now := time.Date(2026, 11, 3, 9, 0, 0, 0, time.UTC)
+	d := newDeliveries(path, logger, now)
+	assert.True(t, d.add("a", now.Add(time.Minute), now))
+	assert.True(t, d.add("b", now.Add(20*time.Minute), now))
+	assert.False(t, d.add("a", now.Add(time.Minute), now.Add(30*time.Second)))
+	require.NoError(t, d.close())
+
+	later := now.Add(2 * time.Minute)
+	again := newDeliveries(path, logger, later)
+	defer func() { _ = again.close() }()
+	assert.Equal(t, []string{"b"}, again.order, "a expired")
+	assert.False(t, again.add("b", now.Add(20*time.Minute), later))
+	assert.True(t, again.add("a", later.Add(time.Minute), later), "its signature no longer holds")
 }

@@ -521,7 +521,9 @@ instance that joined with its webhook comes back the next time it starts.
   `<timestamp>.<body>`), a timestamp at most 10 minutes off, and a delivery ID (`id`) it hasn't
   taken yet. AgentAPI always sends one; an event without it is refused, since a copy of it would
   work again for those 10 minutes. This matters because an event names the URL the hub sends an
-  instance token to. The hub reads an event for at most 10 seconds, and 1 MiB.
+  instance token to. The hub keeps the IDs for as long as their event's signature holds, in
+  `instances.deliveries.json`, so a copy is refused after a restart too. It reads an event for at
+  most 10 seconds, and 1 MiB.
 - A signed event can add an instance the hub doesn't have, and move one the hub doesn't follow
   right now (stopped, or its summary stream isn't open) to the event's URL. It never moves an
   instance the hub follows, whatever run it names, or one added by hand. An `instance.*` event
@@ -688,6 +690,7 @@ Every endpoint but `/hooks` and `/api/session` needs the session cookie or
 | `~/.agentapi/instances/` | `agentapi server` | The AgentAPIs running on this machine, for `join` and `agentapi list` |
 | `~/.agentapi/hub/instances.json` | `agentapi hub serve` | The instances the hub knows, their groups and pins, when each last changed, and tokens of the ones added by hand |
 | `~/.agentapi/hub/instances.json.bak` | `agentapi hub serve` | The file of instances as the hub found it when it last started |
+| `~/.agentapi/hub/instances.deliveries.json` | `agentapi hub serve` | The delivery IDs of the events the hub took whose signature still holds, to refuse copies |
 
 `instances.json` is `{"version": 1, "instances": [...]}`. Hubs of 2.2 and earlier wrote, and read,
 only the array: the hub reads that too, but such a hub sets the newer file aside as damaged and
