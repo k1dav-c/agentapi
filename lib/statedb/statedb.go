@@ -747,11 +747,14 @@ func (d *DB) PutTask(id int, data []byte, seq uint64) {
 }
 
 // PutRichMessage stores the rich message at position pos. Like a message,
-// it is encoded when it is written, from a copy, so the caller may change
-// m once PutRichMessage returned: a rich message that streams in is sent
-// whole on every change, and encoding it each time held up the emitter.
+// it is encoded when it is written, and of a message updated again before
+// it was written only the latest is encoded: a rich message that streams
+// in is sent whole on every change. m is not copied either (copying the
+// whole message on every change made a stream take quadratic time), so
+// the caller must not change m, the blocks of its content or what they
+// point to once PutRichMessage returned. The emitter never does: it
+// replaces a stored rich message, and merging into one makes new content.
 func (d *DB) PutRichMessage(pos int, m transcript.RichMessage, seq uint64) {
-	m = m.Clone()
 	d.enqueue("rich:"+strconv.Itoa(pos), func(tx *sql.Tx) error {
 		data, ok := d.encode("rich message", m)
 		if !ok {
