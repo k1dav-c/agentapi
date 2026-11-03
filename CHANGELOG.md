@@ -12,6 +12,8 @@
 - Pi: an interrupt whose abort Pi didn't confirm in time still ends the turn. The adapter forgot the
   abort, so a late answer didn't cancel an extension command's dialog and the 10-second deadline
   never started: a turn waiting on a dialog could hang.
+- `agentapi update --force --check` says `Already up to date.` when it is; it said an update was
+  available. `--check` only reports, with or without `--force`.
 
 ## v2.5.0
 
