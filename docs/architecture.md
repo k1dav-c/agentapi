@@ -379,7 +379,8 @@ type Factory func(resume Resume) (Adapter, error)
   id), Codex's token counts, Pi's reported costs. `lib/pricing` prices each
   call; Claude Code's `cost-state` records add what its log doesn't list
   (compaction) as unitemized calls. Calls copied by a fork count once, in the
-  earliest session. The Store indexes each log's size, read offset and reader
+  earliest session, by the logs' creation times (statx on Linux, stat on
+  macOS; elsewhere their first lines'). The Store indexes each log's size, read offset and reader
   state, with its calls priced. It reads only complete new lines from growing
   logs, prices only the calls they add or complete, and rereads logs that
   shrink or are replaced. A reading in which no log's calls changed returns
