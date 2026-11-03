@@ -234,36 +234,31 @@ func downloadBinary(ctx context.Context, url, destDir, expectedChecksum string) 
 		return "", fmt.Errorf("create temp file: %w", err)
 	}
 	tmpPath := tmpFile.Name()
+	discard := func(err error) (string, error) {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath)
+		return "", err
+	}
 
 	hash := sha256.New()
 	written, err := io.Copy(io.MultiWriter(tmpFile, hash), io.LimitReader(resp.Body, maxBinarySize+1))
 	if err != nil {
-		_ = tmpFile.Close()
-		_ = os.Remove(tmpPath)
-		return "", fmt.Errorf("write downloaded binary: %w", err)
+		return discard(fmt.Errorf("write downloaded binary: %w", err))
 	}
 	if written > maxBinarySize {
-		_ = tmpFile.Close()
-		_ = os.Remove(tmpPath)
-		return "", fmt.Errorf("downloaded binary exceeds %d bytes", maxBinarySize)
+		return discard(fmt.Errorf("downloaded binary exceeds %d bytes", maxBinarySize))
 	}
 	actualChecksum := hex.EncodeToString(hash.Sum(nil))
 	if !strings.EqualFold(actualChecksum, expectedChecksum) {
-		_ = tmpFile.Close()
-		_ = os.Remove(tmpPath)
-		return "", fmt.Errorf("checksum mismatch: expected %s, got %s", expectedChecksum, actualChecksum)
+		return discard(fmt.Errorf("checksum mismatch: expected %s, got %s", expectedChecksum, actualChecksum))
 	}
 	if err := tmpFile.Chmod(0o755); err != nil {
-		_ = tmpFile.Close()
-		_ = os.Remove(tmpPath)
-		return "", fmt.Errorf("set executable permission: %w", err)
+		return discard(fmt.Errorf("set executable permission: %w", err))
 	}
 	// On disk before the rename makes it the program: after a crash the
 	// program is the old file or the whole new one, not an empty one.
 	if err := tmpFile.Sync(); err != nil {
-		_ = tmpFile.Close()
-		_ = os.Remove(tmpPath)
-		return "", fmt.Errorf("sync temp file: %w", err)
+		return discard(fmt.Errorf("sync temp file: %w", err))
 	}
 	if err := tmpFile.Close(); err != nil {
 		_ = os.Remove(tmpPath)
