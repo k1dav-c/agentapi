@@ -622,7 +622,8 @@ failed.
 | `--log-level` | `AGENTAPI_HUB_LOG_LEVEL`, else `info` | Least important level to log: `debug`, `info`, `warn` or `error` |
 
 The hub reaches the instances through the proxy of the environment (`HTTP_PROXY`, `HTTPS_PROXY`,
-`ALL_PROXY`).
+`ALL_PROXY`). It gives up connecting after 30 seconds (10 for the TLS handshake) and waiting for an
+answer's headers after 15; the summary streams and the pages it proxies stay open.
 
 ### `agentapi hub join`, `leave`, `status`
 

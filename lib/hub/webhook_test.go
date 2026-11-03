@@ -3,8 +3,10 @@ package hub
 import (
 	"bytes"
 	"log/slog"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -84,4 +86,21 @@ func TestMovedInstanceLeavesItsToken(t *testing.T) {
 	assert.Equal(t, "http://dev:2", instance.URL)
 	assert.Empty(t, instance.Token)
 	assert.Equal(t, "everyone's", h.tokenFor(instance))
+}
+
+// The hub's own client gives up connecting to an instance that doesn't
+// answer, rather than waiting for the system's TCP timeout, but sets no
+// limit on a response's body: the summary streams stay open.
+func TestDefaultClientTimeouts(t *testing.T) {
+	h, err := New(Config{Token: "t", Secret: "s"})
+	require.NoError(t, err)
+	assert.Zero(t, h.client.Timeout, "the summary streams stay open")
+	transport, ok := h.client.Transport.(*http.Transport)
+	require.True(t, ok)
+	assert.NotNil(t, transport.DialContext, "a dialer with a timeout")
+	assert.NotNil(t, transport.Proxy)
+	assert.Positive(t, transport.TLSHandshakeTimeout)
+	assert.Positive(t, transport.IdleConnTimeout)
+	assert.Positive(t, transport.MaxIdleConns)
+	assert.Equal(t, 15*time.Second, transport.ResponseHeaderTimeout)
 }

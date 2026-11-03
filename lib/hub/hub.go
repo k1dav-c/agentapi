@@ -115,7 +115,7 @@ func New(config Config) (*Hub, error) {
 	}
 	client := config.Client
 	if client == nil {
-		client = &http.Client{Transport: &http.Transport{Proxy: http.ProxyFromEnvironment, ResponseHeaderTimeout: 15 * time.Second}}
+		client = &http.Client{Transport: newTransport()}
 	}
 	st, err := newStore(config.StatePath, config.Logger, config.Clock)
 	if err != nil {
@@ -125,6 +125,20 @@ func New(config Config) (*Hub, error) {
 		config: config, logger: config.Logger, store: st, client: client, clock: config.Clock,
 		interfaces: netaddr.Interfaces, watchers: map[string]context.CancelFunc{},
 	}, nil
+}
+
+// newTransport is how the hub reaches the instances by default: the
+// environment's proxy, and http.DefaultTransport's limits on connecting (a
+// dial and TLS handshake that time out, keep-alives, idle connections), so
+// an instance that doesn't answer a SYN doesn't keep a watch or a proxied
+// request waiting for the system's TCP timeout. A response's headers must
+// come within 15 seconds; its body has no limit, since the summary streams
+// and the proxy's event streams stay open.
+func newTransport() *http.Transport {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = http.ProxyFromEnvironment
+	transport.ResponseHeaderTimeout = 15 * time.Second
+	return transport
 }
 
 // Run follows the instances' summaries until ctx ends.
