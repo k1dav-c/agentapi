@@ -5,7 +5,7 @@
 ### Features
 
 - A restart in place (SIGUSR2, `POST /update`, `agentapi restart`) first runs the new program with
-  the same arguments, variables and config file under a hidden `agentapi server --validate`, which
+  the same arguments, variables and config file under a hidden `agentapi server --validate`. It
   checks the flags, values, placeholders, port, agent and transport, the prices file and the server
   settings without listening or starting anything; the running server checks that the new program
   can write its state database. If the check fails, the server keeps serving and reports why, as for
@@ -56,8 +56,8 @@
   `agentapi restart`). Every restart generated another, and signed-in browsers, the hub and
   `agentapi attach` were locked out.
 - What the agent started (a dev server run in the background, MCP servers) is stopped with it when
-  the agent exits, on its own or in a reload, after SIGTERM and 2 seconds SIGKILL. It outlived the
-  agent and piled up with every restart.
+  the agent exits, on its own or in a reload, with SIGTERM and, 2 seconds later, SIGKILL. It
+  outlived the agent and piled up with every restart.
 - The agent no longer gets AgentAPI's secrets in its environment: every `AGENTAPI_*_TOKEN` and
   `AGENTAPI_*_SECRET` (webhook and hub secrets, hub tokens) is removed, not only the API token.
 - `agentapi update` syncs the new binary and its directory before and after the rename, so a power
@@ -86,10 +86,10 @@
   is logged at most once a minute with a count.
 - Costs: Claude Code calls without a message or request ID each count (only the first did); a
   Codex call whose running total started over counts its own tokens; a model is unpriced when any
-  of its calls is; on macOS, a fork's copied calls stay with the session it was forked from. Prices
-  for Claude Opus 4 and 4.1, Sonnet 4, Haiku 3.5, Sonnet 4 and 4.5 above 200K input tokens,
-  `codex-mini-latest` and the GPT-5 Codex models; a variant (`-mini`, `-nano`, `-pro`) no longer
-  takes its base model's price, and a model without one is logged once.
+  of its calls is; on macOS, a fork's copied calls stay with the session it was forked from. Claude
+  Opus 4 and 4.1, Sonnet 4, Haiku 3.5, Sonnet 4 and 4.5 above 200K input tokens,
+  `codex-mini-latest` and the GPT-5 Codex models now have prices; a variant (`-mini`, `-nano`,
+  `-pro`) no longer takes its base model's price, and a model without one is logged once.
 - Earlier sessions: a Claude Code log whose first lines belong to no session is listed. `POST
   /sessions/{id}/resume` answers 400 to an id that would name another file, and `POST /upload`
   answers 400 to the names `.` and `..`; control characters are dropped from uploaded names, and
@@ -330,8 +330,8 @@
   browsers an event or rewrites the hub's file.
 - Codex and Pi keep a record whose field changed type, instead of dropping it whole; Pi's finished
   messages still go through its stricter session-log parser. A changed `turn/completed` left Codex's
-  turn running and the queue stalled. Unknown record types, changed fields and records that don't decode
-  are logged once per kind, with the CLI's version where it reports one (Claude Code, Codex).
+  turn running and the queue stalled. Unknown record types, changed fields and records that don't
+  decode are logged once per kind, with the CLI's version where it reports one (Claude Code, Codex).
 - An answer that may have reached the agent but wasn't confirmed stays in flight: the request takes
   no other answer until the agent closes it or the turn ends (409, "request is being answered"), so
   a retry can't send a contradicting approval. An unconfirmed message stays in the conversation with
@@ -472,8 +472,8 @@
   phone the composer is one row: the message, `⋯` (attach, voice, the agent's settings) and send,
   with stop while the agent works; it grows as the message wraps. The agent's mode, model, effort
   and usage take a second row when asked for from `⋯`, when a slash command opens one of their
-  menus, or while the usage nears a limit. While a card asks for you, the status line above it no longer says so too, and the cards
-  leave out the number keys a phone doesn't have.
+  menus, or while the usage nears a limit. While a card asks for you, the status line above it no
+  longer says so too, and the cards leave out the number keys a phone doesn't have.
 
 ### Fixes
 
@@ -484,10 +484,10 @@
   bottom toolbar (Chrome's floats over the page): the pages are frames fixed to the visible area
   between the toolbars, not a screen-high box.
 - On an iPhone, the composer no longer sits under the keyboard: iOS doesn't shrink the page for it,
-  so while it is up the page's frame takes the place and size of what the browser reports
-  visible, the same rule in every iOS browser (whether it shrinks the visible part, or the window
-  and scrolls it), also for a chat the hub opens, where typing in it no longer lets the window be
-  pulled back to the top as it scrolls. While it is up, a card above the composer scrolls in the room left and the
+  so while it is up the page's frame takes the place and size of what the browser reports visible.
+  The rule is the same in every iOS browser (whether it shrinks the visible part, or the window and
+  scrolls it) and in a chat the hub opens, where typing no longer lets the window be pulled back to
+  the top as it scrolls. While it is up, a card above the composer scrolls in the room left and the
   composer stays whole. The terminals' key bar keeps above the keyboard the same way.
 - A stopped or unreachable instance can be forgotten on a phone: **Forget** moved from a
   hover-only button to the row's `⋯` menu.
@@ -594,8 +594,8 @@
 - Retracting a message now closes event streams so clients reconnect for a full replay. Previously,
   the server streamed the whole state to connected clients; a stream ending midway could lose the
   remaining state permanently.
-- Don't resend unconfirmed messages after a restart with `--state-db`. A message sent during
-  shutdown may already have reached the agent, so retrying could run it twice.
+- Unconfirmed messages are no longer sent again after a restart with `--state-db`. A message sent
+  during shutdown may already have reached the agent, so retrying could run it twice.
 - A restart (`DELETE /messages`, an MCP change with `?restart=true`, opening a session, a Codex or
   Pi update) no longer holds up every other request for minutes; messages wait in the queue
   meanwhile. An agent that stopped reading its input can no longer hang AgentAPI or its shutdown.
@@ -623,8 +623,8 @@
 - Read session, subagent and cost logs incrementally from the last offset. With one line added to
   a 111 MB log, GET /cost took 72 ms instead of 3.5 s. With 2000 Codex rollouts, GET /subagents
   took 10 ms instead of 0.8 s. Concurrent cost requests share the read.
-- Load resumed sessions with tens of thousands of rich messages at once; 80,000 previously took
-  38 s. The state database now encodes messages outside the emitter's lock.
+- Load resumed sessions with tens of thousands of rich messages under one lock; 80,000 previously
+  took 38 s. The state database now encodes messages outside the emitter's lock.
 - Chat: a long session stays responsive while the agent works. Each update rebuilds the transcript
   only from what changed (0.3–0.5 ms instead of 85–99 ms for 200 tasks), and components read only
   the state they show, so the layout, composer, dock and Lineage no longer render again on every
@@ -694,8 +694,8 @@
 ### Fixes
 
 - Chat: a notification you closed (an agent's warning or error) stays closed after a reload; the
-  server sends its recent errors again on every connection, so it came back. So does the cold
-  prompt cache notice.
+  server sends its recent errors again on every connection, so it came back. The cold prompt cache
+  notice stays closed too.
 - Chat: a file path the agent names relative to a repository below its working directory (as an
   agent started in a home directory does), or in the wrong case, no longer ends at "File not
   found": the viewer looks for it below the working directory (`GET /files/find`), opens the one
@@ -724,7 +724,7 @@
 
 - Chat: links in the terminal and TTY mode open on a click, also when they run over several lines,
   and the last link a command printed (a login URL) shows above the terminal to open or copy.
-- Use device-code login for Codex by default. The login card and `/login` run `codex login
+- Codex logs in with a device code by default: the login card and `/login` run `codex login
   --device-auth`, which works on servers where a browser elsewhere can't reach the sign-in
   redirect to localhost.
 - Chat: thinking stays beside the steps it explains on a wide screen; a note taller than its step
@@ -900,7 +900,7 @@
   Tool approvals (Allow, Allow always for this session, Deny with feedback), `AskUserQuestion` and
   plan approvals come as requests; steering, interrupting, resuming and image input are supported,
   and the session name is the title Claude Code generates after the first prompt. AgentAPI always
-  passes a permission mode (see below), because managed or user settings can make
+  passes a permission mode (see above), because managed or user settings can make
   `bypassPermissions` the default.
 
   Flags that conflict with the protocol (`-p`, `--output-format`, `--resume`, `--session-id`,
@@ -948,7 +948,8 @@
   an approval, questions or a plan when the message says `approve`, `ask` or `plan` (see
   `chat/README.md`).
 - Native transport (`--transport native`): drives the agent through its own structured protocol
-  instead of its terminal UI. This release adds the framework, API, and adapters for Claude Code, Codex, and Pi.
+  instead of its terminal UI. This release adds the framework, API, and adapters for Claude Code,
+  Codex, and Pi.
 
   Messages, rich messages (replaced as a whole as they stream, so text and thinking grow in place)
   and the timeline come from the protocol, so there is no screen to parse. The agent runs in its own
@@ -1058,7 +1059,7 @@
 
 - Chat: remove excessive blank space below a running task's live screen tail. The retained height
   previously came from the full initial screen, potentially hundreds of rows in the 1000-row
-  terminal. Reset it when switching to the transcript's last 10 lines.
+  terminal. It now resets when the tail switches to the transcript's last 10 lines.
 
 ## v0.22.0
 
@@ -1069,7 +1070,7 @@
   messages appear as thumbnails that open at full size. Sent messages show thumbnails in place of
   upload paths.
 - `GET /uploads/{checksum}/{name}` serves uploaded images to the chat UI. It accesses only the
-  server's upload directory through `os.Root`, preventing symlinks from escaping that directory.
+  server's upload directory through `os.Root`, so symlinks can't escape it.
   Content checks allow PNG, JPEG, GIF, WebP, and BMP, and reject SVG and HTML. Responses include
   `nosniff` and a sandboxing CSP.
 
@@ -1183,7 +1184,7 @@
 ### Features
 
 - Chat: each user prompt appears in a tinted block labelled "You". Agent replies begin with the
-  agent's logo and name (e.g., Pi), making prompts and replies easier to distinguish.
+  agent's logo and name (e.g., Pi).
 
 ## v0.16.0
 
@@ -1228,8 +1229,14 @@
 - Chat redesign ("Transcript"): use a single 48px top bar and a task transcript with a timeline,
   the prompt as the heading, Markdown replies, and one row per tool call (`$ command`, exit code,
   duration, output preview). Show thinking as margin notes on wide screens.
-  A status strip above the composer shows current activity. Decision cards replace the option bar inside the transcript, and number keys select answers. While waiting for a response, the header and tab title show "Needs you", and the queue is held. When a session log supplies the answer, its screen-parsed copy is placed under "Terminal output".
-  Use the Graphite & Signal palette with matching hues in light and dark themes, and Geist Mono for machine output. Explorer opens with ⌘K and supports list filtering. Restart moves to the Session tab with a two-step confirmation. TTY mode includes an 80-column ruler. Long tasks initially show their latest 40 steps.
+  A status strip above the composer shows current activity. Decision cards replace the option bar
+  inside the transcript, and number keys select answers. While the agent waits for a response, the
+  header and tab title show "Needs you", and the queue is held. When a session log supplies the
+  answer, its screen-parsed copy is placed under "Terminal output". Use the Graphite & Signal
+  palette with matching hues in light and dark themes, and Geist Mono for machine output. Explorer
+  opens with ⌘K and supports list filtering. Restart moves to the Session tab with a two-step
+  confirmation. TTY mode includes an 80-column ruler. Long tasks initially show their latest 40
+  steps.
 - Chat: cache transcripts in IndexedDB and display them immediately when reopening a conversation,
   then fetch only changes from the server. Apply updates in batches and render older tasks
   progressively while the browser is idle. Previously, reloading caused a render for every replayed
@@ -1275,8 +1282,10 @@
 - Chat: stop displaying option buttons under ordinary answers containing numbered lists or words
   such as "allow", "approve", or "sign in". Report the actual prompt as `terminal_prompt` in
   `GET /status` and `status_change`, only when the input box is absent. The chat displays one
-  option bar at the end of the conversation.
-  Report a prompt after it has been visible for one second, because Claude Code ignores keys sent immediately after a dialog appears. Clear it as soon as it changes or disappears. Extract options from the last numbered list; for unnumbered choices such as Claude's folder-trust dialog, move the cursor by the appropriate number of rows.
+  option bar at the end of the conversation. Report a prompt after it has been visible for one
+  second, because Claude Code ignores keys sent immediately after a dialog appears. Clear it as soon
+  as it changes or disappears. Extract options from the last numbered list; for unnumbered choices
+  such as Claude's folder-trust dialog, move the cursor by the appropriate number of rows.
 - Claude Code: restore separate reply blocks after `--continue`, `/resume`, or `/clear`. Claude
   Code can advertise a session ID without writing its JSONL file. Previously, the watcher waited
   indefinitely for that file instead of finding the active session, so the chat fell back to a
