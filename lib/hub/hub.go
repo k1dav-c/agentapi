@@ -158,6 +158,13 @@ func (h *Hub) Run(ctx context.Context) {
 	h.watchWG.Wait()
 }
 
+// Close writes the changes the hub's file hasn't kept yet, and stops
+// writing it: it writes a change within a second, and on Close. Call it
+// once the hub stops, after Run returned.
+func (h *Hub) Close() error {
+	return h.store.close()
+}
+
 // tokenFor is the API token the hub sends to instance.
 func (h *Hub) tokenFor(instance Instance) string {
 	if instance.Token != "" {
@@ -367,7 +374,7 @@ func (h *Hub) addInstance(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "the hub has " + id + " at " + existing.URL + " already; forget it first"})
 		return
 	}
-	instance, _, err := h.store.update(id, true, func(i *Instance) {
+	instance, _ := h.store.update(id, true, func(i *Instance) {
 		i.WebhookInstance = summary.Instance
 		i.ID = id
 		i.URL = base
@@ -378,9 +385,6 @@ func (h *Hub) addInstance(w http.ResponseWriter, r *http.Request) {
 		i.Connection = ConnectionConnecting
 		i.Error = ""
 	})
-	if err != nil {
-		h.logger.Warn("Failed to keep the hub's instances", "error", err)
-	}
 	h.watch(instance)
 	writeJSON(w, http.StatusOK, instance.public())
 }
@@ -443,7 +447,7 @@ func (h *Hub) updateInstance(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var nothingToMute bool
-	updated, ok, err := h.store.update(instanceParam(r), false, func(i *Instance) {
+	updated, ok := h.store.update(instanceParam(r), false, func(i *Instance) {
 		if body.Muted != nil {
 			key := ""
 			if *body.Muted {
@@ -466,9 +470,6 @@ func (h *Hub) updateInstance(w http.ResponseWriter, r *http.Request) {
 			i.Pin = pinLast
 		}
 	})
-	if err != nil {
-		h.logger.Warn("Failed to keep the hub's instances", "error", err)
-	}
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such instance"})
 		return
@@ -510,8 +511,6 @@ func (h *Hub) setPins(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, errPinsDiffer):
 		writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "ids": pins})
 		return
-	case err != nil:
-		h.logger.Warn("Failed to keep the hub's instances", "error", err)
 	}
 	writeJSON(w, http.StatusOK, map[string][]string{"ids": pins})
 }
@@ -519,10 +518,7 @@ func (h *Hub) setPins(w http.ResponseWriter, r *http.Request) {
 func (h *Hub) removeInstance(w http.ResponseWriter, r *http.Request) {
 	id := instanceParam(r)
 	h.unwatch(id)
-	removed, err := h.store.remove(id)
-	if err != nil {
-		h.logger.Warn("Failed to keep the hub's instances", "error", err)
-	}
+	removed := h.store.remove(id)
 	if !removed {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such instance"})
 		return

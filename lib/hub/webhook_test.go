@@ -36,14 +36,13 @@ func TestAddedInstanceKeepsItsURL(t *testing.T) {
 	var logs bytes.Buffer
 	h, err := New(Config{Token: "t", Secret: "s", Logger: slog.New(slog.NewTextHandler(&logs, nil))})
 	require.NoError(t, err)
-	_, _, err = h.store.update("dev:1", true, func(i *Instance) {
+	_, _ = h.store.update("dev:1", true, func(i *Instance) {
 		i.URL = "http://dev:1"
 		i.ServerID = "s1"
 		i.Source = SourceManual
 		i.Token = "its-own"
 		i.Connection = ConnectionUnreachable
 	})
-	require.NoError(t, err)
 	get := func() Instance {
 		instance, ok := h.store.get("dev:1")
 		require.True(t, ok)
@@ -78,14 +77,13 @@ func TestAddedInstanceKeepsItsURL(t *testing.T) {
 func TestMovedInstanceLeavesItsToken(t *testing.T) {
 	h, err := New(Config{Token: "t", Secret: "s", InstanceToken: "everyone's"})
 	require.NoError(t, err)
-	_, _, err = h.store.update("dev:1", true, func(i *Instance) {
+	_, _ = h.store.update("dev:1", true, func(i *Instance) {
 		i.URL = "http://dev:1"
 		i.ServerID = "s1"
 		i.Source = SourceWebhook
 		i.Token = "for-dev-1"
 		i.Connection = ConnectionUnreachable
 	})
-	require.NoError(t, err)
 	h.upsertFromWebhook(instanceapi.WebhookInstance{ID: "dev:1", ServerID: "s2"}, "http://dev:2", 60)
 	instance, _ := h.store.get("dev:1")
 	assert.Equal(t, "http://dev:2", instance.URL)

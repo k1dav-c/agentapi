@@ -152,7 +152,7 @@ func (h *Hub) receiveWebhook(w http.ResponseWriter, r *http.Request) {
 	default:
 		// The instance is alive; one the hub doesn't know yet is added
 		// with its next heartbeat.
-		_, _, _ = h.store.update(instance.ID, false, func(i *Instance) {
+		_, _ = h.store.update(instance.ID, false, func(i *Instance) {
 			if sameRun(i.ServerID, instance.ServerID) {
 				i.LastSeen = h.clock.Now()
 			}
@@ -176,7 +176,7 @@ func sameRun(current, serverID string) bool {
 func (h *Hub) upsertFromWebhook(instance instanceapi.WebhookInstance, url string, heartbeatSeconds int) {
 	var restart bool
 	now := h.clock.Now()
-	updated, _, err := h.store.update(instance.ID, true, func(i *Instance) {
+	updated, _ := h.store.update(instance.ID, true, func(i *Instance) {
 		moved := i.URL != "" && i.URL != url
 		if moved && h.refuseMove(i, instance, url) {
 			return
@@ -200,9 +200,6 @@ func (h *Hub) upsertFromWebhook(instance instanceapi.WebhookInstance, url string
 			i.Error = ""
 		}
 	})
-	if err != nil {
-		h.logger.Warn("Failed to keep the hub's instances", "error", err)
-	}
 	if restart {
 		h.watch(updated)
 	}
@@ -240,7 +237,7 @@ func (h *Hub) refuseMove(i *Instance, instance instanceapi.WebhookInstance, url 
 // heartbeat of its own follows it again.
 func (h *Hub) stopped(id, serverID string) {
 	stopped := false
-	_, _, err := h.store.update(id, false, func(i *Instance) {
+	_, _ = h.store.update(id, false, func(i *Instance) {
 		if !sameRun(i.ServerID, serverID) || i.Source == SourceManual {
 			return
 		}
@@ -251,9 +248,6 @@ func (h *Hub) stopped(id, serverID string) {
 		i.LastSeen = h.clock.Now()
 		stopped = true
 	})
-	if err != nil {
-		h.logger.Warn("Failed to keep the hub's instances", "error", err)
-	}
 	if stopped {
 		h.unwatchStopped(id)
 	}

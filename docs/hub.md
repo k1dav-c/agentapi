@@ -85,7 +85,7 @@ agentapi hub serve --bind hub.vpn --token "$HUB_TOKEN" --secret "$HUB_SECRET" \
 ```
 
 It listens on port 3290 and keeps the instances in `~/.agentapi/hub/instances.json`, so it still
-knows them after a restart. `--bind` limits it to the VPN interface; leave it out to listen
+knows them after a restart. It writes the file within a second of a change, and when it stops. `--bind` limits it to the VPN interface; leave it out to listen
 everywhere. The values can come from `AGENTAPI_HUB_TOKEN`, `AGENTAPI_HUB_SECRET` and
 `AGENTAPI_HUB_INSTANCE_TOKEN` instead of flags.
 
@@ -546,8 +546,8 @@ instance that joined with its webhook comes back the next time it starts.
   so a workspace someone took over can't reach the others through your browser. Through the hub,
   an instance's webhook can be read but not changed: it names where the hub sends the token.
 - Adding a URL never moves an instance the hub has; forget it first.
-- `~/.agentapi/hub/instances.json` holds the tokens of instances added by hand; it is created
-  readable by its owner only. `~/.agentapi/config.yaml` holds the hub secret; `agentapi hub join`
+- `~/.agentapi/hub/instances.json` and its `.bak` hold the tokens of instances added by hand; they
+  are created readable by their owner only. `~/.agentapi/config.yaml` holds the hub secret; `agentapi hub join`
   writes it the same way.
 - Signing in sends the hub token. Serve the hub only on the VPN, or behind HTTPS.
 - Anyone signed in to the hub can do what the AgentAPIs allow: send tasks, answer approvals, use
@@ -599,7 +599,8 @@ instance that joined with its webhook comes back the next time it starts.
 | **Update AgentAPI…** asks for a one-time setup | The AgentAPI can't write its binary's directory, such as a root-owned `/usr/local/bin` | Run the command it shows on that machine, once |
 | A row says **Update failed** | Checking or downloading the release failed | Hover it, or open **Update AgentAPI…**, for the error; then try again |
 | A connected agent's **⋯** menu has nothing about updating it | Its AgentAPI is too old to update from the hub | Update it by hand ([Updating by hand](#updating-by-hand)) |
-| The hub logs "The hub's file of instances doesn't parse" | The file was cut short, such as by a crash or a full disk | The hub moved it aside (`instances.json.corrupt-<time>`) and started empty. Joined instances come back with their next heartbeat; add the others again, and set groups, pins and mutes again |
+| The hub logs "The hub's file of instances doesn't parse" | The file was cut short, such as by a crash or a full disk, or a hub of 2.2 or earlier started on a newer hub's file | The hub moved it aside (`instances.json.corrupt-<time>`) and started empty. Joined instances come back with their next heartbeat. To get the rest back, stop the hub and copy `instances.json.bak` (the file as the hub's previous start found it) over `instances.json`; for a hub of 2.2 or earlier, see [Files](#files) |
+| The hub doesn't start: `instances.json is of a newer hub` | A newer hub wrote the file | Run the newer hub, or start from `instances.json.bak` |
 
 `agentapi hub status` on an instance's machine shows which hub its config file names and where
 each running AgentAPI reports. The hub logs each instance it starts following, stops or can't
@@ -686,6 +687,15 @@ Every endpoint but `/hooks` and `/api/session` needs the session cookie or
 | `~/.agentapi/config.yaml` | `agentapi hub join` | The hub's webhook and `allow-update`, read by every `agentapi server` |
 | `~/.agentapi/instances/` | `agentapi server` | The AgentAPIs running on this machine, for `join` and `agentapi list` |
 | `~/.agentapi/hub/instances.json` | `agentapi hub serve` | The instances the hub knows, their groups and pins, when each last changed, and tokens of the ones added by hand |
+| `~/.agentapi/hub/instances.json.bak` | `agentapi hub serve` | The file of instances as the hub found it when it last started |
+
+`instances.json` is `{"version": 1, "instances": [...]}`. Hubs of 2.2 and earlier wrote, and read,
+only the array: the hub reads that too, but such a hub sets the newer file aside as damaged and
+starts empty. To go back to one, stop the hub and keep only the array first:
+
+```sh
+cd ~/.agentapi/hub && jq .instances instances.json > instances.json.new && mv instances.json.new instances.json
+```
 
 ## Limits
 

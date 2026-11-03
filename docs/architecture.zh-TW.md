@@ -94,7 +94,7 @@ flowchart TB
 | `lib/native/procutil` | 子行程：行程群組（process group）與正常關閉流程 |
 | `lib/statedb/` | `--state-db` 的 SQLite 持久保存（native 與 PTY），以及 `--state-file` 的匯入 |
 | `lib/instanceapi/` | AgentAPI 和同時監看多個 AgentAPI 的客戶端之間的約定：它是誰（`WebhookInstance`，出現在 webhook 事件、摘要和登記檔中）、它的摘要、webhook 的外層格式和簽章（`Sign`、`Verify`），以及 hub 對每個實例顯示的狀態（`StateOf`）。`lib/httpapi` 以同樣的名稱保留別名，OpenAPI schema 用的就是這些名稱 |
-| `lib/hub/` | `agentapi hub serve`：實例、頁面上設定的群組和釘選，以及每個實例這一列顯示的內容最近一次變動的時間（`store.go`，保存在檔案中）、有簽章的 webhook 接收端（`webhook.go`）、每個實例的摘要串流（`watch.go`）、登入、瀏覽器的事件串流，以及到實例的代理（`hub.go`、`proxy.go`），還有機器怎麼加入（`join.go`：`GET /api/join` 和啟動 log 列出的位址）；使用說明見 [hub.zh-TW.md](hub.zh-TW.md) |
+| `lib/hub/` | `agentapi hub serve`：實例、頁面上設定的群組和釘選，以及每個實例這一列顯示的內容最近一次變動的時間（`store.go`，由 `persist.go` 保存在檔案中）、有簽章的 webhook 接收端（`webhook.go`）、每個實例的摘要串流（`watch.go`）、登入、瀏覽器的事件串流，以及到實例的代理（`hub.go`、`proxy.go`），還有機器怎麼加入（`join.go`：`GET /api/join` 和啟動 log 列出的位址）；使用說明見 [hub.zh-TW.md](hub.zh-TW.md) |
 | `lib/sse/` | 依 HTML 標準讀寫 server-sent events：讀取端（合併多行 data:、略過註解、行尾可為 CR、LF 或 CRLF）和寫入端，hub 用它讀實例的摘要串流、寫給瀏覽器的串流。`lib/httpapi` 則用 huma 的 `sse` 寫它的串流 |
 | `lib/netaddr/` | 這台機器的 IPv4 位址：其他機器連得到的位址（hub 的加入網址），以及連到某台主機時使用的位址（`Resolver`，供 `--public-url` 的 `{ip}` 使用） |
 | `lib/userconfig/` | 使用者的設定檔 `~/.agentapi/config.yaml`：以旗標名稱設定，`agentapi server` 讀取、`agentapi hub` 寫入 |
@@ -464,6 +464,13 @@ native 訊息也能 steer 或中斷目前回合。佇列變更會在佇列鎖之
   檔案一律拒絕；結構從 1.0 起就沒有改變。
 - 較舊的 AgentAPI 不認得的資料，它重設或移除訊息時也不會清掉。還原時，訊息已不存在或已換成
   另一則的任務會被丟棄；訊息資料列無法讀取的任務也一樣。
+
+hub（`lib/hub`，`persist.go`）把實例保存在 JSON 檔案裡，格式是
+`{"version": 1, "instances": [...]}`；2.2 以前的 hub 寫的純陣列也讀得懂。有變動時只標記檔案落後，
+由背景的寫入者每秒最多寫一次、`Hub.Close` 時再寫一次，經由先 sync 再改名的暫存檔寫入。hub 啟動時
+把讀到的檔案複製成 `instances.json.bak`。無法解析的檔案會改名放到一旁（`.corrupt-<時間>`），hub
+從空的清單開始；版本較新的檔案則讓 hub 停止啟動。舊 hub 會把新格式當成損壞的檔案放到一旁，所以
+改回舊 hub 前要先用 `jq .instances` 轉換（見 [hub.zh-TW.md](hub.zh-TW.md#檔案)）。
 
 `--state-file` 是較早的 PTY 機制（關閉時寫出 JSON），已棄用：`cmd/server` 會把它一次性匯入
 旁邊的狀態資料庫（`statedb.ImportStateFile`，只匯入空的資料庫），之後由資料庫保存對話。SIGUSR1

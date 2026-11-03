@@ -96,7 +96,7 @@ answers write keys directly to the agent's terminal.
 | `lib/native/procutil` | Child process groups and graceful shutdown |
 | `lib/statedb/` | SQLite persistence for `--state-db` (native and PTY), and the import of a `--state-file` |
 | `lib/instanceapi/` | The contract between an AgentAPI and the clients that watch many: who it is (`WebhookInstance`, in its webhook events, summary and registry entry), its summary, the webhook envelope with its signature (`Sign`, `Verify`), and the state a hub shows of each instance (`StateOf`). `lib/httpapi` keeps aliases under the same names, which the OpenAPI schema uses |
-| `lib/hub/` | `agentapi hub serve`: the instances, the groups and pins set on its page and when each last changed what its row shows (`store.go`, kept in a file), the signed webhook receiver (`webhook.go`), each instance's summary stream (`watch.go`), sign-in, the browser's event stream and the proxy to the instances (`hub.go`, `proxy.go`), where machines join it (`join.go`: its addresses for `GET /api/join` and the startup log); the user guide is [hub.md](hub.md) |
+| `lib/hub/` | `agentapi hub serve`: the instances, the groups and pins set on its page and when each last changed what its row shows (`store.go`, kept in a file by `persist.go`), the signed webhook receiver (`webhook.go`), each instance's summary stream (`watch.go`), sign-in, the browser's event stream and the proxy to the instances (`hub.go`, `proxy.go`), where machines join it (`join.go`: its addresses for `GET /api/join` and the startup log); the user guide is [hub.md](hub.md) |
 | `lib/sse/` | Server-sent events as the HTML standard defines them: a reader (data: lines joined, comments skipped, CR, LF or CRLF line ends) and a writer, used by the hub for the instances' summary streams and the browser's stream. `lib/httpapi` writes its streams with huma's `sse` |
 | `lib/netaddr/` | The machine's IPv4 addresses: those other machines may reach it at (the hub's join URLs), and the one it reaches a host from (`Resolver`, for `{ip}` in `--public-url`) |
 | `lib/userconfig/` | The user's settings file, `~/.agentapi/config.yaml`: flags by name, read by `agentapi server`, written by `agentapi hub` |
@@ -585,6 +585,14 @@ The queue is persisted with the conversation.
 - What an older AgentAPI doesn't know, its resets and truncations don't
   clear. A restored task whose message is gone or is another one now is
   dropped, as is one whose message row couldn't be read.
+
+The hub (`lib/hub`, `persist.go`) keeps its instances in a JSON file,
+`{"version": 1, "instances": [...]}`; it also reads the bare array of hubs of 2.2 and earlier. A
+change marks the file behind, and a background writer writes it at most once a second, and on
+`Hub.Close`, through a temporary file it syncs and renames. On startup the hub copies the file it
+read to `instances.json.bak`. A file that doesn't parse is moved aside (`.corrupt-<time>`) and the
+hub starts empty; one of a newer version stops the hub instead. An older hub moves the envelope aside
+as damaged, so going back to one takes `jq .instances` first ([hub.md](hub.md#files)).
 
 `--state-file`, the older PTY mechanism (JSON written on shutdown), is deprecated: `cmd/server`
 imports it once into a state database next to it (`statedb.ImportStateFile`, only into an empty

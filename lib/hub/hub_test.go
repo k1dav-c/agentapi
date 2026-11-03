@@ -46,10 +46,23 @@ func startHub(t *testing.T, statePath string) *httptest.Server {
 	return startHubGrace(t, statePath, 200*time.Millisecond)
 }
 
+// hubs are the hubs the tests run, by URL, for flushHub.
+var hubs sync.Map
+
+// flushHub has the hub at hubURL write its files now: it writes a change
+// within a second.
+func flushHub(t *testing.T, hubURL string) {
+	t.Helper()
+	h, ok := hubs.Load(hubURL)
+	require.True(t, ok)
+	require.NoError(t, h.(*hub.Hub).Flush())
+}
+
 func startHubGrace(t *testing.T, statePath string, grace time.Duration) *httptest.Server {
 	t.Helper()
 	h, err := hub.New(hub.Config{Token: hubToken, Secret: hubSecret, InstanceToken: instanceToken, StatePath: statePath, ConnectGrace: grace})
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = h.Close() })
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -57,6 +70,7 @@ func startHubGrace(t *testing.T, statePath string, grace time.Duration) *httptes
 		close(done)
 	}()
 	srv := httptest.NewServer(h.Handler())
+	hubs.Store(srv.URL, h)
 	t.Cleanup(func() {
 		srv.Close()
 		cancel()
@@ -187,6 +201,7 @@ func TestHub(t *testing.T) {
 	require.Equal(t, http.StatusOK, request(t, http.MethodGet, hubSrv.URL+"/i/"+escaped+"/status", hubToken, nil, nil))
 
 	// The file keeps the instance, readable by its owner only.
+	flushHub(t, hubSrv.URL)
 	info, err := os.Stat(statePath)
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
@@ -212,6 +227,7 @@ func TestHub(t *testing.T) {
 	}
 
 	// A hub that starts again knows the instance.
+	flushHub(t, hubSrv.URL)
 	again := startHub(t, statePath)
 	require.Eventually(t, func() bool {
 		list := instances(t, again.URL)
@@ -711,6 +727,7 @@ func TestHubGroups(t *testing.T) {
 	assert.Equal(t, "Client work", instances(t, hubSrv.URL)[0].Group)
 
 	// A hub that starts again knows it.
+	flushHub(t, hubSrv.URL)
 	again := startHub(t, statePath)
 	assert.Equal(t, "Client work", instances(t, again.URL)[0].Group)
 	var ungrouped hub.Instance
@@ -772,11 +789,16 @@ func TestHubDamagedState(t *testing.T) {
 				"instance": map[string]any{"id": "dev-1:3284", "server_id": "s1", "url": "http://127.0.0.1:1", "agent_type": "claude"},
 			}
 			require.Equal(t, http.StatusNoContent, postEvent(t, srv.URL, started, hubSecret, time.Now()))
+			require.NoError(t, h.Close())
 			data, err := os.ReadFile(statePath)
 			require.NoError(t, err)
-			var stored []map[string]any
+			var stored struct {
+				Version   int              `json:"version"`
+				Instances []map[string]any `json:"instances"`
+			}
 			require.NoError(t, json.Unmarshal(data, &stored))
-			assert.Len(t, stored, 1)
+			assert.Equal(t, 1, stored.Version)
+			assert.Len(t, stored.Instances, 1)
 		})
 	}
 }

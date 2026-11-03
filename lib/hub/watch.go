@@ -111,7 +111,7 @@ func (h *Hub) follow(ctx context.Context, id string) {
 		var other *otherInstanceError
 		answered := errors.As(err, &other)
 		stopped := false
-		_, _, _ = h.store.update(id, false, func(i *Instance) {
+		_, _ = h.store.update(id, false, func(i *Instance) {
 			if ctx.Err() != nil || i.Connection == ConnectionStopped {
 				return
 			}
@@ -174,7 +174,7 @@ func (h *Hub) follow(ctx context.Context, id string) {
 func (h *Hub) applySummary(ctx context.Context, id, url string, summary instanceapi.SummaryBody) bool {
 	now := h.clock.Now()
 	applied := false
-	_, _, _ = h.store.update(id, false, func(i *Instance) {
+	_, _ = h.store.update(id, false, func(i *Instance) {
 		if ctx.Err() != nil || i.Connection == ConnectionStopped || i.URL != url {
 			return
 		}

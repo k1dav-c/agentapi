@@ -77,6 +77,7 @@ agentapi hub serve --bind hub.vpn --token "$HUB_TOKEN" --secret "$HUB_SECRET" \
 ```
 
 hub 監聽 port 3290，並把實例保存在 `~/.agentapi/hub/instances.json`，重新啟動後仍然記得。
+有變動時，hub 會在一秒內寫入這個檔案，停止時也會寫一次。
 `--bind` 讓 hub 只聽 VPN 介面；不加的話監聽所有介面。這些值也可以改用 `AGENTAPI_HUB_TOKEN`、
 `AGENTAPI_HUB_SECRET` 和 `AGENTAPI_HUB_INSTANCE_TOKEN` 設定。
 
@@ -478,7 +479,7 @@ AgentAPI 1.1 以上。在這裡輸入的 token 會為這個實例保存，取代
   workspace 被人控制，也無法透過你的瀏覽器碰到其他 workspace。經由 hub 只能讀取實例的 webhook，
   不能修改：webhook 決定 hub 把 token 送到哪裡。
 - 加入網址不會搬動 hub 已有的實例；要先把它移除。
-- `~/.agentapi/hub/instances.json` 保存手動加入的實例的 token，建立時只有擁有者能讀取。
+- `~/.agentapi/hub/instances.json` 和它的 `.bak` 保存手動加入的實例的 token，建立時只有擁有者能讀取。
   `~/.agentapi/config.yaml` 保存 hub secret，`agentapi hub join` 也以同樣的權限寫入。
 - 登入時會送出 hub token。hub 只開在 VPN 上，或放在 HTTPS 後面。
 - 登入 hub 的人能做的事，等同各 AgentAPI 允許的事：送任務、回覆核准、使用終端機，以及更新機器允許
@@ -526,7 +527,8 @@ AgentAPI 1.1 以上。在這裡輸入的 token 會為這個實例保存，取代
 | **Update AgentAPI…** 要求一次性設定 | AgentAPI 無法寫入 binary 所在的目錄，例如 root 擁有的 `/usr/local/bin` | 在那台機器上執行一次畫面上的指令 |
 | 那一列顯示 **Update failed** | 檢查或下載新版時出錯 | 滑鼠移上去，或開啟 **Update AgentAPI…** 查看錯誤，再試一次 |
 | 已連線的 agent，**⋯** 選單裡沒有任何更新項目 | 它的 AgentAPI 太舊，還不支援從 hub 更新 | 手動更新（見[手動更新](#手動更新)） |
-| hub 的 log 有「The hub's file of instances doesn't parse」 | 檔案不完整，例如寫到一半當機，或磁碟滿了 | hub 已把它改名放到一旁（`instances.json.corrupt-<時間>`），從空的清單開始。用 webhook 加入的實例會在下一次 heartbeat 回來；其他實例要重新加入，群組、釘選和靜音也要重新設定 |
+| hub 的 log 有「The hub's file of instances doesn't parse」 | 檔案不完整，例如寫到一半當機，或磁碟滿了；或是 2.2 以前的 hub 讀到較新 hub 寫的檔案 | hub 已把它改名放到一旁（`instances.json.corrupt-<時間>`），從空的清單開始。用 webhook 加入的實例會在下一次 heartbeat 回來。其餘的要找回來，先停掉 hub，再用 `instances.json.bak`（hub 上次啟動時看到的檔案）覆蓋 `instances.json`；2.2 以前的 hub 請見[檔案](#檔案) |
+| hub 無法啟動：`instances.json is of a newer hub` | 檔案是較新的 hub 寫的 | 改用較新的 hub，或從 `instances.json.bak` 開始 |
 
 在實例所在的機器上執行 `agentapi hub status`，可以看到設定檔指向哪個 hub，以及每個執行中的
 AgentAPI 回報到哪裡。hub 的 log 會記下開始追蹤、已停止和連不到的實例（附上錯誤），以及拒絕的事件；
@@ -608,6 +610,15 @@ AgentAPI 的 webhook。當下無法修改的 AgentAPI，會在重新啟動時套
 | `~/.agentapi/config.yaml` | `agentapi hub join` | hub 的 webhook 和 `allow-update`，每個 `agentapi server` 都會讀取 |
 | `~/.agentapi/instances/` | `agentapi server` | 這台機器上執行中的 AgentAPI，供 `join` 和 `agentapi list` 使用 |
 | `~/.agentapi/hub/instances.json` | `agentapi hub serve` | hub 記得的實例、它們的群組和釘選、各自最近一次變動的時間，以及手動加入的實例的 token |
+| `~/.agentapi/hub/instances.json.bak` | `agentapi hub serve` | hub 上次啟動時看到的實例檔案 |
+
+`instances.json` 的格式是 `{"version": 1, "instances": [...]}`。2.2 以前的 hub 只寫、也只讀陣列：
+現在的 hub 讀得懂舊格式，但舊 hub 會把新格式當成損壞的檔案放到一旁，從空的清單開始。要改回舊
+hub，先停掉 hub，只留下陣列：
+
+```sh
+cd ~/.agentapi/hub && jq .instances instances.json > instances.json.new && mv instances.json.new instances.json
+```
 
 ## 限制
 

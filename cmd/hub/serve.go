@@ -107,6 +107,12 @@ func serveCmd() *cobra.Command {
 			go func() { serveErr <- srv.Serve(listener) }()
 			logger.Info("Hub listening", "address", srv.Addr, "webhook", "/hooks", "state", statePath)
 			logJoin(logger, h.JoinURLs(), port)
+			// The instances' last changes, on any way out.
+			defer func() {
+				if err := h.Close(); err != nil {
+					logger.Error("Failed to keep the hub's instances", "file", statePath, "error", err)
+				}
+			}()
 			select {
 			case err := <-serveErr:
 				stop()
