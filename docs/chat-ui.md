@@ -124,10 +124,10 @@ as thumbnails that open in full size, and can be removed before you send.
 
 ![The composer with an image attached](screenshots/attachments.png)
 
-The agent gets the path of each attachment. An agent that takes images (Claude Code, Codex
-and Pi) also gets PNG, JPEG, GIF and WebP attachments as images. **More input options** (⋯) has
-voice input where the browser supports speech recognition: it dictates into the composer in the
-browser's language.
+The agent gets the path of each attachment, and PNG, JPEG, GIF and WebP attachments as images too.
+AgentAPI removes an upload once it is 7 days old and the conversation no longer refers to it.
+**More input options** (⋯) has voice input where the browser supports speech recognition: it
+dictates into the composer in the browser's language.
 
 The draft and its attachments survive a reload. A message that didn't reach the server stays in the
 chat marked as not sent, even after a reload, with buttons to retry or dismiss it.
@@ -169,8 +169,7 @@ commands go directly to the agent, including Claude Code's `/code-review`.
 | `/login` | Runs the agent's login command in the shell terminal |
 | `/help` | Lists these commands |
 
-`/model`, `/effort`, `/mode` and `/plan` appear for an agent with settings, `/terminal` and `/login`
-when the shell terminal is on.
+`/terminal` and `/login` appear when the shell terminal is on.
 
 ### Keyboard shortcuts
 
@@ -472,17 +471,17 @@ While the keyboard is up, the page ends above it, so the composer and the key ba
 A [hub](../README.md#running-a-hub) (`agentapi hub serve`) serves this chat for every AgentAPI it
 watches. Its list puts the agents you pin on top, then what needs you first or the latest change
 first. Each state has a glyph of its own, and each row says what the agent waits for (the
-approval's command, the question) or does; search and chips filter the list. On a desktop, an overview counts each
-state and has a card per request. Picking an agent opens it in this chat beside the list (or instead
-of it on a phone, with a back button), under one bar: the hub's, with the chat's own buttons in it.
-It opens through the hub, which sends the instance's token.
+approval's command, the question) or does; search and chips filter the list. On a desktop, an
+overview counts each state, shows what needs you, works or finished since you looked, and totals the
+spend, tokens and work time of the last 24 hours and 7 days. Picking an agent opens it in this chat
+beside the list (or instead of it on a phone, with a back button), under one bar: the hub's, with
+the chat's own buttons in it. It opens through the hub, which sends the instance's token.
 
-`+` adds an instance by its URL and
-token. Each row's `⋯` menu pins the instance to the top, puts it in a group of your own (the list
+`+` adds an instance by its URL and token. Each row's `⋯` menu pins the instance to the top, puts it in a group of your own (the list
 then shows a folding header per group), mutes what it waits for until that changes, or forgets a
-stopped or unreachable one. Rows, group headers and a card of the overview show what the agents
-spent in the last 24 hours and 7 days. Each row shows its AgentAPI version, marked when it is older
-than the hub's, and another card counts the versions. The [hub guide](hub.md) covers setup, groups
+stopped or unreachable one. Rows and group headers show what the agents spent in the last 24 hours
+(hover for 7 days), and rows how long they worked. Each row shows its AgentAPI version, marked when
+it is older than the hub's, and a card of the overview counts the versions. The [hub guide](hub.md) covers setup, groups
 and every state in detail.
 
 ## Connection and caching
