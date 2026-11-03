@@ -56,13 +56,6 @@ func TestNativeClaude(t *testing.T) {
 		{"api_token_kept_on_restart/generate", "--api-token"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.flag == "--api-token" {
-				// A restart in place runs the server again with its arguments,
-				// and a bare --api-token generates another token: clients
-				// signed in with the first are locked out. The native worker's
-				// api-token re-exec fix keeps it; unskip once it lands.
-				t.Skip("needs api-token re-exec fix")
-			}
 			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 			defer cancel()
 			s := startNative(ctx, t, tc.flag)
@@ -76,8 +69,10 @@ func TestNativeClaude(t *testing.T) {
 			require.NoError(t, s.cmd.Process.Signal(syscall.SIGUSR2))
 			s.waitStable(ctx, firstID)
 			if tc.flag == "--api-token" {
-				// A new token would be printed again; none is.
-				require.Equal(t, []string{token}, s.tokens(), "the restarted server keeps the generated token")
+				// The restarted server prints its token again: the same one.
+				for _, printed := range s.tokens() {
+					require.Equal(t, token, printed, "the restarted server keeps the generated token")
+				}
 			}
 			s.post(ctx, "/message", `{"content":"still signed in","type":"user"}`)
 			s.waitStable(ctx, "")
