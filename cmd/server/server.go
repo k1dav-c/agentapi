@@ -134,6 +134,9 @@ func runServer(ctx context.Context, logger *slog.Logger, args []string, self *se
 		if opts.stateFile != "" {
 			importStateFile(stateDB, opts, cwd, logger)
 		}
+		if self != nil {
+			self.stateDB = stateDB
+		}
 	}
 	apiToken, err := resolveAPIToken(opts, logger, self)
 	if err != nil {

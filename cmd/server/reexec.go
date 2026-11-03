@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -24,8 +26,9 @@ var errRestart = errors.New("restarting in place")
 // serves or once it stops.
 var errNotServing = errors.New("AgentAPI isn't serving")
 
-// versionCheckTimeout bounds the run of the new program's --version.
-const versionCheckTimeout = 10 * time.Second
+// checkTimeout bounds each run of the new program before a restart: its
+// --version, then its --validate.
+const checkTimeout = 10 * time.Second
 
 // selfExec runs the server again in place (SIGUSR2, an update through the
 // API): in the same process, so its PID, a PID file and a parent that
@@ -53,6 +56,16 @@ type selfExec struct {
 	// restartSignals catches SIGUSR2 from startup on (listenForRestart),
 	// nil until then.
 	restartSignals chan os.Signal
+
+	// stateDB is the server's open state database, which the program that
+	// runs again must be able to write; nil without one. runServer sets
+	// it before the server serves.
+	stateDB stateDBWriter
+}
+
+// stateDBWriter is what a restart asks of the open state database.
+type stateDBWriter interface {
+	CheckWriter(knows int, program string) error
 }
 
 // newSelfExec takes how the server was started, at startup: once an update
@@ -102,23 +115,94 @@ func sameFile(a, b string) bool {
 	return errA == nil && errB == nil && os.SameFile(infoA, infoB)
 }
 
-// check runs the program with --version, as the restart would run it, and
-// returns what it says. A program that went missing or doesn't run (one
-// for another platform, a download cut short) then keeps the server
+// checked is what check found out about the program.
+type checked struct {
+	// version is what its --version says.
+	version string
+	// validated is set if it checked the settings (--validate); a program
+	// older than --validate only runs.
+	validated bool
+}
+
+// check runs the program as the restart would run it: with --version, then
+// with its arguments and environment and --validate, which checks the
+// settings as a start does without starting anything. A program that went
+// missing, doesn't run (one for another platform, a download cut short)
+// or wouldn't start with these settings (a flag it doesn't know, a value
+// it refuses, a state database it can't write) then keeps the server
 // serving rather than stopped.
-func (s *selfExec) check(ctx context.Context) (string, error) {
+func (s *selfExec) check(ctx context.Context) (checked, error) {
 	if s.path == "" {
-		return "", errors.New("AgentAPI didn't find its program at startup")
+		return checked{}, errors.New("AgentAPI didn't find its program at startup")
 	}
-	ctx, cancel := context.WithTimeout(ctx, versionCheckTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, s.path, "--version")
-	cmd.Env = s.env
-	out, err := cmd.Output()
+	out, _, err := s.run(ctx, "--version")
 	if err != nil {
-		return "", fmt.Errorf("%s --version: %w", s.path, err)
+		return checked{}, fmt.Errorf("%s --version: %w", s.path, err)
 	}
-	return strings.TrimSpace(string(out)), nil
+	result := checked{version: strings.TrimSpace(string(out))}
+	out, stderr, err := s.run(ctx, validateArgs(s.argv)...)
+	if err != nil {
+		if strings.Contains(string(stderr), "unknown flag: --"+FlagValidate) {
+			// AgentAPI 2.3.0 and earlier.
+			return result, nil
+		}
+		return checked{}, fmt.Errorf("%s wouldn't start: %s", s.path, reason(stderr, err))
+	}
+	result.validated = true
+	if s.stateDB != nil {
+		schema, ok := strings.CutPrefix(strings.TrimSpace(string(out)), validateOK)
+		knows, convErr := strconv.Atoi(schema)
+		if !ok || convErr != nil {
+			return checked{}, fmt.Errorf("%s --validate answered %q", s.path, strings.TrimSpace(string(out)))
+		}
+		program, _ := strings.CutPrefix(result.version, "agentapi version ")
+		if err := s.stateDB.CheckWriter(knows, program); err != nil {
+			return checked{}, fmt.Errorf("%s wouldn't start: the state database %w", s.path, err)
+		}
+	}
+	return result, nil
+}
+
+// run runs the program with args and the environment it runs again with,
+// for at most checkTimeout, and returns its output.
+func (s *selfExec) run(ctx context.Context, args ...string) (stdout, stderr []byte, err error) {
+	ctx, cancel := context.WithTimeout(ctx, checkTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, s.path, args...)
+	cmd.Env = s.env
+	var errBuf bytes.Buffer
+	cmd.Stderr = &errBuf
+	// Output waits for what the program started, which keeps its stdout.
+	cmd.WaitDelay = time.Second
+	stdout, err = cmd.Output()
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		err = fmt.Errorf("no answer within %s", checkTimeout)
+	}
+	return stdout, errBuf.Bytes(), err
+}
+
+// validateArgs are the arguments of argv, the command line the server
+// runs again with, with --validate: before the agent's command after --.
+func validateArgs(argv []string) []string {
+	var args []string
+	if len(argv) > 0 {
+		args = slices.Clone(argv[1:])
+	}
+	at := slices.Index(args, "--")
+	if at < 0 {
+		at = len(args)
+	}
+	return slices.Insert(args, at, "--"+FlagValidate)
+}
+
+// reason is why a program that failed with err says it failed: the last
+// line it wrote to stderr, or err.
+func reason(stderr []byte, err error) string {
+	lines := strings.Split(strings.TrimSpace(string(stderr)), "\n")
+	if last := strings.TrimSpace(lines[len(lines)-1]); last != "" {
+		return last
+	}
+	return err.Error()
 }
 
 // arm has restart stop the server, whose context is served, with stop.
@@ -137,7 +221,7 @@ func (s *selfExec) arm(served context.Context, stop context.CancelFunc, logger *
 // and the program runs again. It returns why it can't; the server goes on
 // serving then. why says who asked, for the log.
 func (s *selfExec) restart(ctx context.Context, why string) error {
-	version, err := s.check(ctx)
+	checked, err := s.check(ctx)
 	if err != nil {
 		return err
 	}
@@ -146,7 +230,7 @@ func (s *selfExec) restart(ctx context.Context, why string) error {
 	if s.stop == nil || s.served.Err() != nil || ctx.Err() != nil {
 		return errNotServing
 	}
-	s.logger.Info("Restarting in place", "reason", why, "program", s.path, "version", version)
+	s.logger.Info("Restarting in place", "reason", why, "program", s.path, "version", checked.version, "validated", checked.validated)
 	s.requested.Store(true)
 	s.stop()
 	return nil
