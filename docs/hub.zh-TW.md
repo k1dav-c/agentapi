@@ -194,8 +194,9 @@ hub 沒有回應時（它停了，或它前面的 proxy 回了錯誤頁），頁
 沒有開啟任何 agent 時，右側會顯示有幾個 agent 需要你、各自為了什麼。每種狀態一格（需要你、工作中、
 已完成未讀、離線），點一下就會篩選清單。下方每個需要你的 agent 各有一張卡片，寫出它在等什麼（核准
 的指令、提問、登入、用量限制）和等了多久，並有 **Answer** 或 **Open** 按鈕。工作中的 agent 會顯示
-提示和已經跑了多久；你還沒看過的已完成 agent 會顯示標題。最下方的[版本](#版本)卡片統計各 agent
-執行的 AgentAPI 版本。
+提示和已經跑了多久；你還沒看過的已完成 agent 會顯示標題。狀態格和這些卡片之間是[花費](#花費)、
+[Token 用量](#token-用量)和[工作時間](#工作時間)卡片；最下方的[版本](#版本)卡片統計各 agent 執行的
+AgentAPI 版本。
 
 ![深色主題的總覽](screenshots/hub-desktop-dark.png)
 
@@ -205,7 +206,8 @@ hub 沒有回應時（它停了，或它前面的 proxy 回了錯誤頁），頁
 
 每個 AgentAPI 每分鐘從 agent 的 session log 算出它在工作目錄裡的所有 session，最近 24 小時和最近
 7 天花了多少，放進摘要（`spend`）。這是換算成 API 的金額：依模型供應商的牌價計算 token，訂閱方案
-並不會實際收取。只有 native 模式的 Claude Code、Codex 和 Pi 有這個數字，其他 agent 不會顯示。
+並不會實際收取。Claude Code、Codex 和 Pi 有這個數字；`native-demo` 和 AgentAPI 2 的 PTY agent
+不會顯示。
 
 每一列顯示它最近 24 小時的花費（`$110/24h`），群組標題顯示群組的合計，清單頂端顯示全部的合計；
 滑鼠移上去還會看到 7 天的金額。桌面版的總覽有一張 **Spend** 卡片：所有回報花費的 agent 最近 24 小時
@@ -242,8 +244,7 @@ agent 那一列顯示工作中（`working`）時，hub 就替它計時：從開�
 一個事件；hub 停止時，計時停在那一刻。agent 從下一份摘要起重新計時。
 
 每一列在花費後面以計時器圖示顯示最近 24 小時的工作時間（`2.3h`），顯示用量限制時則不顯示；滑鼠移上去
-還會看到 7 天的數字。
-總覽在 Tokens 下方有一張 **Work time** 卡片：所有 agent 最近 24 小時和 7 天的合計、有群組時各群組的
+還會看到 7 天的數字。總覽在 Tokens 下方有一張 **Work time** 卡片：所有 agent 最近 24 小時和 7 天的合計、有群組時各群組的
 小計，以及這週工作最久的五個。數字一律無條件捨去：不到一小時以分鐘表示（`45m`），不到十小時以
 0.1 小時表示（`2.3h`），再長就以小時表示（`31h`）。和花費不同，每個 agent 都算，已停止的也算：
 這是 hub 自己對每個實例的紀錄。
@@ -267,10 +268,16 @@ hub 舊。
 #### 從 hub 更新
 
 機器允許的話，AgentAPI 會在 hub 要求時自行更新。在那一列的 **⋯** 選單選 **Update AgentAPI…**，
-會先請你確認。預設會等 agent 閒置才更新：手上的任務做完，也沒有核准、提問、計畫或終端機對話框在等
-回覆。**Update now** 不等，會直接中斷正在跑的任務。接著 AgentAPI 下載符合機器作業系統和架構的最新
-正式版，用該版的 `checksums.txt` 驗證後安裝，再像 [`agentapi restart`](../README.zh-TW.md#agentapi-restart)
-一樣原地重新啟動。同一台機器上的 AgentAPI 共用一個 binary：第一個負責替換，其他的只要重新啟動。
+會先請你確認。預設會等 agent 閒置才更新：手上的任務做完，也沒有核准、提問或計畫在等回覆。
+**Update now** 不等，會直接中斷正在跑的任務。AgentAPI 下載符合機器作業系統和架構的最新正式版，用
+該版的 `checksums.txt` 驗證後安裝，依指定的方式等待，再像
+[`agentapi restart`](../README.zh-TW.md#agentapi-restart) 一樣原地重新啟動。同一台機器上的 AgentAPI
+共用一個 binary：第一個負責替換，其他的只要重新啟動。
+
+重新啟動之前，AgentAPI 會用自己的設定以 `agentapi server --validate` 執行新程式。新程式用這些設定
+無法啟動時（有它不接受的旗標或 agent），AgentAPI 會繼續服務，更新則以失敗結束並說明原因。AgentAPI 3
+只執行 Claude Code、Codex 和 Pi：執行其他 agent、或任何以 `--transport pty` 執行的 AgentAPI 2 都會
+這樣失敗，但它的機器上已經換成 AgentAPI 3。請在那個 AgentAPI 重新啟動之前，把 v2.5.1 裝回去。
 
 更新期間，那一列會顯示進度：檢查中、下載中、等任務結束、重新啟動中。還在等任務結束時，可以用
 **⋯** 選單的 **Cancel the update**，或開啟的 agent 上方那一列的 **Cancel** 取消。更新失敗時會標示
@@ -323,7 +330,8 @@ hub 舊。
 
 | 圖示 | 第二行開頭 | 意思 |
 | --- | --- | --- |
-| 琥珀色 ! | Approval、Question、Plan、Dialog | 有請求在等你回覆；這一行會顯示內容 |
+| 琥珀色 ! | Approval、Question、Plan | 有請求在等你回覆；這一行會顯示內容 |
+| 琥珀色 ! | Dialog | AgentAPI 2 的 PTY agent 在終端機裡顯示對話框，hub 的聊天介面無法顯示（見[限制](#限制)） |
 | 琥珀色 ! | Login | 要先在它的機器上登入，agent 才能工作 |
 | 琥珀色 ! | Usage limit | 用量限制停下了回合；佇列中的訊息等重置後才送出 |
 | 轉動的藍色弧線 | Working | agent 正在處理顯示的任務 |
@@ -332,7 +340,7 @@ hub 舊。
 | 灰色、劃掉的鈴鐺 | Muted | 它需要你處理，但你把這件事靜音到它改變為止（見[靜音](#靜音)） |
 | 轉動的虛線圓環 | Connecting | hub 正在開啟或重新開啟它的摘要串流 |
 | 斷開的紅色圓環 | Unreachable | hub 已經 10 秒連不到它；這一行會說明原因 |
-| 方塊 | Stopped、Exited | AgentAPI 已停止（或連不到時錯過三次 heartbeat），或它的 agent 已結束（native agent：AgentAPI 已放棄重新啟動） |
+| 方塊 | Stopped、Exited | AgentAPI 已停止（或連不到時錯過三次 heartbeat），或它的 agent 已結束、AgentAPI 也已放棄重新啟動 |
 
 搜尋（**/**）會比對名稱、群組、標題、機器、agent 或版本中的任何字詞。搜尋框下方的標籤可以顯示
 全部，或只顯示需要你、工作中、已完成未讀、離線的 agent，並附上數量。頁首顯示 hub 的串流是否連線中，以及共有
@@ -564,9 +572,9 @@ AgentAPI 1.1 以上。在這裡輸入的 token 會為這個實例保存，取代
 | `the hub doesn't answer to <name>; add it to --allowed-hosts` | hub 設了 `--allowed-hosts`，而你用了別的名稱開啟 | 把這個名稱加進 `--allowed-hosts` |
 | **Update AgentAPI…** 說更新已關閉 | 這台機器不接受 hub 的更新 | 在那台機器的 `~/.agentapi/config.yaml` 加上 `allow-update: true`，再執行 `agentapi restart --all` |
 | **Update AgentAPI…** 要求一次性設定 | AgentAPI 無法寫入 binary 所在的目錄，例如 root 擁有的 `/usr/local/bin` | 在那台機器上執行一次畫面上的指令 |
-| 那一列顯示 **Update failed** | 檢查或下載新版時出錯 | 滑鼠移上去，或開啟 **Update AgentAPI…** 查看錯誤，再試一次 |
+| 那一列顯示 **Update failed** | 檢查或下載新版時出錯，或新版無法以這個 AgentAPI 的設定啟動，例如執行 PTY agent 的 AgentAPI 2 | 滑鼠移上去，或開啟 **Update AgentAPI…** 查看錯誤，再試一次。AgentAPI 2 要保留原本的 agent 時，在它的機器上把 v2.5.1 裝回去（見[從 hub 更新](#從-hub-更新)） |
 | 已連線的 agent，**⋯** 選單裡沒有任何更新項目 | 它的 AgentAPI 太舊，還不支援從 hub 更新 | 手動更新（見[手動更新](#手動更新)） |
-| hub 的 log 有「The hub's file of instances doesn't parse」 | 檔案不完整，例如寫到一半當機，或磁碟滿了；或是 2.2 以前的 hub 讀到較新 hub 寫的檔案 | hub 已把它改名放到一旁（`instances.json.corrupt-<時間>`），從空的清單開始。用 webhook 加入的實例會在下一次 heartbeat 回來。其餘的要找回來，先停掉 hub，再用 `instances.json.bak`（hub 上次啟動時看到的檔案）覆蓋 `instances.json`；2.2 以前的 hub 請見[檔案](#檔案) |
+| hub 的 log 有「The hub's file of instances doesn't parse」 | 檔案損壞，例如手動改壞了；或是 2.2 以前的 hub 讀到較新 hub 寫的檔案 | hub 已把它改名放到一旁（`instances.json.corrupt-<時間>`），從空的清單開始。用 webhook 加入的實例會在下一次 heartbeat 回來。其餘的要找回來，先停掉 hub，再用 `instances.json.bak`（hub 上次啟動時看到的檔案）覆蓋 `instances.json`；2.2 以前的 hub 請見[檔案](#檔案) |
 | hub 無法啟動：`instances.json is of a newer hub` | 檔案是較新的 hub 寫的 | 改用較新的 hub，或從 `instances.json.bak` 開始 |
 
 在實例所在的機器上執行 `agentapi hub status`，可以看到設定檔指向哪個 hub，以及每個執行中的
@@ -666,7 +674,8 @@ cd ~/.agentapi/hub && jq .instances instances.json > instances.json.new && mv in
 ## 限制
 
 - hub 對所有實例都提供它自己版本的聊天介面。hub 和各實例請使用相同的 AgentAPI 版本；哪些不同，
-  見[版本](#版本)。
+  見[版本](#版本)。AgentAPI 3 的聊天介面不顯示 agent 的終端機：AgentAPI 2 的終端機對話框，請到那個
+  AgentAPI 自己的聊天介面（它的網址）回覆。
 - 所有人共用一個 hub token：沒有個別帳號或權限。
 - [工作時間](#工作時間)只有 hub 看到的部分：hub 還沒有這項功能之前、hub 停機或連不到 agent 的期間都
   不算。一個 hub 也不知道另一個 hub 算了多少。
