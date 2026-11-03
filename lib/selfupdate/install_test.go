@@ -233,6 +233,15 @@ func TestBlocked(t *testing.T) {
 	assert.Equal(t, "can't replace "+program.Real+": "+filepath.Dir(program.Real)+" isn't writable. Move it to a directory you own, once: "+
 		"mkdir -p "+bin+" && cp "+program.Real+" "+copied+" && sudo ln -sf "+copied+" "+program.Path, program.Blocked())
 
+	// A path through a symlinked directory isn't a link to the program.
+	linked := filepath.Join(dir, "linked")
+	require.NoError(t, os.Symlink(filepath.Join(dir, "usr"), linked))
+	program, err = selfupdate.Locate(filepath.Join(linked, "local", "bin", "agentapi"))
+	require.NoError(t, err)
+	assert.NotEqual(t, program.Path, program.Real)
+	assert.Equal(t, "can't replace "+program.Real+": "+filepath.Dir(program.Real)+" isn't writable. Move it to a directory you own, once: "+
+		"mkdir -p "+bin+" && cp "+program.Real+" "+copied+" && sudo ln -sf "+copied+" "+program.Path, program.Blocked())
+
 	// A link the user owns needs no sudo.
 	link := filepath.Join(dir, "mine", "agentapi-link")
 	require.NoError(t, os.Symlink(installedThere, link))

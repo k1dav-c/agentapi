@@ -3,6 +3,7 @@ package selfupdate
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -53,7 +54,9 @@ func (p Program) Blocked() string {
 		return ""
 	}
 	what := p.Real
-	if p.Path != p.Real {
+	// A path that differs from Real only by a symlinked directory (macOS's
+	// /var, which is /private/var) isn't a link to it.
+	if info, err := os.Lstat(p.Path); err == nil && info.Mode()&fs.ModeSymlink != 0 {
 		what = fmt.Sprintf("%s (which %s links to)", p.Real, p.Path)
 	}
 	bin := "~/.local/bin"
