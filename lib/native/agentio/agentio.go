@@ -268,6 +268,19 @@ func (c *Calls[K, R]) Drop(id K) {
 	delete(c.calls, id)
 }
 
+// Await waits for the response to request id, which was sent, with
+// call.Wait. A caller that stops waiting, or whose request Close failed,
+// drops the request and gets the error marked native.ErrUnconfirmed: the
+// agent may carry it out all the same.
+func (c *Calls[K, R]) Await(ctx context.Context, id K, call *Call[R]) (R, error) {
+	value, err := call.Wait(ctx)
+	if err != nil {
+		c.Drop(id)
+		return value, native.Unconfirmed(err)
+	}
+	return value, nil
+}
+
 // Close fails the requests still waiting with err, and refuses new ones
 // with it.
 func (c *Calls[K, R]) Close(err error) {

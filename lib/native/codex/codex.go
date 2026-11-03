@@ -575,10 +575,9 @@ func (a *Adapter) call(ctx context.Context, method string, params any, onResult 
 		a.calls.Drop(id)
 		return nil, err
 	}
-	res, err := c.Wait(ctx)
+	res, err := a.calls.Await(ctx, id, c)
 	if err != nil {
-		a.calls.Drop(id)
-		return nil, native.Unconfirmed(err)
+		return nil, err
 	}
 	return res.unpack()
 }

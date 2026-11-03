@@ -364,10 +364,9 @@ func (a *Adapter) request(ctx context.Context, subtype string, fields map[string
 	if err != nil {
 		return nil, err
 	}
-	res, err := call.Wait(ctx)
+	res, err := a.calls.Await(ctx, id, call)
 	if err != nil {
-		a.calls.Drop(id)
-		return nil, native.Unconfirmed(err)
+		return nil, err
 	}
 	return res.response, res.err
 }
