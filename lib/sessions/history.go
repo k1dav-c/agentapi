@@ -114,29 +114,8 @@ func (s *Store) read(path string) SessionHistory {
 	if s.src.namesInLog {
 		namer = s.src.format.NewNamer()
 	}
-	var (
-		history SessionHistory
-		// order holds the rich messages' keys in the order they first
-		// appeared, latest holds their final state: a parser reports a
-		// message again as it grows, or only once the next line came.
-		order  []string
-		latest = make(map[string]transcript.RichMessage)
-	)
-	addRich := func(msgs []transcript.RichMessage) {
-		for _, m := range msgs {
-			if m.MessageID == "" || (m.Role == "user" && !hasToolResult(m)) {
-				// The user's prompts are the messages; the chat takes only
-				// the tool results from the user's rich messages.
-				continue
-			}
-			m.MessageID = historyMessagePrefix + m.MessageID
-			key := m.MessageID + "\x00" + m.Role
-			if _, seen := latest[key]; !seen {
-				order = append(order, key)
-			}
-			latest[key] = m
-		}
-	}
+	var history SessionHistory
+	rich := newRichLog(historyMessagePrefix)
 	s.src.lines(path, func(line []byte) bool {
 		if namer != nil {
 			if name, changed := namer.Name(line); changed {
@@ -149,11 +128,12 @@ func (s *Store) read(path string) SessionHistory {
 			})
 		}
 		if msgs, err := parser.ParseLine(line); err == nil {
-			addRich(msgs)
+			rich.add(msgs)
 		}
 		return true
 	})
-	addRich(parser.Flush())
+	rich.add(parser.Flush())
+	history.Rich = rich.messages()
 
 	// The agent's text after each prompt becomes the agent message that
 	// answers it: the text of the rich messages written since, as the chat
@@ -161,9 +141,7 @@ func (s *Store) read(path string) SessionHistory {
 	texts := make(map[int][]string)
 	times := make(map[int]time.Time)
 	promptBefore := promptFinder(history.Messages)
-	for _, key := range order {
-		m := latest[key]
-		history.Rich = append(history.Rich, m)
+	for _, m := range history.Rich {
 		if m.Role != "assistant" {
 			continue
 		}
@@ -213,6 +191,45 @@ func promptFinder(prompts []conv.Message) func(t time.Time) int {
 		}
 		return -1
 	}
+}
+
+// richLog keeps the rich messages a parser reports of a log, their IDs
+// prefixed: each in the order it first appeared, in its final state (a
+// parser reports a message again as it grows, or only once the next line
+// came). The user's prompts are left out: the chat takes only the tool
+// results from the user's rich messages.
+type richLog struct {
+	prefix string
+	order  []string
+	latest map[string]transcript.RichMessage
+}
+
+func newRichLog(prefix string) *richLog {
+	return &richLog{prefix: prefix, latest: make(map[string]transcript.RichMessage)}
+}
+
+// add keeps msgs, the messages a parser reported.
+func (r *richLog) add(msgs []transcript.RichMessage) {
+	for _, m := range msgs {
+		if m.MessageID == "" || (m.Role == "user" && !hasToolResult(m)) {
+			continue
+		}
+		m.MessageID = r.prefix + m.MessageID
+		key := m.MessageID + "\x00" + m.Role
+		if _, seen := r.latest[key]; !seen {
+			r.order = append(r.order, key)
+		}
+		r.latest[key] = m
+	}
+}
+
+// messages returns the messages kept, in order.
+func (r *richLog) messages() []transcript.RichMessage {
+	var msgs []transcript.RichMessage
+	for _, key := range r.order {
+		msgs = append(msgs, r.latest[key])
+	}
+	return msgs
 }
 
 // hasToolResult reports whether a rich message holds a tool result.
