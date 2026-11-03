@@ -9,7 +9,7 @@ import {TERMINAL_FONT_SIZE as FONT_SIZE, TERMINAL_LINE_HEIGHT as LINE_HEIGHT, Te
 import {LatestLinkChip} from "./terminal-links";
 import {useXterm} from "./use-xterm";
 import {fitTerminalFontSize, screenToTerminalOutput} from "@/lib/tty";
-import {withCredentials} from "@/lib/auth";
+import {reconnectWhenSignedIn, withCredentials} from "@/lib/auth";
 import {EventSourceConnection} from "@/lib/event-source";
 import type {ScreenEvent} from "@/lib/events";
 
@@ -113,6 +113,9 @@ export function TtyView({onExit}: {onExit: () => void}) {
             if (!frame) frame = window.requestAnimationFrame(render);
           },
         }),
+        // A sign-in that ended (a 401) asks for the token, as the chat's
+        // stream does.
+        onError: () => void reconnectWhenSignedIn(storageScope, () => connection.reconnectNow()),
         onChange: ({status}) => setConnected(status === "connected"),
       });
       connection.start();

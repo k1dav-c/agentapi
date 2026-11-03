@@ -5,7 +5,7 @@ import {toast} from "sonner";
 import {ChatStream} from "@/lib/chat-stream";
 import {initialConnectionState, type ConnectionState} from "@/lib/event-source";
 import {loadSession, mergeByKey} from "@/lib/session-cache";
-import {bootstrapSession, ensureSession, withCredentials} from "@/lib/auth";
+import {bootstrapSession, ensureSession, reconnectWhenSignedIn, withCredentials} from "@/lib/auth";
 import type {createChatAPI} from "@/lib/chat-api";
 import {parseTransport, type Transport} from "@/lib/dispatch";
 import {isLoginNotice} from "@/lib/login";
@@ -163,13 +163,10 @@ export function useEventStream({
         else toast.info(data.message, options);
       },
       opened: () => void refreshQueue(),
-      // EventSource doesn't expose the status code; a 401 (no session
-      // cookie, or the token changed) shows up as an error like any other.
-      // Ask the server, and reconnect right away once signed in. Nobody
-      // asked for this reconnect, so a closed dialog stays closed.
+      // A 401 looks like any other failure: see reconnectWhenSignedIn.
       failed: () => {
-        void ensureSession(agentAPIUrl, {background: true}).then((signedIn) => {
-          if (signedIn && !disposed) stream.reconnectNow();
+        void reconnectWhenSignedIn(agentAPIUrl, () => {
+          if (!disposed) stream.reconnectNow();
         });
       },
       connection: setConnection,

@@ -9,7 +9,7 @@ import {TerminalKeyBar} from "./terminal-chrome";
 import {LatestLinkChip} from "./terminal-links";
 import {useXterm} from "./use-xterm";
 import {decodeBase64, terminalSize} from "@/lib/shell";
-import {withCredentials} from "@/lib/auth";
+import {reconnectWhenSignedIn, withCredentials} from "@/lib/auth";
 import {EventSourceConnection} from "@/lib/event-source";
 import type {TerminalExitEvent, TerminalOutputEvent} from "@/lib/events";
 import {getErrorMessage} from "@/lib/error-utils";
@@ -106,6 +106,9 @@ export function ShellView({onExit, command}: {onExit: () => void; command?: stri
           setState("open");
           fit();
         },
+        // A sign-in that ended (a 401) asks for the token, as the chat's
+        // stream does.
+        onError: () => void reconnectWhenSignedIn(storageScope, () => connection.reconnectNow()),
         onChange: ({status}) => {
           if (status !== "connected") setState((current) => (current === "exited" ? current : "connecting"));
         },
