@@ -1,5 +1,36 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- A restart in place (SIGUSR2, `POST /update`, `agentapi restart`) first runs the new program with
+  the same arguments, variables and config file under a hidden `agentapi server --validate`, which
+  checks the flags, values, placeholders, port, agent and transport, the prices file and the server
+  settings without listening or starting anything; the running server checks that the new program
+  can write its state database. If the check fails, the server keeps serving and reports why, as for
+  a program that doesn't run: in its log, as `failed` in `POST /update`, and in `agentapi restart`.
+  A new program that predates `--validate` is checked with `--version` only. A `--port` outside
+  0–65535 is refused at startup.
+- Uploads the conversation no longer refers to are removed once they are 7 days old: at start, every
+  hour, and after the conversation is cleared or another session is opened. An upload stays while
+  any message, rich message, request or queued message names it. Only the folders AgentAPI creates
+  in the uploads directory are removed, never through a symlink.
+
+### Performance
+
+- A streamed rich message is stored without copying it on every update: 2000 updates of one message
+  took 550 ms and 830 MB, now 3 ms and 2 MB.
+- The shell terminal keeps its scrollback in a ring, so output into a full scrollback no longer
+  copies 256 KiB per chunk.
+
+### Internal
+
+- A release runs the tests of its commit first (`release.yml` calls `go-test.yml`) and publishes
+  only if they pass, on a push to `main`, a manual run or a release published by hand. A push that a
+  later one already released, or that is no longer on `main`, isn't released. On `main`, the tests
+  appear as **Release / Go Tests**.
+
 ## v2.3.0
 
 ### Features
