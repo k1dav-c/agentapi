@@ -976,8 +976,12 @@ the same build.
   run in CI; the chat has eslint, `bun test` and `tsc`. CI also runs the
   tests of `lib/` and `cmd/` with the race detector, every test on macOS,
   and on Windows builds every test and runs those of the packages with
-  Windows code. The release checks that each binary is built for its
-  platform.
+  Windows code. The Release workflow runs these tests (`go-test.yml`, called
+  as a reusable workflow) on the commit it releases and releases only once
+  they pass, for a push to `main`, a manual run and a published release
+  alike; pull requests run them on their own. It checks that each binary is
+  built for its platform, and a push that a later push's release already
+  holds, or that is no longer on `main`, releases nothing.
 
 ## Design principles
 

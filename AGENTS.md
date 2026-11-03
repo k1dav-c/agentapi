@@ -30,6 +30,8 @@ Use these commands and conventions when changing AgentAPI.
 - `go test ./e2e` - Run the end-to-end tests: the server binary with a scripted echo agent (PTY) and `e2e/fakeclaude`, a scripted Claude Code (native)
 - `cd chat && bun test` - Run the chat UI tests
 - Tests are located alongside source files (e.g., `lib/httpapi/server_test.go`)
+- CI releases on every push to `main` from Conventional Commit messages, but only after these tests
+  pass on that commit: the Release workflow runs `.github/workflows/go-test.yml` first
 
 ## Development commands
 
