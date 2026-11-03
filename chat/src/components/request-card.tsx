@@ -39,9 +39,8 @@ const KIND_META = {
   plan: { label: "Plan", icon: ClipboardList },
 } as const;
 
-// The request the agent waits on (native transport), docked above the
-// composer like the terminal prompt card. One request shows at a time,
-// oldest first.
+// The request the agent waits on, docked above the composer. One request
+// shows at a time, oldest first.
 export function RequestCard() {
   const requests = useChatSelector((chat) => chat.requests);
   const lastMessageTime = useChatSelector((chat) => chat.currentTask?.time);

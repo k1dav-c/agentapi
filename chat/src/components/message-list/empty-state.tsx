@@ -7,10 +7,9 @@ import {AgentType} from "@/lib/agents";
 import {type ServerStatus} from "@/lib/agent-status";
 import { MessageItem } from "./message-item";
 
-// Terminal output from before the first task. Usually that is just the
-// agent's startup banner, which stays collapsed instead of reading as
-// content; if you worked in TTY mode (prompts typed straight into the
-// terminal never become tasks), it holds the real conversation and opens.
+// The agent's output from before the first task. Usually that is just a
+// startup banner, which stays collapsed instead of reading as content; if
+// it holds agent replies, it is the real conversation and opens.
 export function StartupScreen({
   messages,
 }: {
