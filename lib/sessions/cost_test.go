@@ -622,3 +622,31 @@ func TestClaudeCostsOfCallsWithoutIDs(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 3, d.Cost("s1").Calls)
 }
+
+// A model's cost is priced only when all its calls are: Pi prices some
+// calls of a model itself, and not others.
+func TestModelPricedByAllItsCalls(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 10, 20, 10, 0, 0, 0, time.UTC)
+	calls := []ModelCall{
+		{Time: at, Model: "local-llama", USD: 0.01, Priced: true},
+		{Time: at.Add(time.Second), Model: "local-llama"},
+		{Time: at.Add(2 * time.Second), Model: "claude-opus-5-5", USD: 0.02, Priced: true},
+	}
+	c := CostOf(calls)
+	require.Len(t, c.Models, 2)
+	assert.Equal(t, "claude-opus-5-5", c.Models[0].Model)
+	assert.True(t, c.Models[0].Priced)
+	assert.False(t, c.Models[1].Priced, "a call of it had no price")
+
+	// Summed over sessions, the one with the priced call first.
+	slices.Reverse(calls)
+	assert.False(t, CostOf(calls).Models[1].Priced)
+	sum := newCostSum()
+	sum.merge(CostOf(calls[2:]))
+	sum.merge(CostOf(calls[1:2]))
+	sum.merge(CostOf(calls[:1]))
+	total := sum.c.sorted()
+	require.Len(t, total.Models, 2)
+	assert.False(t, total.Models[1].Priced)
+}

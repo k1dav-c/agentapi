@@ -37,7 +37,8 @@ type ModelCall struct {
 	cost float64
 }
 
-// ModelCost is what a session spent on one model.
+// ModelCost is what a session spent on one model. Priced is false when
+// any of its calls had no price.
 type ModelCost struct {
 	Model  string         `json:"model" doc:"The model."`
 	USD    float64        `json:"usd" doc:"API-equivalent cost in USD."`
@@ -94,6 +95,7 @@ func (s *costSum) add(call ModelCall) {
 		s.model = i
 	}
 	m := &c.Models[s.model]
+	m.Priced = m.Priced && call.Priced
 	m.USD += call.USD
 	m.Tokens = m.Tokens.Add(call.Tokens)
 	m.Calls++
@@ -144,6 +146,7 @@ func (s *costSum) merge(c SessionCost) {
 			s.models[m.Model] = i
 		}
 		sm := &s.c.Models[i]
+		sm.Priced = sm.Priced && m.Priced
 		sm.USD += m.USD
 		sm.Tokens = sm.Tokens.Add(m.Tokens)
 		sm.Calls += m.Calls
