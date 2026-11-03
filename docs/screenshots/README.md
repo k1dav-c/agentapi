@@ -1,29 +1,28 @@
 # Documentation screenshots
 
 The [chat UI guide](../chat-ui.md) and [README](../../README.md) use these screenshots and GIFs.
-Chromium captured them from AgentAPI 2.4.0, built from the source with `make build`, serving the
+Chromium captured them from AgentAPI 3.0.0, built from the source with `make build`, serving the
 production chat UI and API.
 
 [scripts/capture-docs.mjs](../../scripts/capture-docs.mjs) starts its own servers on a small sample
 project, `my-app` (a page with a stylesheet, a script and release notes, two commits and
 uncommitted changes):
 
-- the built-in `native-demo` agent with the native transport, for everything but TTY mode. The
-  server is real: it streams the events, keeps the queue, opens and answers the requests, applies
-  the settings, serves the files and diffs, and runs the shell terminal. The demo's replies, tool
-  results, models, context and usage limits are simulated, so no paid agent runs;
+- the built-in `native-demo` agent, for the chat. The server is real: it streams the events, keeps
+  the queue, opens and answers the requests, applies the settings, serves the files and diffs, and
+  runs the shell terminal. The demo's replies, tool results, models, context and usage limits are
+  simulated, so no paid agent runs;
 - the same demo posing as Claude Code (`--type claude -- native-demo`), one directory above
   `my-app`, for the earlier sessions, a subagent and a file found below the working directory.
   AgentAPI reads Claude Code's logs for it, which the script writes into a temporary home
   directory: three earlier sessions, and the log of the subagent the demo's Agent tool call starts;
-- bash as a PTY agent (`--term-width 100`), for TTY mode;
 - `agentapi hub serve` with nine `native-demo` instances that join it with `agentapi hub join`,
   posing as Claude Code, Codex and Pi, for the hub: one asks for an approval, one asks questions,
   one needs a login, one hit its usage limit, one works, one finished a task, one is idle, one
   stopped and one was killed, so the hub can't reach it. Six are in two groups, and two of those
   are pinned to the top. The one that asks questions can run a binary stamped with an older
   version (`AGENTAPI_OLDER_BINARY`), so that it shows as older than the hub: 2.0.0 beside the
-  hub's 2.1.0 in the screenshots. The hub starts on a file that says how long each instance
+  hub's 3.0.0 in the screenshots. The hub starts on a file that says how long each instance
   worked over the last week, as a hub that watched them would keep it, since a demo doesn't run
   for hours. A second, empty hub shows the guide for the first agents. The rows name the machine;
   the screenshots show placeholders (`dev-1` and so on).
@@ -70,7 +69,6 @@ device scale factor of 1.
 | [lineage.png](lineage.png) | The Lineage panel on a subagent |
 | [file-find.png](file-find.png) | The file viewer on a file found below the working directory |
 | [login-card.png](login-card.png) | A login card |
-| [tty-mode.png](tty-mode.png) | TTY mode on a PTY agent |
 | [hub-desktop.png](hub-desktop.png) | The hub's overview: how many need you, a tile per state, a card per request, what runs and what finished |
 | [hub-desktop-dark.png](hub-desktop-dark.png) | The same overview in the dark theme |
 | [hub-instance.png](hub-instance.png) | An agent open beside the list, its approval ready to answer |
@@ -129,8 +127,8 @@ runs the script) and a neutral shell prompt.
    recorded in [capture.json](capture.json).
 
 3. Run the script from the repository root. It needs Node.js 18 or later, git and bash, and
-   fourteen free ports (3311 to 3324 unless you set `AGENTAPI_SCREENSHOT_PORT` to the first of
-   fourteen others):
+   thirteen free ports (3311 to 3323 unless you set `AGENTAPI_SCREENSHOT_PORT` to the first of
+   thirteen others):
 
    ```bash
    export AGENTAPI_PLAYWRIGHT_MODULE=/tmp/agentapi-docs-browser/node_modules/playwright-core/index.mjs
@@ -149,7 +147,7 @@ version, browser, capture time, viewports and images. It stops the servers and r
 files even if a step fails. The run takes about five minutes; a chat error fails it.
 
 The binary's version shows in the chat's header. To show the version a merge will release, build
-with it: `make build VERSION=0.27.0`.
+with it: `make build VERSION=3.0.0`.
 
 Review the new images before updating the [chat UI guide](../chat-ui.md), its
 [Traditional Chinese translation](../chat-ui.zh-TW.md) and the READMEs.
