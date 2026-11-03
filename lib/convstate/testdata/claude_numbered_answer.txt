@@ -1,0 +1,14 @@
+❯ 下一步要怎麼做？
+
+● 建議依序處理：
+
+  1. 先確認 OAuth 是否需要重新 authorize，再決定要 Allow 還是 Deny
+  2. Select an option for the deploy target and continue
+  3. 跑完測試後再 approve 這個 PR
+
+  你要我先從哪一步開始？
+
+────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)

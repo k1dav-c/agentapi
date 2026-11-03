@@ -472,7 +472,7 @@ func (s *Server) awaitUpdateRestart(run *updateRun, version string, moved func()
 func (s *Server) beginUpdateRestart(run *updateRun, version string) (began, current bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !run.isNow() && (s.restarting.Load() || !s.emitter.agentIdle()) {
+	if !run.isNow() && (s.restarting.Load() || !s.emitter.AgentIdle()) {
 		return false, true
 	}
 	if !s.updater.advance(run, UpdateStateRestarting, version) {

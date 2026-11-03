@@ -11,6 +11,7 @@ import (
 	"time"
 
 	conv "github.com/coder/agentapi/lib/conversation"
+	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/handoff"
 	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
@@ -59,7 +60,7 @@ func (i *handoffIO) ReadScreen() string { return "" }
 func handoffServer() (*Server, *handoffConversation, *handoffIO) {
 	c := &handoffConversation{status: conv.StatusStable}
 	i := &handoffIO{}
-	e := NewEventEmitter(WithServerID("session"), WithAgentType(mf.AgentTypeClaude))
+	e := convstate.NewEventEmitter(convstate.WithServerID("session"), convstate.WithAgentType(mf.AgentTypeClaude))
 	e.EmitStatus(conv.StatusStable)
 	e.EmitMessages([]conv.Message{
 		{Id: 1, Role: conv.RoleUser, Message: "work"},
@@ -94,16 +95,16 @@ func TestHandoffView(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			e := NewEventEmitter()
+			e := convstate.NewEventEmitter()
 			var msgs []conv.Message
 			for i, m := range tc.messages {
 				role, text, _ := strings.Cut(m, ":")
 				msgs = append(msgs, conv.Message{Id: i, Role: conv.Role(role), Message: text})
 			}
 			e.EmitMessages(msgs)
-			view := e.handoffView()
-			assert.Equal(t, tc.question, view.question)
-			assert.Equal(t, tc.reply, view.reply)
+			view := e.HandoffView()
+			assert.Equal(t, tc.question, view.Question)
+			assert.Equal(t, tc.reply, view.Reply)
 		})
 	}
 }
@@ -352,7 +353,7 @@ func TestQueueNotBlockedByQuestionFarUpInScrollback(t *testing.T) {
 	s, c, _ := handoffServer()
 	s.agentType = mf.AgentTypeAider
 	lines := []string{"Do you want to proceed?", "❯ 1. Yes", "  2. No", "Enter to confirm"}
-	for range terminalQuestionTailLines {
+	for range mf.TerminalQuestionTailLines {
 		lines = append(lines, "later output")
 	}
 	s.emitter.EmitScreen(strings.Join(lines, "\n"))
@@ -396,7 +397,7 @@ func TestPlanFeedbackKey(t *testing.T) {
 	_, ok = freeTextReplyKeys(mf.AgentTypeCodex, readScreenFixture(t, "claude_plan_dialog.txt"))
 	require.False(t, ok)
 	// The dialog text wraps "Would you like to / proceed?" across lines.
-	require.True(t, isTerminalQuestion(readScreenFixture(t, "claude_plan_dialog.txt")))
+	require.True(t, mf.IsTerminalQuestionScreen(mf.AgentTypeClaude, readScreenFixture(t, "claude_plan_dialog.txt")))
 }
 
 func TestCreateMessageDuringPlanDialogSendsFeedback(t *testing.T) {
@@ -442,7 +443,7 @@ func TestCodexPromptsQueueChatMessages(t *testing.T) {
 			s.agentType = mf.AgentTypeCodex
 			screen := readScreenFixture(t, fixture)
 			s.emitter.EmitScreen(screen)
-			require.True(t, isTerminalQuestionScreen(mf.AgentTypeCodex, screen))
+			require.True(t, mf.IsTerminalQuestionScreen(mf.AgentTypeCodex, screen))
 			_, ok := freeTextReplyKeys(mf.AgentTypeCodex, screen)
 			require.False(t, ok, "approval and plan prompts have no free-text field")
 			resp, err := s.createMessage(t.Context(), &MessageRequest{Body: MessageRequestBody{Type: MessageTypeUser, Content: "hello"}})
@@ -465,7 +466,7 @@ func TestCodexQuestionFreeTextReply(t *testing.T) {
 	screen := readScreenFixture(t, "codex_question.txt")
 	// The user message just above the dialog must not be mistaken for the
 	// composer, or chat messages would be typed into the dialog.
-	require.True(t, isTerminalQuestionScreen(mf.AgentTypeCodex, screen))
+	require.True(t, mf.IsTerminalQuestionScreen(mf.AgentTypeCodex, screen))
 	keys, ok := freeTextReplyKeys(mf.AgentTypeCodex, screen)
 	require.True(t, ok)
 	require.Equal(t, "\x1b[B\x1b[B\x1b[B\t", keys, "arrow from option 1 to 4, then open notes")
@@ -505,21 +506,6 @@ func TestFormatMessageClearsCodexComposer(t *testing.T) {
 	require.Equal(t, "note", reply[2].String())
 }
 
-func TestScreenTail(t *testing.T) {
-	naive := func(screen string, n int) string {
-		lines := strings.Split(strings.TrimRight(screen, " \t\r\n"), "\n")
-		if len(lines) > n {
-			lines = lines[len(lines)-n:]
-		}
-		return strings.Join(lines, "\n")
-	}
-	for _, screen := range []string{"", "one", "a\nb\nc", "a\nb\nc\n\n  \n", "\n\na\n", strings.Repeat("x\n", 100) + "end  \n \n"} {
-		for _, n := range []int{1, 2, 3, 40, 200} {
-			require.Equal(t, naive(screen, n), screenTail(screen, n), "screen %q n %d", screen, n)
-		}
-	}
-}
-
 // Detection only looks at the bottom of the screen, so a fixture must be
 // classified the same when it sits under a long transcript and above the
 // blank padding of AgentAPI's 1000-row terminal.
@@ -535,7 +521,7 @@ func TestTerminalQuestionScreenOnFullHeightScreen(t *testing.T) {
 		}
 		screen := readScreenFixture(t, entry.Name())
 		full := above + screen + "\n" + padding
-		require.Equal(t, isTerminalQuestionScreen(agent, screen), isTerminalQuestionScreen(agent, full), entry.Name())
+		require.Equal(t, mf.IsTerminalQuestionScreen(agent, screen), mf.IsTerminalQuestionScreen(agent, full), entry.Name())
 		require.Equal(t, isCodexUpdatePrompt(screen), isCodexUpdatePrompt(full), entry.Name())
 	}
 }
@@ -575,10 +561,6 @@ func TestFormatMessageClosesClaudeFileSuggestions(t *testing.T) {
 		typed, _ := split(FormatMessage(tc.agent, tc.message))
 		require.Equal(t, "\x1b[200~"+tc.message+"\x1b[201~", typed, tc.message)
 	}
-}
-
-func isTerminalQuestion(content string) bool {
-	return isTerminalQuestionText(content, strings.ToLower(content))
 }
 
 // hangingConversation is a terminal agent whose screen never settles: a

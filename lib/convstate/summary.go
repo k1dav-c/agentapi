@@ -1,10 +1,7 @@
-package httpapi
+package convstate
 
 import (
-	"context"
 	"reflect"
-
-	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/native"
@@ -43,7 +40,7 @@ type SummaryUpdateBody struct {
 }
 
 // WithInstance has summaries name the AgentAPI with instance.
-func WithInstance(instance func() WebhookInstance) EventEmitterOption {
+func WithInstance(instance func() instanceapi.WebhookInstance) EventEmitterOption {
 	return func(e *EventEmitter) { e.instance = instance }
 }
 
@@ -137,7 +134,7 @@ func (e *EventEmitter) SetSpend(spend SummarySpend) {
 
 // SetUpdate records how far an update through the API is, and sends the
 // summary if that changed.
-func (e *EventEmitter) SetUpdate(update UpdateStatus) {
+func (e *EventEmitter) SetUpdate(update instanceapi.UpdateStatus) {
 	e.mu.Lock()
 	defer e.unlock()
 	if e.summary.update != nil && *e.summary.update == update {
@@ -147,9 +144,9 @@ func (e *EventEmitter) SetUpdate(update UpdateStatus) {
 	e.summary.changed = true
 }
 
-// agentIdle reports whether the agent waits with nothing open: it is
+// AgentIdle reports whether the agent waits with nothing open: it is
 // stable, and no request or dialog of its terminal waits for an answer.
-func (e *EventEmitter) agentIdle() bool {
+func (e *EventEmitter) AgentIdle() bool {
 	e.mu.Lock()
 	defer e.unlock()
 	status := e.statusChangeBody()
@@ -177,7 +174,7 @@ type summaryFeed struct {
 	spend *SummarySpend
 	// update is how far an update through the API is (updater); nil
 	// until the server sets it.
-	update *UpdateStatus
+	update *instanceapi.UpdateStatus
 }
 
 // sendSummaryLocked sends the summary if the state changed since it was
@@ -213,33 +210,3 @@ func (e *EventEmitter) anyWantsLocked(t EventType) bool {
 
 // SummaryEvents picks the summary alone (GET /events?only=summary).
 func SummaryEvents(t EventType) bool { return t == EventTypeSummaryUpdate }
-
-// SummaryResponse is the body of GET /summary.
-type SummaryResponse struct {
-	Body SummaryBody
-}
-
-func (s *Server) getSummary(_ context.Context, _ *struct{}) (*SummaryResponse, error) {
-	return &SummaryResponse{Body: s.emitter.Summary()}, nil
-}
-
-func (s *Server) markSeen(_ context.Context, _ *struct{}) (*SummaryResponse, error) {
-	return &SummaryResponse{Body: s.emitter.MarkSeen()}, nil
-}
-
-func (s *Server) registerSummaryRoutes() {
-	huma.Post(s.api, "/tasks/seen", s.markSeen, func(o *huma.Operation) {
-		o.Summary = "Mark the tasks seen"
-		o.Description = "Records that a client showed the conversation to the user now, so the tasks that ended " +
-			"until now are read: the summary's unread is false until a task ends again. Every client of this " +
-			"AgentAPI shares it: the chat calls it while it shows the conversation, and summary clients get " +
-			"summary_update. Returns the summary."
-	})
-	huma.Get(s.api, "/summary", s.getSummary, func(o *huma.Operation) {
-		o.Summary = "Get a summary of the agent"
-		o.Description = "Returns what a client that watches many AgentAPIs shows of one in a single response: " +
-			"who it is (instance), whether the agent works or waits, why it waits for the user (attention), " +
-			"a title, the latest task, what waits (requests, queued messages) and the usage limits. " +
-			"GET /events?only=summary sends summary_update whenever it changes, and no other events."
-	})
-}

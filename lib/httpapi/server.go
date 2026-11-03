@@ -23,6 +23,7 @@ import (
 
 	"github.com/coder/agentapi/internal/version"
 	conv "github.com/coder/agentapi/lib/conversation"
+	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/logctx"
 	"github.com/coder/agentapi/lib/mcpconfig"
 	mf "github.com/coder/agentapi/lib/msgfmt"
@@ -285,25 +286,25 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	// The status and the webhook name this run the same.
 	serverID := hex.EncodeToString(serverBytes[:])
 	webhook.serverID = serverID
-	emitterOptions := []EventEmitterOption{
-		WithAgentType(config.AgentType),
-		WithTransport(config.Transport),
-		WithServerID(serverID),
-		WithTerminalColumns(config.PTY.TerminalColumns),
-		WithClock(config.Clock),
-		WithStatusChangeHandler(webhook.statusChanged),
-		WithInstance(webhook.instanceSnapshot),
+	emitterOptions := []convstate.EventEmitterOption{
+		convstate.WithAgentType(config.AgentType),
+		convstate.WithTransport(config.Transport),
+		convstate.WithServerID(serverID),
+		convstate.WithTerminalColumns(config.PTY.TerminalColumns),
+		convstate.WithClock(config.Clock),
+		convstate.WithStatusChangeHandler(webhook.statusChanged),
+		convstate.WithInstance(webhook.instanceSnapshot),
 	}
 	stateDB := config.StateDB
 	if stateDB != nil {
-		emitterOptions = append(emitterOptions, WithPersister(stateDB))
+		emitterOptions = append(emitterOptions, convstate.WithPersister(stateDB))
 	}
 	var terminal *shellterm.Terminal
 	if config.Native.Terminal && config.Transport == TransportNative {
 		terminal = shellterm.New(shellterm.Config{Dir: config.CWD, Env: terminalEnv(), Logger: logger.With("component", "terminal")})
-		emitterOptions = append(emitterOptions, WithTerminal())
+		emitterOptions = append(emitterOptions, convstate.WithTerminal())
 	}
-	emitter := NewEventEmitter(emitterOptions...)
+	emitter := convstate.NewEventEmitter(emitterOptions...)
 	restored, err := restoreState(config, stateDB, emitter, logger)
 	if err != nil {
 		return nil, err

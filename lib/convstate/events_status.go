@@ -1,4 +1,4 @@
-package httpapi
+package convstate
 
 import (
 	"reflect"
@@ -16,7 +16,7 @@ func (e *EventEmitter) EmitStatus(newStatus conv.Status) {
 	e.mu.Lock()
 	defer e.unlock()
 
-	newAgentStatus := convertStatus(newStatus)
+	newAgentStatus := ConvertStatus(newStatus)
 	newLifecycle := LifecycleRunning
 	if newStatus == conv.StatusInitializing {
 		newLifecycle = LifecycleStarting

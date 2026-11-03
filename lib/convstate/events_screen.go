@@ -1,4 +1,4 @@
-package httpapi
+package convstate
 
 import (
 	"strings"
@@ -17,14 +17,14 @@ func (e *EventEmitter) EmitScreen(newScreen string) {
 
 	e.notifyChannels(EventTypeScreenUpdate, ScreenUpdateBody{Screen: strings.TrimRight(newScreen, mf.WhiteSpaceChars)})
 	e.screen = newScreen
-	e.screenQuestion = isTerminalQuestionScreen(e.agentType, newScreen)
+	e.screenQuestion = mf.IsTerminalQuestionScreen(e.agentType, newScreen)
 
 	// Clients decide whether to offer prompt options from this rather than
 	// guessing from message text, where a numbered list in an answer looks
 	// just like a selection menu.
 	prompt := ""
 	if e.screenQuestion {
-		prompt = screenTail(newScreen, terminalQuestionTailLines)
+		prompt = mf.ScreenTail(newScreen, mf.TerminalQuestionTailLines)
 	}
 	e.updateTerminalPromptLocked(prompt)
 }

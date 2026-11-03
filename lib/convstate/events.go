@@ -1,4 +1,4 @@
-package httpapi
+package convstate
 
 import (
 	"crypto/rand"
@@ -85,10 +85,10 @@ type StatusChangeBody struct {
 	ServerID  string         `json:"server_id" doc:"Random identifier of this AgentAPI run: it changes every time AgentAPI starts."`
 	Turn      uint64         `json:"turn" doc:"How many times the agent started working since AgentAPI started."`
 	// AgentSessionID is the agent's own session (native transport).
-	AgentSessionID string       `json:"agent_session_id,omitempty" doc:"The agent's own session ID, which GET /sessions lists and resuming opens. Native transport only, once the agent reports it."`
-	AgentType      mf.AgentType `json:"agent_type" doc:"Type of the agent being used by the server."`
-	Transport      Transport    `json:"transport" doc:"Backend transport being used ('pty' or 'native')."`
-	Version        string       `json:"agentapi_version" doc:"Version of the AgentAPI server."`
+	AgentSessionID string                `json:"agent_session_id,omitempty" doc:"The agent's own session ID, which GET /sessions lists and resuming opens. Native transport only, once the agent reports it."`
+	AgentType      mf.AgentType          `json:"agent_type" doc:"Type of the agent being used by the server."`
+	Transport      instanceapi.Transport `json:"transport" doc:"Backend transport being used ('pty' or 'native')."`
+	Version        string                `json:"agentapi_version" doc:"Version of the AgentAPI server."`
 	// TerminalPrompt is the bottom of the screen while the agent shows an
 	// interactive prompt (selection list, confirmation) instead of its input
 	// box, and empty otherwise.
@@ -132,6 +132,10 @@ type ErrorBody struct {
 	number uint64
 }
 
+// Number counts the errors the emitter stored, from 1, so that a replayed
+// error can be told from a new one.
+func (b ErrorBody) Number() uint64 { return b.number }
+
 // RichMessageUpdateBody is the SSE payload for rich message updates.
 type RichMessageUpdateBody struct {
 	transcript.RichMessage
@@ -155,6 +159,24 @@ type HeartbeatBody struct {
 type Event struct {
 	Type    EventType
 	Payload any
+}
+
+// Seq is the sequence number of the change the event carries, or 0 for an
+// event without one (the status, an error, the screen, the summary).
+func (event Event) Seq() uint64 {
+	switch body := event.Payload.(type) {
+	case MessageUpdateBody:
+		return body.Seq
+	case RichMessageUpdateBody:
+		return body.Seq
+	case RequestUpdateBody:
+		return body.Seq
+	case TaskUpdateBody:
+		return body.Seq
+	case QueueUpdateBody:
+		return body.Seq
+	}
+	return 0
 }
 
 type EventEmitter struct {
@@ -193,7 +215,7 @@ type EventEmitter struct {
 	agentSessionID      string
 	handoffRevision     uint64
 	agentType           mf.AgentType
-	transport           Transport
+	transport           instanceapi.Transport
 	terminalColumns     uint16
 	sessionName         string
 	chans               map[int]subscriber
@@ -201,7 +223,7 @@ type EventEmitter struct {
 	subscriptionBufSize uint
 	screen              string
 	// screenQuestion: the screen shows a dialog of the agent's terminal
-	// that waits for an answer (isTerminalQuestionScreen), worked out once
+	// that waits for an answer (msgfmt.IsTerminalQuestionScreen), worked out once
 	// per screen.
 	screenQuestion bool
 	terminalPrompt string
@@ -224,7 +246,7 @@ type EventEmitter struct {
 	queueVersion uint64
 	queueSeq     uint64
 	// instance names the AgentAPI in summaries, which summary sends.
-	instance func() WebhookInstance
+	instance func() instanceapi.WebhookInstance
 	summary  summaryFeed
 	// seenAt is when a client last showed the conversation to the user: a
 	// task that ended after it is unread.
@@ -284,7 +306,8 @@ type EmitterState struct {
 	SeenAt time.Time
 }
 
-func convertStatus(status conv.Status) AgentStatus {
+// ConvertStatus is the agent status a conversation status reports.
+func ConvertStatus(status conv.Status) AgentStatus {
 	switch status {
 	case conv.StatusInitializing:
 		return AgentStatusRunning
@@ -321,7 +344,7 @@ func WithAgentType(agentType mf.AgentType) EventEmitterOption {
 }
 
 // WithTransport sets the transport reported in status updates.
-func WithTransport(transport Transport) EventEmitterOption {
+func WithTransport(transport instanceapi.Transport) EventEmitterOption {
 	return func(e *EventEmitter) { e.transport = transport }
 }
 
@@ -428,7 +451,7 @@ func NewEventEmitter(opts ...EventEmitterOption) *EventEmitter {
 		reported:            LifecycleStarting,
 		chans:               make(map[int]subscriber),
 		subscriptionBufSize: defaultSubscriptionBufSize,
-		epoch:               newEpoch(),
+		epoch:               NewEpoch(),
 	}
 	for _, opt := range opts {
 		opt(e)
@@ -488,7 +511,8 @@ func (e *EventEmitter) notifyChannels(eventType EventType, payload any) {
 	}
 }
 
-func newEpoch() string {
+// NewEpoch returns a new random epoch (see SessionSyncBody).
+func NewEpoch() string {
 	b := make([]byte, 8)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
@@ -511,7 +535,7 @@ func (e *EventEmitter) Reset() {
 	e.taskSeq = map[int]uint64{}
 	// A new epoch makes reconnecting clients drop their cache; connected
 	// clients are told now so they clear the old conversation.
-	e.epoch = newEpoch()
+	e.epoch = NewEpoch()
 	if e.persister != nil {
 		e.persister.Reset(e.epoch)
 	}
@@ -685,6 +709,13 @@ func (e *EventEmitter) unsubscribeInner(chanId int) {
 	}
 	close(sub.ch)
 	delete(e.chans, chanId)
+}
+
+// Subscribers returns how many subscriptions are open.
+func (e *EventEmitter) Subscribers() int {
+	e.mu.Lock()
+	defer e.unlock()
+	return len(e.chans)
 }
 
 func (e *EventEmitter) Unsubscribe(chanId int) {

@@ -48,11 +48,12 @@ func sendUserMessage(t *testing.T, srv *Server, content string) *MessageResponse
 }
 
 func errorMessages(e *EventEmitter) []string {
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	// A subscription replays the stored errors.
+	id, _, replay := e.SubscribeTo(func(t EventType) bool { return t == EventTypeError }, 0, "")
+	e.Unsubscribe(id)
 	var messages []string
-	for _, err := range e.errors {
-		messages = append(messages, err.Message)
+	for _, event := range replay {
+		messages = append(messages, event.Payload.(ErrorBody).Message)
 	}
 	return messages
 }

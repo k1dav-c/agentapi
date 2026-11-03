@@ -240,11 +240,18 @@ func (s *Server) webhookTaskCost(since time.Time) *WebhookCost {
 	return &cost
 }
 
+// eventSource is what the observer reads of the emitter: its events, which
+// it subscribes to like an /events client.
+type eventSource interface {
+	SubscribeTo(wants func(EventType) bool, since uint64, epoch string) (int, <-chan Event, []Event)
+	Unsubscribe(id int)
+}
+
 // webhookObserver turns the conversation's events into webhook events. It
 // reads the emitter like an /events client.
 type webhookObserver struct {
 	webhook *webhookDispatcher
-	emitter *EventEmitter
+	emitter eventSource
 	// taskCost, if set, gives what the session's model calls since a time
 	// cost.
 	taskCost func(since time.Time) *WebhookCost
@@ -287,6 +294,9 @@ type webhookObserver struct {
 	replies map[int]string
 }
 
+// richKey identifies a rich message, which comes again as it grows.
+type richKey struct{ id, role string }
+
 // toolMessage is a rich message that holds results of tool calls, and the
 // calls whose result it brought.
 type toolMessage struct {
@@ -316,7 +326,7 @@ func (m *mark) advance(k messageKey) {
 	}
 }
 
-func newWebhookObserver(webhook *webhookDispatcher, emitter *EventEmitter, now time.Time) *webhookObserver {
+func newWebhookObserver(webhook *webhookDispatcher, emitter eventSource, now time.Time) *webhookObserver {
 	return &webhookObserver{
 		webhook:      webhook,
 		emitter:      emitter,
@@ -379,7 +389,7 @@ func (o *webhookObserver) replay(events []Event, quiet bool) {
 			o.seq = max(o.seq, sync.Seq)
 			continue
 		}
-		if seq := eventSeq(event); seq != 0 && seq <= last {
+		if seq := event.Seq(); seq != 0 && seq <= last {
 			continue
 		}
 		o.handle(event, quiet)
@@ -391,7 +401,7 @@ func (o *webhookObserver) take(event Event) {
 	if sync, ok := event.Payload.(SessionSyncBody); ok {
 		o.epoch = sync.Epoch
 	}
-	o.seq = max(o.seq, eventSeq(event))
+	o.seq = max(o.seq, event.Seq())
 	o.handle(event, false)
 }
 
@@ -680,11 +690,11 @@ func (o *webhookObserver) requestUpdated(state native.RequestState, quiet bool) 
 }
 
 func (o *webhookObserver) agentError(err ErrorBody, quiet bool) {
-	if err.number != 0 && err.number <= o.lastError {
+	if err.Number() != 0 && err.Number() <= o.lastError {
 		// Replayed by a new subscription.
 		return
 	}
-	o.lastError = max(o.lastError, err.number)
+	o.lastError = max(o.lastError, err.Number())
 	if quiet || err.Time.Before(o.since) {
 		return
 	}

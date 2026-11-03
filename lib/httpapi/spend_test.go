@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/sessions"
 )
 
@@ -30,7 +31,7 @@ func TestSpendOf(t *testing.T) {
 // The summary carries the latest spend; the same spend again changes
 // nothing.
 func TestSummarySpend(t *testing.T) {
-	e := NewEventEmitter()
+	e := convstate.NewEventEmitter()
 	assert.Nil(t, e.Summary().Spend, "not worked out yet")
 	e.SetSpend(SummarySpend{DayUSD: 1.5, WeekUSD: 9})
 	spend := e.Summary().Spend
@@ -69,7 +70,7 @@ func TestNextSpend(t *testing.T) {
 	more := nextSpend(same, SummarySpend{DayUSD: 1.5, WeekUSD: 2}, "s1", at.Add(2*time.Minute))
 	assert.Equal(t, at.Add(2*time.Minute).Truncate(time.Second), more.UpdatedAt)
 
-	e := NewEventEmitter()
+	e := convstate.NewEventEmitter()
 	e.SetSpend(first)
 	e.SetSpend(same)
 	assert.Equal(t, first, *e.Summary().Spend)

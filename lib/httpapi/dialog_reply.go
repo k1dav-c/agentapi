@@ -42,10 +42,10 @@ var (
 // return would pick the highlighted option (e.g. approve a plan, or answer a
 // question with its default).
 func freeTextReplyKeys(agentType mf.AgentType, screen string) (string, bool) {
-	if !isTerminalQuestionScreen(agentType, screen) {
+	if !mf.IsTerminalQuestionScreen(agentType, screen) {
 		return "", false
 	}
-	tail := screenTail(screen, terminalQuestionTailLines)
+	tail := mf.ScreenTail(screen, mf.TerminalQuestionTailLines)
 	if agentType == mf.AgentTypeClaude {
 		return claudePlanFeedbackKey(tail)
 	}

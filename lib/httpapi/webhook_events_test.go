@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	conv "github.com/coder/agentapi/lib/conversation"
+	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/instanceapi"
 	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
@@ -88,12 +89,27 @@ type observed struct {
 
 func newObserved(t *testing.T, d *webhookDispatcher, clock quartz.Clock) *observed {
 	t.Helper()
-	emitter := NewEventEmitter(WithClock(clock), WithSubscriptionBufSize(256))
+	emitter := convstate.NewEventEmitter(convstate.WithClock(clock), convstate.WithSubscriptionBufSize(256))
 	o := newWebhookObserver(d, emitter, clock.Now())
 	_, events, replay := o.subscribe()
 	o.replay(replay, true)
 	return &observed{emitter: emitter, o: o, events: events}
 }
+
+// countingSource counts the subscriptions an observer took, once each is
+// open.
+type countingSource struct {
+	*EventEmitter
+	count atomic.Int32
+}
+
+func (s *countingSource) SubscribeTo(wants func(EventType) bool, since uint64, epoch string) (int, <-chan Event, []Event) {
+	id, events, replay := s.EventEmitter.SubscribeTo(wants, since, epoch)
+	s.count.Add(1)
+	return id, events, replay
+}
+
+func (s *countingSource) subscriptions() int { return int(s.count.Load()) }
 
 // pump hands the observer what the emitter sent since the last time.
 func (x *observed) pump() {
@@ -209,13 +225,9 @@ func TestWebhookObserverNeedsYou(t *testing.T) {
 	e.SetLoginRequired(nil)
 
 	// A terminal dialog is published once it settled on the screen.
-	e.mu.Lock()
-	e.updateTerminalPromptLocked("1. Yes\n2. No")
-	e.mu.Unlock()
-	clock.Advance(terminalPromptSettle).MustWait(t.Context())
-	e.mu.Lock()
-	e.updateTerminalPromptLocked("")
-	e.mu.Unlock()
+	e.EmitScreen("Allow this?\n1. Yes\n2. No")
+	clock.Advance(time.Second).MustWait(t.Context()) // the prompt settles
+	e.EmitScreen("$ ")
 
 	goOn := conv.Message{Id: 1, Role: conv.RoleUser, Message: "Go on", Time: start}
 	e.EmitMessages([]conv.Message{deploy, goOn})
@@ -236,7 +248,7 @@ func TestWebhookObserverNeedsYou(t *testing.T) {
 	}, eventTypes(events))
 	prompt := events[7].Data.(WebhookTerminalPrompt)
 	assert.Equal(t, "terminal_prompt", prompt.Kind)
-	assert.Equal(t, "1. Yes\n2. No", prompt.Prompt)
+	assert.Equal(t, "Allow this?\n1. Yes\n2. No", prompt.Prompt)
 	assert.Equal(t, prompt.ID, events[8].Data.(WebhookTerminalPrompt).ID)
 	task := events[11].Data.(WebhookTask)
 	assert.Equal(t, TaskStatusLimited, task.Status)
@@ -249,7 +261,7 @@ func TestWebhookObserverHistory(t *testing.T) {
 	t.Parallel()
 	clock := quartz.NewMock(t)
 	d := testDispatcher(t, WebhookConfig{Events: []string{"*"}}, clock)
-	emitter := NewEventEmitter(WithClock(clock))
+	emitter := convstate.NewEventEmitter(convstate.WithClock(clock))
 	old := clock.Now().Add(-time.Hour)
 	emitter.EmitMessages([]conv.Message{
 		{Id: 0, Role: conv.RoleUser, Message: "Earlier", Time: old},
@@ -260,11 +272,7 @@ func TestWebhookObserverHistory(t *testing.T) {
 
 	ctx := t.Context()
 	go o.run(ctx)
-	require.Eventually(t, func() bool {
-		emitter.mu.Lock()
-		defer emitter.mu.Unlock()
-		return len(emitter.chans) == 1
-	}, 5*time.Second, 10*time.Millisecond)
+	require.Eventually(t, func() bool { return emitter.Subscribers() == 1 }, 5*time.Second, 10*time.Millisecond)
 	// A resumed session's messages are old too.
 	emitter.EmitMessages([]conv.Message{
 		{Id: 0, Role: conv.RoleUser, Message: "Earlier", Time: old},
@@ -294,14 +302,11 @@ func TestWebhookObserverResubscribes(t *testing.T) {
 	t.Parallel()
 	clock := quartz.NewMock(t)
 	d := testDispatcher(t, WebhookConfig{Events: []string{"message.created", "task.started", "agent.error"}}, clock)
-	emitter := NewEventEmitter(WithClock(clock))
+	emitter := convstate.NewEventEmitter(convstate.WithClock(clock))
 	emitter.EmitStatus(conv.StatusStable)
-	o := newWebhookObserver(d, emitter, clock.Now())
-	subscriptions := func() int {
-		emitter.mu.Lock()
-		defer emitter.mu.Unlock()
-		return emitter.chanIdx
-	}
+	source := &countingSource{EventEmitter: emitter}
+	o := newWebhookObserver(d, source, clock.Now())
+	subscriptions := source.subscriptions
 	go o.run(t.Context())
 	require.Eventually(t, func() bool { return subscriptions() == 1 }, 5*time.Second, 10*time.Millisecond)
 
@@ -477,14 +482,11 @@ func TestWebhookObserverResubscribesWithoutRepeats(t *testing.T) {
 	t.Parallel()
 	clock := quartz.NewMock(t)
 	d := testDispatcher(t, WebhookConfig{Events: []string{"tool.completed"}}, clock)
-	emitter := NewEventEmitter(WithClock(clock))
+	emitter := convstate.NewEventEmitter(convstate.WithClock(clock))
 	emitter.EmitStatus(conv.StatusStable)
-	o := newWebhookObserver(d, emitter, clock.Now())
-	subscriptions := func() int {
-		emitter.mu.Lock()
-		defer emitter.mu.Unlock()
-		return emitter.chanIdx
-	}
+	source := &countingSource{EventEmitter: emitter}
+	o := newWebhookObserver(d, source, clock.Now())
+	subscriptions := source.subscriptions
 	go o.run(t.Context())
 	require.Eventually(t, func() bool { return subscriptions() == 1 }, 5*time.Second, 10*time.Millisecond)
 
@@ -555,7 +557,7 @@ func TestWebhookObserverResumes(t *testing.T) {
 		e.Unsubscribe(id)
 		var changed []Event
 		for _, event := range replay {
-			if eventSeq(event) != 0 {
+			if event.Seq() != 0 {
 				changed = append(changed, event)
 			}
 		}
@@ -582,11 +584,7 @@ func TestWebhookObserverRunsForItsEvents(t *testing.T) {
 	}
 
 	srv, _ := newQuietNativeServer(t, nil)
-	subscriptions := func() int {
-		srv.emitter.mu.Lock()
-		defer srv.emitter.mu.Unlock()
-		return len(srv.emitter.chans)
-	}
+	subscriptions := srv.emitter.Subscribers
 	assert.Zero(t, subscriptions())
 	w := &webhookAPI{webhook: srv.webhook}
 	put := func(url string, events ...string) {

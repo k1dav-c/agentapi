@@ -11,6 +11,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	conv "github.com/coder/agentapi/lib/conversation"
+	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/handoff"
 	"github.com/coder/agentapi/lib/native"
 )
@@ -146,9 +147,9 @@ func (b ptyBackend) beforeQueue() {
 }
 
 // handoffOffer offers a dialog of the agent's terminal.
-func (b ptyBackend) handoffOffer(view handoffView) (string, string, native.RequestState, bool) {
-	if view.dialog {
-		return "terminal", view.screen, native.RequestState{}, true
+func (b ptyBackend) handoffOffer(view convstate.HandoffView) (string, string, native.RequestState, bool) {
+	if view.Dialog {
+		return "terminal", view.Screen, native.RequestState{}, true
 	}
 	return "", "", native.RequestState{}, false
 }

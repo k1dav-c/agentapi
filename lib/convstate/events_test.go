@@ -1,9 +1,10 @@
-package httpapi
+package convstate
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/coder/agentapi/internal/version"
 	conv "github.com/coder/agentapi/lib/conversation"
+	"github.com/coder/agentapi/lib/instanceapi"
 	mf "github.com/coder/agentapi/lib/msgfmt"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/transcript"
@@ -784,7 +786,7 @@ func TestEventEmitterRestore(t *testing.T) {
 	_, _, state = emitter.SubscribeSince(3, "restored")
 	var seqs []uint64
 	for _, event := range state[1:] {
-		if seq := eventSeq(event); seq != 0 {
+		if seq := event.Seq(); seq != 0 {
 			seqs = append(seqs, seq)
 		}
 	}
@@ -857,7 +859,7 @@ func TestEventEmitterSubscribeTo(t *testing.T) {
 // The screen's dialog is worked out once per screen.
 func TestEventEmitterScreenQuestion(t *testing.T) {
 	dialog := readScreenFixture(t, "claude_permission_dialog.txt")
-	pty := NewEventEmitter(WithAgentType(mf.AgentTypeClaude), WithTransport(TransportPTY))
+	pty := NewEventEmitter(WithAgentType(mf.AgentTypeClaude), WithTransport(instanceapi.TransportPTY))
 	pty.EmitScreen(dialog)
 	screen, question := pty.Screen()
 	assert.Equal(t, dialog, screen)
@@ -883,47 +885,6 @@ func TestEmitter_RichMessageContentIsNeverNull(t *testing.T) {
 	restored := NewEventEmitter()
 	restored.Restore(EmitterState{RichMessages: []transcript.RichMessage{{MessageID: "m3", Role: "user"}}, RichSeqs: []uint64{1}})
 	assert.NotNil(t, restored.RichMessages()[0].Content)
-}
-
-// Clients follow the queue through queue_update events.
-func TestEmitterQueueUpdates(t *testing.T) {
-	t.Parallel()
-	e := NewEventEmitter()
-	var q messageQueue
-	q.onChange = func(queue []QueuedMessage, _ int, version uint64) { e.SetQueue(queue, version) }
-	_, ch, _ := e.SubscribeTo(AllEvents, 0, "")
-	at := time.Now()
-	first := q.Push("one", at, false)
-	q.Push("two", at, false)
-	q.Update(first.ID, "uno")
-	q.Remove(first.ID)
-	var queues [][]string
-	for _, event := range drain(ch) {
-		update, ok := event.Payload.(QueueUpdateBody)
-		require.True(t, ok)
-		var contents []string
-		for _, m := range update.Queue {
-			contents = append(contents, m.Content)
-		}
-		queues = append(queues, contents)
-	}
-	assert.Equal(t, [][]string{{"one"}, {"one", "two"}, {"uno", "two"}, {"two"}}, queues)
-
-	// A change reported late, after a newer one, is dropped.
-	e.SetQueue(nil, 1)
-	assert.Empty(t, drain(ch))
-
-	// The replay holds the queue.
-	_, _, replay := e.SubscribeSince(0, "")
-	var replayed *QueueUpdateBody
-	for _, event := range replay {
-		if update, ok := event.Payload.(QueueUpdateBody); ok {
-			replayed = &update
-		}
-	}
-	require.NotNil(t, replayed)
-	require.Len(t, replayed.Queue, 1)
-	assert.Equal(t, "two", replayed.Queue[0].Content)
 }
 
 // Restarting, exited and failed stay while the conversation's status
@@ -958,4 +919,12 @@ func TestEventEmitterHoldsServerLifecycle(t *testing.T) {
 	emitter.SetLifecycle(LifecycleStarting)
 	emitter.EmitStatus(conv.StatusStable)
 	assert.Equal(t, LifecycleReady, emitter.StatusSnapshot().Lifecycle)
+}
+
+// readScreenFixture reads a screen of an agent's terminal from testdata.
+func readScreenFixture(t *testing.T, name string) string {
+	t.Helper()
+	b, err := os.ReadFile("testdata/" + name)
+	require.NoError(t, err)
+	return string(b)
 }

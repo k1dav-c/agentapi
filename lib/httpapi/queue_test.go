@@ -6,6 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/coder/agentapi/lib/convstate"
 )
 
 func TestMessageQueue(t *testing.T) {
@@ -106,5 +108,59 @@ func TestReadsDontWaitForTheServerLock(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("a read waited for s.mu")
+	}
+}
+
+// Clients follow the queue through queue_update events.
+func TestEmitterQueueUpdates(t *testing.T) {
+	t.Parallel()
+	e := convstate.NewEventEmitter()
+	var q messageQueue
+	q.onChange = func(queue []QueuedMessage, _ int, version uint64) { e.SetQueue(queue, version) }
+	_, ch, _ := e.SubscribeTo(convstate.AllEvents, 0, "")
+	at := time.Now()
+	first := q.Push("one", at, false)
+	q.Push("two", at, false)
+	q.Update(first.ID, "uno")
+	q.Remove(first.ID)
+	var queues [][]string
+	for _, event := range drain(ch) {
+		update, ok := event.Payload.(QueueUpdateBody)
+		require.True(t, ok)
+		var contents []string
+		for _, m := range update.Queue {
+			contents = append(contents, m.Content)
+		}
+		queues = append(queues, contents)
+	}
+	assert.Equal(t, [][]string{{"one"}, {"one", "two"}, {"uno", "two"}, {"two"}}, queues)
+
+	// A change reported late, after a newer one, is dropped.
+	e.SetQueue(nil, 1)
+	assert.Empty(t, drain(ch))
+
+	// The replay holds the queue.
+	_, _, replay := e.SubscribeSince(0, "")
+	var replayed *QueueUpdateBody
+	for _, event := range replay {
+		if update, ok := event.Payload.(QueueUpdateBody); ok {
+			replayed = &update
+		}
+	}
+	require.NotNil(t, replayed)
+	require.Len(t, replayed.Queue, 1)
+	assert.Equal(t, "two", replayed.Queue[0].Content)
+}
+
+// drain returns the events waiting in ch.
+func drain(ch <-chan Event) []Event {
+	var events []Event
+	for {
+		select {
+		case event := <-ch:
+			events = append(events, event)
+		default:
+			return events
+		}
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	conv "github.com/coder/agentapi/lib/conversation"
+	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/statedb"
 )
@@ -56,7 +57,7 @@ func restoreState(config ServerConfig, db *statedb.DB, emitter *EventEmitter, lo
 		// The changes AgentAPI made just before it crashed may be missing,
 		// and the next ones would reuse their seqs: clients that saw them
 		// must not resume their cache, so the conversation gets a new epoch.
-		state.Epoch = newEpoch()
+		state.Epoch = convstate.NewEpoch()
 		db.SetSeq(state.Epoch, state.Seq)
 		logger.Warn("The state database was not closed cleanly; clients reload the conversation")
 	}

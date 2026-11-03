@@ -1,4 +1,4 @@
-package httpapi
+package convstate
 
 import (
 	"testing"
@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	conv "github.com/coder/agentapi/lib/conversation"
+	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/native"
 )
 
@@ -25,10 +26,10 @@ func summaries(t *testing.T, events []Event) []SummaryBody {
 
 func TestSummary(t *testing.T) {
 	t.Parallel()
-	e := NewEventEmitter(WithInstance(func() WebhookInstance { return WebhookInstance{ID: "host:3284", Name: "repo"} }))
+	e := NewEventEmitter(WithInstance(func() instanceapi.WebhookInstance { return instanceapi.WebhookInstance{ID: "host:3284", Name: "repo"} }))
 	e.EmitStatus(conv.StatusStable)
 	summary := e.Summary()
-	assert.Equal(t, WebhookInstance{ID: "host:3284", Name: "repo"}, summary.Instance)
+	assert.Equal(t, instanceapi.WebhookInstance{ID: "host:3284", Name: "repo"}, summary.Instance)
 	assert.Equal(t, AttentionNone, summary.Attention)
 	assert.Empty(t, summary.Title)
 	assert.Nil(t, summary.Task)
@@ -102,7 +103,7 @@ func TestSummaryEvents(t *testing.T) {
 	assert.Zero(t, got[len(got)-1].Tasks)
 
 	// The instance changing outside the conversation is sent when told.
-	e.instance = func() WebhookInstance { return WebhookInstance{ID: "renamed"} }
+	e.instance = func() instanceapi.WebhookInstance { return instanceapi.WebhookInstance{ID: "renamed"} }
 	e.SummaryChanged()
 	got = summaries(t, drain(ch))
 	require.Len(t, got, 1)

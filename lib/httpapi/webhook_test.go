@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	conv "github.com/coder/agentapi/lib/conversation"
+	"github.com/coder/agentapi/lib/convstate"
 	mf "github.com/coder/agentapi/lib/msgfmt"
 )
 
@@ -63,7 +64,7 @@ func TestWebhookStatusChangesOnly(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	emitter := NewEventEmitter(WithStatusChangeHandler(dispatcher.statusChanged))
+	emitter := convstate.NewEventEmitter(convstate.WithStatusChangeHandler(dispatcher.statusChanged))
 	emitter.EmitStatus(conv.StatusChanging)
 	assert.Empty(t, dispatcher.queue)
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/handoff"
 	"github.com/coder/agentapi/lib/native"
 )
@@ -100,7 +101,7 @@ func (b nativeBackend) beforeQueue() {
 }
 
 // handoffOffer offers the oldest pending request.
-func (b nativeBackend) handoffOffer(handoffView) (string, string, native.RequestState, bool) {
+func (b nativeBackend) handoffOffer(convstate.HandoffView) (string, string, native.RequestState, bool) {
 	request, text, ok := b.s.pendingNativeHandoff()
 	return "request", text, request, ok
 }

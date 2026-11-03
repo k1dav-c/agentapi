@@ -1,4 +1,4 @@
-package httpapi
+package convstate
 
 import (
 	"encoding/json"
@@ -85,7 +85,7 @@ func (e *EventEmitter) EmitMessages(newMessages []conv.Message) {
 // filled halfway through was closed with the rest of the state unsent,
 // which the client then never asked for again. Caller holds e.mu.
 func (e *EventEmitter) resyncLocked() {
-	e.epoch = newEpoch()
+	e.epoch = NewEpoch()
 	if e.persister != nil {
 		e.persister.SetSeq(e.epoch, e.seq)
 	}
