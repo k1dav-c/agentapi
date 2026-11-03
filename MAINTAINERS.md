@@ -4,7 +4,7 @@
 
 On every push to `main`, `.github/workflows/release.yml` first runs the tests
 (`.github/workflows/go-test.yml`, as a reusable workflow) on that commit, and releases nothing
-unless they all pass: AgentAPIs with `--allow-update` install the latest release. It then runs
+unless they all pass, because AgentAPIs with `--allow-update` install the latest release. It then runs
 `next-version.sh` to choose the next version from
 [Conventional Commit](https://www.conventionalcommits.org/) messages since the last `vX.Y.Z` tag.
 The highest applicable bump wins:
@@ -30,8 +30,8 @@ the workflow builds and attaches), wait for the tests too.
 - Releases go out one at a time, and GitHub keeps one run waiting for its turn: a run that waits is
   cancelled when another starts waiting. The commits of a cancelled push go out with the next
   release.
-- A push whose tests finish after a later push's release, which holds its commits, releases
-  nothing, nor does one that a force-push took off `main`.
+- A push whose tests finish after a later push has released (that release holds its commits)
+  releases nothing. Neither does a push that a force-push took off `main`.
 - Pull requests run the tests through the Go Tests workflow; pushes to `main` run them only in the
   Release workflow, whose checks on the commit are named `Go Tests / …`.
 

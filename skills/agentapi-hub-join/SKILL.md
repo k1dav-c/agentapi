@@ -7,7 +7,7 @@ description: Join this machine's AgentAPIs to an AgentAPI hub (agentapi hub join
 
 An AgentAPI hub (`agentapi hub serve`) lists the AgentAPIs of many machines on one page. A machine
 joins once: `agentapi hub join` writes the hub into `~/.agentapi/config.yaml`, which every
-`agentapi server` of this user reads when it starts. AgentAPIs that run already get the change at
+`agentapi server` of this user reads when it starts. AgentAPIs already running get the change at
 once. The guide is [docs/hub.md](https://github.com/k1dav-c/agentapi/blob/main/docs/hub.md).
 
 ## What to ask for
@@ -20,7 +20,7 @@ ask the user for them; never guess or make them up:
 | --- | --- | --- |
 | The hub's webhook URL | `http://192.168.1.20:3290/hooks` | The hub's address on the network this machine shares with it, plus `/hooks`. The Add dialog lists the hub's addresses, and the hub logs them when it starts |
 | The hub secret | (a hex string) | `AGENTAPI_HUB_SECRET` on the hub's machine; it signs this machine's events. The Add dialog shows it only on a hub with a token |
-| Where the hub reaches this machine | `http://{ip}:{port}` | Use it as written: each AgentAPI fills in `{ip}` with this machine's address on the route to the hub, and follows it when DHCP changes it, and `{port}` with its port. Take another address or name only if the user gives one |
+| Where the hub reaches this machine | `http://{ip}:{port}` | Use it as written: each AgentAPI fills in `{ip}` with this machine's address on the route to the hub and `{port}` with its port, and follows the address when DHCP changes it. Take another address or name only if the user gives one |
 | Updates from the hub | yes or no | Whether the hub may update this machine's AgentAPIs to the latest release (`--allow-update`). Ask; the default is no |
 
 ### Picking the addresses

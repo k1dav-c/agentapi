@@ -140,7 +140,7 @@ runs the script) and a neutral shell prompt.
    For the older binary, build the same source stamped with an earlier version:
    `go build -ldflags "-X github.com/coder/agentapi/internal/version.Version=2.0.0" -o /tmp/agentapi-2.0.0 main.go`.
 
-The script creates a temporary sample project and home directory, then starts three servers on
+The script creates a temporary sample project and home directory, then starts its servers on
 127.0.0.1. It captures every view and GIF and writes [capture.json](capture.json) with the binary
 version, browser, capture time, viewports and images. It stops the servers and removes temporary
 files even if a step fails. The run takes about five minutes; a chat error fails it.
