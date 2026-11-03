@@ -36,7 +36,7 @@ func readUserConfig(v *viper.Viper, flags *pflag.FlagSet, logger *slog.Logger) {
 	}
 	var unknown []string
 	for key := range config {
-		if flags.Lookup(key) == nil || key == FlagConfig {
+		if flags.Lookup(key) == nil || key == FlagConfig || key == FlagValidate {
 			unknown = append(unknown, key)
 		}
 	}

@@ -518,10 +518,14 @@ func CreateServerCmd() *cobra.Command {
 			if viper.GetBool(FlagExit) {
 				return nil
 			}
+			// Not bound to viper: a variable or the config file doesn't
+			// turn the server into a check.
+			validate, _ := cmd.Flags().GetBool(FlagValidate)
 			level := new(slog.LevelVar)
 			logger := slog.New(slog.NewTextHandler(cmd.OutOrStdout(), &slog.HandlerOptions{Level: level}))
-			if viper.GetBool(FlagPrintOpenAPI) {
-				// We don't want log output here.
+			if viper.GetBool(FlagPrintOpenAPI) || validate {
+				// We don't want log output here: --validate prints one
+				// line.
 				logger = slog.New(logctx.DiscardHandler)
 			}
 			ctx := logctx.WithLogger(context.Background(), logger)
@@ -538,6 +542,9 @@ func CreateServerCmd() *cobra.Command {
 				return fmt.Errorf("invalid --%s: %w", FlagLogLevel, err)
 			}
 			level.Set(logLevel)
+			if validate {
+				return validateServer(cmd.OutOrStdout(), cmd.Flags().Args())
+			}
 			logger.Debug("Restarting in place runs this program", "program", self.path)
 			err = runServer(ctx, logger, cmd.Flags().Args(), self)
 			if errors.Is(err, errRestart) {
@@ -622,6 +629,11 @@ func CreateServerCmd() *cobra.Command {
 	// flag is unknown.
 	if err := serverCmd.Flags().MarkHidden(FlagExperimentalACP); err != nil {
 		panic(fmt.Sprintf("failed to mark flag %s as hidden: %v", FlagExperimentalACP, err))
+	}
+
+	serverCmd.Flags().Bool(FlagValidate, false, "Check the settings as a start would, without starting anything, print ok or why it wouldn't start, and exit")
+	if err := serverCmd.Flags().MarkHidden(FlagValidate); err != nil {
+		panic(fmt.Sprintf("failed to mark flag %s as hidden: %v", FlagValidate, err))
 	}
 
 	serverCmd.Flags().Bool(FlagExit, false, "Exit immediately after parsing arguments")
