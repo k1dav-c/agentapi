@@ -20,20 +20,17 @@ import (
 	"golang.org/x/term"
 )
 
-type ChannelWriter struct {
+// channelWriter sends what is written to it on ch: the keys read from
+// stdin, to send to the agent.
+type channelWriter struct {
 	ch chan []byte
 }
 
-func (c *ChannelWriter) Write(p []byte) (n int, err error) {
+func (c *channelWriter) Write(p []byte) (n int, err error) {
 	// A Writer must not keep p: the reader reuses its buffer for the next
 	// keys, while these may still wait to be sent.
 	c.ch <- bytes.Clone(p)
 	return len(p), nil
-}
-
-func (c *ChannelWriter) Receive() ([]byte, bool) {
-	data, ok := <-c.ch
-	return data, ok
 }
 
 type model struct {
@@ -41,7 +38,6 @@ type model struct {
 }
 
 func (m model) Init() tea.Cmd {
-	// Just return `nil`, which means "no I/O right now, please."
 	return nil
 }
 
@@ -51,7 +47,6 @@ type screenMsg struct {
 
 type finishMsg struct{}
 
-//lint:ignore U1000 The Update function is used by the Bubble Tea framework
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case screenMsg:
@@ -191,6 +186,47 @@ func errNoTerminal(transport httpapi.Transport) error {
 	return fmt.Errorf("the %s transport runs the agent without a terminal, so there is none to attach to", transport)
 }
 
+// sendKeys sends the agent the keys read from stdin, but Ctrl+C, until ctx
+// ends or keys is closed.
+func (c *client) sendKeys(ctx context.Context, keys <-chan []byte) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case buf, ok := <-keys:
+			if !ok {
+				return nil
+			}
+			input := string(buf)
+			// Don't send Ctrl+C to the agent
+			if input == "\x03" {
+				continue
+			}
+			if err := c.writeRawInput(ctx, input); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+// showScreens shows each screen the server sends in p, until ctx ends or
+// screens is closed.
+func showScreens(ctx context.Context, p *tea.Program, screens <-chan httpapi.ScreenUpdateBody) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case screenUpdate, ok := <-screens:
+			if !ok {
+				return
+			}
+			p.Send(screenMsg{
+				screen: screenUpdate.Screen,
+			})
+		}
+	}
+}
+
 func runAttach(c *client) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -216,7 +252,7 @@ func runAttach(c *client) error {
 		_ = term.Restore(stdin, oldState)
 	}()
 
-	stdinWriter := &ChannelWriter{
+	stdinWriter := &channelWriter{
 		ch: make(chan []byte, 4096),
 	}
 	tee := io.TeeReader(os.Stdin, stdinWriter)
@@ -236,41 +272,11 @@ func runAttach(c *client) error {
 	writeRawInputErrCh := make(chan error, 1)
 	go func() {
 		defer close(writeRawInputErrCh)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case buf, ok := <-stdinWriter.ch:
-				if !ok {
-					return
-				}
-				input := string(buf)
-				// Don't send Ctrl+C to the agent
-				if input == "\x03" {
-					continue
-				}
-				if err := c.writeRawInput(ctx, input); err != nil {
-					writeRawInputErrCh <- fmt.Errorf("failed to write raw input: %w", err)
-					return
-				}
-			}
+		if err := c.sendKeys(ctx, stdinWriter.ch); err != nil {
+			writeRawInputErrCh <- fmt.Errorf("failed to write raw input: %w", err)
 		}
 	}()
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case screenUpdate, ok := <-screenCh:
-				if !ok {
-					return
-				}
-				p.Send(screenMsg{
-					screen: screenUpdate.Screen,
-				})
-			}
-		}
-	}()
+	go showScreens(ctx, p, screenCh)
 	pErrCh := make(chan error, 1)
 	go func() {
 		_, err := p.Run()
