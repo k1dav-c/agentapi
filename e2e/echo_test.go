@@ -440,7 +440,7 @@ func waitForServer(ctx context.Context, t testing.TB, url string, timeout time.D
 	for {
 		select {
 		case <-healthCtx.Done():
-			require.Failf(t, "failed to start server", "server at %s not ready within timeout: %w", url, healthCtx.Err())
+			require.Failf(t, "failed to start server", "server at %s not ready within timeout: %v", url, healthCtx.Err())
 		case <-ticker.C:
 			resp, err := client.Get(url)
 			if err == nil {
