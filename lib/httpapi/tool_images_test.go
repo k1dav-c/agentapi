@@ -45,7 +45,12 @@ func TestStoreRichImages(t *testing.T) {
 			{MediaType: "image/png", Data: []byte(`<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`)},
 		},
 	}}}
+	sent := msg.Content
 	srv.storeRichImages(&msg)
+	// The parser's content, which a message sent before may share, is left
+	// as it was.
+	assert.Len(t, sent[0].Images, 2)
+	assert.NotNil(t, sent[0].Images[0].Data)
 	// The same image again (the log is re-read on restart) gets the same URL.
 	again := transcript.RichMessage{Content: []transcript.RichContentBlock{{
 		Type:   "tool_result",

@@ -2,7 +2,7 @@
 
 [English](chat-ui.md) | 繁體中文
 
-開啟 `/chat` 即可使用 `agentapi` 執行檔內建的聊天介面。它支援所有 transport，適用於桌面與手機，
+開啟 `/chat` 即可使用 `agentapi` 執行檔內建的聊天介面。支援所有 transport，適用於桌面與手機，
 透過 [HTTP API](../README.zh-TW.md#http-api-參考) 與伺服器溝通。
 
 截圖和動畫是 AgentAPI v0.28.0 搭配內建 `native-demo` agent 處理一個小型範例網站的畫面；
@@ -36,7 +36,7 @@ demo 的回覆、工具結果、模型和用量都是模擬的，TTY mode 則是
   用掉的 token 數，以及[搜尋](#搜尋)、[終端機](#終端機)（native transport 是 shell 終端機，
   PTY 則是 TTY mode）、[工作階段瀏覽器](#工作階段瀏覽器)和淺色或深色主題的按鈕。
 - **對話紀錄。** 每個任務一個區塊，由舊到新排列。左欄顯示每個任務的開始時間和花了多久。
-- **輸入框。** 訊息欄和它的工具列：*native* 權限模式、模型與推理強度，以及 context 用了多少；
+- **輸入框。** 訊息欄和工具列：*native* 權限模式、模型與推理強度，以及 context 用了多少；
   接著是附件按鈕、更多輸入選項和送出按鈕。下方那一行列出可用的按鍵。
 - 右下角的 ↑ 和 ↓ 按鈕會跳到上一個和下一個任務。
 
@@ -45,21 +45,21 @@ demo 的回覆、工具結果、模型和用量都是模擬的，TTY mode 則是
 ## 任務與對話紀錄
 
 你送出的每則訊息都會開始一個任務。任務會先在標示「You」的色塊中顯示你的提示詞，接著依序呈現
-agent 做了什麼：以 Markdown 顯示的回覆、每個工具呼叫各一列，以及它的思考內容。任務的標頭會
-顯示它的編號和狀態（Queued、Working、Waiting for you、Done、Failed 或 Limit reached）、工作中時
-的 Stop 按鈕，以及它的 ⋯ 選單。狀態由伺服器的[任務](../README.zh-TW.md#任務)決定：agent 回報錯誤或結束時顯示 Failed，
-滑鼠移上去可看第一個錯誤；因用量限制停止時顯示 Limit reached，可看 agent 的訊息。
+agent 做了什麼：以 Markdown 顯示的回覆、每個工具呼叫各一列，以及思考內容。任務的標頭會
+顯示編號和狀態（Queued、Working、Waiting for you、Done、Failed 或 Limit reached）、工作中時
+的 Stop 按鈕，以及 ⋯ 選單。狀態由伺服器的[任務](../README.zh-TW.md#任務)決定：agent 回報錯誤或
+結束時顯示 Failed，滑鼠移上去可看第一個錯誤；因用量限制停止時顯示 Limit reached，可看 agent 的訊息。
 工具呼叫與思考內容的任務歸屬也由伺服器指定。
 
-*native* steer 進執行中任務的訊息會留在那個任務裡：它依送出的時間出現在 agent 的步驟之間，顯示為
-標示 *steered* 的你的訊息，任務的編號、狀態和花費都不變。編號與伺服器的任務一致，和 `GET /tasks`、
+*native* steer 進執行中任務的訊息會留在那個任務裡：它依送出的時間出現在 agent 的步驟之間，標示為
+*steered*，任務的編號、狀態和花費都不變。編號與伺服器的任務一致，和 `GET /tasks`、
 webhook 及 hub 的計數相同。伺服器版本早於任務功能時，每則訊息都會開始一個任務。
 
 寬螢幕上，開始時間與耗時顯示在左側空白處；窄螢幕上則接在標頭的任務編號後。
 *native* Claude Code、Codex 和 Pi 另會顯示任務執行期間的模型呼叫花費，含 sub agent，
 依供應商牌價計算。任務之間的呼叫，例如壓縮，不算入任何任務。
 
-這是 API 等價金額，訂閱方案不按此收費。滑鼠移上去可看呼叫次數與 tokens。花費會在回合結束時，
+這是 API 等價金額，訂閱方案不按此收費。滑鼠移上去可看呼叫次數與 token。花費會在回合結束時，
 以及執行期間每 15 秒更新。計算與價格設定見[工作階段花費](../README.zh-TW.md#工作階段花費)。
 
 ![任務的時間軸：開始時間、耗時和花費](screenshots/task-cost.png)
@@ -117,7 +117,7 @@ agent 收到的是每個附件的路徑。*native* 接受圖片的 agent（Claud
 圖片的形式收到 PNG、JPEG、GIF 和 WebP 附件。瀏覽器支援語音辨識時，
 **More input options**（⋯）提供語音輸入：以瀏覽器的語言把你說的話聽寫進輸入框。
 
-草稿和它的附件在重新載入頁面後仍會保留。沒有送達伺服器的訊息會留在聊天中並標示為未送出，
+草稿和附件在重新載入頁面後仍會保留。沒有送達伺服器的訊息會留在聊天中並標示為未送出，
 附有重試或捨棄的按鈕，重新載入後也一樣。
 
 ### Agent 工作中時
@@ -126,13 +126,13 @@ agent 收到的是每個附件的路徑。*native* 接受圖片的 agent（Claud
 
 agent 工作中時，訊息會排入伺服器的佇列，顯示在訊息欄下方，等回合結束後依序執行。
 所有開啟的聊天畫面都會即時同步佇列。排隊中的任務可編輯、移動或移除。
-*native* ↳ 按鈕可立即 steer 進目前回合，送出選單則有三種模式：
+*native* ↳ 按鈕可把排隊中的任務 steer 進目前的回合，送出選單則有三種模式：
 
 - **Queue**（Enter）：等這個回合結束再送出。
 - **Steer**（⌘/Ctrl+Enter）：加進 agent 正在進行的回合。
 - **Interrupt & send**（⌘/Ctrl+Shift+Enter）：停止這個回合，然後送出。
 
-旁邊的紅色按鈕和任務的 Stop 按鈕都會中斷回合。agent 在等待某個請求的回覆時，新的訊息會
+送出按鈕旁的紅色按鈕和任務的 Stop 按鈕都會中斷回合。agent 在等待某個請求的回覆時，新的訊息會
 排在該請求之後。
 
 ![較長的回合：一個任務排進佇列，另一個 steer 進回合，最後按下 Stop](screenshots/demo-queue.gif)
@@ -150,7 +150,7 @@ agent 工作中時，訊息會排入伺服器的佇列，顯示在訊息欄下�
 | `/effort [effort]` | 變更推理強度 |
 | `/mode [bypass\|auto\|ask\|plan]` | 變更權限模式 |
 | `/plan` | 切換到 plan 模式 |
-| `/compact` | 摘要對話以騰出 context（Claude Code 由聊天介面送出它自己的 `/compact` 來壓縮） |
+| `/compact` | 摘要對話以騰出 context（Claude Code 則由聊天介面送出 Claude Code 自己的 `/compact`） |
 | `/clear` | 開始新的對話：在新的工作階段中重新啟動 agent |
 | `/terminal` | 開啟 shell 終端機 |
 | `/login` | 在 shell 終端機中執行 agent 的登入指令 |
@@ -167,7 +167,7 @@ agent 工作中時，訊息會排入伺服器的佇列，顯示在訊息欄下�
 
 ## Agent 設定
 
-*native* 輸入框的工具列可以在 agent 執行時變更它的設定（`PUT /settings`）。這些設定在整個
+*native* 輸入框的工具列可以在 agent 執行時變更設定（`PUT /settings`）。這些設定在整個
 工作階段中都有效：重新啟動、重新登入之後，以及使用 `--state-db` 時 AgentAPI 重新啟動之後，
 AgentAPI 都會再把它們套用到 agent。
 
@@ -195,9 +195,9 @@ Pi 沒有權限模式，所以它的工具列沒有模式選單。
 
 ![context 彈出視窗：context window 中的 token 數，以及 5 小時與每週的用量限制](screenshots/context-usage.png)
 
-圓環顯示 context window 用了多少。它的彈出視窗列出上一個回合後 context 中的 token 數，以及
+圓環顯示 context window 用了多少。點開後會列出上一個回合後 context 中的 token 數，以及
 帳號的用量限制、各用了多少和何時重置：Claude Code 的 5 小時與每週限制、Codex 的用量週期。
-context 滿了時，agent 會壓縮它；`/compact` 則會立刻壓縮。
+context 滿了時，agent 會自動壓縮；`/compact` 則會立刻壓縮。
 
 ![輸入框上方的提醒：prompt cache 已過期，下一則訊息會重新讀取 120k token，旁邊是 Compact](screenshots/cold-cache.png)
 
@@ -210,17 +210,18 @@ context 滿了時，agent 會壓縮它；`/compact` 則會立刻壓縮。
 
 ![因 5 小時限制而停下、標示為 Limit reached 的任務：卡片顯示重置時間，以及 Continue at reset、Continue now 和 Send queued tasks，佇列中有一個被暫停的任務](screenshots/limit-card.png)
 
-*native* 帳號達到用量限制時，agent 會停下它的回合，輸入框上方的卡片會說明限制何時重置。排隊
+*native* 帳號達到用量限制時，agent 會停下目前的回合，輸入框上方的卡片會說明限制何時重置。排隊
 中的任務會等到那時，並標示 *held until the usage limit resets*，而不是一個接一個失敗。
 **Continue at reset** 會在重置一分鐘後送出一則請 agent 繼續任務的訊息，**Continue now** 則
-立刻送出，**Send queued tasks** 會讓佇列馬上送出。你自己送出的任務會立刻送出。在那之前，agent
+立刻送出，**Send queued tasks** 會讓佇列馬上放行。你自己送的任務會直接送出。重置之前，agent
 和有請求時一樣需要你：標頭、分頁標題和分頁圖示都會顯示，開啟通知的背景分頁也會跳出通知。
 
 ## 請求與決策卡片
 
 agent 需要你回應時，會在輸入框上方顯示卡片並等待。卡片上方的狀態列（手機上改由卡片自己說明）、
 標頭和分頁標題會顯示「Needs you」，任務會顯示「Waiting for you」，工具呼叫列則標示 agent 在等
-什麼。數字鍵可以選擇選項。每個請求只能回覆一次，任何開著的聊天畫面都能回覆；已經無法回覆的請求會註明這一點。
+什麼。數字鍵可以選擇選項。每個請求只能回覆一次，任何開著的聊天畫面都能回覆；
+已經無法回覆的請求會註明這一點。
 
 ### 核准
 
@@ -237,7 +238,7 @@ agent 需要你回應時，會在輸入框上方顯示卡片並等待。卡片�
 ![提問卡片停在三個步驟中的第一步：Package manager、Checks 和 Notes](screenshots/native-question.png)
 
 *native* agent 的提問一次一個步驟：單選、複選或自由輸入文字。**Next** 會前往下一個步驟，
-最後一個步驟會一起送出所有答案。祕密答案在輸入時會被遮蔽，並以 `[redacted]` 保存。
+最後一個步驟會一起送出所有答案。祕密答案在輸入時會遮住，並以 `[redacted]` 保存。
 
 ![回答三個問題：選一個選項、勾選兩個檢查項目，再寫一則備註](screenshots/demo-question.gif)
 
@@ -296,8 +297,8 @@ HTML、Markdown 和 SVG 檔案有 **Preview** 分頁，圖片檔則直接顯示�
 呈現 HTML 頁面時，頁面以相對路徑引用的樣式表、腳本、圖片、字型和影音都會內嵌進去（每個檔案
 最多 4 MiB，合計 16 MiB；沒有內嵌的項目會列在提示中）。頁面在有 sandbox、沒有自己 origin
 的 frame 中執行：腳本可以執行，但無法存取聊天介面、它的登入狀態或 API，儲存空間和
-cookie 也只在預覽開著的期間保留。頁面的 Content-Security-Policy 允許載入它引用的資源，但不能送出任何
-東西：不能發出請求、開啟 socket 或送出表單。
+cookie 也只在預覽開著的期間保留。頁面的 Content-Security-Policy 允許載入它引用的資源，
+但不能送出任何東西：不能發出請求、開啟 socket 或送出表單。
 
 ![Markdown 檔案的預覽，包含標題、圖片、清單、表格和程式碼](screenshots/file-markdown.png)
 
@@ -349,10 +350,10 @@ API 請參閱 [MCP 管理](../README.zh-TW.md#mcp-管理)。
 
 *native* 此分頁從 Claude Code、Codex 和 Pi 的紀錄列出工作目錄中的工作階段，包含名稱、第一則
 訊息、訊息數、最後變動時間和花費。上方卡片加總工作階段及 sub agent 今天、最近 7 天和 30 天
-（含今天，依你的時區），以及全部期間的花費。金額以牌價計算，為 API 等價金額；滑鼠移上去可看 tokens。
+（含今天，依你的時區），以及全部期間的花費。金額以牌價計算，為 API 等價金額；滑鼠移上去可看 token。
 
-**Open** 會在該工作階段重新啟動 agent 並顯示對話；**Start a copy** 會以新 id 開啟副本，保留原工作階段。
-兩者都會取代目前的對話與佇列，並要求再點一次確認。
+**Open** 會在該工作階段重新啟動 agent 並顯示對話；**Start a copy** 會以新 id 開啟
+副本，保留原工作階段。兩者都會取代目前的對話與佇列，並要求再點一次確認。
 
 ![Explorer 的 Session 分頁要求再點一次才會重新啟動 agent](screenshots/explorer-session.png)
 
@@ -360,7 +361,7 @@ API 請參閱 [MCP 管理](../README.zh-TW.md#mcp-管理)。
 agent 一再結束、AgentAPI 已放棄重新啟動時，也用這個按鈕重新啟動。
 AgentAPI 直接啟動 Codex 和 Pi 的 CLI 時，它們會先更新到最新的發行版。
 **Download conversation JSONL** 會儲存這個工作階段的每則訊息、工具呼叫和結果，每行一個事件，
-後面接著 agent 執行過的 sub agent 的事件；工作階段詳細資訊的選單裡也有。
+後面接著 agent 執行過的 sub agent 事件；工作階段詳細資訊的選單裡也有。
 
 ### Webhook 分頁
 
@@ -399,9 +400,11 @@ AgentAPI 直接啟動 Codex 和 Pi 的 CLI 時，它們會先更新到最新的�
 Ctrl+C，shell 的 Ctrl+R、Ctrl+A、Ctrl+E、Ctrl+U 和 Ctrl+W，Home、End、Page up 和 Page down、
 / - | ~、Alt+↑ 和 Ctrl+L。
 按鍵列的 **Ctrl** 和 **Alt** 按鈕會按住修飾鍵，套用到你輸入的下一個按鍵，任何其他組合鍵都能這樣
-輸入。Ctrl+D 和 Ctrl+Z 會要求你再按一次。終端機裡的網頁連結點一下就會開啟，折成多行的連結
-也一樣；指令最後印出的連結（例如登入連結）會縮短後顯示在終端機上方，點一下就能開啟或複製。以
-`--terminal=false` 啟動 AgentAPI 可以關閉它。
+輸入。Ctrl+D 和 Ctrl+Z 會要求你再按一次。
+
+終端機裡的網頁連結點一下就會開啟，折成多行的連結也一樣；指令最後印出的連結（例如登入連結）會
+縮短後顯示在終端機上方，點一下就能開啟或複製。以 `--terminal=false` 啟動 AgentAPI 可以關閉
+終端機。
 
 ![終端機：git status、顯示在終端機上方的連結，以及按住 Ctrl 清除畫面](screenshots/demo-terminal.gif)
 
@@ -420,8 +423,8 @@ Ctrl+C，shell 的 Ctrl+R、Ctrl+A、Ctrl+E、Ctrl+U 和 Ctrl+W，Home、End、P
 ![工作階段詳細資訊選單：狀態、agent、工作階段、附複製按鈕的工作階段 ID、版本、活動、佇列和 token](screenshots/session-details.png)
 
 點選標頭中的狀態會開啟工作階段詳細資訊：狀態、agent、工作階段名稱、*native* agent 的工作階段
-ID（前幾個字元，附複製按鈕）、AgentAPI 版本、agent 正在做什麼、佇列，以及輸入和輸出的 token 數。它的選單可以把對話下載成 JSONL（和 Explorer 的
-Session 分頁一樣）、開啟瀏覽器通知、顯示鍵盤快捷鍵，以及說明如何把這個 AgentAPI 加入
+ID（前幾個字元，附複製按鈕）、AgentAPI 版本、agent 正在做什麼、佇列，以及輸入和輸出的 token
+數。它的選單可以把對話下載成 JSONL（和 Explorer 的 Session 分頁一樣）、開啟瀏覽器通知、顯示鍵盤快捷鍵，以及說明如何把這個 AgentAPI 加入
 [hub](hub.zh-TW.md)。（context 用了多少和用量限制在輸入框
 的工具列上，見 [Context 與用量限制](#context-與用量限制)。）
 
@@ -445,10 +448,10 @@ agent 的警告和錯誤（失敗的回合、它忽略的設定）會以角落�
 
 ![手機上的聊天介面](screenshots/chat-mobile.png)
 
-在手機上，對話紀錄會占滿整個寬度，思考內容收合在任務中。輸入框只占一行：訊息欄、`⋯`（附件、語音輸入和 agent 的
-設定）和送出，agent 工作時再加上停止；訊息換行時才會變高。agent 的模式、模型、effort 和用量平常不顯示，
-從 `⋯` 打開、用 `/model` 這類指令開啟它們的選單，或用量接近上限時，才會出現在第二行。有卡片在等你回覆時，
-只由卡片說明（上方的狀態列只留給螢幕閱讀器），選項也不顯示手機用不到的數字鍵。請求卡片
+在手機上，對話紀錄會占滿整個寬度，思考內容收合在任務中。輸入框只占一行：訊息欄、`⋯`（附件、
+語音輸入和 agent 的設定）和送出，agent 工作時再加上停止；訊息換行時才會變高。agent 的模式、
+模型、推理強度和用量平常不顯示，從 `⋯` 打開、用 `/model` 這類指令開啟它們的選單，或用量接近
+上限時，才會出現在第二行。有卡片在等你回覆時，只由卡片說明（上方的狀態列只留給螢幕閱讀器），選項也不顯示手機用不到的數字鍵。請求卡片
 最多占螢幕的 60%，截成兩行的標題可以展開看完整內容。檔案檢視器會占滿整個螢幕，終端機
 則有按鍵列。鍵盤打開時，頁面會停在鍵盤上方，輸入框和按鍵列都不會被擋住。
 
@@ -466,6 +469,7 @@ agent 的警告和錯誤（失敗的回合、它忽略的設定）會以角落�
 篩選。桌面上的總覽會統計各種狀態，每個請求一張卡片。點選一個 agent，就會在清單旁（手機上則取代
 清單，並有返回按鈕）以這個聊天介面開啟它，上方只有一列：hub 的列，聊天介面自己的按鈕也放在裡面。
 開啟時透過 hub，hub 會替你送出實例的 token。
+
 `+` 可以用網址和 token 加入實例。每一列的 `⋯` 選單可以把實例釘選在最上方、放進自己建立的群組（清單
 會為每個群組加上可收合的標題）、把它正在等的事靜音到改變為止，或移除已停止、連不到的實例。各列、
 群組標題和總覽的一張卡片會顯示 agent 最近 24 小時和 7 天的花費。每一列也顯示 AgentAPI 版本，比 hub

@@ -1,7 +1,7 @@
 # AgentAPI Chat Interface
 
 The AgentAPI web chat groups conversations by task and displays tool activity, attachments and a
-terminal. It is also an example client for the AgentAPI HTTP API. Claude Code generated 95% of the code.
+terminal. It is also an example client for the AgentAPI HTTP API.
 
 ## Development Setup
 
@@ -127,5 +127,5 @@ On phones, thinking collapses into the conversation and the composer stays at th
 permission mode, model, and context controls.
 
 The [screenshot guide](../docs/screenshots/README.md) includes native question and plan cards, the
-file viewer, the model menu, and instructions for regenerating all eight images with
+file viewer, the model menu, and instructions for regenerating the images with
 [scripts/capture-docs.mjs](../scripts/capture-docs.mjs).

@@ -10,11 +10,18 @@ name: Release
 # by hand still works: its binaries are built with the release's tag as the
 # version.
 #
+# Nothing is released unless the tests (go-test.yml, called here) pass on the
+# same commit, whatever started the run: AgentAPIs with --allow-update install
+# the latest release. The tests run in this workflow rather than the release
+# waiting for the Go Tests workflow (workflow_run), so that one mechanism
+# covers every trigger and the commit tested is github.sha; go-test.yml
+# therefore doesn't run on pushes to main itself.
+#
 # The release is created in this workflow, not by a separate release-triggered
 # one, because releases created with GITHUB_TOKEN don't trigger other workflows.
 
 permissions:
-  contents: write
+  contents: read
 
 on:
   push:
@@ -29,14 +36,24 @@ on:
         options: [auto, patch, minor, major]
         default: auto
 
-concurrency:
-  group: release
-  cancel-in-progress: false
-
 jobs:
+  test:
+    name: Go Tests
+    uses: ./.github/workflows/go-test.yml
+
   release:
     name: Build and Release
+    needs: test
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # One release at a time, after the tests; the tests of later pushes run
+    # meanwhile. GitHub keeps one run waiting per group: one that waits is
+    # cancelled when another starts waiting, and the commits of a cancelled
+    # push go out with the next release.
+    concurrency:
+      group: release
+      cancel-in-progress: false
 
     steps:
       - uses: actions/checkout@v4
@@ -51,14 +68,27 @@ jobs:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           BUMP: ${{ inputs.bump }}
         run: |
+          version=""
+          if [[ "${EVENT_NAME}" == "push" ]]; then
+            # main as it is now: checkout points origin/main at the commit
+            # it checks out.
+            git fetch --quiet origin main
+          fi
           if [[ "${EVENT_NAME}" == "release" ]]; then
             version="${RELEASE_TAG#v}"
+          elif [[ "${EVENT_NAME}" == "push" ]] && released=$(git tag --contains HEAD --list 'v[0-9]*.[0-9]*.[0-9]*') && [[ -n "${released}" ]]; then
+            # The tests of a later push finished first, and its release
+            # holds this commit.
+            echo "Released already in ${released//$'\n'/, }; skipping."
+          elif [[ "${EVENT_NAME}" == "push" ]] && ! git merge-base --is-ancestor HEAD FETCH_HEAD; then
+            echo "$(git rev-parse HEAD) is no longer on main (force-pushed); skipping."
           else
             version=$(./next-version.sh "${BUMP:-auto}")
+            if [[ -z "${version}" ]]; then
+              echo "No release-worthy commits since the last release; skipping."
+            fi
           fi
-          if [[ -z "${version}" ]]; then
-            echo "No release-worthy commits since the last release; skipping."
-          else
+          if [[ -n "${version}" ]]; then
             echo "Version: ${version}"
           fi
           echo "version=${version}" >> "$GITHUB_OUTPUT"

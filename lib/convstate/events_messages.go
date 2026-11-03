@@ -112,7 +112,10 @@ func wantsConversation(wants func(EventType) bool) bool {
 // EmitRichMessage emits a rich structured message from the JSONL watcher.
 // It stores the message for late subscriber replay. Messages are upserted
 // by (MessageID, Role) because parsers re-emit a message as its content
-// accumulates (e.g. Codex turn updates).
+// accumulates (e.g. Codex turn updates). The emitter keeps msg and hands
+// it to subscribers and the persister without copying it: the caller must
+// not change its content blocks afterwards (appending to the content is
+// fine).
 func (e *EventEmitter) EmitRichMessage(msg transcript.RichMessage) {
 	e.emitRichMessage(msg, false)
 }
@@ -120,7 +123,8 @@ func (e *EventEmitter) EmitRichMessage(msg transcript.RichMessage) {
 // EmitRichMessageSnapshot stores msg as the full current state of the
 // message, replacing an earlier state with the same (MessageID, Role)
 // instead of merging blocks into it. Native adapters send snapshots: their
-// text blocks grow, and merging would keep every intermediate version.
+// text blocks grow, and merging would keep every intermediate version. Like
+// EmitRichMessage, it keeps msg.
 func (e *EventEmitter) EmitRichMessageSnapshot(msg transcript.RichMessage) {
 	e.emitRichMessage(msg, true)
 }

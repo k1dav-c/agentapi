@@ -71,6 +71,8 @@ type Server struct {
 	emitter            *EventEmitter
 	chatBasePath       string
 	uploads            *uploadStore
+	uploadPruneNow     chan struct{} // nil until startUploadPruning
+	uploadPruneDone    chan struct{} // closed once pruning stopped; nil until it starts
 	cwd                string
 	clock              quartz.Clock
 	shutdownCtx        context.Context
@@ -122,7 +124,9 @@ type ServerConfig struct {
 	// (the native and PTY transports).
 	StateDB *statedb.DB
 	// UploadDir is where uploads and tool result images are kept. Empty
-	// means a temporary directory that is removed on stop.
+	// means a temporary directory that is removed on stop. Either way the
+	// files AgentAPI stored there (<checksum>/<name>) that the conversation
+	// no longer refers to are removed once they are old (uploadGrace).
 	UploadDir string
 	// APIToken, if non-empty, enables token authentication on all API
 	// endpoints: a Bearer header, or the session cookie POST /auth/session
@@ -191,6 +195,34 @@ func (c ServerConfig) agentIO() st.AgentIO {
 	return c.PTY.AgentIO
 }
 
+// CheckConfig returns an error NewServer would return for config before it
+// sets anything up: for its allowed hosts and origins, bind address and
+// webhook. NewServer also opens what the state database holds.
+func CheckConfig(config ServerConfig) error {
+	if _, _, _, err := parseListenConfig(config); err != nil {
+		return err
+	}
+	if err := webhook.Check(config.Webhook); err != nil {
+		return fmt.Errorf("configure webhook: %w", err)
+	}
+	return nil
+}
+
+// parseListenConfig parses the allowed hosts and origins and the bind
+// address of config.
+func parseListenConfig(config ServerConfig) (hosts, origins []string, bind string, err error) {
+	if hosts, err = parseAllowedHosts(config.AllowedHosts); err != nil {
+		return nil, nil, "", fmt.Errorf("failed to parse allowed hosts: %w", err)
+	}
+	if origins, err = parseAllowedOrigins(config.AllowedOrigins); err != nil {
+		return nil, nil, "", fmt.Errorf("failed to parse allowed origins: %w", err)
+	}
+	if bind, err = ParseBindAddress(config.Bind); err != nil {
+		return nil, nil, "", fmt.Errorf("invalid bind address: %w", err)
+	}
+	return hosts, origins, bind, nil
+}
+
 // NewServer creates a new server instance
 func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	router := chi.NewMux()
@@ -201,17 +233,9 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		config.Clock = quartz.NewReal()
 	}
 
-	allowedHosts, err := parseAllowedHosts(config.AllowedHosts)
+	allowedHosts, allowedOrigins, bind, err := parseListenConfig(config)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse allowed hosts: %w", err)
-	}
-	allowedOrigins, err := parseAllowedOrigins(config.AllowedOrigins)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse allowed origins: %w", err)
-	}
-	bind, err := ParseBindAddress(config.Bind)
-	if err != nil {
-		return nil, fmt.Errorf("invalid bind address: %w", err)
+		return nil, err
 	}
 
 	logger.Info(fmt.Sprintf("Allowed hosts: %s", strings.Join(allowedHosts, ", ")))
@@ -461,6 +485,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	if s.agentio != nil || s.native != nil {
 		s.conversation.Start(ctx)
 		s.startMessageQueue()
+		s.startUploadPruning()
 	}
 
 	// Start the JSONL watcher to capture rich structured messages.
@@ -561,6 +586,9 @@ func (s *Server) Stop(ctx context.Context) error {
 			_ = s.terminal.Close()
 		}
 		s.persistQueue()
+		if s.uploadPruneDone != nil {
+			<-s.uploadPruneDone
+		}
 		s.cleanupUploadDir()
 	})
 	return err

@@ -1,9 +1,14 @@
 name: Go Tests
 
+# Pull requests run the tests here. Pushes to main, manual releases and
+# published releases run them through the Release workflow (workflow_call),
+# which releases only once they pass.
 on:
-    push:
-        branches: [main]
     pull_request:
+    workflow_call:
+
+permissions:
+    contents: read
 
 jobs:
     test:

@@ -121,6 +121,9 @@ func loadServerOptions(flags flagSource, args []string) (serverOptions, error) {
 			PublicURL: httpapi.ExpandPublicURL(flags.GetString(FlagPublicURL), port),
 		},
 	}
+	if port < 0 || port > 65535 {
+		return serverOptions{}, fmt.Errorf("invalid --%s %d: a port is 0 to 65535", FlagPort, port)
+	}
 	var err error
 	opts.agentType, err = parseAgentType(opts.agent, flags.GetString(FlagType))
 	if err != nil {

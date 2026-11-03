@@ -2,7 +2,7 @@
 
 The [chat UI guide](../chat-ui.md) and [README](../../README.md) use these screenshots and GIFs.
 Chromium captured them from an AgentAPI binary built from the source (`go build`, version `0.0.0-dev`)
-after v1.2.0, serving the production chat UI and API.
+after v2.3.0, serving the production chat UI and API.
 
 [scripts/capture-docs.mjs](../../scripts/capture-docs.mjs) starts its own servers on a small sample
 project, `my-app` (a page with a stylesheet, a script and release notes, two commits and
@@ -140,7 +140,7 @@ runs the script) and a neutral shell prompt.
    For the older binary, build the same source stamped with an earlier version:
    `go build -ldflags "-X github.com/coder/agentapi/internal/version.Version=2.0.0" -o /tmp/agentapi-2.0.0 main.go`.
 
-The script creates a temporary sample project and home directory, then starts three servers on
+The script creates a temporary sample project and home directory, then starts its servers on
 127.0.0.1. It captures every view and GIF and writes [capture.json](capture.json) with the binary
 version, browser, capture time, viewports and images. It stops the servers and removes temporary
 files even if a step fails. The run takes about five minutes; a chat error fails it.

@@ -5,7 +5,6 @@
 package shellterm
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -60,7 +59,7 @@ type Terminal struct {
 	ptmx       *os.File
 	done       chan struct{}
 	cols, rows uint16
-	history    []byte
+	history    *scrollback
 	watchers   map[int]chan []byte
 	nextID     int
 	closed     bool
@@ -74,7 +73,11 @@ func New(cfg Config) *Terminal {
 	if cfg.Scrollback <= 0 {
 		cfg.Scrollback = defaultScrollback
 	}
-	return &Terminal{cfg: cfg, cols: defaultCols, rows: defaultRows, watchers: make(map[int]chan []byte)}
+	return &Terminal{
+		cfg: cfg, cols: defaultCols, rows: defaultRows,
+		history:  newScrollback(cfg.Scrollback),
+		watchers: make(map[int]chan []byte),
+	}
 }
 
 // shell returns the program to run.
@@ -119,7 +122,7 @@ func (t *Terminal) Watch() (history []byte, output <-chan []byte, stop func(), e
 			close(c)
 		}
 	}
-	return append([]byte(nil), t.history...), ch, stop, nil
+	return t.history.bytes(), ch, stop, nil
 }
 
 func (t *Terminal) startLocked() error {
@@ -208,15 +211,7 @@ func (t *Terminal) broadcast(data []byte) {
 }
 
 func (t *Terminal) appendLocked(data []byte) {
-	t.history = append(t.history, data...)
-	if over := len(t.history) - t.cfg.Scrollback; over > 0 {
-		kept := t.history[over:]
-		// Start at a line, not inside an escape sequence.
-		if i := bytes.IndexByte(kept, '\n'); i >= 0 {
-			kept = kept[i+1:]
-		}
-		t.history = append([]byte(nil), kept...)
-	}
+	t.history.add(data)
 }
 
 // Write types data into the shell.

@@ -59,10 +59,12 @@ func (s *Server) deleteMessages(_ context.Context, _ *struct{}) (*DeleteMessages
 // conversation: the emitter's state (messages, rich messages, requests,
 // timeline, errors) and the queue, whose IDs go on counting. It leaves the
 // conversation itself alone, so the native conversation can have it run
-// while it replaces its agent. Caller holds s.mu.
+// while it replaces its agent. The uploads only the old conversation
+// referred to are removed soon after. Caller holds s.mu.
 func (s *Server) forgetConversationLocked() {
 	s.emitter.Reset()
 	s.queue.Clear()
+	s.requestUploadPrune()
 }
 
 // resetConversationLocked clears all conversation state: the

@@ -264,6 +264,8 @@ type Persister interface {
 	PutMessage(msg conv.Message, seq uint64)
 	// TruncateMessages removes the messages with an ID of at least fromID.
 	TruncateMessages(fromID int)
+	// PutRichMessage stores msg, which it may keep: the emitter never
+	// changes a stored rich message (or its content) in place.
 	PutRichMessage(pos int, msg transcript.RichMessage, seq uint64)
 	AppendSessionEvents(events []transcript.SessionEvent)
 	PutRequest(state native.RequestState, seq uint64)

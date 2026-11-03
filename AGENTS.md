@@ -30,6 +30,8 @@ Use these commands and conventions when changing AgentAPI.
 - `go test ./e2e` - Run the end-to-end tests: the server binary with a scripted echo agent (PTY) and `e2e/fakeclaude`, a scripted Claude Code (native)
 - `cd chat && bun test` - Run the chat UI tests
 - Tests are located alongside source files (e.g., `lib/httpapi/server_test.go`)
+- CI releases on every push to `main` from Conventional Commit messages, but only after these tests
+  pass on that commit: the Release workflow runs `.github/workflows/go-test.yml` first
 
 ## Development commands
 
@@ -71,7 +73,7 @@ to PTY mode, which parses terminal output.
 - `lib/hub/` - `agentapi hub serve`: a server that watches many AgentAPIs (signed webhooks, summary streams, a proxy that opens any of them in the chat, the addresses machines join it by)
 - `lib/sse/` - Server-sent events as the HTML standard defines them (`Reader`, `Write`), for the hub's streams
 - `lib/netaddr/` - The machine's IPv4 addresses: those other machines may reach (the hub's join URLs), and the one on the route to a host (`{ip}` in `--public-url`)
-- `lib/userconfig/` - The user's settings file (`~/.agentapi/config.yaml`), which agentapi server reads and agentapi hub join writes
+- `lib/userconfig/` - The user's settings file (`~/.agentapi/config.yaml`), which `agentapi server` reads and `agentapi hub join` writes
 - `lib/registry/` - The registry of the AgentAPIs running on a machine (`~/.agentapi/instances`), which `agentapi list` reads
 - `lib/selfupdate/` - Installs the latest release in place of the program (`agentapi update`, `POST /update`): the GitHub lookup, the binary for the platform, checksum verification and the rename under a lock file; whether the user can replace the program (`Program.Blocked`)
 - `chat/` - Next.js web UI (embedded into Go binary)
@@ -82,7 +84,6 @@ to PTY mode, which parses terminal output.
 - All transports implement the same conversation interface and report to the event emitter.
 - PTY mode translates API calls into keystrokes and parses the terminal screen.
 - Native mode reports structured messages, requests, settings, and usage directly.
-- The Go binary embeds the Next.js chat UI as static assets.
 
 ### PTY message flow
 
@@ -117,7 +118,6 @@ supports Claude Code, Codex, and Pi, plus `native-demo` with `--type custom` for
 
 ## Project structure
 
-- Go module with standard layout
 - Chat UI in `chat/` directory (Next.js + TypeScript)
 - OpenAPI schema auto-generated to `openapi.json`
 - Release versions determined by `next-version.sh`; builds stamp the binary version, and `version.sh` synchronizes generated metadata

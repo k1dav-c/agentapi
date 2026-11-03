@@ -1288,3 +1288,29 @@ func TestGuardedEndpoints(t *testing.T) {
 		assert.Equal(t, tc.status, rec.Code, "%s %s: %s", tc.method, tc.path, rec.Body.String())
 	}
 }
+
+// CheckConfig refuses what NewServer would, without a server.
+func TestCheckConfig(t *testing.T) {
+	t.Parallel()
+	ok := httpapi.ServerConfig{AllowedHosts: []string{"localhost"}, AllowedOrigins: []string{"http://localhost:3284"}, Bind: "127.0.0.1"}
+	require.NoError(t, httpapi.CheckConfig(ok))
+	for name, tc := range map[string]struct {
+		change func(*httpapi.ServerConfig)
+		want   string
+	}{
+		"host":     {func(c *httpapi.ServerConfig) { c.AllowedHosts = []string{"localhost:3284"} }, "failed to parse allowed hosts"},
+		"origin":   {func(c *httpapi.ServerConfig) { c.AllowedOrigins = []string{"http://a, http://b"} }, "failed to parse allowed origins"},
+		"bind":     {func(c *httpapi.ServerConfig) { c.Bind = "127.0.0.1:80" }, "invalid bind address"},
+		"webhook":  {func(c *httpapi.ServerConfig) { c.Webhook.URL = "ftp://hub" }, "configure webhook: webhook URL must use http or https"},
+		"template": {func(c *httpapi.ServerConfig) { c.Webhook.PayloadTemplate = "{{.Nope}}" }, "configure webhook: invalid webhook payload template"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			config := ok
+			tc.change(&config)
+			assert.ErrorContains(t, httpapi.CheckConfig(config), tc.want)
+			_, err := httpapi.NewServer(logctx.WithLogger(context.Background(), slog.New(slog.DiscardHandler)), config)
+			assert.ErrorContains(t, err, tc.want, "NewServer refuses it alike")
+		})
+	}
+}

@@ -264,17 +264,29 @@ func parseWebhookTemplate(templateStr string) (*template.Template, error) {
 	return tmpl, nil
 }
 
-// New returns a dispatcher of the events of an AgentAPI of agentType on
-// transport, which Start starts sending.
-func New(config Config, logger *slog.Logger, agentType mf.AgentType, transport instanceapi.Transport, clock quartz.Clock) (*Dispatcher, error) {
+// Check returns the error New would return for config.
+func Check(config Config) error {
+	_, err := checkedTemplate(config)
+	return err
+}
+
+// checkedTemplate checks config and returns its payload template, nil for
+// none.
+func checkedTemplate(config Config) (*template.Template, error) {
 	if err := config.validate(); err != nil {
 		return nil, err
 	}
-	config = webhookConfigWithDefaults(config)
-	tmpl, err := parseWebhookTemplate(config.PayloadTemplate)
+	return parseWebhookTemplate(config.PayloadTemplate)
+}
+
+// New returns a dispatcher of the events of an AgentAPI of agentType on
+// transport, which Start starts sending.
+func New(config Config, logger *slog.Logger, agentType mf.AgentType, transport instanceapi.Transport, clock quartz.Clock) (*Dispatcher, error) {
+	tmpl, err := checkedTemplate(config)
 	if err != nil {
 		return nil, err
 	}
+	config = webhookConfigWithDefaults(config)
 	serverID := randomWebhookID()
 	return &Dispatcher{
 		config:        config,

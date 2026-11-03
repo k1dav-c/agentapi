@@ -23,7 +23,7 @@ For each test, `echo_test.go`:
 
 ## Native transport
 
-`native_test.go` runs `agentapi server -- claude` with a state database, with `fakeclaude/` first on
+`native_test.go` runs `agentapi server -- claude` with a state database and `fakeclaude/` first on
 `PATH` as Claude Code. `fakeclaude` reports a login for `claude auth status`, answers the control
 requests AgentAPI sends, and answers each user message with one turn, `Echo: <message>`, in the
 stream-json frames a real CLI writes. The tests take a turn, restart the server in place with

@@ -304,19 +304,18 @@ header, tab title and status strip show "Needs you", and queued tasks are marked
 steered into a task shows inside it, so the chat numbers tasks as the server does. Long tasks show
 their latest 40 steps first.
 
-Each agent message has its own Markdown/raw toggle so you can switch display modes without
-affecting the rest of the conversation.
+Each agent message has its own Markdown/raw toggle.
 
 ### Session Explorer
 
-The Session Explorer provides:
+The Session Explorer (⌘K / Ctrl+K) provides:
 
 - links and file paths discovered in the current conversation;
 - an index for jumping directly to earlier tasks;
 - MCP server configuration without leaving the chat UI;
 - a Session tab with the agent's [earlier sessions](#earlier-sessions) to open or copy, what they
   [cost](#session-costs), and a two-step restart confirmation;
-- a Webhook tab that sets up the [webhook](#webhooks) (open the Explorer with ⌘K / Ctrl+K).
+- a Webhook tab that sets up the [webhook](#webhooks).
 
 ![The Session Explorer's Index tab listing the session's tasks](docs/screenshots/explorer-index.png)
 
@@ -348,8 +347,8 @@ agent receives the file path.
 
 ### Decision cards
 
-Items awaiting your response appear above the composer as decision cards: its terminal dialogs on
-the PTY transport (see [Interactive prompt support](#interactive-prompt-support)), its
+Items awaiting your response appear above the composer as decision cards: the agent's terminal
+dialogs on the PTY transport (see [Interactive prompt support](#interactive-prompt-support)), its
 [requests](#requests-approvals-questions-and-plans) on the native transport, and the
 [login card](#logging-in) while it waits for a login. Number keys pick options. On a phone a card
 takes at most 60% of the screen, and a title cut to two lines can be shown in full.
@@ -414,8 +413,8 @@ the window (11–20px); the mirror uses the agent's real terminal width, so star
 
 ### With the native transport
 
-Native requests for tool approval, answers or plan approval appear as cards above the composer,
-using at most 60% of a phone's screen. While the agent works, the send menu can steer a message into
+Native requests for tool approval, answers or plan approval appear as cards above the composer.
+While the agent works, the send menu can steer a message into
 the running turn or interrupt it. The toolbar controls permission mode, model and reasoning effort,
 and shows context usage and rate limits. Slash commands include `/model` and `/compact`.
 
@@ -683,9 +682,9 @@ approving it does not change files.
 `GET /status` reports the supported `capabilities`: `steer`, `interrupt`, `resume` (the session
 can be resumed when AgentAPI starts again, see [Persistent sessions](#persistent-sessions)),
 `settings` (see [Settings](#settings-permission-mode-model-and-effort)), `compact` (see
-[Slash commands](#slash-commands-and-compaction)) and `images` (image attachments, `@"<path>"`
-references to PNG, JPEG, GIF or WebP files up to 10 MB, are sent to the agent as images as well as
-paths; to an agent without it, only the paths are sent). While no agent runs (a restart, a wait for
+[Slash commands](#slash-commands-and-compaction)) and `images`. With `images`, image attachments
+(`@"<path>"` references to PNG, JPEG, GIF or WebP files up to 10 MB) go to the agent as images as
+well as paths; without it, only the paths are sent. While no agent runs (a restart, a wait for
 a login), it reports what the last one supported.
 
 In the chat, while the agent works, the send button's menu adds **Steer** (⌘/Ctrl+Enter) and
@@ -730,9 +729,7 @@ phone in a row of their own above the buttons).
 
 ![The model menu with three models and the reasoning efforts of the chosen one](docs/screenshots/model-settings.png)
 
-The permission control in the composer's toolbar changes how the agent handles approvals, and the
-model control chooses a model and its reasoning effort. Swift, Deep, and Plain are demonstration
-models supplied by `native-demo`.
+Swift, Deep, and Plain are demonstration models supplied by `native-demo`.
 
 ### Context and rate limits
 
@@ -861,7 +858,9 @@ state-db: ~/.agentapi/state/{port}.db
 - Requests that were open when AgentAPI stopped are marked expired: the agent
   that asked is gone.
 - Uploads are kept next to the file (`<file>.uploads`), because messages refer
-  to them by path.
+  to them by path. One that nothing in the conversation (or the queue) refers
+  to is removed once it is 7 days old, which leaves time for a draft's
+  attachments; this is checked on start, hourly and after a restart.
 - A file belongs to one agent type, transport and working directory; AgentAPI
   refuses to start with another one's file. It is locked while AgentAPI runs,
   so a second AgentAPI (or `sqlite3`) can't open it.
@@ -991,10 +990,7 @@ usage.
 
 The permission mode, model and effort switch with Claude Code's control requests
 (`set_permission_mode`, `set_model`, `apply_flag_settings`); its models and their efforts come
-from its initialize response, and the model and effort it runs with from `get_settings`. AgentAPI
-adds `--allow-dangerously-skip-permissions`, without which Claude Code ignores a switch to
-`bypassPermissions`, except where Claude Code refuses that mode (as root outside a sandbox).
-Approving a plan offers "Yes, and bypass permissions" whenever the session can switch to it.
+from its initialize response, and the model and effort it runs with from `get_settings`.
 
 - Approvals offer Allow, Deny (with optional feedback for Claude) and, when
   Claude Code suggests a permission rule, "Allow always", which applies the
@@ -1206,7 +1202,7 @@ their session logs for structured activity, and the chat answers their terminal 
 
 ### How it works
 
-AgentAPI runs an in-memory terminal emulator. It translates API calls into appropriate terminal
+AgentAPI runs an in-memory terminal emulator. It translates API calls into terminal
 keystrokes and parses the agent's outputs into individual messages.
 
 #### Splitting terminal output into messages
@@ -1216,7 +1212,7 @@ There are two types of messages:
 - User messages: sent by the user to the agent
 - Agent messages: sent by the agent to the user
 
-To parse individual messages from the terminal output, we take the following steps:
+AgentAPI splits the terminal output into messages in these steps:
 
 1. The initial terminal output, before any user messages are sent, is treated as the agent's first message.
 2. When the user sends a message through the API, a snapshot of the terminal is taken before any keystrokes are sent.
@@ -1238,8 +1234,8 @@ elements may need an update; until then, replies may include extra interface tex
 ### Structured Claude, Codex and Pi activity
 
 In addition to parsing terminal snapshots, this fork can watch Claude, Codex and Pi session logs.
-This provides structured thinking blocks, tool invocations, tool results, usage information, and
-stable message identifiers that cannot always be reconstructed reliably from terminal output alone.
+The logs give structured thinking blocks, tool invocations, tool results, usage information, and
+stable message identifiers, which terminal output alone can't always reconstruct.
 
 - `GET /rich-messages` returns the structured conversation.
 - `GET /timeline` returns normalized session events suitable for export,
@@ -1275,7 +1271,7 @@ arrive as structured requests instead.
 ### Kimi Code CLI
 
 This fork adds the `kimi` agent type, automatic detection for the `kimi` executable, chat UI
-labeling, terminal message formatting, readiness detection, and tests for its startup state.
+labeling, terminal message formatting and readiness detection.
 
 Kimi can use the regular interactive PTY transport:
 
@@ -1334,11 +1330,7 @@ These endpoints work with every transport, except where noted; the
   messages wait in the queue; raw keys, another restart and opening a
   session get 409, and so does a restart while AgentAPI stops.
 - `GET /status` returns the backward-compatible `stable`/`running` status,
-  the detailed lifecycle (`starting`, `ready`, `running`, `restarting`,
-  `exited` or `failed`; a native agent that exits is `restarting` while
-  AgentAPI starts it again, until the new agent accepts turns, and `failed`
-  once it gives up; `restarting`, `exited` and `failed` don't change with
-  the agent's status until the agent is back), the transport, `server_id` (a random identifier of
+  the detailed lifecycle, the transport, `server_id` (a random identifier of
   this AgentAPI run, new at every start), `turn` (how many times the agent
   started working), the conversation's `epoch`, the session name, the
   AgentAPI version, the agent's open dialog (`terminal_prompt`) and the
@@ -1346,12 +1338,18 @@ These endpoints work with every transport, except where noted; the
   reports `agent_session_id` (the agent's own session, which
   [`GET /sessions`](#earlier-sessions) lists), `capabilities`,
   `pending_requests`, `settings`, `usage`, `terminal` and `login_required`.
+  The lifecycle is `starting`, `ready`, `running`, `restarting`, `exited` or
+  `failed`. A native agent that exits is `restarting` while AgentAPI starts
+  it again, until the new agent accepts turns, and `failed` once it gives
+  up. `restarting`, `exited` and `failed` don't change with the agent's
+  status until the agent is back.
 - `GET /tasks` returns the conversation's [tasks](#tasks).
 - `GET /title` returns the session's human-readable title.
 - `POST /upload` stores a file (up to 10 MB; a body over 11 MiB is refused
   before it is read) and returns its path, which a message references as
   `@"<path>"`. The file keeps the base name it was sent with, without control
-  characters and cut to 255 bytes; a name of `.` or `..` gets 400.
+  characters and cut to 255 bytes; a name of `.` or `..` gets 400. A file
+  the conversation doesn't refer to is removed after 7 days.
 
 ### Tasks
 
@@ -1381,8 +1379,7 @@ chat and the [webhook](#webhooks)'s `task.*` events use the same tasks.
 ### Message queue
 
 Messages submitted while an agent is busy are placed in a FIFO queue instead of being rejected.
-Queued messages can be inspected, edited, or deleted before delivery through both the API and chat
-UI.
+The API and the chat UI can show, edit or delete a queued message before it goes out.
 
 - `GET /queue` lists the queued messages.
 - `PUT /queue/{id}` edits a queued message and `DELETE /queue/{id}` removes
@@ -1439,7 +1436,7 @@ instance:
   question or plan), `dialog` (in the terminal), `limit` (a usage limit stopped the turn), `exited`,
   or `none`.
 - `GET /events?only=summary` sends `summary_update` on connection and when the summary changes,
-  plus heartbeats. It omits messages and screen updates, allowing a client to follow dozens of
+  plus heartbeats. It omits messages and screen updates, so a client can follow dozens of
   instances. Reply text growing doesn't change the summary; task starts and ends, requests, status
   changes and queue changes do. One change sends one `summary_update` with all it changed: a turn's
   end sends the agent stable with its task done. Other `/events` clients don't receive
@@ -1460,8 +1457,7 @@ entry's `server_id` before using one: another AgentAPI may have taken the port.
 
 Set `--instance-id` to identify the instance (default `<hostname>:<port>`), `--name` for its display
 name (default the working directory's name), and `--public-url` for its address. `PUT /webhook` can
-change the ID and URL at runtime. Webhook events carry the same `instance` identity, so clients
-using webhooks or direct connections can identify instances consistently.
+change the ID and URL at runtime.
 
 For a browser client on another origin, add that origin to
 [`--allowed-origins`](#allowed-origins). To send an [API token](#api-token-authentication), read the
@@ -1556,7 +1552,9 @@ curl -X POST localhost:3284/update -H 'Content-Type: application/json' -d '{"whe
 - `POST /update` installs the latest official release of k1dav-c/agentapi for the machine's OS and
   architecture, then restarts AgentAPI in place into it, as [`agentapi restart`](#agentapi-restart)
   does: the same PID, a new `server_id` and version. The download must match the release's
-  `checksums.txt` and run as that version. The request can't choose a version or a URL.
+  `checksums.txt` and run as that version. The request can't choose a version or a URL. A release
+  that wouldn't start with this AgentAPI's settings or state database fails the update before the
+  restart, and AgentAPI goes on serving.
 - `"when": "idle"`, the default, installs at once and restarts once the agent is idle: stable, with
   no request (approval, question or plan) or terminal dialog open. Queued messages stay queued and
   go out after the restart. `"now"` restarts at once and interrupts the agent.
@@ -1645,8 +1643,8 @@ Every event names the AgentAPI it comes from, so one receiver can tell many apar
 The instance `id` is `--instance-id`, by default `<hostname>:<port>`, and `name` is `--name`, by
 default the working directory's name. `url` is `--public-url`, where the receiver can reach this
 AgentAPI to open its chat or call its API, and `workspace_url` the Coder workspace it runs in, if
-any. Messages and tool calls from before AgentAPI
-started, or of a session it opened from the agent's history, are not sent again.
+any. Messages and tool calls from before AgentAPI started, or of a session it opened from the
+agent's history, are not sent again.
 
 ```bash
 agentapi server \
@@ -1754,8 +1752,7 @@ The API and Session Explorer support:
 - optionally restarting the agent to apply changes immediately.
 
 When an agent is restarted, AgentAPI and its HTTP/SSE clients remain online. A PTY agent receives a
-new process and session-log watcher, although its previous in-memory conversation context is not
-retained. For MCP changes, a native agent reloads the same session and preserves the conversation
+new process and session-log watcher, but loses its in-memory conversation context. For MCP changes, a native agent reloads the same session and preserves the conversation
 (an agent that can't resume its session, with `resume` false, starts a new session instead, and the
 conversation is cleared). A reload during an active turn returns 409 because it would interrupt that
 turn. Before a restart from the Explorer or `DELETE /messages`, AgentAPI updates Codex
@@ -1884,7 +1881,7 @@ agentapi server --allowed-origins 'https://example.com' -- claude
 
 To specify multiple origins, use a comma-separated list when using the `--allowed-origins` flag, or
 a space-separated list when using the `AGENTAPI_ALLOWED_ORIGINS` environment variable. Origins must
-include the protocol (`http://` or `https://`) and support wildcards (e.g.,
+include the protocol (`http://` or `https://`) and may use wildcards (e.g.,
 `https://*.example.com`):
 
 ```bash
@@ -2102,8 +2099,11 @@ agentapi restart --all      # every AgentAPI of yours on this machine
 ```
 
 `agentapi restart` finds them in the [registry](#watching-many-instances) and sends each SIGUSR2.
-An AgentAPI first runs the program it was started from with `--version`; if that fails, it logs why
-and goes on serving. Otherwise it stops as for a shutdown (the agent is interrupted and closed, the
+An AgentAPI first runs the program it was started from with `--version`, then with the arguments
+and environment it will run with and a check that it would start with them: its flags, `AGENTAPI_*`
+variables and config file, its agent's arguments, and a state database it can write. If either
+fails (an update brought a release that refuses a setting, say), it logs why and goes on serving,
+and `agentapi restart` reports that it still runs as before. Otherwise it stops as for a shutdown (the agent is interrupted and closed, the
 state database written, the registry entry removed, and the webhook sends `instance.stopped`), then
 runs the same path again with the same arguments and environment, in the same process. Its PID
 stays, so a PID file and a parent shell that waits for it, such as a Coder workspace's start

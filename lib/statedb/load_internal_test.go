@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -115,4 +116,75 @@ func metaOf(t *testing.T, db *sql.DB) map[string]string {
 	}
 	require.NoError(t, closeRows(rows))
 	return meta
+}
+
+// Check tells whether a database would open, without changing it.
+func TestCheck(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, Check(filepath.Join(dir, "missing", "state.db")), "Open creates it")
+
+	path := filepath.Join(dir, "state.db")
+	db, err := Open(path, quiet())
+	require.NoError(t, err)
+	db.PutMessage(conv.Message{Id: 0, Message: "kept"}, 1)
+	db.Flush()
+	assert.ErrorIs(t, Check(path), ErrInUse)
+	require.NoError(t, db.Close())
+	require.NoError(t, Check(path))
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	require.Len(t, entries, 1, "no -wal or -shm file")
+
+	// An older schema isn't migrated.
+	older := filepath.Join(dir, "older.db")
+	sqlDB, err := sql.Open("sqlite", dataSourceName(older))
+	require.NoError(t, err)
+	require.NoError(t, migrateTo(sqlDB, 1))
+	require.NoError(t, sqlDB.Close())
+	require.NoError(t, Check(older))
+	sqlDB, err = sql.Open("sqlite", dataSourceName(older))
+	require.NoError(t, err)
+	assert.Equal(t, 1, schema(t, sqlDB))
+	require.NoError(t, sqlDB.Close())
+
+	// A newer AgentAPI's: one that only added is fine, one that changed
+	// what this one writes isn't.
+	known := migrations
+	defer func() { migrations = known }()
+	migrations = append(slices.Clone(known),
+		migration{since: "9.0.0", minWriter: 1, sql: "CREATE TABLE later (id INTEGER PRIMARY KEY)"})
+	db, err = Open(path, quiet())
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+	migrations = known
+	require.NoError(t, Check(path))
+	migrations = append(slices.Clone(known),
+		migration{since: "9.0.0", minWriter: 1, sql: "CREATE TABLE later2 (id INTEGER PRIMARY KEY)"},
+		migration{since: "9.1.0", minWriter: len(known) + 2, sql: "ALTER TABLE messages ADD COLUMN kind TEXT NOT NULL DEFAULT ''"})
+	newer := filepath.Join(dir, "newer.db")
+	db, err = Open(newer, quiet())
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+	migrations = known
+	assert.ErrorContains(t, Check(newer), fmt.Sprintf("state database %s: needs AgentAPI 9.1.0 or later (schema %d", newer, len(known)+2))
+
+	notADB := filepath.Join(dir, "text.db")
+	require.NoError(t, os.WriteFile(notADB, []byte("not a database, but long enough to look at its header, which is a hundred bytes long......."), 0o600))
+	assert.ErrorContains(t, Check(notADB), "state database "+notADB)
+}
+
+// CheckWriter tells whether another program could write an open database.
+func TestCheckWriter(t *testing.T) {
+	known := migrations
+	defer func() { migrations = known }()
+	migrations = append(slices.Clone(known),
+		migration{since: "9.0.0", minWriter: 1, sql: "CREATE TABLE later (id INTEGER PRIMARY KEY)"},
+		migration{since: "9.1.0", minWriter: len(known) + 2, sql: "ALTER TABLE messages ADD COLUMN kind TEXT NOT NULL DEFAULT ''"})
+	db, err := Open(filepath.Join(t.TempDir(), "state.db"), quiet())
+	require.NoError(t, err)
+	defer func() { require.NoError(t, db.Close()) }()
+	require.NoError(t, db.CheckWriter(len(known)+2, "9.1.0"))
+	require.NoError(t, db.CheckWriter(len(known)+5, "10.0.0"), "a newer program migrates it")
+	assert.ErrorContains(t, db.CheckWriter(len(known)+1, "9.0.4"),
+		fmt.Sprintf("needs AgentAPI 9.1.0 or later (schema %d; AgentAPI 9.0.4 knows schema %d)", len(known)+2, len(known)+1))
 }
