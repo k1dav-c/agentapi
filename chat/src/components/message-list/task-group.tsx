@@ -47,7 +47,6 @@ export const TaskGroup = React.memo(function TaskGroup({
   onEditMessage,
   onDismissMessage,
   onStopTask,
-  onSendRaw,
   searchQuery,
   searchResultIndex,
   isCurrentSearchResult,
@@ -66,7 +65,6 @@ export const TaskGroup = React.memo(function TaskGroup({
   onEditMessage: (clientId: string, content: string) => void;
   onDismissMessage: (clientId: string) => void;
   onStopTask?: () => void;
-  onSendRaw?: (data: string) => void;
   searchQuery: string;
   searchResultIndex: number;
   isCurrentSearchResult: boolean;
@@ -285,9 +283,9 @@ export const TaskGroup = React.memo(function TaskGroup({
                       ) : item.type === "thinking" ? (
                         <ThinkingNote key={item.key} content={item.content} />
                       ) : item.type === "tool-group" ? (
-                        <ToolCallGroup key={item.key} toolCalls={item.toolCalls} searchQuery={searchQuery} onSendRaw={onSendRaw} />
+                        <ToolCallGroup key={item.key} toolCalls={item.toolCalls} searchQuery={searchQuery} />
                       ) : (
-                        <ToolCallCard key={item.key} toolCall={item.toolCall} searchQuery={searchQuery} onSendRaw={onSendRaw} />
+                        <ToolCallCard key={item.key} toolCall={item.toolCall} searchQuery={searchQuery} />
                       )
                     )}
                   </div>

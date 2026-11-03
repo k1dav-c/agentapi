@@ -268,16 +268,12 @@ export function createChatAPI(baseURL: string) {
       }
     },
 
-    async sendMessage(
-      content: string,
-      type: "user" | "raw",
-      mode: DispatchMode = "queue",
-    ): Promise<SendResult> {
+    async sendMessage(content: string, mode: DispatchMode = "queue"): Promise<SendResult> {
       const result = await jsonRequest<{ok?: boolean; queued?: boolean; steered?: boolean}>("/message", {
         method: "POST",
         // Only send dispatch_mode when it isn't the default, so older
         // servers that don't know the field keep accepting messages.
-        body: mode === "queue" ? {content, type} : {content, type, dispatch_mode: mode},
+        body: mode === "queue" ? {content, type: "user"} : {content, type: "user", dispatch_mode: mode},
         fallback: "Failed to send the message",
       });
       return {ok: result.ok === true, queued: result.queued === true, steered: result.steered === true};

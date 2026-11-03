@@ -26,7 +26,7 @@ import {cn} from "@/lib/utils";
 import {useMediaQuery} from "@/lib/use-media-query";
 
 interface MessageInputProps {
-  onSendMessage: (message: string, type: "user" | "raw", mode?: DispatchMode) => Promise<SendResult>;
+  onSendMessage: (message: string, mode?: DispatchMode) => Promise<SendResult>;
   disabled?: boolean;
   serverStatus: ServerStatus;
   suggestedPrompt?: string;
@@ -146,7 +146,7 @@ export default function MessageInput({
       }
       return;
     }
-    const result = await onSendMessage(message, "user", mode);
+    const result = await onSendMessage(message, mode);
     if (!result.ok) return;
     const notice = sendNotice(result, mode);
     if (notice) toast.success(notice);

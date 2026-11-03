@@ -63,8 +63,6 @@ import {useStableCallback} from "@/lib/use-stable-callback";
 
 export type {DraftMessage, Message, RichContentBlock, RichMessage, Usage} from "@/lib/conversation";
 
-type MessageType = "user" | "raw";
-
 export type {SendResult} from "./use-drafts";
 
 export interface FileUploadResponse {
@@ -127,15 +125,13 @@ export interface ChatActions extends Pick<ChatAPI, (typeof API_CALLS)[number]> {
   // Checks the login again now (POST /login/retry).
   retryLogin: () => Promise<void>;
   respondToRequest: (id: string, response: RequestResponse) => Promise<NativeRequest>;
-  // Stops what the agent is doing now (Esc on a PTY agent's terminal, POST
-  // /interrupt on the native transport); see ChatState.canStop. It reports
+  // Stops what the agent is doing now (POST /interrupt); see
+  // ChatState.canStop. It reports
   // a failure itself and resolves to false.
   stop: () => Promise<boolean>;
   steerQueuedMessage: (id: number) => Promise<void>;
   reorderQueue: (ids: number[]) => Promise<void>;
-  sendMessage: (message: string, type?: MessageType, mode?: DispatchMode) => Promise<SendResult>;
-  // Sends keystrokes to the agent's terminal as-is (TTY mode).
-  sendTerminalInput: (data: string) => Promise<void>;
+  sendMessage: (message: string, mode?: DispatchMode) => Promise<SendResult>;
   retryFailedMessage: (clientId: string) => Promise<boolean>;
   dismissFailedMessage: (clientId: string) => void;
   updateQueuedMessage: (id: number, content: string) => Promise<void>;
@@ -395,13 +391,8 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
   const stop = async () => {
     if (!stoppable) return false;
     try {
-      if (dispatch.transport === "native") {
-        await api.interrupt();
-        toast.info("Stopping the agent");
-      } else {
-        await api.sendMessage("\x1b", "raw");
-        toast.info("Stop signal sent");
-      }
+      await api.interrupt();
+      toast.info("Stopping the agent");
       return true;
     } catch (error) {
       toast.error("Failed to stop the agent", {description: getErrorMessage(error)});
@@ -456,9 +447,6 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
   // component that takes it never renders again for it.
   const callbacks = {
     sendMessage: useStableCallback(sendMessage),
-    sendTerminalInput: useStableCallback(async (data: string) => {
-      await api.sendMessage(data, "raw");
-    }),
     updateSettings: useStableCallback(async (change: AgentSettings) => {
       const result = await api.updateSettings(change);
       // Shown at once; the status_change event that follows says the same.

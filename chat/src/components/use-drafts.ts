@@ -57,32 +57,27 @@ export function useDrafts({
   const withoutDraft = (clientId: string) => (previous: (Message | DraftMessage)[]) =>
     previous.filter((message) => !isDraftMessage(message) || message.clientId !== clientId);
 
-  // Sends a message; a raw one (keys for the terminal) without a draft.
-  const sendMessage = async (content: string, type: "user" | "raw" = "user", mode: DispatchMode = "queue"): Promise<SendResult> => {
-    // For user messages, require non-empty content
-    if (type === "user" && !content.trim()) return {ok: false, queued: false};
+  // Sends a message, shown as a draft until the server has it.
+  const sendMessage = async (content: string, mode: DispatchMode = "queue"): Promise<SendResult> => {
+    if (!content.trim()) return {ok: false, queued: false};
     const clientId = crypto.randomUUID();
-    if (type === "user") {
-      setMessages((previous) => [...previous, {role: "user", content, clientId, deliveryStatus: "sending"}]);
-      setLoading(true);
-    }
+    setMessages((previous) => [...previous, {role: "user", content, clientId, deliveryStatus: "sending"}]);
+    setLoading(true);
     try {
-      const result = await api.sendMessage(content, type, mode);
+      const result = await api.sendMessage(content, mode);
       await queueChanged();
-      if (type === "user") setMessages(withoutDraft(clientId));
+      setMessages(withoutDraft(clientId));
       return {ok: result.ok, queued: result.queued, steered: result.steered};
     } catch (error) {
       console.error("Error sending message:", error);
       const message = getErrorMessage(error);
       toast.error(`Error sending message`, {description: message});
-      if (type === "user") {
-        setMessages((previous) =>
-          previous.map((item) => (isDraftMessage(item) && item.clientId === clientId ? {...item, deliveryStatus: "failed", error: message} : item)),
-        );
-      }
+      setMessages((previous) =>
+        previous.map((item) => (isDraftMessage(item) && item.clientId === clientId ? {...item, deliveryStatus: "failed", error: message} : item)),
+      );
       return {ok: false, queued: false};
     } finally {
-      if (type === "user") setLoading(false);
+      setLoading(false);
     }
   };
 
@@ -92,7 +87,7 @@ export function useDrafts({
     const failedMessage = messages.find((message) => isDraftMessage(message) && message.clientId === clientId);
     if (!failedMessage) return false;
     dismissFailedMessage(clientId);
-    const result = await sendMessage(failedMessage.content, "user");
+    const result = await sendMessage(failedMessage.content);
     return result.ok;
   };
 

@@ -67,7 +67,6 @@ export function Chat() {
     setSuggestedPrompt(content);
   });
   const stopTask = useStableCallback(() => void stop());
-  const sendRaw = useStableCallback((data: string) => void sendMessage(data, "raw"));
   useEffect(() => {
     if (!hasTerminal && !hasShell) setTerminalOpen(false);
   }, [hasTerminal, hasShell]);
@@ -138,7 +137,6 @@ export function Chat() {
             onEditMessage={editFailedMessage}
             onDismissMessage={dismissFailedMessage}
             onStopTask={canStop ? stopTask : undefined}
-            onSendRaw={hasTerminal ? sendRaw : undefined}
             headerAction={
               <div className="flex items-center gap-0.5">
                 {hasShell && (

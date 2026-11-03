@@ -7,7 +7,6 @@ import { Button } from "../ui/button";
 import { uiCopy } from "@/lib/ui-copy";
 import { describeToolCall } from "@/lib/tool-call-view";
 import type { ToolCall } from "@/lib/task-timeline";
-import { currentPromptQuestion, parseInteractiveToolInput } from "@/lib/interactive-tool";
 import {useChatSelector} from "../chat-provider";
 import { ImageThumb } from "../image-preview";
 import { toolRequestBadge, type Tone } from "@/lib/native-requests";
@@ -184,14 +183,12 @@ export const ToolCallCard = React.memo(function ToolCallCard({
   searchQuery = "",
   open,
   onOpenChange,
-  onSendRaw,
 }: {
   toolCall: ToolCall;
   searchQuery?: string;
   open?: boolean;
   // The group's open state; the card is controlled when open is set.
   onOpenChange?: (id: string, open: boolean) => void;
-  onSendRaw?: (data: string) => void;
 }) {
   const view = useMemo(() => describeToolCall(toolCall), [toolCall]);
   const {targets, change, command, exitCode, durationMs, images, imageName, input} = view;
@@ -200,24 +197,9 @@ export const ToolCallCard = React.memo(function ToolCallCard({
   const storageScope = useChatSelector((chat) => chat.storageScope);
   const features = useChatSelector((chat) => chat.features);
   const requests = useChatSelector((chat) => chat.requests);
-  // A question in a tool call is answered here with keystrokes, so only
-  // where they reach the agent's terminal (PTY). On the native transport it
-  // is answered on its request card, and the tool call shows the request's
-  // state; ACP has neither.
-  const interactiveInput = isPending && onSendRaw ? parseInteractiveToolInput(toolCall.name, toolCall.input) : null;
   const request = features.requests ? requests.findLast((candidate) => candidate.tool_use_id === toolCall.id) : undefined;
   const requestBadge = request ? toolRequestBadge(request) : null;
-  const [localIsOpen, setLocalIsOpen] = useState(Boolean(searchQuery) || Boolean(interactiveInput));
-  // The agent's prompt shows one question at a time and moves on as each is
-  // answered, so only the question it is asking accepts clicks. Codex prints
-  // which one that is; otherwise count the answers given here.
-  const [answeredCount, setAnsweredCount] = useState(0);
-  // Only a card with questions reads the messages, so the others don't
-  // render again as they stream.
-  const lastAgentOutput = useChatSelector((chat) =>
-    interactiveInput ? (chat.messages.findLast((message) => message.role === "agent")?.content ?? "") : "",
-  );
-  const activeQuestion = currentPromptQuestion(lastAgentOutput) ?? answeredCount;
+  const [localIsOpen, setLocalIsOpen] = useState(Boolean(searchQuery));
   const isOpen = open ?? localIsOpen;
 
   useEffect(() => {
@@ -337,58 +319,13 @@ export const ToolCallCard = React.memo(function ToolCallCard({
         )}
       </summary>
       <div className="space-y-3 border-t px-3 py-3">
-        {interactiveInput && interactiveInput.questions.length > 0 ? (
-          interactiveInput.questions.map((q, qi) => (
-            <div key={qi} className={`space-y-2 ${qi === activeQuestion ? "" : "opacity-60"}`}>
-              <p className="text-xs font-medium text-foreground">{q.question}</p>
-              <div className="flex flex-wrap gap-1.5">
-                {(q.options ?? []).map((opt, oi) => (
-                  <button
-                    key={oi}
-                    type="button"
-                    disabled={qi !== activeQuestion}
-                    onClick={() => {
-                      // Both Claude Code and Codex pick an option as soon as
-                      // its digit is typed; an extra Enter would answer the
-                      // next question with its default.
-                      onSendRaw?.(String(oi + 1));
-                      setAnsweredCount(qi + 1);
-                    }}
-                    className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground shadow-sm transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none"
-                    title={opt.description}
-                  >
-                    <span className="grid size-5 place-items-center rounded bg-muted text-[10px] font-bold">{oi + 1}</span>
-                    <span className="max-w-52 truncate">{opt.label}</span>
-                  </button>
-                ))}
-              </div>
-              {qi === activeQuestion && (
-                <p className="text-[11px] text-muted-foreground">
-                  Or type your own answer in the message box.
-                </p>
-              )}
-              {q.options?.some(o => o.description) && (
-                <div className="space-y-1 pt-1">
-                  {q.options.map((opt, oi) => opt.description ? (
-                    <p key={oi} className="text-[11px] text-muted-foreground">
-                      <span className="font-medium">{oi + 1}.</span> {opt.label} — {opt.description}
-                    </p>
-                  ) : null)}
-                </div>
-              )}
-            </div>
-          ))
-        ) : (
-          <>
-            {/* Only while open: a closed card's body is in the page too,
-                and a big write's diff is a row per line. */}
-            {isOpen && targets.length > 0 && viewer && <ToolFiles targets={targets} viewer={viewer} />}
-            {isOpen && change && <ToolChange change={change} />}
-            {input && (
-              // With the change shown, the raw input stays a click away.
-              <ToolDetail label="Input" content={input} searchQuery={searchQuery} collapsible={Boolean(change)} />
-            )}
-          </>
+        {/* Only while open: a closed card's body is in the page too,
+            and a big write's diff is a row per line. */}
+        {isOpen && targets.length > 0 && viewer && <ToolFiles targets={targets} viewer={viewer} />}
+        {isOpen && change && <ToolChange change={change} />}
+        {input && (
+          // With the change shown, the raw input stays a click away.
+          <ToolDetail label="Input" content={input} searchQuery={searchQuery} collapsible={Boolean(change)} />
         )}
         {toolCall.result !== undefined && (
           <ToolDetail
@@ -397,7 +334,7 @@ export const ToolCallCard = React.memo(function ToolCallCard({
             searchQuery={searchQuery}
           />
         )}
-        {!input && !interactiveInput && toolCall.result === undefined && (
+        {!input && toolCall.result === undefined && (
           <p className="text-xs text-muted-foreground">
             No tool details are available yet.
           </p>
@@ -410,11 +347,9 @@ export const ToolCallCard = React.memo(function ToolCallCard({
 export function ToolCallGroup({
   toolCalls,
   searchQuery,
-  onSendRaw,
 }: {
   toolCalls: ToolCall[];
   searchQuery: string;
-  onSendRaw?: (data: string) => void;
 }) {
   const [openToolIDs, setOpenToolIDs] = useState<Set<string>>(
     () =>
@@ -465,7 +400,6 @@ export function ToolCallGroup({
             key={toolCall.id}
             toolCall={toolCall}
             searchQuery={searchQuery}
-            onSendRaw={onSendRaw}
             open={openToolIDs.has(toolCall.id)}
             onOpenChange={setToolOpen}
           />

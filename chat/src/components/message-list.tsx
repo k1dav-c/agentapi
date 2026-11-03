@@ -30,7 +30,6 @@ interface MessageListProps {
   onDismissMessage: (clientId: string) => void;
   // Stops the running task; unset when it can't be stopped.
   onStopTask?: () => void;
-  onSendRaw?: (data: string) => void;
   headerAction?: React.ReactNode;
 }
 
@@ -39,7 +38,6 @@ export default function MessageList({
   onEditMessage,
   onDismissMessage,
   onStopTask,
-  onSendRaw,
   headerAction,
 }: MessageListProps) {
   const [scrollArea, setScrollArea] = useState<HTMLDivElement | null>(null);
@@ -203,7 +201,6 @@ export default function MessageList({
                 onEditMessage={onEditMessage}
                 onDismissMessage={onDismissMessage}
                 onStopTask={onStopTask}
-                onSendRaw={onSendRaw}
                 searchQuery={taskQuery}
                 searchResultIndex={searchResultIndex}
                 isCurrentSearchResult={

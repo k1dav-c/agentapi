@@ -77,7 +77,7 @@ describe("API errors", () => {
 describe("requests", () => {
   test("send JSON and read the answer", async () => {
     const calls = mockFetch(json({ok: true, queued: true}));
-    expect(await createChatAPI(BASE).sendMessage("hi", "user", "steer")).toEqual({ok: true, queued: true, steered: false});
+    expect(await createChatAPI(BASE).sendMessage("hi", "steer")).toEqual({ok: true, queued: true, steered: false});
     expect(calls[0].url).toBe(`${BASE}/message`);
     expect(calls[0].init.method).toBe("POST");
     expect(JSON.parse(String(calls[0].init.body))).toEqual({content: "hi", type: "user", dispatch_mode: "steer"});
@@ -86,7 +86,7 @@ describe("requests", () => {
 
   test("queue mode leaves dispatch_mode out for older servers", async () => {
     const calls = mockFetch(json({ok: true}));
-    await createChatAPI(BASE).sendMessage("hi", "user");
+    await createChatAPI(BASE).sendMessage("hi");
     expect(JSON.parse(String(calls[0].init.body))).toEqual({content: "hi", type: "user"});
   });
 
