@@ -13,6 +13,24 @@
   AgentAPI wrote stay in those files, and the agents keep loading them; the saved profiles stay in
   `.agentapi/mcp-profiles.json` in the working directory, unread. MCP tool calls and Codex's MCP
   elicitations still show in the chat.
+- The PTY transport is removed: AgentAPI runs Claude Code, Codex and Pi natively, and
+  `native-demo`. Other agents (aider, goose, gemini, amp, cursor, auggie, amazonq, opencode,
+  copilot, kimi, a custom program) and `--transport pty` fail at startup and in `--validate`, which
+  name v2.5.1. To keep them, install the v2.5.1 binary from its GitHub release: `agentapi update`
+  installs only the latest. An instance with `--allow-update` that runs a PTY agent refuses the
+  restart into 3.0 and keeps serving, but `POST /update` replaced the program on disk first: put
+  v2.5.1 back before it restarts.
+- Gone with it: `agentapi attach`; the chat's TTY mode and its terminal-prompt card;
+  `GET /internal/screen`; `POST /message` with `type: "raw"` (now 422); `terminal_prompt` and
+  `terminal_columns` in `GET /status` and `status_change`; the handoff's `terminal` kind;
+  `request.opened` and `request.closed` webhook events of kind `terminal_prompt`. Summaries and
+  webhook events report `transport: native`; a hub still shows an AgentAPI 2's `dialog`.
+- `--transport` is deprecated and takes only `native`; `--term-width` and `--term-height` have no
+  effect. Without `--type`, the agent command's name picks the agent (`-- /usr/local/bin/codex`,
+  `-- native-demo`).
+- A `--state-db` that AgentAPI 2 kept for a PTY agent opens: the agent starts a new session below
+  the conversation, which goes on natively. A `--state-file` is imported the same way. AgentAPI
+  2.5.1 opens a 3.0 database.
 
 ## v2.5.1
 

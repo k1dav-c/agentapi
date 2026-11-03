@@ -3,18 +3,11 @@
 English | [繁體中文](README.zh-TW.md)
 
 Use AgentAPI to control [Claude Code](https://github.com/anthropics/claude-code),
-[AmazonQ](https://aws.amazon.com/developer/learning/q-developer-cli/),
-[Opencode](https://opencode.ai/), [Goose](https://github.com/block/goose),
-[Aider](https://github.com/Aider-AI/aider), [Gemini](https://github.com/google-gemini/gemini-cli),
-[GitHub Copilot](https://github.com/github/copilot-cli), [Sourcegraph Amp](https://ampcode.com/),
-[Codex](https://github.com/openai/codex),
-[Kimi Code](https://www.kimi.com/zh-tw/help/kimi-code/cli-getting-started), [Pi](https://pi.dev/),
-[Auggie](https://docs.augmentcode.com/cli/overview), and [Cursor CLI](https://cursor.com/en/cli)
-with an HTTP API.
+[Codex](https://github.com/openai/codex) and [Pi](https://pi.dev/) with an HTTP API.
 
 ![The AgentAPI chat with two tasks: prompts, tool calls, thinking notes and the composer](docs/screenshots/chat-desktop.png)
 
-The screenshots show AgentAPI v0.28.0 running the built-in `native-demo` agent. Its replies, tool
+The screenshots show AgentAPI v3.0.0 running the built-in `native-demo` agent. Its replies, tool
 results, models and usage are simulated. See the [chat UI guide](docs/chat-ui.md) for features and
 animations, or the [screenshot guide](docs/screenshots/README.md) to reproduce the captures.
 
@@ -37,10 +30,10 @@ issues involving its added features in [this repository](https://github.com/k1da
 Upstream changes should be reviewed and tested against the native transports, chat UI and hub
 before integration; upstream and fork version numbers are separate release lines.
 
-This fork builds on upstream v0.12.2. It drives Claude Code, Codex and Pi through their own
-protocols with the [native transport](#native-transport) by default, and keeps terminal emulation
-(the [PTY transport](#pty-transport)) for every other agent. Session management and chat features
-support long-running tasks across transports, and [webhooks](#webhooks) report them to a central
+This fork builds on upstream v0.12.2. Since 3.0 it drives only Claude Code, Codex and Pi, through
+their own protocols (the [native transport](#native-transport)); the terminal emulation of the PTY
+transport, for other agents, ended with v2.5.1 (see [Agents](#agents)). Session management and
+chat features support long-running tasks, and [webhooks](#webhooks) report them to a central
 platform. [CHANGELOG.md](CHANGELOG.md) lists what
 changed, [docs/architecture.md](docs/architecture.md) describes how it is built,
 [docs/hub.md](docs/hub.md) how to watch many AgentAPIs from one page, and the
@@ -51,10 +44,9 @@ has the complete commit history.
 
 - [Features at a glance](#features-at-a-glance)
 - [Quickstart](#quickstart)
-- [Agents and transports](#agents-and-transports)
+- [Agents](#agents)
 - [Chat UI](#chat-ui)
 - [Native transport](#native-transport)
-- [PTY transport](#pty-transport)
 - [Conversation API](#conversation-api)
 - [Integrations](#integrations)
 - [Security](#security)
@@ -70,15 +62,12 @@ has the complete commit history.
 
 **Drive coding agents over HTTP**
 
-- Control 13 coding agents through their terminal UI with the
-  [PTY transport](#pty-transport), which turns the screen into messages.
 - Drive Claude Code, Codex and Pi through their own protocols with the
-  [native transport](#native-transport), which they use by default (see
-  [Transports](#transports)).
+  [native transport](#native-transport).
 - Read structured activity (thinking, tool calls and their results, token
   usage) from `GET /rich-messages` and `GET /timeline`.
 - Messages sent while the agent works wait in a [queue](#message-queue) that
-  you can edit and reorder; with the native transport they can also
+  you can edit and reorder; they can also
   [steer or interrupt](#steer-interrupt-and-the-queue) the running turn.
 - The server tracks each message and the agent's turn on it as a
   [task](#tasks): running, completed, failed, or stopped by a usage limit.
@@ -102,8 +91,8 @@ has the complete commit history.
 - A shared [terminal](#terminal) in the agent's working directory, for logins
   and quick commands.
 - [Persistent sessions](#persistent-sessions): with `--state-db`, the
-  conversation survives an AgentAPI restart, and a native agent resumes its
-  own session.
+  conversation survives an AgentAPI restart, and the agent resumes its own
+  session.
 - Open one of the agent's [earlier sessions](#earlier-sessions) in its working
   directory, or start a copy of one.
 - See what each [session and task cost](#session-costs) at the model
@@ -120,12 +109,12 @@ has the complete commit history.
   [webhook](#webhooks).
 - [Lineage](#lineage): the subagents the agent ran, and what each did, step by
   step, even while it works.
-- [Decision cards](#decision-cards) for terminal dialogs and native requests,
+- [Decision cards](#decision-cards) for requests,
   menus for the agent's settings, a ring for its context, and slash commands.
 - A [file viewer](#file-viewer) with the file, its git diff and a preview of
   HTML, Markdown and images, which finds a file the agent named relative to a
-  repository below its working directory; [TTY mode](#tty-mode) and the native
-  terminal, also on phones.
+  repository below its working directory; the [terminal](#terminal), also on
+  phones.
 - [Background alerts](#alerts-connection-recovery-and-caching), browser
   notifications, a transcript cache, and recovery from dropped connections.
 
@@ -179,13 +168,7 @@ has the complete commit history.
 
    This drives Claude Code through its own protocol, the
    [native transport](#native-transport): approvals arrive as structured
-   requests, its settings can be switched and the chat has a terminal. To drive
-   its terminal UI instead (the [PTY transport](#pty-transport), with TTY mode
-   in the chat), add `--transport pty`:
-
-   ```bash
-   agentapi server --transport pty -- claude
-   ```
+   requests, its settings can be switched and the chat has a terminal.
 
 1. Send a message to the agent:
 
@@ -203,80 +186,44 @@ has the complete commit history.
 
 1. Try the chat web interface at http://localhost:3284/chat.
 
-## Agents and transports
+## Agents
 
-### Supported agents
+AgentAPI 3 runs Claude Code, Codex and Pi through their own protocols, the
+[native transport](#native-transport):
 
-The agent type determines screen formatting and available features. Set it with `--type`, or let
-AgentAPI detect it from a command that matches a known type name, such as `agentapi server -- claude`.
-Full paths such as `-- /usr/local/bin/claude` need an explicit type; unrecognized commands use `custom`.
-
-| Agent | Type | PTY | Native | Structured activity |
-| --- | --- | :-: | :-: | :-: |
-| [Claude Code](https://github.com/anthropics/claude-code) | `claude` | ✓ | ✓ | ✓ |
-| [Codex](https://github.com/openai/codex) | `codex` | ✓ | ✓ | ✓ |
-| [Pi](https://pi.dev/) | `pi` | ✓ | ✓ | ✓ |
-| [Kimi Code](https://www.kimi.com/zh-tw/help/kimi-code/cli-getting-started) | `kimi` | ✓ | | |
-| [Goose](https://github.com/block/goose) | `goose` | ✓ | | |
-| [Aider](https://github.com/Aider-AI/aider) | `aider` | ✓ | | |
-| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `gemini` | ✓ | | |
-| [GitHub Copilot](https://github.com/github/copilot-cli) | `copilot` | ✓ | | |
-| [Sourcegraph Amp](https://ampcode.com/) | `amp` | ✓ | | |
-| [Auggie](https://docs.augmentcode.com/cli/overview) | `auggie` | ✓ | | |
-| [Cursor CLI](https://cursor.com/en/cli) | `cursor` (`cursor-agent`) | ✓ | | |
-| [Amazon Q](https://aws.amazon.com/developer/learning/q-developer-cli/) | `amazonq` (`q`) | ✓ | | |
-| [Opencode](https://opencode.ai/) | `opencode` | ✓ | | |
-| Any other terminal program | `custom` | ✓ | | |
-
-- **Structured activity**: thinking, tool calls and token usage, read from
-  the agent's session log on the PTY transport (see
-  [Structured Claude, Codex and Pi activity](#structured-claude-codex-and-pi-activity))
-  and from its protocol on the native transport.
-
-> [!NOTE]
-> AgentAPI detects the agent type from the agent command only when the command is a type name, such as `claude`, `codex`, `kimi` or `pi`. When you run the agent through a full path or a wrapper script, specify the type explicitly (e.g., `agentapi server --type=claude -- /usr/local/bin/claude`), or message formatting may break.
-
-### Transports
-
-`--transport` chooses how AgentAPI drives the agent. Without it, Claude Code, Codex and Pi use the
-native transport, and every other agent the PTY transport, as does a server started with the
-deprecated `--state-file`:
-
-| | PTY | Native |
+| Agent | Type | Protocol |
 | --- | --- | --- |
-| Flag | `--transport pty` | `--transport native` |
-| Default for | every other agent, and with `--state-file` | Claude Code, Codex, Pi |
-| Agents | all of the above | Claude Code, Codex, Pi |
-| How | runs the agent's terminal UI in a terminal emulator and reads its screen | speaks the agent's own protocol: `claude -p` stream-json, `codex app-server`, `pi --mode rpc` |
-| Tool calls and thinking | from the session log (Claude Code, Codex, Pi) | streamed from the protocol |
-| Approvals, questions, plans | terminal dialogs, answered from decision cards or TTY mode | structured [requests](#requests-approvals-questions-and-plans) |
-| Steer and interrupt a turn | | ✓ |
-| Settings, usage, compaction | | ✓ |
-| Survives an AgentAPI restart | `--state-db`: the conversation; the agent starts anew | `--state-db`: the conversation and the agent's session |
-| Terminal in the chat | TTY mode: the agent's own terminal | a shell in the working directory |
+| [Claude Code](https://github.com/anthropics/claude-code) | `claude` | `claude -p` stream-json |
+| [Codex](https://github.com/openai/codex) | `codex` | `codex app-server` |
+| [Pi](https://pi.dev/) | `pi` | `pi --mode rpc` |
+
+`--type` sets the agent type; without it, AgentAPI takes it from the command's name, so
+`agentapi server -- /usr/local/bin/codex` needs none. A wrapper script needs `--type`. The built-in
+`native-demo` simulates an agent (see [Development](#development)).
 
 ```bash
-agentapi server -- claude                    # native
-agentapi server --transport pty -- claude    # Claude Code's terminal UI
+agentapi server -- claude
 agentapi server --state-db ~/.agentapi/myproject.db -- codex
-agentapi server -- aider                     # PTY
+agentapi server --type pi -- ./my-pi-wrapper
 ```
 
-The experimental ACP transport (`--transport acp`, `--experimental-acp`) was removed: it approved
-every permission request and couldn't restart its agent or keep its conversation. Those flags now
-stop AgentAPI with an error; run such an agent with the PTY transport instead.
+Any other agent, or `--transport pty`, stops AgentAPI 3 at startup with an error that names
+v2.5.1. To run Aider, Goose, Gemini CLI, Amp, Cursor CLI, Auggie, Amazon Q, Opencode, Copilot, Kimi
+Code or another terminal program, use AgentAPI v2.5.1, the last release with the PTY transport:
+download its binary from the [v2.5.1 release](https://github.com/k1dav-c/agentapi/releases/tag/v2.5.1)
+and keep it. `agentapi update` only installs the latest release. An AgentAPI 2 that runs such an
+agent with `--allow-update` checks the new program before it restarts into it, refuses AgentAPI 3
+and keeps serving; but the update already replaced the program on disk, so put v2.5.1 back before
+that AgentAPI restarts some other way.
 
-`--state-db <file>` (native and PTY transports) keeps the conversation in a SQLite file, and a native
-agent resumes its session when AgentAPI starts again with the same file; see
-[Persistent sessions](#persistent-sessions). `--terminal` (default true, native transport only)
-offers a shell in the agent's working directory; see [Terminal](#terminal). `--state-file <file>` is
-deprecated: AgentAPI imports its conversation into a state database next to it and keeps it there
-from then on.
+`--transport` is deprecated and takes only `native`. The experimental ACP transport
+(`--transport acp`, `--experimental-acp`) was removed earlier; those flags stop AgentAPI with an
+error.
 
 ## Chat UI
 
-The chat UI at `/chat` is embedded in the binary and works with every transport on desktops and
-phones. It includes searchable tool activity, compact tool-call cards and connection indicators.
+The chat UI at `/chat` is embedded in the binary and works on desktops and phones. It includes
+searchable tool activity, compact tool-call cards and connection indicators.
 The header shows the AgentAPI version and the agent's mark: the logo of Claude, OpenAI (Codex) or
 Pi, or a square for other agents. See the [chat UI guide](docs/chat-ui.md) for screenshots and animations.
 
@@ -318,10 +265,9 @@ Each task's ⋯ menu previews, copies or exports the task as Markdown.
 
 ### Lineage
 
-When Claude Code or Codex runs subagents with the native transport, a header button shows their
-total and running counts. It opens the Lineage panel, which lists each subagent's task, kind,
-state and elapsed time. Select one to follow its thinking, tool calls, results and answer as it
-works. The **Steps** button on an Agent or spawn_agent tool call opens that subagent directly.
+When Claude Code or Codex runs subagents, a header button shows their total and running counts. It
+opens the Lineage panel, which lists each subagent's task, kind, state and elapsed time. Select one
+to follow its thinking, tool calls, results and answer as it works. The **Steps** button on an Agent or spawn_agent tool call opens that subagent directly.
 
 ![The Lineage panel on a subagent: its task, a file it read, a command it ran and its answer](docs/screenshots/lineage.png)
 
@@ -342,10 +288,9 @@ agent receives the file path.
 
 ### Decision cards
 
-Items awaiting your response appear above the composer as decision cards: the agent's terminal
-dialogs on the PTY transport (see [Interactive prompt support](#interactive-prompt-support)), its
-[requests](#requests-approvals-questions-and-plans) on the native transport, and the
-[login card](#logging-in) while it waits for a login. Number keys pick options. On a phone a card
+Items awaiting your response appear above the composer as decision cards: the agent's
+[requests](#requests-approvals-questions-and-plans), and the [login card](#logging-in) while it
+waits for a login. Number keys pick options. On a phone a card
 takes at most 60% of the screen, and a title cut to two lines can be shown in full.
 
 ![A question card on the first of its three steps, above the composer](docs/screenshots/native-question.png)
@@ -395,27 +340,13 @@ HTML, Markdown and SVG files have a third tab, Preview, and an image file shows 
 
 The [chat UI guide](docs/chat-ui.md#files) also shows the File tab and a Markdown preview.
 
-### TTY mode
+### Agent controls
 
-With the PTY transport, TTY mode is an escape hatch for when the chat view looks wrong: the terminal
-button in the header swaps the conversation for the agent's terminal screen (xterm.js) and sends
-every key straight to the agent, including arrows, Ctrl/Alt keys, pastes and IME input. The same key
-bar as the [terminal](#terminal)'s gives a phone the keys its keyboard lacks. The font grows with
-the window (11–20px); the mirror uses the agent's real terminal width, so start AgentAPI with
-`--term-width 120` if you want longer lines.
-
-![TTY mode on bash run as a PTY agent, with the column ruler and the key bar](docs/screenshots/tty-mode.png)
-
-### With the native transport
-
-Native requests for tool approval, answers or plan approval appear as cards above the composer.
-While the agent works, the send menu can steer a message into
-the running turn or interrupt it. The toolbar controls permission mode, model and reasoning effort,
-and shows context usage and rate limits. Slash commands include `/model` and `/compact`.
-
-The terminal button opens a shell in the agent's working directory. TTY mode requires the agent's
-own terminal, so screen views stay hidden for native sessions. See
-[Native transport](#native-transport).
+Requests for tool approval, answers or plan approval appear as cards above the composer. While the
+agent works, the send menu can steer a message into the running turn or interrupt it. The toolbar
+controls permission mode, model and reasoning effort, and shows context usage and rate limits.
+Slash commands include `/model` and `/compact`. The terminal button opens a shell in the agent's
+working directory. See [Native transport](#native-transport).
 
 ### Alerts, connection recovery and caching
 
@@ -442,10 +373,7 @@ shows it immediately, and then asks the server only for changes since the last s
 Native transport uses the agent's structured protocol to receive replies, tool
 calls, and usage, and to handle approvals, questions, and plans in the chat UI.
 
-**Choosing the native transport**
-
-Claude Code, Codex and Pi use the native transport by default. `--transport native` asks for it
-explicitly, and `--transport pty` drives their terminal UI instead:
+**Running an agent**
 
 ```bash
 agentapi server -- claude --model sonnet
@@ -454,16 +382,11 @@ agentapi server -- pi --provider openai-codex --model gpt-5.6-luna --thinking lo
 ```
 
 - AgentAPI selects the adapter from the command name. Specify `--type` for
-  full executable paths or wrapper scripts; without it they run as `custom`
-  agents with the PTY transport.
-- A server started with the deprecated `--state-file` and no `--transport`
-  keeps the PTY transport, so command lines written for it still start; see
-  [Persistent sessions](#persistent-sessions).
-- For UI development, `--type custom -- native-demo` runs a simulated agent with
-  the native transport; see the [development guide](chat/README.md). With
-  `--type claude`, `codex` or `pi` instead, the demo poses as that agent, and
-  AgentAPI reads that agent's logs for its earlier sessions and subagents.
-  `--transport native` with any other agent type is rejected at startup.
+  wrapper scripts.
+- For UI development, `agentapi server -- native-demo` runs a simulated agent;
+  see the [development guide](chat/README.md). With `--type claude`, `codex`
+  or `pi`, the demo poses as that agent, and AgentAPI reads that agent's logs
+  for its earlier sessions and subagents.
 
 **What to expect**
 
@@ -510,15 +433,14 @@ the stream pauses.
 
 | Field | Meaning |
 | --- | --- |
-| `transport` | `native` in this mode |
+| `transport` | always `native` |
 | `capabilities` | Operations the agent supports |
 | `pending_requests` | Number of requests waiting for a response |
 | `settings` | Current session settings |
 | `usage` | Context and usage information |
 | `terminal` | Whether a separate shell terminal is available |
 
-When the agent is only waiting for a request response, `status` is `stable`, as
-it is when waiting for a terminal dialog response.
+When the agent is only waiting for a request response, `status` is `stable`.
 
 **Shutdown**
 
@@ -535,8 +457,7 @@ restart: SIGTERM, then SIGKILL 2 seconds later.
 ### Logging in
 
 Native mode uses the agent CLI's stored login. Log in as the same operating-system user that runs
-AgentAPI. You can use the chat's [terminal](#terminal), any terminal on the same machine, or a PTY
-session. The login card's **Run in terminal** button and the `/login` command both run the login
+AgentAPI. You can use the chat's [terminal](#terminal) or any terminal on the same machine. The login card's **Run in terminal** button and the `/login` command both run the login
 command in the chat terminal.
 
 ![A login card: the command to run, where to run it, Run in terminal and Check again](docs/screenshots/login-card.png)
@@ -595,8 +516,7 @@ Pi extensions) and plan approvals (Claude's `ExitPlanMode`) arrive as requests:
 - `GET /requests` lists the pending requests and the 50 most recently closed
   ones, and `GET /requests/{id}` returns one. `/events` sends a
   `request_update` event whenever one opens or closes, and `GET /status`
-  counts the pending ones in `pending_requests`. Other transports return an
-  empty list.
+  counts the pending ones in `pending_requests`.
 - `POST /requests/{id}/respond` answers one: `option_id` for approvals and
   plans (with optional `text` as feedback when the request has `feedback`),
   `answers` keyed by question ID for questions. A request is answered at most
@@ -655,11 +575,11 @@ approving it does not change files.
 
 ### Steer, interrupt and the queue
 
-- `POST /message` takes `dispatch_mode`: `queue` (the default, as on every
-  transport: send the message once the agent is idle), `steer` (add it to the
+- `POST /message` takes `dispatch_mode`: `queue` (the default: send the
+  message once the agent is idle), `steer` (add it to the
   turn the agent is working on; the reply says `steered`) or `interrupt` (stop
-  that turn and send the message next). `steer` and `interrupt` need the
-  native transport. While a turn runs they also need the matching capability,
+  that turn and send the message next). While a turn runs `steer` and
+  `interrupt` need the matching capability,
   otherwise the answer is 400. When no turn is running (including while the
   agent restarts or waits for a login), both send or queue the message as
   usual.
@@ -668,7 +588,7 @@ approving it does not change files.
 - `POST /queue/{id}/steer` moves a queued message into the running turn (409
   if no turn is running; the message stays queued).
 - `PUT /queue` with `{"ids": [...]}` reorders the queue. It must list every
-  queued message once (409 otherwise). This works on every transport.
+  queued message once (409 otherwise).
 - If the agent refuses a queued message, AgentAPI tries it up to 5 times in
   all, then drops it with an error that quotes it. A message the agent didn't
   answer in time is dropped at once: it may have reached the agent, and
@@ -684,8 +604,7 @@ a login), it reports what the last one supported.
 
 In the chat, while the agent works, the send button's menu adds **Steer** (⌘/Ctrl+Enter) and
 **Interrupt & send** (⌘/Ctrl+Shift+Enter) next to queueing (Enter), and Stop interrupts the turn
-(`POST /interrupt`). Queued tasks can be steered in right away, and moved up and down on every
-transport.
+(`POST /interrupt`). Queued tasks can be steered in right away, and moved up and down.
 
 ![A long turn with two queued tasks and the send menu open: Queue, Steer, and Interrupt & send](docs/screenshots/queue-steer.png)
 
@@ -775,14 +694,14 @@ header and tab title say "Needs you".
 
 ### Terminal
 
-AgentAPI provides a shell in the native agent's working directory for logins, git commands and
+AgentAPI provides a shell in the agent's working directory for logins, git commands and
 other work. It supports colors, cursor movement and full-screen programs, and fits the window on
 desktops and phones. Everyone shares the same shell, like a tmux window. It keeps running with no
 viewers; if it exits, opening the terminal starts a new one. Its environment matches the agent's,
 with AgentAPI's own variables removed.
 
 Web links are clickable even when wrapped across lines. The last link printed by a command, such
-as a login URL, also appears above the terminal for opening or copying. TTY mode behaves the same.
+as a login URL, also appears above the terminal for opening or copying.
 
 The key bar supplies arrows, Enter, Esc, Tab, Shift+Tab, Ctrl+C, Ctrl+R, Ctrl+A, Ctrl+E, Ctrl+U,
 Ctrl+W, Home, End, Page up, Page down, / - | ~, Alt+↑ and Ctrl+L. Ctrl+D and Ctrl+Z require a second
@@ -793,8 +712,7 @@ press. The Ctrl and Alt buttons hold the modifier for the next key.
   shell exits) and starts the shell if it doesn't run.
 - `POST /terminal/input` (`{"data": "..."}`) types into it and
   `POST /terminal/resize` (`{"cols": 120, "rows": 40}`) sizes it.
-- It is on by default with the native transport; `--terminal=false` turns it
-  off. It is as protected as the rest of the API, so use `--api-token` when
+- It is on by default; `--terminal=false` turns it off. It is as protected as the rest of the API, so use `--api-token` when
   the server is reachable by others.
 
 ![The shell terminal: git status and git log in the agent's working directory, and the key bar](docs/screenshots/terminal.png)
@@ -828,9 +746,8 @@ sends it.
 `--state-db <file>` keeps the conversation in a SQLite file: messages, rich messages (tool calls,
 thinking), the timeline, requests and the queue, plus the agent's own session ID and the webhook
 settings changed through the API. When AgentAPI starts again with the same file, the chat shows the
-conversation as it was and queued messages are still queued. A native agent resumes its session, so
-it remembers the conversation too. A PTY agent starts fresh below the restored conversation, and the
-last agent message keeps its text until the next message. After a clean shutdown, browser caches
+conversation as it was and queued messages are still queued. The agent resumes its session, so it
+remembers the conversation too. After a clean shutdown, browser caches
 stay valid because the conversation keeps its epoch. Without `--state-db`, every start of AgentAPI
 is a new conversation.
 
@@ -856,8 +773,10 @@ state-db: ~/.agentapi/state/{port}.db
   to them by path. One that nothing in the conversation (or the queue) refers
   to is removed once it is 7 days old, which leaves time for a draft's
   attachments; this is checked on start, hourly and after a restart.
-- A file belongs to one agent type, transport and working directory; AgentAPI
-  refuses to start with another one's file. It is locked while AgentAPI runs,
+- A file belongs to one agent type and working directory; AgentAPI refuses to
+  start with another one's file. A file AgentAPI 2 wrote for a PTY agent
+  opens: the agent starts a new session below its conversation, which goes
+  on natively. It is locked while AgentAPI runs,
   so a second AgentAPI (or `sqlite3`) can't open it.
 - A new file is created readable and writable by its owner only (0600), and missing
   directories are created (0700).
@@ -873,22 +792,21 @@ state-db: ~/.agentapi/state/{port}.db
   After a crash the last of them may be missing, so the conversation gets a
   new epoch and clients load it again in full. Writes that keep failing are
   reported as an error.
-- A restored native conversation doesn't get `--initial-prompt` again. A PTY
-  conversation records the prompt it got and sends it again after a restart
-  only if it changed.
+- A restored conversation doesn't get `--initial-prompt` again.
 - Webhook settings changed with `PUT /webhook` or in the Explorer apply after
   a restart, unless AgentAPI starts with other webhook flags.
 - The time a client last showed the conversation (`POST /tasks/seen`) is
   kept, so a task that ended unseen is still [unread](#watching-many-instances)
   after a restart. A database written before 1.2 treats its tasks as seen.
-- `--state-file <file>`, the PTY transport's former persistence, is
+- `--state-file <file>`, the PTY transport's persistence before v1.0.0, is
   deprecated. The conversation it holds is imported the first time into a
   state database next to it (the same name with `.db`, or `--state-db`), which
-  keeps the conversation from then on; the file isn't written anymore.
+  keeps the conversation from then on, and the agent starts a new session
+  below it; the file isn't written anymore.
   `--load-state=false` skips the import, and `--save-state` has no effect.
   SIGUSR1 writes what the state database hasn't written yet.
 - [`agentapi restart`](#agentapi-restart) (SIGUSR2) and
-  `agentapi update --restart` keep the conversation, and the native agent's
+  `agentapi update --restart` keep the conversation, and the agent's
   session, of an AgentAPI with `--state-db`.
 
 ### Earlier sessions
@@ -1172,134 +1090,21 @@ AgentAPI runs Pi in its RPC mode (`pi --mode rpc`, JSON over stdin and stdout).
 
 ### Limitations
 
-- The agent has no terminal of its own. The chat hides TTY mode, the terminal
-  prompt card, the live screen tail and "Terminal output". `raw` messages
-  (keys for the terminal) are refused with 400. The agent's slash
-  commands that need its interactive UI don't work, apart from the ones the
-  chat runs itself. The [terminal](#terminal) is a separate shell.
+- The agent has no terminal of its own. The agent's slash commands that need
+  its interactive UI don't work, apart from the ones the chat runs itself. The
+  [terminal](#terminal) is a separate shell.
 - Restart (Explorer → Restart or `DELETE /messages`) replaces the agent with a
   new one in a new session and clears the conversation and the queue; requests
   still open become `not_resumable`. The `--initial-prompt` is sent to the new
-  session again, and Codex and Pi are updated first, as with PTY.
+  session again, and Codex and Pi are updated first.
 - Without `--state-db`, the next start of AgentAPI is a new session; the
   agent's earlier session isn't resumed.
 - Images reach the agent only as `@"<path>"` attachments of a message, not as
   command-line flags (`codex -i` and Pi's `@file` are refused).
 
-## PTY transport
-
-The PTY transport works with every agent that has a terminal UI, and is the default for every agent
-but Claude Code, Codex and Pi, which use it with `--transport pty`. For those three it also follows
-their session logs for structured activity, and the chat answers their terminal dialogs.
-
-### How it works
-
-AgentAPI runs an in-memory terminal emulator. It translates API calls into terminal
-keystrokes and parses the agent's outputs into individual messages.
-
-#### Splitting terminal output into messages
-
-There are two types of messages:
-
-- User messages: sent by the user to the agent
-- Agent messages: sent by the agent to the user
-
-AgentAPI splits the terminal output into messages in these steps:
-
-1. The initial terminal output, before any user messages are sent, is treated as the agent's first message.
-2. When the user sends a message through the API, a snapshot of the terminal is taken before any keystrokes are sent.
-3. The user message is then submitted to the agent. From this point on, any time the terminal output changes, a new snapshot is taken. It's diffed against the initial snapshot, and any new text that appears below the initial content is treated as the agent's next message.
-4. If the terminal output changes again before a new user message is sent, the agent message is updated.
-
-#### Removing TUI elements from agent messages
-
-AgentAPI removes two common TUI elements from replies:
-
-- Echoed user input: lines containing the text of the user's last message.
-- The input box: trailing lines with common TUI elements such as `>` or `------`.
-
-#### What will happen when Claude Code, Goose, Aider, or Codex update their TUI?
-
-Message splitting should still work because it doesn't depend on the TUI structure. Removing TUI
-elements may need an update; until then, replies may include extra interface text.
-
-### Structured Claude, Codex and Pi activity
-
-In addition to parsing terminal snapshots, this fork can watch Claude, Codex and Pi session logs.
-The logs give structured thinking blocks, tool invocations, tool results, usage information, and
-stable message identifiers, which terminal output alone can't always reconstruct.
-
-- `GET /rich-messages` returns the structured conversation.
-- `GET /timeline` returns normalized session events suitable for export,
-  auditing, or building another UI. With `?subagents=true` (native Claude
-  Code and Codex), the events of the subagents the agent ran follow, read
-  from their own logs. Each subagent's events come in turn, starting with a
-  system event; each event has its `subagent_id` and, for Claude Code, the
-  `parent_tool_use_id` of the Agent tool call that started it. The agent's
-  own events only have the subagent's prompt and final answer.
-- Background and delegated tasks remain visible with their running, completed,
-  or failed state and output details.
-- Claude thinking blocks are rendered inline as collapsible sections in the
-  task timeline.
-- Codex is started with `-c model_reasoning_summary="auto"` (unless you set it
-  yourself) so its log contains readable reasoning summaries instead of only
-  encrypted reasoning.
-
-Terminal parsing remains the fallback for other agents and for environments where a session log is
-unavailable. With the [native transport](#native-transport), the same endpoints are filled from the
-agent's protocol instead of its session log.
-
-### Interactive prompt support
-
-The chat UI detects interactive TUI prompts — such as Claude Code's plan approval dialog or
-permission confirmation, Codex's approvals, and Pi's project trust prompt — and docks them above the
-composer as a decision card. Number keys pick an option. Multi-select questions (Claude Code's
-AskUserQuestion with `multiSelect`) show checkboxes and a Continue button that moves on to the next
-question or the review step. A numbered list in the agent's answer is not mistaken for options.
-`GET /status` reports the prompt as `terminal_prompt`. With the
-[native transport](#native-transport) there are no terminal prompts; approvals, questions and plans
-arrive as structured requests instead.
-
-### Kimi Code CLI
-
-This fork adds the `kimi` agent type, automatic detection for the `kimi` executable, chat UI
-labeling, terminal message formatting and readiness detection.
-
-Kimi can use the regular interactive PTY transport:
-
-```bash
-agentapi server -- kimi
-```
-
-### Pi coding agent
-
-With `--transport pty`, the `pi` agent type runs the [Pi coding agent](https://pi.dev/) (`npm
-install -g @earendil-works/pi-coding-agent`) in its interactive terminal UI. It is auto-detected
-when the executable name is `pi`:
-
-```bash
-agentapi server --transport pty -- pi
-```
-
-Log in once with `/login` in Pi (TTY mode in the chat UI works), or set a provider key such as
-`ANTHROPIC_API_KEY`. AgentAPI follows Pi's session log (`~/.pi/agent/sessions/`, or
-`$PI_CODING_AGENT_DIR` / `$PI_CODING_AGENT_SESSION_DIR`) for structured messages, so the chat shows
-Pi's tool calls, thinking and token usage like it does for Claude Code and Codex.
-
-Pi's dialogs (such as the project trust prompt) can be answered from the chat, and the header and
-tab icon show Pi's logo. Restarting the agent runs `pi update --self` first.
-
-AgentAPI starts Pi with its own `--session-id` (a new one on every start or restart) so it follows
-the right session log even when several Pi processes share a directory. If you pass `--session`,
-`--continue`, `--resume` or `--session-id` yourself, AgentAPI uses your session settings; with
-`--continue`/`--resume` the chat falls back to the terminal output.
-
-Without `--transport pty`, Pi runs in its RPC mode; see [Native transport](#native-transport).
-
 ## Conversation API
 
-These endpoints work with every transport, except where noted; the
-[HTTP API reference](#http-api-reference) lists them all.
+The [HTTP API reference](#http-api-reference) lists all the endpoints.
 
 ### Messages and status
 
@@ -1307,19 +1112,16 @@ These endpoints work with every transport, except where noted; the
   A 200 means AgentAPI saw the agent start on it, or queued it (`queued`)
   because the agent is busy; `dispatch_mode` chooses what happens then (see
   [Steer, interrupt and the queue](#steer-interrupt-and-the-queue)).
-  `"type": "raw"` types keys into the agent's terminal instead (PTY
-  transport).
 - `GET /messages` returns the conversation; `GET /rich-messages` and
   `GET /timeline` return its structured form (see
-  [Structured Claude, Codex and Pi activity](#structured-claude-codex-and-pi-activity)).
+  [Structured activity](#structured-activity)).
 - A message that went out but wasn't confirmed (the call timed out, or
   AgentAPI was stopping) may have reached the agent: it isn't sent again,
   but leaves the queue with an error.
 - `DELETE /messages` clears the conversation (messages, rich messages,
   requests, tasks, timeline, errors and the queue) and restarts the agent
-  (with the native transport, in a new session). While the agent restarts,
-  messages wait in the queue; raw keys, another restart and opening a
-  session get 409, and so does a restart while AgentAPI stops. Before the
+  in a new session. While the agent restarts, messages wait in the queue;
+  another restart and opening a session get 409, and so does a restart while AgentAPI stops. Before the
   restart AgentAPI updates Codex (`codex update`) and Pi (`pi update --self`)
   when it launches those CLIs directly, one AgentAPI at a time; an update that
   fails or takes over 3 minutes leaves the installed version. Claude Code
@@ -1328,9 +1130,7 @@ These endpoints work with every transport, except where noted; the
   the detailed lifecycle, the transport, `server_id` (a random identifier of
   this AgentAPI run, new at every start), `turn` (how many times the agent
   started working), the conversation's `epoch`, the session name, the
-  AgentAPI version, the agent's open dialog (`terminal_prompt`) and the
-  terminal width (`terminal_columns`). With the native transport it also
-  reports `agent_session_id` (the agent's own session, which
+  AgentAPI version, `agent_session_id` (the agent's own session, which
   [`GET /sessions`](#earlier-sessions) lists), `capabilities`,
   `pending_requests`, `settings`, `usage`, `terminal` and `login_required`.
   The lifecycle is `starting`, `ready`, `running`, `restarting`, `exited` or
@@ -1346,12 +1146,25 @@ These endpoints work with every transport, except where noted; the
   characters and cut to 255 bytes; a name of `.` or `..` gets 400. A file
   the conversation doesn't refer to is removed after 7 days.
 
+### Structured activity
+
+- `GET /rich-messages` returns the structured conversation: thinking, tool
+  calls with their results, usage and stable message identifiers, from the
+  agent's protocol.
+- `GET /timeline` returns normalized session events suitable for export,
+  auditing, or building another UI. With `?subagents=true` (Claude Code and
+  Codex), the events of the subagents the agent ran follow, read from their
+  own logs. Each subagent's events come in turn, starting with a system
+  event; each event has its `subagent_id` and, for Claude Code, the
+  `parent_tool_use_id` of the Agent tool call that started it. The agent's
+  own events only have the subagent's prompt and final answer.
+
 ### Tasks
 
-AgentAPI groups the conversation into tasks, for every transport: a task is a message of yours and
+AgentAPI groups the conversation into tasks: a task is a message of yours and
 the agent's turn on it. Messages you add while it runs (steering) belong to it; the next message
-after it ends starts the next task. A task ends when the agent is idle again with no request or
-terminal dialog open. When answering a request or dialog leaves the agent idle, AgentAPI waits 3
+after it ends starts the next task. A task ends when the agent is idle again with no request open.
+When answering a request leaves the agent idle, AgentAPI waits 3
 seconds before ending the task, since the agent usually continues working.
 
 `GET /tasks` lists them, the earliest first, each with:
@@ -1382,7 +1195,7 @@ The API and the chat UI can show, edit or delete a queued message before it goes
 - `PUT /queue` with `{"ids": [...]}` reorders the queue; it must list every
   queued message once.
 - `POST /queue/{id}/steer` moves a queued message into the turn the agent is
-  working on (native transport).
+  working on.
 - With `?sync=1`, `/events` sends a `queue_update` with the whole queue
   whenever it changes, so a client sees what another client queued without
   asking.
@@ -1390,7 +1203,7 @@ The API and the chat UI can show, edit or delete a queued message before it goes
 ### Events and incremental sync
 
 `GET /events` streams server-sent events: `message_update`, `status_change`,
-`rich_message_update`, `agent_error`, `request_update` (native transport) and a `heartbeat` every
+`rich_message_update`, `agent_error`, `request_update` and a `heartbeat` every
 15 seconds, so clients can detect a lost connection. With `?sync=1` the stream starts with a
 `session_sync` event, adds `task_update` and `queue_update`, and every update carries a `seq`;
 reconnecting with `&since=<seq>&epoch=<epoch>` replays only what changed. Clients without `sync`
@@ -1400,7 +1213,7 @@ With `?sync=1`, events also carry SSE IDs (the end of the replay has the replay'
 changes their own), so a plain `EventSource` that reconnects by itself resumes from its
 `Last-Event-ID`; put the `epoch` from `GET /status` in the URL. When a message is taken back (a
 turn the agent refused to start), the conversation gets a new epoch and the server ends the event
-streams (screen streams excepted): clients reconnect, and with their old epoch get the whole state
+streams: clients reconnect, and with their old epoch get the whole state
 again. Opening a session with more than 256 rich messages ends them too, rather than streaming it.
 
 ## Integrations
@@ -1428,10 +1241,10 @@ instance:
   `update` says whether a client can [update the AgentAPI](#updating-through-the-api), and how far
   an update is.
 - `attention` identifies why the agent needs you, in priority order: `login`, `request` (approval,
-  question or plan), `dialog` (in the terminal), `limit` (a usage limit stopped the turn), `exited`,
-  or `none`.
+  question or plan), `limit` (a usage limit stopped the turn), `exited`, or `none`. An AgentAPI 2
+  with the PTY transport also reports `dialog` (in the agent's terminal).
 - `GET /events?only=summary` sends `summary_update` on connection and when the summary changes,
-  plus heartbeats. It omits messages and screen updates, so a client can follow dozens of
+  plus heartbeats. It omits messages, so a client can follow dozens of
   instances. Reply text growing doesn't change the summary; task starts and ends, requests, status
   changes and queue changes do. One change sends one `summary_update` with all it changed: a turn's
   end sends the agent stable with its task done. Other `/events` clients don't receive
@@ -1590,10 +1403,10 @@ It sends only `run.status_changed` by default. Select events with `--webhook-eve
 | Event | Sent when | `data` |
 | --- | --- | --- |
 | `run.status_changed` | The agent changes between `running` and `stable` | `status`, `previous_status`, `server_id`, `agent_type`, `transport` |
-| `instance.started`, `instance.heartbeat`, `instance.stopped` | AgentAPI starts, every `--webhook-heartbeat` (60s) and when `PUT /webhook` points the webhook at a new URL, and shuts down | What the agent does: `status`, `lifecycle`, `session_name`, `pending_requests`, `queued_messages`, and `agent_session_id`, `terminal_prompt`, `login_required`, `limit_stop`, `usage`, `settings` when set; `heartbeat_seconds`, how often the heartbeat comes (missing when it is off) |
+| `instance.started`, `instance.heartbeat`, `instance.stopped` | AgentAPI starts, every `--webhook-heartbeat` (60s) and when `PUT /webhook` points the webhook at a new URL, and shuts down | What the agent does: `status`, `lifecycle`, `session_name`, `pending_requests`, `queued_messages`, and `agent_session_id`, `login_required`, `limit_stop`, `usage`, `settings` when set; `heartbeat_seconds`, how often the heartbeat comes (missing when it is off) |
 | `task.started` | A [task](#tasks) starts: a message of yours reaches the agent | The task as `GET /tasks` has it: `id` (the message's), `status`, `prompt`, `started_at` |
 | `task.completed`, `task.failed` | The [task](#tasks) ends: `completed`, or `failed` and `limited` (`task.failed`) | The task with `status`, `ended_at`, `duration_seconds`, the agent's last message (`reply`, `reply_id`), `steered`, `errors`, `limit`, `session_name`, and for native Claude Code, Codex and Pi its API-equivalent `cost` (see [Session costs](#session-costs)) |
-| `request.opened`, `request.closed` | An approval, question or plan (native; the request as `GET /requests` has it), or a terminal dialog (PTY; `kind` `terminal_prompt` with the `prompt`), opens or closes | The request |
+| `request.opened`, `request.closed` | An approval, question or plan (the request as `GET /requests` has it) opens or closes | The request |
 | `login.required`, `login.completed` | The native agent needs a login, or no longer does | `agent`, `message`, `command` to run |
 | `limit.stopped`, `limit.cleared` | A usage limit stopped a turn, or the stop is over | `message`, `stopped_at`, `resets_at` |
 | `agent.error` | The agent reported an error or a warning | `message`, `level`, `time` |
@@ -1703,13 +1516,13 @@ The run-status event, which AgentAPI sends when `--webhook-events` isn't given:
   "id": "unique-delivery-id",
   "type": "run.status_changed",
   "created_at": "2026-07-26T12:00:00Z",
-  "instance": {"id": "my-host:3284", "server_id": "agentapi-run-id", "agent_type": "claude", "transport": "pty"},
+  "instance": {"id": "my-host:3284", "server_id": "agentapi-run-id", "agent_type": "claude", "transport": "native"},
   "data": {
     "server_id": "agentapi-run-id",
     "status": "stable",
     "previous_status": "running",
     "agent_type": "claude",
-    "transport": "pty"
+    "transport": "native"
   }
 }
 ```
@@ -1717,16 +1530,13 @@ The run-status event, which AgentAPI sends when `--webhook-events` isn't given:
 ### Human-reply API
 
 Another client, such as a chat bot, can answer the agent without the web UI. While the agent waits
-for you, `GET /handoff` returns what it waits on, with an `id` and a `kind`: its latest response
-(`message`), the terminal prompt it is showing (`terminal`) or, with the native transport, the
-oldest pending request (`request`). Otherwise it returns `{"request": null}`.
+for you, `GET /handoff` returns what it waits on, with an `id` and a `kind`: the oldest pending
+request (`request`) or else its latest response (`message`). Otherwise it returns `{"request": null}`.
 
 `POST /handoff/reply` with that `request_id`, a unique reply `id` and the `content` answers it. A
 reply to a response is sent as a normal user message, the way `POST /message` sends one: if the
 agent got busy meanwhile, it waits in the [queue](#message-queue). A reply to a request answers it
-as described under [Requests](#requests-approvals-questions-and-plans). A terminal prompt takes a
-displayed option number, `enter` or `esc`, or free text where the prompt has a text field (such as
-Claude Code's plan feedback). The `outcome` is `applied`, `queued` (the reply waits in the queue
+as described under [Requests](#requests-approvals-questions-and-plans). The `outcome` is `applied`, `queued` (the reply waits in the queue
 and goes out once the agent can take it), `superseded` (no longer open, for example because it was
 answered in the web UI), `invalid` (the reply doesn't fit; it stays open) or `uncertain`, and
 nothing is answered twice. Combined with the webhooks above, an integration can tell you when the
@@ -1880,7 +1690,7 @@ other than browsers (curl, SDKs, the hub) aren't affected.
   (except as root outside a sandbox), so a client can switch any session to
   bypass. Codex's default overrides the policies in `~/.codex/config.toml`
   unless the command line picks one.
-- Run commands in the [terminal](#terminal) (native transport, on by default;
+- Run commands in the [terminal](#terminal) (on by default;
   `--terminal=false` turns it off).
 - Read files in the agent's working directory with the file viewer endpoints;
   paths outside it, even through symlinks, are refused, and the diff only
@@ -1916,19 +1726,8 @@ seconds for a whole turn.
 | Native | Claude Code | 27–30 MiB | 0.1% | 0.08 s | 230–290 MiB | 1.1 s |
 | Native | Codex | 27–28 MiB | 0.1% | 0.11 s | 205–265 MiB | 0.43 s |
 | Native | Pi | 27–28 MiB | 0.1% | 0.12 s | 100–120 MiB | 0.37 s |
-| PTY | Claude Code | 29–34 MiB | 0.15% | 0.29 s | 265–300 MiB | 1.4 s |
-| PTY | Codex | 34 MiB | 0.2–0.7% | 0.66 s | 245–345 MiB | 6.3 s |
-| PTY | Pi | 28–35 MiB | 0.1% | 0.59 s | 120–130 MiB | 1.2 s |
 | Native | `native-demo` (no agent process) | 27 MiB | 0.03% | 0.07 s | | |
 
-- While the agent is idle, both transports cost AgentAPI next to nothing: polling the screen
-  (PTY) costs about as little as waiting for the protocol (native). The exception was Codex with
-  the PTY transport (0.2–0.7% in the table): to find the session's log, AgentAPI read Codex's
-  recent session files every 500 ms, more of them before the first message. It now reads each file
-  once, and AgentAPI idles at 0.1% with PTY Codex too (measured after the fix).
-- A turn costs AgentAPI 3–6 times more CPU with the PTY transport (typing the message, reading the
-  screen, following the session log), and the agent too: Codex's terminal UI took 6.3 CPU seconds
-  for a turn its app-server answered in 0.4.
 - An agent's own memory moves during a session: Claude Code grew to 314 MiB about a minute and a
   half after it started (its own background work, 0.1% CPU idle otherwise), and Codex gave back
   about 55 MiB after its first turn.
@@ -1951,25 +1750,11 @@ agent command after the `--` separator.
 agentapi server -- claude --allowedTools "Bash(git*) Edit Replace"
 ```
 
-You may also use `agentapi` to run the Aider and Goose agents:
+The agent is Claude Code, Codex or Pi (see [Agents](#agents)):
 
 ```bash
-agentapi server -- aider --model sonnet --api-key anthropic=sk-ant-apio3-XXX
-agentapi server -- goose
-```
-
-Claude Code, Codex and Pi run with the [native transport](#native-transport) unless you pass
-`--transport pty` for their terminal UI (see [Pi coding agent](#pi-coding-agent)):
-
-```bash
+agentapi server -- codex -a on-request
 agentapi server -- pi
-agentapi server --transport pty -- pi
-```
-
-Kimi Code can run through its interactive terminal UI:
-
-```bash
-agentapi server -- kimi
 ```
 
 #### Flags
@@ -1997,19 +1782,18 @@ state-db: ~/.agentapi/state/{port}.db
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `-t`, `--type` | from the agent command | Agent type; see [Supported agents](#supported-agents) |
+| `-t`, `--type` | from the agent command | Agent type: `claude`, `codex`, `pi` or `native-demo`; see [Agents](#agents) |
 | `-p`, `--port` | `3284` | Port to listen on |
 | `--bind` | all interfaces | Address to listen on; see [Bind address](#bind-address) |
-| `--transport` | `native` for Claude Code, Codex and Pi, else `pty` | `native` or `pty`; see [Transports](#transports) |
-| `--state-db` | | SQLite file that keeps the conversation (native and PTY) and resumes a native agent's session; `{port}` and `{hostname}` are filled in; see [Persistent sessions](#persistent-sessions) |
-| `--terminal` | `true` | Shell in the agent's working directory for the chat (native); see [Terminal](#terminal) |
-| `--auto-continue` | `false` | Continue a turn stopped by a usage limit once the limit resets (native); see [Usage limits](#usage-limits) |
+| `--transport` | `native` | Deprecated: `native` is the only transport; `pty` stops AgentAPI with an error |
+| `--state-db` | | SQLite file that keeps the conversation and resumes the agent's session; `{port}` and `{hostname}` are filled in; see [Persistent sessions](#persistent-sessions) |
+| `--terminal` | `true` | Shell in the agent's working directory for the chat; see [Terminal](#terminal) |
+| `--auto-continue` | `false` | Continue a turn stopped by a usage limit once the limit resets; see [Usage limits](#usage-limits) |
 | `--prices` | | JSON file of model prices per million tokens, which add to or replace the built-in ones; see [Session costs](#session-costs) |
-| `-s`, `--state-file` | | Deprecated: imported once into a state database next to it (`--state-db` names another) |
+| `-s`, `--state-file` | | Deprecated: the PTY transport's former persistence, imported once into a state database next to it (`--state-db` names another) |
 | `--load-state`, `--save-state` | | Deprecated: `--load-state=false` skips the import; `--save-state` has no effect |
 | `-I`, `--initial-prompt` | | First message for the agent; read from stdin when piped |
-| `-W`, `--term-width` | `80` | Width of the emulated terminal, and of TTY mode's lines (PTY) |
-| `-H`, `--term-height` | `1000` | Height of the emulated terminal (PTY) |
+| `-W`, `--term-width`, `-H`, `--term-height` | | Deprecated and without effect: the PTY transport's terminal size |
 | `--api-token` | off | Require a Bearer token; without a value, a random token is generated and printed; see [API token authentication](#api-token-authentication) |
 | `-a`, `--allowed-hosts` | `localhost`, `127.0.0.1`, `[::1]` | Accepted `Host` headers, `*` for any; see [Allowed hosts](#allowed-hosts) |
 | `-o`, `--allowed-origins` | `http://localhost:3284`, `http://localhost:3000`, `http://localhost:3001` | Origins allowed to call the API from a browser, `*` for any; see [Allowed origins](#allowed-origins) |
@@ -2142,34 +1926,22 @@ update now applies the file when it restarts. `--allow-update` also writes `allo
 the hub can [update the AgentAPIs through their API](#updating-through-the-api) once they restart;
 `leave` keeps it.
 
-### `agentapi attach`
-
-Attach to a running agent's terminal session (PTY transport; native agents have no terminal to
-attach to).
-
-```bash
-agentapi attach --url localhost:3284
-```
-
-A server started with `--api-token` needs the token: pass `--api-token` or set
-`AGENTAPI_API_TOKEN`. Press `Ctrl+C` to detach from the session.
-
 ## HTTP API reference
 
 The server describes its API with OpenAPI: [openapi.json](openapi.json) in this repository,
 `/openapi.json` on a running server, and a documentation UI at `/docs`. It listens on port 3284 by
-default. Endpoints marked *native* need the native transport.
+default.
 
 ### Conversation
 
 | Endpoint | Description |
 | --- | --- |
 | `GET /messages` | All messages of the conversation |
-| `POST /message` | Send a message, or queue it while the agent is busy; `dispatch_mode` is `queue` (default), `steer` or `interrupt` (*native*) |
-| `DELETE /messages` | Clear the conversation and the queue, and restart the agent (*native*: in a new session) |
+| `POST /message` | Send a message, or queue it while the agent is busy; `dispatch_mode` is `queue` (default), `steer` or `interrupt` |
+| `DELETE /messages` | Clear the conversation and the queue, and restart the agent in a new session |
 | `GET /rich-messages` | The structured conversation: thinking, tool calls with results, usage |
-| `GET /timeline` | Normalized session events, for export or another UI; `?subagents=true` adds the subagents' (*native*) |
-| `GET /status` | Status, lifecycle, server ID, turn, epoch, session name, version, open dialog; *native*: the agent's session ID, capabilities, pending requests, settings, usage, usage limit stop, terminal, login |
+| `GET /timeline` | Normalized session events, for export or another UI; `?subagents=true` adds the subagents' |
+| `GET /status` | Status, lifecycle, server ID, turn, epoch, session name, version, the agent's session ID, capabilities, pending requests, settings, usage, usage limit stop, terminal, login |
 | `GET /title` | The session's human-readable title |
 | `GET /events` | Server-sent events; `?sync=1` for incremental replay on reconnect, and task and queue updates; `?only=summary` for the summary alone |
 | `GET /summary` | What a client that watches many AgentAPIs shows of this one: instance, status, attention, title, latest task, requests, queue, usage; see [Watching many instances](#watching-many-instances) |
@@ -2184,9 +1956,9 @@ default. Endpoints marked *native* need the native transport.
 | `GET /queue` | The messages waiting for the agent |
 | `PUT /queue` | Reorder the queue (`{"ids": [...]}`, every queued message once) |
 | `PUT /queue/{id}`, `DELETE /queue/{id}` | Edit or remove a queued message |
-| `POST /queue/{id}/steer` | Move a queued message into the running turn (*native*) |
+| `POST /queue/{id}/steer` | Move a queued message into the running turn |
 
-### Native agent control
+### Agent control
 
 | Endpoint | Description |
 | --- | --- |
@@ -2207,7 +1979,7 @@ default. Endpoints marked *native* need the native transport.
 
 | Endpoint | Description |
 | --- | --- |
-| `GET /terminal` | The shell's output as server-sent events (*native*, unless `--terminal=false`) |
+| `GET /terminal` | The shell's output as server-sent events (unless `--terminal=false`) |
 | `POST /terminal/input`, `POST /terminal/resize` | Type into the shell; set its size |
 | `GET /files/content` | A file in the agent's working directory, cut at 1 MiB |
 | `GET /files/diff` | The file's uncommitted changes against HEAD |
@@ -2238,16 +2010,14 @@ default. Endpoints marked *native* need the native transport.
 | `GET /auth/session` | Whether the API needs a token, and whether the caller has one (no credentials needed) |
 | `POST /auth/session`, `DELETE /auth/session` | Sign a browser in with the token (session cookie), or sign it out |
 
-The chat itself is served at `/chat/` (and `/chat/embed`), and TTY mode reads the agent's screen
-from `/internal/screen`, which isn't part of the public API.
+The chat itself is served at `/chat/` (and `/chat/embed`).
 
 ## Architecture
 
 AgentAPI is a single Go binary: an HTTP server (chi, with huma generating the OpenAPI schema) that
-runs one agent process and serves the chat UI, a Next.js app embedded in the binary. Every transport
-implements the same conversation interface and reports to the same event emitter, so the HTTP API,
-the event stream, the queue and the chat work the same over both. See
-[docs/architecture.md](docs/architecture.md) for the packages, the data flow of each transport, the
+runs one agent process and serves the chat UI, a Next.js app embedded in the binary. The agent's
+native adapter reports to an event emitter, which the HTTP API, the event stream, the queue and the
+chat read. See [docs/architecture.md](docs/architecture.md) for the packages, the data flow, the
 event stream, persistence and the security model.
 
 ## Development
@@ -2262,16 +2032,14 @@ go test ./...   # Go tests, including the e2e smoke test
 Tests run with `CGO_ENABLED=0`. Commit `openapi.json` with every API change, and regenerate it only
 with `make gen` (see [AGENTS.md](AGENTS.md)). The chat UI lives in [chat/](chat/README.md):
 `bun run dev` serves it against a running AgentAPI, and
-`agentapi server --type custom -- native-demo` runs a simulated native agent for working on it
+`agentapi server -- native-demo` runs a simulated native agent for working on it
 without a real one.
 
 ## Runtime reliability
 
-The fork fixes wide-character cursor tracking, PTY lifecycle leaks, concurrent event delivery,
-message tracking races and TUI redraw artifacts. It also fixes JSONL watcher flushing,
-content-block merging during Claude delta streaming, and switching the watched file when Claude
-Code parks a session in a new JSONL file. These fixes address long sessions, process replacement
-and temporary browser or network interruptions.
+The fork fixes concurrent event delivery, message tracking races and content-block merging during
+Claude delta streaming. These fixes address long sessions, process replacement and temporary
+browser or network interruptions.
 
 ## Roadmap
 
