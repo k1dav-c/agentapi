@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased
+## v2.3.0
+
+### Features
+
+- The hub's file of instances has a version: `instances.json` is now `{"version": 1, "instances":
+  [...]}` (the old list is read as before), and `instances.json.bak` keeps the file
+  read at startup. A hub of 2.2.0 or older sets the new file aside and starts empty; to go back,
+  restore the `.bak` or run `jq .instances`. The hub writes it in the background, at most once a
+  second and when it stops, instead of on every change while holding its lock.
 
 ### Fixes
 
@@ -65,11 +73,6 @@
 
 ### Performance
 
-- The hub writes its file of instances in the background, at most once a second and when it
-  stops, instead of on every change while holding its lock. The file is now `{"version": 1,
-  "instances": [...]}` (the old list is read as before), and `instances.json.bak` keeps the file
-  read at startup. A hub of 2.2.0 or older sets the new file aside and starts empty; to go back,
-  restore the `.bak` or run `jq .instances`.
 - The hub page re-renders only its times every second while an agent works, not every row.
 - The chat skips the layout of tasks out of sight in long conversations.
 - `GET /timeline?subagents=true` and `GET /subagents/{id}` keep each subagent's events until its
