@@ -65,6 +65,10 @@
   long names are cut to 255 bytes.
 - The PTY transport's session-log watcher follows a log that was truncated or replaced, skips lines
   over the length limit, and retries after a read error instead of stopping.
+- Windows: `agentapi list` and the hub drop the registry entry of an AgentAPI whose process is gone,
+  as on Linux and macOS; every entry was kept.
+- `agentapi update` no longer says a program reached through a symlinked directory (macOS's `/var`)
+  is linked to from its own path.
 - Chat: a hub frame that reloads shows its bar again; a queued send that fails keeps **Retry**; hub
   actions the hub refuses (pin, group, mute, forget) show why, and **Forget** closes the agent only
   once it's forgotten; the hub keeps the cached chats of up to 100 instances; the list's keys work
