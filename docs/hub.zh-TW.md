@@ -216,6 +216,24 @@ hub 沒有回應時（它停了，或它前面的 proxy 回了錯誤頁），頁
 scope 只算一次，取最新的數字（`updated_at`）。hub 目前沒在追蹤的 agent（已停止、連不到或連線中）
 會以淡色顯示最後一次的數字，標示為最後已知的金額，不算進合計。
 
+### 工作時間
+
+![agent 的工作時間：最近 24 小時和 7 天、各群組，以及工作最久的 agent](screenshots/hub-work.png)
+
+agent 那一列顯示工作中（`working`）時，hub 就替它計時：從開始一輪的摘要算到結束這一輪、或開始問你
+事情的那份摘要。等你處理、閒置、連線中、連不到和已停止都不算。hub 只算它看到的時間，所以 hub 還沒有
+這項功能之前、hub 停機的期間，以及連不到 agent 的期間都不在裡面。摘要串流斷線時，計時停在串流最後
+一個事件；hub 停止時，計時停在那一刻。agent 從下一份摘要起重新計時。
+
+每一列在花費後面以計時器圖示顯示最近 24 小時的工作時間（`2.3h`），顯示用量限制時則不顯示；滑鼠移上去
+還會看到 7 天的數字。
+總覽在 Spend 下方有一張 **Work time** 卡片：所有 agent 最近 24 小時和 7 天的合計、有群組時各群組的
+小計，以及這週工作最久的五個。數字一律無條件捨去：不到一小時以分鐘表示（`45m`），不到十小時以
+0.1 小時表示（`2.3h`），再長就以小時表示（`31h`）。和花費不同，每個 agent 都算，已停止的也算：
+這是 hub 自己對每個實例的紀錄。
+
+hub 把最近 7 天的工作區段存在檔案裡，送出的是它們的合計（`work`）；正在進行的那一段由頁面自己加上。
+
 ### 版本
 
 ![agent 執行的 AgentAPI 版本、所在的機器，以及怎麼更新較舊的](screenshots/hub-versions.png)
@@ -281,9 +299,9 @@ hub 舊。
 ![清單會顯示的每種狀態，最上方是兩個釘選的 agent](screenshots/hub-list.png)
 
 每一列顯示 agent 的名稱（`--name`，預設為工作目錄名稱）和 AgentAPI 版本（見[版本](#版本)）、它在等
-什麼或在做什麼、多久以前、agent 和機器；也會顯示不是空的佇列、最近 24 小時的花費（見
-[花費](#花費)），以及超過 60% 的用量限制。AgentAPI 正在更新或更新失敗時，會另起一行顯示（見
-[從 hub 更新](#從-hub-更新)）。[釘選](#釘選)的 agent 排在最前面，順序由你決定。同一個
+什麼或在做什麼、多久以前、agent 和機器；也會顯示不是空的佇列、最近 24 小時的花費和工作時間（見
+[花費](#花費)、[工作時間](#工作時間)），以及超過 60% 的用量限制。AgentAPI 正在更新或更新失敗時，
+會另起一行顯示（見[從 hub 更新](#從-hub-更新)）。[釘選](#釘選)的 agent 排在最前面，順序由你決定。同一個
 [群組](#群組)內，各列依下表的狀態順序排列，同狀態再依名稱排序；改用[最近變動](#最近變動)時，
 則先排有過任務的，再依各列最近一次變動排序。每種狀態都有自己的形狀，不靠顏色也看得出來：
 
@@ -340,8 +358,8 @@ hub 舊。
 
 下列情況算是變動：狀態改變（需要你、開始工作、完成、閒置、停止，或 hub 連不到、又連上它）、新的任務、
 開始等新的事（請求、登入、用量限制）、標題改變，以及佇列、更新和版本的變化。下列則不算：heartbeat、
-有人做的操作（群組、釘選、靜音、讀過已完成的任務）、花費和用量數字、agent 工作中送出的訊息，以及斷線後
-10 秒內又接回的摘要串流。
+有人做的操作（群組、釘選、靜音、讀過已完成的任務）、花費、工作時間和用量數字、agent 工作中送出的
+訊息，以及斷線後 10 秒內又接回的摘要串流。
 
 hub 會記錄每個實例最近一次變動的時間（`changed_at`）並保存在檔案中，所以重新啟動 hub 不會打亂清單的
 順序。新實例的這個時間，就是 hub 第一次看到它的時候。從舊版更新上來的 hub 還沒有這項紀錄：實例下一次
@@ -596,12 +614,12 @@ hub 透過環境變數中的 proxy（`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`�
 | `GET /api/session` | 請求帶有 session 或 hub token 時回傳 `{"authenticated": true}` |
 | `POST /api/session` | `{"token": …}` 登入並設定 session cookie |
 | `DELETE /api/session` | 登出 |
-| `GET /api/instances` | 所有實例：各自是誰、摘要、連線、列表上顯示的狀態（`state`：`needs-you`、`working`、`unread`、`idle`、`muted`、`connecting`、`unreachable` 或 `stopped`）、這一列顯示的內容最近一次變動的時間（`changed_at`，RFC 3339；見[最近變動](#最近變動)），以及在釘選的實例中排第幾（`pin`，從 1 開始；沒有釘選就沒有這個欄位）；另外附上 hub 自己的版本（`hub_version`） |
+| `GET /api/instances` | 所有實例：各自是誰、摘要、連線、列表上顯示的狀態（`state`：`needs-you`、`working`、`unread`、`idle`、`muted`、`connecting`、`unreachable` 或 `stopped`）、這一列顯示的內容最近一次變動的時間（`changed_at`，RFC 3339；見[最近變動](#最近變動)），在釘選的實例中排第幾（`pin`，從 1 開始；沒有釘選就沒有這個欄位），以及 hub 看到它工作了多久（`work`：已結束區段在回應當下的 `last_24h_seconds` 和 `last_7d_seconds`，工作中時另有 `working_since`；見[工作時間](#工作時間)）；另外附上 hub 自己的版本（`hub_version`） |
 | `POST /api/instances` | `{"url": …, "token": …}` 以網址加入實例 |
 | `PATCH /api/instances/{id}` | `{"group": …}` 把實例放進群組，`""` 為不分組；`{"muted": true}` 把它目前在等的事靜音到改變為止（沒有在等時回 409），`false` 結束靜音；`{"pinned": true}` 把它釘選在已釘選的實例後面，`false` 取消釘選 |
 | `DELETE /api/instances/{id}` | 移除實例，釘選也一併刪除 |
 | `PUT /api/pins` | `{"ids": […]}` 由上而下排定釘選實例的順序。必須列出每個釘選的實例各一次，不能有其他實例；不符合時回 409，並在 `ids` 附上目前釘選實例的順序，例如這段期間有人釘選、取消釘選或移除了實例；hub 沒有的實例回 404 |
-| `GET /api/events` | Server-sent events：先送 `instances`（全部實例和 `hub_version`，格式同 `GET /api/instances`），再送 `instance`（某個實例有頁面看得到的變動；最後聯絡時間只在它離線時才算）、`removed`（`{"id"}`），以及每 15 秒一次的 `heartbeat` |
+| `GET /api/events` | Server-sent events：先送 `instances`（全部實例和 `hub_version`，格式同 `GET /api/instances`），再送 `instance`（某個實例有頁面看得到的變動，或工作時間變動滿一分鐘；最後聯絡時間只在它離線時才算）、`removed`（`{"id"}`），以及每 15 秒一次的 `heartbeat` |
 | `GET /api/join` | 機器加入 hub 用的資訊：`urls` 的每一項是一個 webhook 網址（`url`）和這個位址所在的網路介面（`interface`；`--bind` 的位址沒有），順序和啟動時的 log 相同；只有設了 token 的 hub 才會附上 secret（`secret`，並帶 `secret_shown: true`） |
 | `/i/{id}/…` | 透過 hub 存取實例自己的 API 和聊天介面；頁面用 `POST /i/{id}/update` 更新實例，用 `DELETE` 取消 |
 
@@ -614,7 +632,7 @@ hub 透過環境變數中的 proxy（`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`�
 | --- | --- | --- |
 | `~/.agentapi/config.yaml` | `agentapi hub join` | hub 的 webhook 和 `allow-update`，每個 `agentapi server` 都會讀取 |
 | `~/.agentapi/instances/` | `agentapi server` | 這台機器上執行中的 AgentAPI，供 `join` 和 `agentapi list` 使用 |
-| `~/.agentapi/hub/instances.json` | `agentapi hub serve` | hub 記得的實例、它們的群組和釘選、各自最近一次變動的時間，以及手動加入的實例的 token |
+| `~/.agentapi/hub/instances.json` | `agentapi hub serve` | hub 記得的實例、它們的群組和釘選、各自最近一次變動的時間、最近 7 天各自工作的區段，以及手動加入的實例的 token |
 | `~/.agentapi/hub/instances.json.bak` | `agentapi hub serve` | hub 上次啟動時看到的實例檔案 |
 | `~/.agentapi/hub/instances.deliveries.json` | `agentapi hub serve` | hub 處理過、簽章仍有效的事件的 delivery ID，用來拒絕重送的事件 |
 
@@ -626,11 +644,16 @@ hub，先停掉 hub，只留下陣列：
 cd ~/.agentapi/hub && jq .instances instances.json > instances.json.new && mv instances.json.new instances.json
 ```
 
+每個實例的工作時間是同一個 version 1 裡多出來的欄位（`work`）。2.3 和 2.4 的 hub 會略過它，下次寫入
+檔案時就把它丟掉。
+
 ## 限制
 
 - hub 對所有實例都提供它自己版本的聊天介面。hub 和各實例請使用相同的 AgentAPI 版本；哪些不同，
   見[版本](#版本)。
 - 所有人共用一個 hub token：沒有個別帳號或權限。
+- [工作時間](#工作時間)只有 hub 看到的部分：hub 還沒有這項功能之前、hub 停機或連不到 agent 的期間都
+  不算。一個 hub 也不知道另一個 hub 算了多少。
 - hub 監看和開啟 AgentAPI，也能更新機器允許更新的 AgentAPI，但不會啟動或停止它們。
 - 關掉 hub 的頁面後，手機就收不到任何通知：hub 還不會送推播。每個 AgentAPI 只有一個 webhook，而
   hub 已經用掉了。
