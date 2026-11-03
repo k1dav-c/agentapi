@@ -191,6 +191,34 @@ func (c ServerConfig) agentIO() st.AgentIO {
 	return c.PTY.AgentIO
 }
 
+// CheckConfig returns an error NewServer would return for config before it
+// sets anything up: for its allowed hosts and origins, bind address and
+// webhook. NewServer also opens what the state database holds.
+func CheckConfig(config ServerConfig) error {
+	if _, _, _, err := parseListenConfig(config); err != nil {
+		return err
+	}
+	if err := webhook.Check(config.Webhook); err != nil {
+		return fmt.Errorf("configure webhook: %w", err)
+	}
+	return nil
+}
+
+// parseListenConfig parses the allowed hosts and origins and the bind
+// address of config.
+func parseListenConfig(config ServerConfig) (hosts, origins []string, bind string, err error) {
+	if hosts, err = parseAllowedHosts(config.AllowedHosts); err != nil {
+		return nil, nil, "", fmt.Errorf("failed to parse allowed hosts: %w", err)
+	}
+	if origins, err = parseAllowedOrigins(config.AllowedOrigins); err != nil {
+		return nil, nil, "", fmt.Errorf("failed to parse allowed origins: %w", err)
+	}
+	if bind, err = ParseBindAddress(config.Bind); err != nil {
+		return nil, nil, "", fmt.Errorf("invalid bind address: %w", err)
+	}
+	return hosts, origins, bind, nil
+}
+
 // NewServer creates a new server instance
 func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	router := chi.NewMux()
@@ -201,17 +229,9 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		config.Clock = quartz.NewReal()
 	}
 
-	allowedHosts, err := parseAllowedHosts(config.AllowedHosts)
+	allowedHosts, allowedOrigins, bind, err := parseListenConfig(config)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse allowed hosts: %w", err)
-	}
-	allowedOrigins, err := parseAllowedOrigins(config.AllowedOrigins)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse allowed origins: %w", err)
-	}
-	bind, err := ParseBindAddress(config.Bind)
-	if err != nil {
-		return nil, fmt.Errorf("invalid bind address: %w", err)
+		return nil, err
 	}
 
 	logger.Info(fmt.Sprintf("Allowed hosts: %s", strings.Join(allowedHosts, ", ")))
