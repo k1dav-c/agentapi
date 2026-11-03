@@ -1,60 +1,34 @@
 "use client";
 
 import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from "react";
-import {ArrowLeft, Bell, BellOff, ExternalLink, Plus, Search, X} from "lucide-react";
-import {toast} from "sonner";
-import {AgentMark} from "@/components/agent-mark";
+import {Bell, BellOff, Plus, Search, X} from "lucide-react";
 import {ModeToggle} from "@/components/mode-toggle";
 import {Button} from "@/components/ui/button";
-import {
-  activity,
-  applyHubEvent,
-  chatURL,
-  countFilters,
-  displayName,
-  formatUSD,
-  groupNames,
-  hubRoot,
-  instanceState,
-  instanceVersion,
-  spendTitle,
-  spendTotals,
-  stateLabel,
-  type HubEvent,
-  type HubFilter,
-  type HubInstance,
-  type InstanceState,
-} from "@/lib/hub";
-import {createHubAPI, hubErrorText} from "@/lib/hub-api";
-import {frameInstance, frameMessage, onFrameMessage, toFrame, type Framed, type FromFrame} from "@/lib/hub-frame";
+import {chatURL, countFilters, displayName, formatUSD, groupNames, hubRoot, spendTitle, spendTotals, type HubFilter} from "@/lib/hub";
 import {listSections, movePin, pinOf, sortPinned} from "@/lib/hub-order";
-import {shownUpdate} from "@/lib/hub-update";
-import {checkHubSession, type HubSession} from "@/lib/hub-session";
-import {getReconnectDelay} from "@/lib/reconnect";
 import {useStableCallback} from "@/lib/use-stable-callback";
 import {cn} from "@/lib/utils";
-import {useEventSource} from "./use-event-source";
 import {HubMark} from "./hub/brand";
 import {AddInstance, GroupName, type Naming} from "./hub/dialogs";
 import {HubClock} from "./hub/clock";
-import {GroupHeader, InstanceRow, agentName, type RowActions} from "./hub/instance-row";
+import {basePath, FrameInfo, InstanceBar} from "./hub/instance-bar";
+import {GroupHeader, InstanceRow, type RowActions} from "./hub/instance-row";
 import {ListEdge, useListWidth} from "./hub/list-edge";
 import {ListOrderSwitch, useListOrder} from "./hub/list-order";
 import {Onboarding, Overview} from "./hub/overview";
 import {SignIn} from "./hub/sign-in";
-import {StatusGlyph, stateTone} from "./hub/status-glyph";
+import {readStorage, writeStorage} from "./hub/storage";
+import {useHubTab} from "./hub/tab-icon";
 import {cancelFromHub} from "./hub/update";
-import {UpdateStatus} from "./hub/update-chip";
+import {useHubActions} from "./hub/use-hub-actions";
+import {useHubFrame} from "./hub/use-hub-frame";
 import {useHubKeys} from "./hub/use-hub-keys";
-import {VersionTag} from "./hub/version-tag";
-
-const basePath = (process.env.NEXT_PUBLIC_BASE_PATH ?? "/chat").replace(/\/$/, "");
+import {useHubStream} from "./hub/use-hub-stream";
+import {useNeedsYou} from "./hub/use-needs-you";
 
 // Where the browser keeps which groups are folded, and whether to notify.
 const collapsedKey = "agentapi.hub.collapsed";
 const notifyKey = "agentapi.hub.notify";
-// The hub sends a heartbeat every 15 s.
-const STALE_STREAM_MS = 45_000;
 
 const filters: {id: HubFilter; label: string}[] = [
   {id: "all", label: "All"},
@@ -64,49 +38,12 @@ const filters: {id: HubFilter; label: string}[] = [
   {id: "offline", label: "Offline"},
 ];
 
-function readStorage<T>(key: string, fallback: T): T {
-  try {
-    const value = localStorage.getItem(key);
-    return value === null ? fallback : (JSON.parse(value) as T);
-  } catch {
-    return fallback;
-  }
-}
-
-function writeStorage(key: string, value: unknown) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {}
-}
-
-// The tab icon: the hub's mark, with a dot in the most pressing state and
-// the number that need you.
-function faviconUrl(waiting: number, working: boolean): string {
-  const dot = waiting > 0 ? "#c27c0e" : working ? "#4f6bed" : "";
-  const badge = dot
-    ? `<circle cx="24" cy="8" r="7.5" fill="${dot}" stroke="#ffffff" stroke-width="1.5"/>` +
-      (waiting > 0 ? `<text x="24" y="11.4" font-family="system-ui,sans-serif" font-size="10" font-weight="700" fill="#ffffff" text-anchor="middle">${waiting > 9 ? "9+" : waiting}</text>` : "")
-    : "";
-  const svg =
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="9" fill="#232733"/>` +
-    `<circle cx="16" cy="16" r="3.6" fill="#ffffff"/><circle cx="9.3" cy="9.3" r="2.2" fill="#c27c0e"/><circle cx="24.6" cy="20" r="2.2" fill="#4f6bed"/><circle cx="12" cy="25" r="2.2" fill="#16a07a"/>` +
-    badge +
-    `</svg>`;
-  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
-}
-
 // HubView is the hub's page: sign in, the instances in a sidebar (what
 // needs you first), and on the right either the overview or the chat of
 // the one picked. On a narrow screen the list and the chat take turns.
 export function HubView() {
   const root = useMemo(() => (typeof window === "undefined" ? "" : hubRoot(basePath, window.location.origin)), []);
-  const [session, setSession] = useState<HubSession | undefined>(undefined);
-  const [instances, setInstances] = useState<Map<string, HubInstance>>(new Map());
-  // The hub's own version, which the older instances are marked against.
-  const [hubVersion, setHubVersion] = useState("");
-  // The last session check after the stream failed found the hub
-  // unreachable.
-  const [unreachable, setUnreachable] = useState(false);
+  const {session, signedIn, retrySession, instances, hubVersion, unreachable, status} = useHubStream(root);
   const [selected, setSelected] = useState<string | undefined>(() =>
     typeof window === "undefined" ? undefined : decodeURIComponent(window.location.hash.slice(1)) || undefined,
   );
@@ -116,65 +53,10 @@ export function HubView() {
   const [naming, setNaming] = useState<Naming | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set(readStorage<string[]>(collapsedKey, [])));
   const [notify, setNotify] = useState<boolean>(() => readStorage(notifyKey, false));
-  const [announcement, setAnnouncement] = useState("");
   const search = useRef<HTMLInputElement>(null);
   const listWidth = useListWidth();
   const [order, setOrder] = useListOrder();
-
-  // Signed in or not; a hub that doesn't answer is asked again, with a
-  // backoff, and at once when the browser comes back online.
-  const [sessionAttempt, setSessionAttempt] = useState(0);
-  useEffect(() => {
-    if (!root) return;
-    let active = true;
-    void checkHubSession(root).then((result) => {
-      if (active) setSession(result);
-    });
-    return () => {
-      active = false;
-    };
-  }, [root, sessionAttempt]);
-  useEffect(() => {
-    if (session !== "unreachable") return;
-    const retry = () => setSessionAttempt((n) => n + 1);
-    const timer = setTimeout(retry, getReconnectDelay(sessionAttempt + 1));
-    window.addEventListener("online", retry);
-    return () => {
-      clearTimeout(timer);
-      window.removeEventListener("online", retry);
-    };
-  }, [session, sessionAttempt]);
-
-  // The instances and their changes, from one stream, kept open.
-  const stream = useEventSource({
-    url: session === "signed-in" && root ? `${root}/api/events` : null,
-    withCredentials: true,
-    staleAfter: STALE_STREAM_MS,
-    listeners: () => {
-      const on = (type: HubEvent["type"]) => (message: MessageEvent<string>) => {
-        const data = JSON.parse(message.data);
-        const event: HubEvent =
-          type === "instances"
-            ? {type, instances: data.instances ?? [], hubVersion: data.hub_version ?? ""}
-            : type === "instance"
-              ? {type, instance: data}
-              : {type, id: data.id};
-        if (event.type === "instances") setHubVersion(event.hubVersion ?? "");
-        setInstances((previous) => applyHubEvent(previous, event));
-      };
-      return {instances: on("instances"), instance: on("instance"), removed: on("removed")};
-    },
-    onOpen: () => setUnreachable(false),
-    // EventSource hides the status: a session that expired comes back as a
-    // sign-in, a hub that doesn't answer as unreachable.
-    onError: () => {
-      void checkHubSession(root).then((result) => {
-        if (result === "signed-out") setSession("signed-out");
-        setUnreachable(result === "unreachable");
-      });
-    },
-  });
-  const connected = stream.status === "connected";
+  const connected = status === "connected";
 
   const all = useMemo(() => [...instances.values()], [instances]);
   const counts = useMemo(() => countFilters(all), [all]);
@@ -218,30 +100,7 @@ export function HubView() {
     setSelected(id);
   }, []);
 
-  // The open instance's chat draws the bar above itself once it is ready
-  // (FrameBar), with its own actions in it; until then the hub's bar shows.
-  // A chat that loads again in the frame says it is ready again, and is
-  // told the instance again (Framed.ready).
-  const frame = useRef<HTMLIFrameElement>(null);
-  const [framed, setFramed] = useState<Framed>();
-  useEffect(() => {
-    const onMessage = (event: MessageEvent) => {
-      const chat = frame.current;
-      const instance = chat?.dataset.instance;
-      if (!chat || !instance || event.source !== chat.contentWindow) return;
-      const message = frameMessage<FromFrame>(event);
-      if (!message) return;
-      if (message.type === "ready") {
-        setFramed((previous) => onFrameMessage(previous, message, instance).framed);
-        return;
-      }
-      const {ask} = onFrameMessage(undefined, message, instance);
-      if (ask === "back") select(undefined);
-      else if (ask === "cancel-update") void cancelFromHub(root, instance);
-    };
-    window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
-  }, [select, root]);
+  const {frame, framed} = useHubFrame({onBack: () => select(undefined), onCancelUpdate: (id) => void cancelFromHub(root, id)});
 
   // Back and forward show what the URL names.
   useEffect(() => {
@@ -251,73 +110,18 @@ export function HubView() {
   }, []);
 
   // Tell people who aren't looking: a screen reader, the tab, a notification.
-  const previousStates = useRef<Map<string, InstanceState>>(new Map());
-  useEffect(() => {
-    const before = previousStates.current;
-    const next = new Map<string, InstanceState>();
-    for (const instance of all) {
-      const state = instanceState(instance);
-      next.set(instance.id, state);
-      if (state === "needs-you" && before.size > 0 && before.get(instance.id) !== "needs-you") {
-        const text = `${displayName(instance)}: ${activity(instance).text}`;
-        setAnnouncement(`${displayName(instance)} needs you. ${activity(instance).text}`);
-        if (notify && document.hidden && typeof Notification !== "undefined" && Notification.permission === "granted") {
-          const notification = new Notification(`${displayName(instance)} needs you`, {body: text, tag: `agentapi-hub-${instance.id}`});
-          notification.onclick = () => {
-            window.focus();
-            select(instance.id);
-            notification.close();
-          };
-        }
-      }
-    }
-    previousStates.current = next;
-  }, [all, notify, select]);
+  const announcement = useNeedsYou(all, notify, select);
+  useHubTab(waiting, counts.working > 0);
 
-  useEffect(() => {
-    document.title = waiting > 0 ? `(${waiting}) AgentAPI Hub` : "AgentAPI Hub";
-    let link = document.querySelector<HTMLLinkElement>("link[data-hub-icon]");
-    if (!link) {
-      document.querySelectorAll<HTMLLinkElement>('link[rel~="icon"]').forEach((icon) => icon.remove());
-      link = document.createElement("link");
-      link.rel = "icon";
-      link.type = "image/svg+xml";
-      link.setAttribute("data-hub-icon", "");
-      document.head.appendChild(link);
-    }
-    link.href = faviconUrl(waiting, counts.working > 0);
-  }, [waiting, counts.working]);
-
-  // The changes the page makes come back on the event stream, like any
-  // other; one the hub refuses, or doesn't get, says so in a toast.
-  const api = useMemo(() => createHubAPI(root), [root]);
-  const instancesRef = useRef(instances);
-  instancesRef.current = instances;
-  const attempt = useCallback(async (failure: (name: string) => string, id: string, change: () => Promise<void>): Promise<boolean> => {
-    try {
-      await change();
-      return true;
-    } catch (error) {
-      const instance = instancesRef.current.get(id);
-      toast.error(failure(instance ? displayName(instance) : id), {description: hubErrorText(error)});
-      return false;
-    }
-  }, []);
-
-  // Pins an instance below the pinned ones on the hub, or unpins it.
-  const setPinned = useCallback(
-    (id: string, pinned: boolean) => attempt((name) => `Couldn't ${pinned ? "pin" : "unpin"} ${name}`, id, () => api.changeInstance(id, {pinned})),
-    [api, attempt],
-  );
-
+  const actions = useHubActions(root, instances);
   useHubKeys({
     search,
     query,
     onClearSearch: () => setQuery(""),
     onOverview: () => select(undefined),
     onPin: (id) => {
-      const instance = instancesRef.current.get(id);
-      if (instance) void setPinned(id, pinOf(instance) === undefined);
+      const instance = actions.instance(id);
+      if (instance) void actions.setPinned(id, pinOf(instance) === undefined);
     },
   });
 
@@ -343,49 +147,38 @@ export function HubView() {
     writeStorage(notifyKey, on);
   };
 
+  // Forget closes the agent once the hub forgot it.
   const forget = useStableCallback(async (id: string) => {
-    if (!(await attempt((name) => `Couldn't forget ${name}`, id, () => api.forgetInstance(id)))) return;
-    if (selected === id) select(undefined);
+    if ((await actions.forget(id)) && selected === id) select(undefined);
   });
-  const setGroup = useStableCallback((id: string, group: string) =>
-    attempt((name) => (group ? `Couldn't move ${name} to ${group}` : `Couldn't take ${name} out of its group`), id, () => api.changeInstance(id, {group})),
-  );
-  // Mutes what an instance waits for now, until that changes (the hub ends
-  // the mute then), or ends the mute.
-  const setMuted = useStableCallback((id: string, muted: boolean) =>
-    attempt((name) => `Couldn't ${muted ? "mute" : "unmute"} ${name}`, id, () => api.changeInstance(id, {muted})),
-  );
   // Moves a pinned instance past the next pinned row the list shows; the hub
   // keeps the order of all of them.
   const movePinned = useStableCallback(async (id: string, step: -1 | 1) => {
     const ids = movePin(sortPinned(all).map((instance) => instance.id), shownPins, id, step);
-    if (!ids) return;
-    await attempt((name) => `Couldn't move ${name}`, id, () => api.setPins(ids));
+    if (ids) await actions.setPins(ids, id);
   });
   // What the rows do: one object for as long as the page is open.
   const rowActions = useMemo<RowActions>(
     () => ({
       select,
       forget: (id) => void forget(id),
-      group: (id, name) => void setGroup(id, name),
+      group: (id, name) => void actions.setGroup(id, name),
       newGroup: (id) => setNaming({mode: "new", id}),
-      mute: (id, muted) => void setMuted(id, muted),
-      pin: (id, pinned) => void setPinned(id, pinned),
+      mute: (id, muted) => void actions.setMuted(id, muted),
+      pin: (id, pinned) => void actions.setPinned(id, pinned),
       move: (id, step) => void movePinned(id, step),
     }),
-    [select, forget, setGroup, setMuted, setPinned, movePinned],
+    [select, forget, actions, movePinned],
   );
   const renameGroup = async (from: string, to: string) => {
     // A folded group stays folded under its new name.
     changeCollapsed((next) => {
       if (next.delete(from)) next.add(to);
     });
-    const members = all.filter((instance) => (instance.group?.trim() ?? "") === from);
-    const results = await Promise.allSettled(members.map((instance) => api.changeInstance(instance.id, {group: to})));
-    const failed = results.flatMap((result) => (result.status === "rejected" ? [result.reason as unknown] : []));
-    if (failed.length > 0) {
-      toast.error(`Couldn't move ${failed.length} of ${members.length} ${members.length === 1 ? "agent" : "agents"} to ${to}`, {description: hubErrorText(failed[0])});
-    }
+    await actions.moveGroup(
+      all.filter((instance) => (instance.group?.trim() ?? "") === from),
+      to,
+    );
   };
 
   if (session === undefined) {
@@ -404,13 +197,13 @@ export function HubView() {
           <h1 className="text-base font-semibold">Can&apos;t reach the hub</h1>
           <p className="mt-1 text-sm text-muted-foreground">It didn&apos;t answer. Trying again…</p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => setSessionAttempt((n) => n + 1)}>
+        <Button variant="outline" size="sm" onClick={retrySession}>
           Try again
         </Button>
       </main>
     );
   }
-  if (session === "signed-out") return <SignIn root={root} onSignedIn={() => setSession("signed-in")} />;
+  if (session === "signed-out") return <SignIn root={root} onSignedIn={signedIn} />;
 
   const current = selected ? instances.get(selected) : undefined;
   const filtered = filter !== "all" || query.trim() !== "";
@@ -435,7 +228,7 @@ export function HubView() {
                   <span aria-live="polite" className="shrink-0">
                     {connected
                       ? `Live · ${counts.all} ${counts.all === 1 ? "agent" : "agents"}`
-                      : stream.status === "offline"
+                      : status === "offline"
                         ? "Offline"
                         : unreachable
                           ? "Can't reach the hub · retrying"
@@ -652,88 +445,12 @@ export function HubView() {
           naming={naming}
           onClose={() => setNaming(null)}
           onSave={(name) => {
-            if (naming?.mode === "new") void setGroup(naming.id, name);
+            if (naming?.mode === "new") void actions.setGroup(naming.id, name);
             else if (naming?.mode === "rename") void renameGroup(naming.from, name);
             setNaming(null);
           }}
         />
       </main>
     </HubClock>
-  );
-}
-
-// FrameInfo tells the open instance's chat what its bar shows, whenever
-// that changes and whenever the chat says it is ready (ready counts it).
-function FrameInfo({
-  frame,
-  ready,
-  instance,
-  hubVersion,
-  root,
-}: {
-  frame: React.RefObject<HTMLIFrameElement | null>;
-  ready: number;
-  instance: HubInstance;
-  hubVersion: string;
-  root: string;
-}) {
-  const info = JSON.stringify(toFrame(frameInstance(instance, {hubVersion, agent: agentName(instance), tab: chatURL(basePath, root, instance.id)})));
-  useEffect(() => {
-    frame.current?.contentWindow?.postMessage(JSON.parse(info), window.location.origin);
-  }, [frame, info, ready]);
-  return null;
-}
-
-// InstanceBar heads the open instance: back to the list or overview, what
-// it is and does, and its own chat in a tab of its own.
-function InstanceBar({instance, hubVersion, root, onBack}: {instance: HubInstance; hubVersion: string; root: string; onBack: () => void}) {
-  const state = instanceState(instance);
-  const agent = agentName(instance);
-  const version = instanceVersion(instance);
-  const update = shownUpdate(instance);
-  return (
-    <div className="box-content flex h-12 shrink-0 items-center gap-1 border-b bg-background px-1.5 pt-[env(safe-area-inset-top)] sm:h-14 md:gap-2 md:px-3">
-      <Button variant="ghost" size="icon" className="size-10 shrink-0 rounded-full md:hidden" onClick={onBack} aria-label="Back to Agents">
-        <ArrowLeft className="size-5" />
-      </Button>
-      <Button variant="ghost" size="icon" className="hidden size-9 rounded-full md:inline-flex" onClick={onBack} aria-label="Back to the overview" title="Back to the overview (esc)">
-        <X className="size-4" />
-      </Button>
-      <StatusGlyph state={state} className="ml-1 hidden sm:block" />
-      <div className="min-w-0 flex-1 pl-0.5 md:pl-1">
-        <p className="truncate text-sm leading-tight font-semibold">{displayName(instance)}</p>
-        <p className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-          <span className={cn("shrink-0 font-medium", stateTone[state])}>{stateLabel(instance)}</span>
-          {update && <UpdateStatus update={update} onCancel={() => void cancelFromHub(root, instance.id)} />}
-          {agent && (
-            <>
-              <span aria-hidden="true" className="text-muted-foreground/40">·</span>
-              {instance.agent_type && <AgentMark agentType={instance.agent_type} className="size-3" />}
-              <span className="shrink-0">{agent}</span>
-            </>
-          )}
-          {instance.hostname && (
-            <>
-              <span aria-hidden="true" className="hidden text-muted-foreground/40 sm:inline">·</span>
-              <span className="hidden min-w-0 truncate sm:inline" data-hub-host>
-                {instance.hostname}
-              </span>
-            </>
-          )}
-          {version && (
-            <>
-              <span aria-hidden="true" className="hidden text-muted-foreground/40 sm:inline">·</span>
-              <VersionTag version={version} hubVersion={hubVersion} lastKnown={instance.connection !== "connected"} className="hidden sm:flex" />
-            </>
-          )}
-        </p>
-      </div>
-      <Button variant="ghost" size="sm" className="hidden h-9 shrink-0 gap-1.5 text-muted-foreground sm:inline-flex" asChild>
-        <a href={chatURL(basePath, root, instance.id)} target="_blank" rel="noreferrer" aria-label={`Open ${displayName(instance)} in a new tab`}>
-          <ExternalLink className="size-4" />
-          <span className="hidden lg:inline">New tab</span>
-        </a>
-      </Button>
-    </div>
   );
 }
