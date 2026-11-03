@@ -734,14 +734,18 @@ of the content's SHA-256, so a path never changes; unused ones are removed after
 - The hub (`lib/hub`) holds the instances' API tokens and sends them only to
   instance URLs from events signed with its secret (HMAC of the timestamp and
   body, at most 10 minutes old, each delivery once) or added by someone signed
-  in. Its proxy refuses an instance whose URL another AgentAPI (another
-  instance ID in the summary) answers. An event must name its run
-  (`server_id`), and moves only an instance the hub doesn't follow now (its
-  summary stream isn't open), never one added by hand; a moved instance
-  leaves its own token behind. Every joined machine has the same secret, so
-  any of them can still point an instance ID the hub doesn't follow at an
-  address of its own and get `--instance-token`; a key per machine would
-  close that. Browsers sign in with the hub token for an HttpOnly, SameSite=Lax cookie
+  in. Its proxy forwards only to an instance it is connected to (it reads
+  that instance's summary at its URL), so not while it connects, nor where
+  another AgentAPI (another instance ID in the summary) answers. An event
+  must name its run (`server_id`), and moves only an instance whose URL is
+  dead to the hub (it failed there past the connect grace, or another
+  AgentAPI answers there), never one it is connected or connecting to, or
+  one added by hand; a moved instance leaves its own token behind. The file
+  keeps the URL where the hub last read each summary, which a restarted hub
+  follows first. Every joined machine has the same secret, so any of them
+  can still point a new instance ID, or one whose address stopped answering,
+  at an address of its own and get `--instance-token`; a key per machine
+  would close that. Browsers sign in with the hub token for an HttpOnly, SameSite=Lax cookie
   derived from it. The proxy drops their cookies and `Authorization`, `Origin`,
   `Referer` and `Sec-Fetch-*` headers and the instances' `Set-Cookie`, so
   neither side's credentials reach the other. The hub refuses requests that

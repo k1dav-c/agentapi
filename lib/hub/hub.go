@@ -318,8 +318,12 @@ func (h *Hub) addInstance(w http.ResponseWriter, r *http.Request) {
 		i.Source = SourceManual
 		i.LastSeen = h.clock.Now()
 		i.Summary = summary
-		i.Connection = ConnectionConnecting
+		// The hub just read its summary there.
+		i.Connection = ConnectionConnected
+		i.confirmedURL = base
 		i.Error = ""
+		i.failed = false
+		i.answeredBy = ""
 	})
 	h.watch(instance)
 	writeJSON(w, http.StatusOK, instance.sent(h.clock.Now()))

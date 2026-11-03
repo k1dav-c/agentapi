@@ -37,9 +37,13 @@ hub 和各個 AgentAPI 透過你掌控的網路互連，例如你自己的 VPN�
    `instance.stopped`，hub 據此新增、更新或停止實例（手動加入的實例不會因 `instance.stopped`
    停止，hub 會持續嘗試連線）。hub 連不到、又錯過三次 heartbeat 的實例，例如 workspace 被強制
    關掉的，視為已停止，hub 不再嘗試連線，直到它下一次送 heartbeat。這些事件只用來新增實例、告訴
-   hub 它在哪裡；每個實例在做什麼，以它的摘要為準。事件寫了另一個網址時，
-   只有 hub 沒連上這個實例才會改用新網址，手動加入的實例則一律不改：機器換了位址的 AgentAPI
-   （`--public-url` 裡用 `{ip}`），會在舊位址不再回應後的第一次 heartbeat 搬到新位址。
+   hub 它在哪裡；每個實例在做什麼，以它的摘要為準。事件寫了另一個網址時，只有 hub 確定舊網址
+   已經失效，才會改用新網址：在那裡連線失敗超過 10 秒的寬限（Unreachable，或錯過 heartbeat 而視為
+   已停止），或那裡回應的是另一個 AgentAPI。hub 已連上或還在連線中（hub 剛重新啟動，或串流斷線
+   未滿 10 秒）時一律不改，手動加入的實例也一律不改。因 `instance.stopped` 而停止的實例，hub 會先
+   回舊網址試一次。機器換了位址的 AgentAPI（`--public-url` 裡用 `{ip}`），會在舊位址變成
+   Unreachable 後的第一次 heartbeat 搬到新位址，大約兩分鐘內（見[疑難排解](#疑難排解)）。檔案會記下
+   hub 最後一次讀到每個實例摘要的網址，hub 重新啟動後先從那裡追蹤。
 2. hub 追蹤每個實例的摘要（`GET /events?only=summary`），以它為實例狀況的依據：狀態、在等什麼、
    標題、最新任務、佇列和用量限制。每個實例一條連線；斷線時 1 秒後重連，之後間隔逐次拉長，最多
    30 秒。串流 45 秒沒有任何動靜就視為斷線。連線失敗的前 10 秒，實例仍顯示為連線中（剛啟動的實例
@@ -507,16 +511,21 @@ AgentAPI 1.1 以上。在這裡輸入的 token 會為這個實例保存，取代
   網址，就是 hub 送出實例 token 的地方。hub 會把 delivery ID 保存在
   `instances.deliveries.json`，直到事件的簽章失效，所以重新啟動後也照樣拒絕重送的事件。hub 讀一個
   事件最多花 10 秒、最多讀 1 MiB。
-- 有簽章的事件可以新增 hub 還沒有的實例，也可以把 hub 目前沒在追蹤的實例（已停止，或摘要串流沒有
-  連上）改到事件裡的網址。hub 正在追蹤的實例，不論事件寫的是哪一次執行，事件都改不了它的網址；手動
-  加入的實例也一樣。`instance.*` 事件必須寫明是哪一次執行（`server_id`，AgentAPI 1.0 以後都會送）。
-  實例換了網址後，hub 不再送出為舊網址設定的 token；`--instance-token` 照常適用。
+- 有簽章的事件可以新增 hub 還沒有的實例，也可以把 hub 確定舊網址已失效的實例（超過 10 秒寬限仍
+  Unreachable、錯過 heartbeat 而視為已停止，或那裡回應的是另一個 AgentAPI）改到事件裡的網址。hub
+  已連上或還在連線中的實例，不論事件寫的是哪一次執行，事件都改不了它的網址；手動加入的實例也一樣。
+  `instance.stopped` 不代表網址已失效：hub 會先回舊網址試一次。`instance.*` 事件必須寫明是哪一次
+  執行（`server_id`，AgentAPI 1.0 以後都會送）。實例換了網址後，hub 不再送出為舊網址設定的
+  token；`--instance-token` 照常適用。
 - 每台加入的機器都有同一個 secret，存在那台機器上任何 agent 都讀得到的檔案裡（bypass 權限模式的
-  agent 讀檔不會先問）。這樣的 agent 若受到讀到的內容誘導，仍然可以拿 hub 目前沒在追蹤的實例 ID，
-  宣告一個它自己的位址；hub 就會把 `--instance-token`，以及你送給那個實例的訊息和核准，送到那個
-  位址。只讓你願意交出實例 token 的機器加入；網址絕不能變的實例，請手動加入。每台機器各用一把金鑰
+  agent 讀檔不會先問）。這樣的 agent 若受到讀到的內容誘導，仍然可以用新的實例 ID，或位址已經
+  不回應的實例 ID（例如它的機器正在重新開機），宣告一個它自己的位址；hub 就會把
+  `--instance-token` 送到那個位址，等它以那個實例的身分回應後，再把你送給那個實例的訊息和核准
+  也送過去。只讓你願意交出實例 token 的機器加入；網址絕不能變的實例，請手動加入。每台機器各用一把金鑰
   才能根除這個問題，hub 目前還沒有這個功能。
-- 只有在那個網址上的 AgentAPI 自稱是這個實例時，hub 才會轉送這個實例的請求。
+- 只有在已連上時，也就是 hub 正從那個網址讀到這個實例的摘要時，hub 才會轉送這個實例的請求
+  （對話、核准、更新）。hub 重新啟動、串流斷線或事件把實例搬走後，連線中的期間 proxy 一律回 503，
+  什麼都不送出。
 - session cookie 是 HttpOnly、SameSite=Lax，由 hub token 推導而來，裡面沒有 token 本身。proxy 會
   移除瀏覽器的 cookie 以及 `Authorization`、`Origin`、`Referer`、`Sec-Fetch-*` 標頭，也會移除實例的
   `Set-Cookie`，雙方的憑證都不會傳到另一邊。
@@ -562,7 +571,10 @@ AgentAPI 1.1 以上。在這裡輸入的 token 會為這個實例保存，取代
 | 機器換了 IP 位址後，實例顯示 Unreachable（`no route to host` 或逾時） | 加入時 `--public-url` 寫的是固定 IP，DHCP 換掉了它，例如 Coder workspace 重新啟動後 | 用 `--public-url 'http://{ip}:{port}'` 重新執行 `agentapi hub join`；hub 會在下一次 heartbeat 跟上，之後每次換位址也一樣 |
 | Unreachable：`another AgentAPI answers at this URL` | 實例的位址現在屬於另一台機器（DHCP 換了位址），或 `--public-url` 指向別台機器 | 檢查 `--public-url`；搬走的實例會在下一次 heartbeat（一分鐘內）送出新位址 |
 | hub 的 log 有「Two AgentAPIs report the same instance ID」 | 兩台機器名稱相同，同一個 port 上的 AgentAPI 就有相同的 ID；hub 保留它正在追蹤的那個 | 把其中一台改名，或給它的 AgentAPI 設定 `--instance-id` |
-| hub 的 log 有「An instance's event names another URL」 | hub 還在用舊網址追蹤它時，它的 `--public-url` 改了 | 不用處理：hub 繼續用連得上的網址，等舊網址不再回應才改用新的 |
+| hub 的 log 有「An instance's event names another URL」（或「… while the hub connects to its URL」） | hub 還在用舊網址追蹤它或連線時，它的 `--public-url` 改了 | 不用處理：hub 繼續用連得上的網址，等舊網址變成 Unreachable 才改用新的 |
+| 機器換了位址後，實例要顯示 Unreachable 一兩分鐘才搬過去 | 舊位址連線失敗滿 10 秒後，hub 才會在實例下一次 heartbeat（每分鐘一次）時搬動它；舊位址完全沒回應時更久：每次嘗試最多花 30 秒，串流沒有動靜 45 秒後才算斷線。3.0.1 以前的 hub 在串流一斷線後的第一次 heartbeat 就搬 | 不用處理：最多比以前晚一分鐘 |
+| hub 的 log 有「A stopped instance's event names another URL」 | 送過 `instance.stopped` 的實例在另一個網址啟動 | 不用處理：hub 先回舊網址試一次，失敗後在下一次 heartbeat 搬動它 |
+| 開啟實例時回應 `the hub isn't connected to the instance yet`（503） | hub 啟動、串流斷線或實例搬走後，還沒在它的網址讀到摘要 | 等它那一列顯示已連上 |
 | hub 的 log 有「An instance added by hand keeps its URL」 | 它是用某個網址手動加入的，它的 webhook 卻寫了另一個網址 | 把 `--public-url` 改成加入時用的網址，或在 hub 移除它，讓它的 webhook 重新加入 |
 | hub 的 log 有「Refused an instance event that names no server ID」 | 送出事件的不是 AgentAPI 1.0 以後的版本，卻有 hub 的 secret 簽章 | 更新送出事件的程式；若不知道是誰，找出是哪台有 secret 的機器送的 |
 | Unreachable，而且 hub 的 VPN 用戶端以 userspace 模式執行 | hub 的連線沒有經過 VPN | 為 hub 設定 `ALL_PROXY`，指向 VPN 用戶端的 SOCKS5 proxy |
@@ -656,7 +668,7 @@ hub 透過環境變數中的 proxy（`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`�
 | --- | --- | --- |
 | `~/.agentapi/config.yaml` | `agentapi hub join` | hub 的 webhook 和 `allow-update`，每個 `agentapi server` 都會讀取 |
 | `~/.agentapi/instances/` | `agentapi server` | 這台機器上執行中的 AgentAPI，供 `join` 和 `agentapi list` 使用 |
-| `~/.agentapi/hub/instances.json` | `agentapi hub serve` | hub 記得的實例、它們的群組和釘選、各自最近一次變動的時間、最近 7 天各自工作的區段，以及手動加入的實例的 token |
+| `~/.agentapi/hub/instances.json` | `agentapi hub serve` | hub 記得的實例、它們的群組和釘選、各自最近一次變動的時間、最近 7 天各自工作的區段、hub 最後一次讀到各自摘要的網址，以及手動加入的實例的 token |
 | `~/.agentapi/hub/instances.json.bak` | `agentapi hub serve` | hub 上次啟動時看到的實例檔案 |
 | `~/.agentapi/hub/instances.deliveries.json` | `agentapi hub serve` | hub 處理過、簽章仍有效的事件的 delivery ID，用來拒絕重送的事件 |
 
@@ -669,7 +681,7 @@ cd ~/.agentapi/hub && jq .instances instances.json > instances.json.new && mv in
 ```
 
 每個實例的工作時間是同一個 version 1 裡多出來的欄位（`work`）。2.3 和 2.4 的 hub 會略過它，下次寫入
-檔案時就把它丟掉。
+檔案時就把它丟掉。3.0.1 以前的 hub 對 `confirmed_url`（hub 最後一次讀到實例摘要的網址）也一樣。
 
 ## 限制
 

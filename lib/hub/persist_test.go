@@ -116,3 +116,49 @@ func TestDecodeState(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, stored)
 }
+
+// The file keeps where the hub last read an instance's summary; a hub
+// that starts again follows it there first, not at a URL an event moved
+// it to that never answered. A hub before 3.0.1 reads the file too: it
+// ignores the field.
+func TestStateKeepsTheConfirmedURL(t *testing.T) {
+	logger := slog.New(slog.DiscardHandler)
+	path := filepath.Join(t.TempDir(), "instances.json")
+	s, err := newStore(path, logger, quartz.NewMock(t))
+	require.NoError(t, err)
+	_, _ = s.update("dev:1", true, func(i *Instance) {
+		i.URL = "http://dev:2"
+		i.Source = SourceWebhook
+		i.confirmedURL = "http://dev:1"
+	})
+	_, _ = s.update("dev:9", true, func(i *Instance) {
+		i.URL = "http://dev:9"
+		i.Source = SourceWebhook
+	})
+	require.NoError(t, s.close())
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	var file struct {
+		Version   int `json:"version"`
+		Instances []struct {
+			ID           string `json:"id"`
+			URL          string `json:"url"`
+			ConfirmedURL string `json:"confirmed_url"`
+		} `json:"instances"`
+	}
+	require.NoError(t, json.Unmarshal(data, &file))
+	assert.Equal(t, 1, file.Version, "an older hub still reads it")
+	require.Len(t, file.Instances, 2)
+	assert.Equal(t, "http://dev:2", file.Instances[0].URL)
+	assert.Equal(t, "http://dev:1", file.Instances[0].ConfirmedURL)
+	assert.Empty(t, file.Instances[1].ConfirmedURL, "never confirmed")
+
+	again, err := newStore(path, logger, quartz.NewMock(t))
+	require.NoError(t, err)
+	defer func() { _ = again.close() }()
+	instance, _ := again.get("dev:1")
+	assert.Equal(t, "http://dev:1", instance.URL)
+	assert.Equal(t, ConnectionConnecting, instance.Connection)
+	instance, _ = again.get("dev:9")
+	assert.Equal(t, "http://dev:9", instance.URL, "one kept by an earlier hub stays where it was")
+}
