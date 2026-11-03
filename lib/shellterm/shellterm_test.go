@@ -128,7 +128,7 @@ func TestScrollbackStartsAtALine(t *testing.T) {
 	t.Parallel()
 	term := New(Config{Scrollback: 10})
 	term.appendLocked([]byte("first line\nsecond\n"))
-	assert.Equal(t, "second\n", string(term.history))
+	assert.Equal(t, "second\n", string(term.history.bytes()))
 }
 
 func TestTerminalWithABackgroundJob(t *testing.T) {
