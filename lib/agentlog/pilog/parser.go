@@ -102,114 +102,132 @@ func (p *Parser) ParseLine(line []byte) ([]transcript.RichMessage, error) {
 
 	switch msg.Role {
 	case "user":
-		text := Text(msg.Content)
-		if text == "" {
-			return nil, nil
-		}
-		return []transcript.RichMessage{{
-			MessageID: entry.ID,
-			Role:      "user",
-			Timestamp: ts,
-			Content:   []transcript.RichContentBlock{{Type: "text", Text: text}},
-		}}, nil
-
+		return userMessage(entry.ID, msg, ts), nil
 	case "assistant":
-		rich := transcript.RichMessage{
-			MessageID:  entry.ID,
-			Role:       "assistant",
-			Model:      msg.Model,
-			StopReason: piStopReasons[msg.StopReason],
-			Timestamp:  ts,
-		}
-		if msg.Usage != nil {
-			rich.Usage = &transcript.Usage{
-				InputTokens:              msg.Usage.Input,
-				OutputTokens:             msg.Usage.Output,
-				CacheReadInputTokens:     msg.Usage.CacheRead,
-				CacheCreationInputTokens: msg.Usage.CacheWrite,
-			}
-		}
-		var blocks []piContentBlock
-		_ = json.Unmarshal(msg.Content, &blocks)
-		for _, block := range blocks {
-			switch block.Type {
-			case "text":
-				if strings.TrimSpace(block.Text) != "" {
-					rich.Content = append(rich.Content, transcript.RichContentBlock{Type: "text", Text: block.Text})
-				}
-			case "thinking":
-				// Redacted thinking is encrypted; there is nothing to show.
-				if !block.Redacted && strings.TrimSpace(block.Thinking) != "" {
-					rich.Content = append(rich.Content, transcript.RichContentBlock{Type: "thinking", Thinking: block.Thinking})
-				}
-			case "toolCall":
-				rich.Content = append(rich.Content, transcript.RichContentBlock{
-					Type:      "tool_use",
-					ToolUseID: block.ID,
-					ToolName:  block.Name,
-					ToolInput: block.Arguments,
-				})
-			}
-		}
-		if msg.StopReason == "error" && msg.ErrorMessage != "" {
-			rich.Content = append(rich.Content, transcript.RichContentBlock{Type: "text", Text: "Error: " + msg.ErrorMessage})
-		}
-		if len(rich.Content) == 0 {
-			return nil, nil
-		}
-		return []transcript.RichMessage{rich}, nil
-
+		return assistantMessage(entry.ID, msg, ts), nil
 	case "toolResult":
-		isError := msg.IsError
-		status := "completed"
-		if isError {
-			status = "failed"
+		return toolResultMessage(entry.ID, msg, ts), nil
+	case "bashExecution":
+		return bashExecutionMessages(entry.ID, msg, ts), nil
+	}
+	return nil, nil
+}
+
+// userMessage is the user's message id, if it holds text.
+func userMessage(id string, msg *piMessage, ts time.Time) []transcript.RichMessage {
+	text := Text(msg.Content)
+	if text == "" {
+		return nil
+	}
+	return []transcript.RichMessage{{
+		MessageID: id,
+		Role:      "user",
+		Timestamp: ts,
+		Content:   []transcript.RichContentBlock{{Type: "text", Text: text}},
+	}}
+}
+
+// assistantMessage is the model's message id, if it holds anything to
+// show.
+func assistantMessage(id string, msg *piMessage, ts time.Time) []transcript.RichMessage {
+	rich := transcript.RichMessage{
+		MessageID:  id,
+		Role:       "assistant",
+		Model:      msg.Model,
+		StopReason: piStopReasons[msg.StopReason],
+		Timestamp:  ts,
+	}
+	if msg.Usage != nil {
+		rich.Usage = &transcript.Usage{
+			InputTokens:              msg.Usage.Input,
+			OutputTokens:             msg.Usage.Output,
+			CacheReadInputTokens:     msg.Usage.CacheRead,
+			CacheCreationInputTokens: msg.Usage.CacheWrite,
 		}
-		return []transcript.RichMessage{{
-			MessageID: entry.ID,
+	}
+	var blocks []piContentBlock
+	_ = json.Unmarshal(msg.Content, &blocks)
+	for _, block := range blocks {
+		switch block.Type {
+		case "text":
+			if strings.TrimSpace(block.Text) != "" {
+				rich.Content = append(rich.Content, transcript.RichContentBlock{Type: "text", Text: block.Text})
+			}
+		case "thinking":
+			// Redacted thinking is encrypted; there is nothing to show.
+			if !block.Redacted && strings.TrimSpace(block.Thinking) != "" {
+				rich.Content = append(rich.Content, transcript.RichContentBlock{Type: "thinking", Thinking: block.Thinking})
+			}
+		case "toolCall":
+			rich.Content = append(rich.Content, transcript.RichContentBlock{
+				Type:      "tool_use",
+				ToolUseID: block.ID,
+				ToolName:  block.Name,
+				ToolInput: block.Arguments,
+			})
+		}
+	}
+	if msg.StopReason == "error" && msg.ErrorMessage != "" {
+		rich.Content = append(rich.Content, transcript.RichContentBlock{Type: "text", Text: "Error: " + msg.ErrorMessage})
+	}
+	if len(rich.Content) == 0 {
+		return nil
+	}
+	return []transcript.RichMessage{rich}
+}
+
+// toolResultMessage is a tool's output, as a user message with a
+// tool_result block like Claude Code's.
+func toolResultMessage(id string, msg *piMessage, ts time.Time) []transcript.RichMessage {
+	isError := msg.IsError
+	return []transcript.RichMessage{{
+		MessageID: id,
+		Role:      "user",
+		Timestamp: ts,
+		Content: []transcript.RichContentBlock{{
+			Type:      "tool_result",
+			ToolUseID: msg.ToolCallID,
+			Text:      Text(msg.Content),
+			Status:    resultStatus(isError),
+			IsError:   &isError,
+		}},
+	}}
+}
+
+// bashExecutionMessages are a command the user ran with "!": shown as a
+// bash call and its output, like a tool call the agent made.
+func bashExecutionMessages(id string, msg *piMessage, ts time.Time) []transcript.RichMessage {
+	callID := "bash-" + id
+	input, _ := json.Marshal(map[string]string{"command": msg.Command})
+	isError := msg.ExitCode != nil && *msg.ExitCode != 0
+	output := strings.TrimRight(msg.Output, "\n")
+	if isError {
+		output = strings.TrimLeft(fmt.Sprintf("%s\nExit code %d", output, *msg.ExitCode), "\n")
+	}
+	return []transcript.RichMessage{
+		{
+			MessageID: id,
+			Role:      "assistant",
+			Timestamp: ts,
+			Content:   []transcript.RichContentBlock{{Type: "tool_use", ToolUseID: callID, ToolName: "bash", ToolInput: input}},
+		},
+		{
+			MessageID: "result-" + id,
 			Role:      "user",
 			Timestamp: ts,
 			Content: []transcript.RichContentBlock{{
-				Type:      "tool_result",
-				ToolUseID: msg.ToolCallID,
-				Text:      Text(msg.Content),
-				Status:    status,
-				IsError:   &isError,
+				Type: "tool_result", ToolUseID: callID, Text: output, Status: resultStatus(isError), IsError: &isError,
 			}},
-		}}, nil
-
-	case "bashExecution":
-		// A command the user ran with "!": show it as a bash call and its
-		// output, like a tool call the agent made.
-		callID := "bash-" + entry.ID
-		input, _ := json.Marshal(map[string]string{"command": msg.Command})
-		isError := msg.ExitCode != nil && *msg.ExitCode != 0
-		status := "completed"
-		if isError {
-			status = "failed"
-		}
-		output := strings.TrimRight(msg.Output, "\n")
-		if isError {
-			output = strings.TrimLeft(fmt.Sprintf("%s\nExit code %d", output, *msg.ExitCode), "\n")
-		}
-		return []transcript.RichMessage{
-			{
-				MessageID: entry.ID,
-				Role:      "assistant",
-				Timestamp: ts,
-				Content:   []transcript.RichContentBlock{{Type: "tool_use", ToolUseID: callID, ToolName: "bash", ToolInput: input}},
-			},
-			{
-				MessageID: "result-" + entry.ID,
-				Role:      "user",
-				Timestamp: ts,
-				Content: []transcript.RichContentBlock{{
-					Type: "tool_result", ToolUseID: callID, Text: output, Status: status, IsError: &isError,
-				}},
-			},
-		}, nil
+		},
 	}
-	return nil, nil
+}
+
+// resultStatus is a tool result's status.
+func resultStatus(isError bool) string {
+	if isError {
+		return "failed"
+	}
+	return "completed"
 }
 
 // FlushCompleted has nothing to do: Pi writes complete messages.
