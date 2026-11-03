@@ -241,6 +241,24 @@ keeps its logs). The totals count each scope once, with its latest figure (`upda
 the hub doesn't follow right now (stopped, unreachable, connecting) shows its last figure dimmed,
 as last known, and the totals leave it out.
 
+### Token usage
+
+![The tokens the agents used: the last 24 hours and 7 days, by kind, the agents that used the most, and each group](screenshots/hub-tokens.png)
+
+The spend's pass also counts the tokens of the same calls: `spend` has them for the last 24 hours
+(`day_tokens`) and 7 days (`week_tokens`), as `input`, `output`, `cache_write` (Anthropic's
+five-minute and one-hour caches together), `cache_read` and their `total`. A call counts once, where
+its cost does: a fork's copy of an earlier session's call counts in that session. Calls to a model
+without a known price count their tokens and no cost. What Claude Code counted but didn't log call
+by call (compacting the context) counts with the tokens its own count gives it.
+
+Below Spend, the overview's **Tokens** card has the 24 hours and 7 days of every agent that reports
+them, by kind, each group's when there are groups, and the five that used the most this week. They
+add up as the spend does: each scope once, connected agents only. AgentAPI 2.4.0 and older send
+their spend without tokens; the card says how many agents report them. Counts are short (`950`,
+`12k`, `3.4M`, `1.2B`); hover a total for the exact number. Rows have no room for another figure:
+hover a row's spend for its last 24 hours of tokens.
+
 ### Work time
 
 ![How long the agents worked: the last 24 hours and 7 days, each group, and the agents that worked the most](screenshots/hub-work.png)
@@ -253,8 +271,8 @@ drops ends the count at the last event it sent; a hub that stops ends it then. T
 again from its next summary.
 
 A row shows its agent's last 24 hours after the spend, with a timer (`2.3h`), unless it shows a
-usage limit; hover for the 7 days too. Below Spend, the overview's **Work time** card has the 24 hours and 7 days of all the agents,
-each group's when there are groups, and the five that worked the most this week. Figures are
+usage limit; hover for the 7 days too. Below Tokens, the overview's **Work time** card has the 24
+hours and 7 days of all the agents, each group's when there are groups, and the five that worked the most this week. Figures are
 rounded down: minutes under an hour (`45m`), tenths of an hour under ten (`2.3h`), then hours
 (`31h`). Unlike spend, every agent counts, stopped ones too: the time is the hub's own record,
 per instance.

@@ -558,8 +558,10 @@ usage limit stop, login, terminal prompt) and the latest screen.
 - For an agent whose session logs it reads, the server works out the summary's
   `spend` once a minute (`spend.go`): `sessions.Store.Costs` reads the logs
   incrementally, and the hours of its total that end within the last 24 hours
-  and 7 days are added up. `EventEmitter.SetSpend` sends the summary only when
-  the amounts change; `updated_at` says when they did. Its `scope` hashes the
+  and 7 days are added up, their cost and their tokens (each hour of a
+  `SessionCost` keeps both, so a call's tokens count once, where its cost
+  does). `EventEmitter.SetSpend` sends the summary only when the amounts or
+  tokens change; `updated_at` says when they did. Its `scope` hashes the
   machine's host name and ID with `sessions.Store.Scope` (the agent, the
   directory's real path, where the agent keeps its logs), so a hub counts two
   AgentAPIs that read the same logs once.

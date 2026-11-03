@@ -812,7 +812,7 @@ context 後綴（`[1m]`）和發布日期；找不到時取最長的已知前綴
 每個這種模型警告一次。`scripts/prices.mjs` 會比對內建價格和 Pi 的模型清單。
 
 - `GET /sessions` 為每個工作階段提供 `cost`：`usd`、`tokens`、`calls`、每個模型的花費
-  （`models`）和每小時的花費（`hourly`，UTC），以及全部加總的 `total_cost`。
+  （`models`）和每小時的花費（`hourly`，UTC，含當小時的 `tokens`），以及全部加總的 `total_cost`。
 - `GET /cost` 提供目前開啟的工作階段的花費和它的模型呼叫 `calls`（`time`、`model`、`tokens`、
   `usd`、`subagent_id`）；一個任務的花費，就是從它的訊息到下一個任務之間的呼叫。已經有前面幾筆呼叫的
   用戶端可以帶上 `from`（筆數）和當時拿到的 `digest`，只取得之後的呼叫（回應裡的 `from` 會標示起點）；
@@ -1195,8 +1195,9 @@ AgentAPI，用[人工回覆 API](#人工回覆-api)讓機器人代為回覆 agen
   `request`（類型、標題和 agent 提出的時間）、`queued_messages`、開啟中的終端機對話框、
   `login_required`、`limit_stop`、`usage`（context window 與帳號用量限制），以及 native 模式的
   Claude Code、Codex 和 Pi 才有的 `spend`：agent 在工作目錄裡所有工作階段最近 24 小時（`day_usd`）
-  和 7 天（`week_usd`）換算成 API 價格的金額，每分鐘從紀錄檔重新計算一次，並附上金額最後變動的時間
-  （`updated_at`）和 `scope`。同一台機器上，同一個 agent 在同一個目錄的 AgentAPI 回報的是同一批
+  和 7 天（`week_usd`）換算成 API 價格的金額，每分鐘從紀錄檔重新計算一次，並附上同一批呼叫的 token
+  （`day_tokens` 和 `week_tokens`：`input`、`output`、`cache_write`、`cache_read` 和合計 `total`）、
+  金額最後變動的時間（`updated_at`）和 `scope`。同一台機器上，同一個 agent 在同一個目錄的 AgentAPI 回報的是同一批
   工作階段，`scope` 也相同：加總多個 AgentAPI 的用戶端每個 scope 只算一次。`update` 則說明用戶端
   能不能[更新這個 AgentAPI](#透過-api-更新)，以及更新進行到哪裡。
 - `attention` 依優先順序標示需要使用者處理的原因：`login`、`request`（核准、提問或計畫）、

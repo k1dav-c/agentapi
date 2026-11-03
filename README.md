@@ -968,7 +968,8 @@ tokens but no cost (`priced: false`), and the server's log warns of the model on
 `scripts/prices.mjs` compares the built-in prices with Pi's model registry.
 
 - `GET /sessions` gives each session's `cost`: `usd`, `tokens`, `calls`, the cost per model
-  (`models`) and per hour (`hourly`, in UTC), and `total_cost`, the sum of all of them.
+  (`models`) and per hour (`hourly`, in UTC, with its `tokens`), and `total_cost`, the sum of all
+  of them.
 - `GET /cost` gives the open session's cost and its model `calls` (`time`, `model`, `tokens`, `usd`,
   `subagent_id`), from which a task's cost is the calls made from its message until the next. A
   client that has the first calls sends `from` (how many) and the `digest` it got with them, and
@@ -1427,8 +1428,9 @@ instance:
   `queued_messages`, the open terminal dialog, `login_required`, `limit_stop`, `usage` (context
   window and account limits) and, for native Claude Code, Codex and Pi, `spend`: the API-equivalent
   cost of the agent's sessions in the working directory over the last 24 hours (`day_usd`) and 7
-  days (`week_usd`), worked out from its logs once a minute, with when the amounts last changed
-  (`updated_at`) and a `scope`. AgentAPIs of one agent in one directory of a machine report the
+  days (`week_usd`), worked out from its logs once a minute, the tokens of the same calls
+  (`day_tokens` and `week_tokens`: `input`, `output`, `cache_write`, `cache_read` and their
+  `total`), when the amounts last changed (`updated_at`) and a `scope`. AgentAPIs of one agent in one directory of a machine report the
   same sessions, with the same `scope`: a client that adds up many counts each scope once. Its
   `update` says whether a client can [update the AgentAPI](#updating-through-the-api), and how far
   an update is.
