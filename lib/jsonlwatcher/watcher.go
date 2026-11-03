@@ -1,9 +1,10 @@
 package jsonlwatcher
 
 import (
-	"bufio"
 	"context"
-	"io"
+	"errors"
+	"hash/fnv"
+	"io/fs"
 	"log/slog"
 	"os"
 	"time"
@@ -116,22 +117,25 @@ func (w *Watcher) waitForSessionFile(ctx context.Context) (string, error) {
 	}
 }
 
-// tailFile opens the JSONL file and reads new lines as they're appended.
+// tailFile reads the JSONL file's lines as they're appended, through an
+// agentlog.Follower: only complete lines, a line too long skipped, and the
+// file from its start again once it shrank or was replaced. It returns
+// the path to follow next when the resolver moves to another file, or ""
+// once ctx is canceled.
 func (w *Watcher) tailFile(ctx context.Context, path string) string {
 	// Wait for the file to exist
-	var f *os.File
 	ticker := w.clock.NewTicker(sessionPollInterval, "Watcher", "open")
 	defer ticker.Stop()
-
+	var failed string
 	for {
-		var err error
-		f, err = os.Open(path)
+		_, err := os.Stat(path)
 		if err == nil {
 			break
 		}
-		if !os.IsNotExist(err) {
+		if !errors.Is(err, fs.ErrNotExist) && err.Error() != failed {
+			// It may go away: keep trying.
 			w.logger.Error("Failed to open JSONL file", "path", path, "error", err)
-			return ""
+			failed = err.Error()
 		}
 		select {
 		case <-ctx.Done():
@@ -148,43 +152,41 @@ func (w *Watcher) tailFile(ctx context.Context, path string) string {
 			}
 		}
 	}
-	defer func() { _ = f.Close() }()
 	ticker.Stop()
 
 	w.logger.Info("Opened JSONL file for tailing", "path", path)
 
-	reader := bufio.NewReader(f)
 	var drift *agentlog.Drift
 	if w.format != nil {
 		drift = agentlog.NewDrift(w.format)
 	}
+	tail := &tailReader{w: w, drift: drift}
+	readers := 0
+	follower := agentlog.NewFollower(path, func(string) *tailReader {
+		if readers++; readers > 1 {
+			// Read again from its start: what the parser holds is of the
+			// file as it was.
+			w.logger.Info("JSONL file was truncated or replaced; reading it again", "path", path)
+			w.emit(w.parser.Flush())
+			tail.again()
+		}
+		return tail
+	})
 	pollTicker := w.clock.NewTicker(pollInterval, "Watcher", "poll")
 	defer pollTicker.Stop()
 	resolveTicker := w.clock.NewTicker(sessionPollInterval, "Watcher", "resolve")
 	defer resolveTicker.Stop()
 
+	failed = ""
 	for {
-		// Read all available complete lines
-		for {
-			line, err := reader.ReadBytes('\n')
-			if err != nil {
-				if err == io.EOF {
-					// Partial line or no more data; wait for more
-					if len(line) > 0 {
-						if _, seekErr := f.Seek(-int64(len(line)), io.SeekCurrent); seekErr != nil {
-							w.logger.Error("Failed to seek back for partial line", "error", seekErr)
-						}
-						reader.Reset(f)
-					}
-					break
-				}
-				w.logger.Error("Error reading JSONL file", "error", err)
-				return ""
+		if err := follower.Read(); err != nil {
+			// Logged once until a read succeeds; the next poll tries again.
+			if err.Error() != failed {
+				w.logger.Warn("Failed to read JSONL file; retrying", "path", path, "error", err)
+				failed = err.Error()
 			}
-			if drift != nil {
-				drift.Line(line)
-			}
-			w.processLine(line)
+		} else {
+			failed = ""
 		}
 		if drift != nil {
 			drift.Report(w.logger, path)
@@ -216,11 +218,58 @@ func (w *Watcher) tailFile(ctx context.Context, path string) string {
 	}
 }
 
+// tailReader hands the lines of the file a watcher follows to it. Read
+// again from its start, the file's lines that were read before go to the
+// parser alone: its messages are merged downstream by ID, but OnLine's
+// timeline events would come twice.
+type tailReader struct {
+	w     *Watcher
+	drift *agentlog.Drift
+	// read holds the hashes of the lines read, before those of the reading
+	// before the file was read again.
+	read   []uint64
+	before map[uint64]struct{}
+}
+
+// again starts another reading of the file.
+func (t *tailReader) again() {
+	t.before = make(map[uint64]struct{}, len(t.read))
+	for _, sum := range t.read {
+		t.before[sum] = struct{}{}
+	}
+	t.read = t.read[:0]
+}
+
+// Line reads one complete line.
+func (t *tailReader) Line(line []byte) bool {
+	h := fnv.New64a()
+	_, _ = h.Write(line)
+	sum := h.Sum64()
+	t.read = append(t.read, sum)
+	if _, ok := t.before[sum]; ok {
+		t.w.parseLine(line)
+		return true
+	}
+	if t.drift != nil {
+		t.drift.Line(line)
+	}
+	t.w.processLine(line)
+	return true
+}
+
+// Size is about how many bytes of memory the reader holds.
+func (t *tailReader) Size() int { return 8*len(t.read) + 32*len(t.before) }
+
 // processLine delegates parsing to the LineParser and handles completed messages.
 func (w *Watcher) processLine(line []byte) {
 	if w.onLine != nil {
 		w.onLine(line)
 	}
+	w.parseLine(line)
+}
+
+// parseLine hands a line to the parser, and emits the messages it completed.
+func (w *Watcher) parseLine(line []byte) {
 	completed, err := w.parser.ParseLine(line)
 	if err != nil {
 		w.logger.Debug("Failed to parse JSONL line", "error", err, "line", string(line[:min(len(line), 100)]))

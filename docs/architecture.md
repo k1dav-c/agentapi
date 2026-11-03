@@ -287,7 +287,10 @@ sequenceDiagram
   none (a shell, a REPL), also once its screen is stable.
 - `jsonlwatcher` finds the Claude Code, Codex or Pi session log that belongs
   to the agent's process (by its process ID and working directory) and tails
-  it. The parsers of `lib/agentlog` turn its lines into rich messages
+  it through `agentlog.Follower`, as the Store reads logs: complete lines only,
+  a line too long skipped, the file from its start again once it shrank or
+  was replaced (its lines read before reach the timeline once), and a failed
+  read tried again. The parsers of `lib/agentlog` turn its lines into rich messages
   (thinking, tool calls with their results, usage) and timeline events, which
   reach the emitter next to the screen-derived messages.
 - Terminal dialogs (Claude Code's plan approval and permission prompts, Codex

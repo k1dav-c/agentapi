@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentlog"
 	"github.com/coder/agentapi/lib/agentlog/claudelog"
 	"github.com/coder/agentapi/lib/transcript"
 )
@@ -330,3 +332,127 @@ func TestWatcherReportsFormatDrift(t *testing.T) {
 type writerFunc func(p []byte) (int, error)
 
 func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
+
+// followed runs a watcher of path and returns what it emitted so far: the
+// messages, upserted by (MessageID, Role) as the EventEmitter does, and the
+// lines handed to OnLine.
+func followed(t *testing.T, path string) (*quartz.Mock, func() ([]transcript.RichMessage, []string)) {
+	t.Helper()
+	var mu sync.Mutex
+	var emitted []transcript.RichMessage
+	var lines []string
+	clock := quartz.NewMock(t)
+	w := New(Config{
+		Resolver: &staticResolver{path: path},
+		Parser:   claudelog.NewParser(),
+		Clock:    clock,
+		OnMessage: func(msg transcript.RichMessage) {
+			mu.Lock()
+			defer mu.Unlock()
+			for i := range emitted {
+				if emitted[i].MessageID == msg.MessageID && emitted[i].Role == msg.Role {
+					emitted[i] = msg
+					return
+				}
+			}
+			emitted = append(emitted, msg)
+		},
+		OnLine: func(line []byte) {
+			mu.Lock()
+			defer mu.Unlock()
+			lines = append(lines, string(line))
+		},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		w.Start(ctx)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+	return clock, func() ([]transcript.RichMessage, []string) {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Clone(emitted), slices.Clone(lines)
+	}
+}
+
+func userLine(uuid, text string) string {
+	return `{"type":"user","uuid":"` + uuid + `","timestamp":"2026-07-24T09:35:19.000Z","message":{"role":"user","content":"` + text + `"}}` + "\n"
+}
+
+// A file rewritten shorter, or replaced by another one renamed over it, is
+// read again from its start; the lines read before reach OnLine once.
+func TestWatcherRereadsTruncatedAndReplacedFiles(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	require.NoError(t, os.WriteFile(path, []byte(userLine("u1", "one")+userLine("u2", "two")), 0o600))
+	clock, got := followed(t, path)
+	pump(t, clock, func() bool { _, lines := got(); return len(lines) == 2 })
+
+	// Truncated, and written again: a shorter file.
+	require.NoError(t, os.WriteFile(path, []byte(userLine("u3", "three")), 0o600))
+	pump(t, clock, func() bool { _, lines := got(); return len(lines) == 3 })
+
+	// Replaced by a file renamed over it, which has what the old one had,
+	// and more.
+	next := filepath.Join(dir, "next.jsonl")
+	require.NoError(t, os.WriteFile(next, []byte(userLine("u3", "three")+userLine("u4", "four")+userLine("u5", "five")), 0o600))
+	require.NoError(t, os.Rename(next, path))
+	pump(t, clock, func() bool { _, lines := got(); return len(lines) == 5 })
+
+	msgs, lines := got()
+	assert.Len(t, lines, 5, "no line twice")
+	var texts []string
+	for _, m := range msgs {
+		texts = append(texts, m.Content[0].Text)
+	}
+	assert.Equal(t, []string{"one", "two", "three", "four", "five"}, texts)
+}
+
+// A line longer than agentlog.MaxLineLength is skipped, and the lines after
+// it read.
+func TestWatcherSkipsALineTooLong(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	long := `{"type":"user","uuid":"big","message":{"role":"user","content":"` + strings.Repeat("x", agentlog.MaxLineLength) + `"}}` + "\n"
+	require.NoError(t, os.WriteFile(path, []byte(userLine("u1", "one")+long+userLine("u2", "two")), 0o600))
+	clock, got := followed(t, path)
+	pump(t, clock, func() bool { _, lines := got(); return len(lines) == 2 })
+	_, lines := got()
+	assert.Contains(t, lines[1], `"u2"`)
+}
+
+// A file that can't be read is tried again, and read on from where it
+// was once it can.
+func TestWatcherRetriesAfterAnError(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a file without permissions")
+	}
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	require.NoError(t, os.WriteFile(path, []byte(userLine("u1", "one")), 0o600))
+	clock, got := followed(t, path)
+	pump(t, clock, func() bool { _, lines := got(); return len(lines) == 1 })
+
+	// Written to, and unreadable.
+	require.NoError(t, os.Chmod(path, 0o200))
+	if f, err := os.Open(path); err == nil {
+		_ = f.Close()
+		t.Skip("the file system ignores permissions")
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	require.NoError(t, err)
+	_, err = f.WriteString(userLine("u2", "two"))
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+	for range 4 {
+		_, w := clock.AdvanceNext()
+		w.MustWait(context.Background())
+	}
+	_, lines := got()
+	assert.Len(t, lines, 1)
+	require.NoError(t, os.Chmod(path, 0o600))
+	pump(t, clock, func() bool { _, lines := got(); return len(lines) == 2 })
+}

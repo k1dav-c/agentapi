@@ -252,8 +252,10 @@ sequenceDiagram
   可以接受第一個提示：輸入框出現時；至於可能不會畫出輸入框的 `custom` agent（例如 shell 或
   REPL），畫面穩定後也可以。
 - `jsonlwatcher` 會找到屬於 agent 行程的 Claude Code、Codex 或 Pi 工作階段紀錄檔（依行程 ID
-  和工作目錄）並持續追蹤。`lib/agentlog` 的解析器把每一行轉成結構化訊息（思考、工具呼叫與
-  結果、用量）和時間軸事件，和從畫面解析出的訊息一起送進 emitter。
+  和工作目錄），像 Store 讀紀錄檔一樣以 `agentlog.Follower` 持續追蹤：只讀完整的行，略過過長的
+  行，檔案縮小或被替換時從頭重讀（先前讀過的行不會再進時間軸），讀取失敗會再試。`lib/agentlog`
+  的解析器把每一行轉成結構化訊息（思考、工具呼叫與結果、用量）和時間軸事件，和從畫面解析出的
+  訊息一起送進 emitter。
 - 終端機對話框（Claude Code 的計畫核准與權限提示、Codex 的核准、Pi 的信任提示）從畫面辨識，
   回報為 `terminal_prompt`。`handoff.go` 會把回答轉成對話框需要的按鍵，
   `dialog_reply.go` 則會打開對話框的文字輸入欄，讓聊天訊息可以作為回答。
