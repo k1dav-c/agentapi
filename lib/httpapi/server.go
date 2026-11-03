@@ -225,8 +225,6 @@ func parseListenConfig(config ServerConfig) (hosts, origins []string, bind strin
 
 // NewServer creates a new server instance
 func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
-	router := chi.NewMux()
-
 	logger := logctx.From(ctx)
 
 	if config.Clock == nil {
@@ -241,95 +239,32 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	logger.Info(fmt.Sprintf("Allowed hosts: %s", strings.Join(allowedHosts, ", ")))
 	logger.Info(fmt.Sprintf("Allowed origins: %s", strings.Join(allowedOrigins, ", ")))
 
-	// Enforce allowed hosts in a custom middleware that ignores the port during matching.
-	badHostHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "Invalid host header. Allowed hosts: "+strings.Join(allowedHosts, ", "), http.StatusBadRequest)
-	})
 	// The address {ip} in the public URL stands for now, which DHCP may
 	// change: the list can't name it.
 	var dispatcher *webhook.Dispatcher
 	publicIP := func(hostname string) bool { return dispatcher != nil && dispatcher.PublicIP() == hostname }
-	router.Use(hostAuthorizationMiddleware(allowedHosts, publicIP, badHostHandler))
-
-	router.Use(requestLogMiddleware(logger))
-	router.Use(Compress())
-
-	corsMiddleware := cors.New(cors.Options{
-		AllowedOrigins:   allowedOrigins,
-		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
-		ExposedHeaders:   []string{"Link"},
-		AllowCredentials: true,
-		MaxAge:           300, // Maximum value not ignored by any of major browsers
-	})
-	router.Use(corsMiddleware.Handler)
-
-	// After CORS, so that a refused request's 403 has the CORS headers.
-	router.Use(CrossOriginProtection(allowedOrigins, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		logger.Warn("Refused a request a page of another origin sent", "method", r.Method, "path", r.URL.Path, "origin", r.Header.Get("Origin"))
-		http.Error(w, "A page of another origin sent this request. To let it, add its origin to --allowed-origins.", http.StatusForbidden)
-	})))
-
-	// Token auth runs after CORS: preflight requests carry no credentials
-	// and are answered by the CORS middleware, and a 401 still gets the CORS
-	// headers, so a chat UI on another origin can read it and ask for the
-	// token.
-	var auth *tokenAuth
-	if config.APIToken != "" {
-		logger.Info("API token authentication enabled")
-		auth = newTokenAuth(config.APIToken)
-		router.Use(auth.middleware)
-	}
+	router, auth := newRouter(config, logger, allowedHosts, allowedOrigins, publicIP)
 
 	humaConfig := huma.DefaultConfig("AgentAPI", version.Version)
 	humaConfig.Info.Description = "HTTP API for Claude Code, Goose, and Aider.\n\nhttps://github.com/coder/agentapi"
 	api := humachi.New(router, humaConfig)
-	formatMessage := func(message string, userInput string) string {
-		return mf.FormatAgentMessage(config.AgentType, message, userInput)
-	}
-
-	isAgentReadyForInitialPrompt := func(message string) bool {
-		return mf.IsAgentReadyForInitialPrompt(config.AgentType, message)
-	}
-
-	stabilityScreen := func(screen string) string {
-		return mf.StabilityRegion(config.AgentType, screen)
-	}
-
-	formatToolCall := func(message string) (string, []string) {
-		return mf.FormatToolCall(config.AgentType, message)
-	}
 
 	dispatcher, err = webhook.New(config.Webhook, logger, config.AgentType, config.Transport, config.Clock)
 	if err != nil {
 		return nil, fmt.Errorf("configure webhook: %w", err)
 	}
-	var serverBytes [16]byte
-	if _, err := rand.Read(serverBytes[:]); err != nil {
-		return nil, fmt.Errorf("generate server ID: %w", err)
+	serverID, err := newServerID()
+	if err != nil {
+		return nil, err
 	}
 	// The status and the webhook name this run the same.
-	serverID := hex.EncodeToString(serverBytes[:])
 	dispatcher.SetServerID(serverID)
-	emitterOptions := []convstate.EventEmitterOption{
-		convstate.WithAgentType(config.AgentType),
-		convstate.WithTransport(config.Transport),
-		convstate.WithServerID(serverID),
-		convstate.WithTerminalColumns(config.PTY.TerminalColumns),
-		convstate.WithClock(config.Clock),
-		convstate.WithStatusChangeHandler(dispatcher.StatusChanged),
-		convstate.WithInstance(dispatcher.Instance),
-	}
 	stateDB := config.StateDB
-	if stateDB != nil {
-		emitterOptions = append(emitterOptions, convstate.WithPersister(stateDB))
-	}
 	var terminal *shellterm.Terminal
 	if config.Native.Terminal && config.Transport == TransportNative {
 		terminal = shellterm.New(shellterm.Config{Dir: config.CWD, Env: terminalEnv(), Logger: logger.With("component", "terminal")})
-		emitterOptions = append(emitterOptions, convstate.WithTerminal())
 	}
-	emitter := convstate.NewEventEmitter(emitterOptions...)
+	emitter := newEventEmitter(config, serverID, dispatcher, terminal != nil)
 	restored, err := restoreState(config, stateDB, emitter, logger)
 	if err != nil {
 		return nil, err
@@ -351,49 +286,14 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 
 	var conversation conv.Conversation
 	var nativeConversation *native.Conversation
-	var observer *nativeObserver
 	if config.Transport == TransportNative {
 		if config.Native.Factory == nil {
 			return nil, fmt.Errorf("native transport requires an adapter factory")
 		}
-		observer = &nativeObserver{emitter: emitter}
-		if stateDB != nil {
-			observer.persister = stateDB
-		}
-		nativeConversation = native.NewConversation(native.Config{
-			Factory:         config.Native.Factory,
-			ResumeRef:       restored.resumeRef,
-			Settings:        restored.settings,
-			LimitStop:       restored.limitStop,
-			AutoContinue:    config.Native.AutoContinue,
-			InitialMessages: restored.messages,
-			InitialPrompt:   config.InitialPrompt,
-			Emitter:         emitter,
-			Observer:        observer,
-			Logger:          logger,
-			Clock:           config.Clock,
-			RestartDelays:   config.Native.RestartDelays,
-			PrepareRichMessage: func(msg *transcript.RichMessage) {
-				uploads.storeRichImages(msg, logger)
-			},
-		})
+		nativeConversation = newNativeConversation(config, restored, emitter, uploads, logger)
 		conversation = nativeConversation
 	} else {
-		conversation = st.NewPTY(ctx, st.PTYConversationConfig{
-			AgentType:             config.AgentType,
-			AgentIO:               config.PTY.AgentIO,
-			Clock:                 config.Clock,
-			SnapshotInterval:      snapshotInterval,
-			ScreenStabilityLength: 2 * time.Second,
-			FormatMessage:         formatMessage,
-			ReadyForInitialPrompt: isAgentReadyForInitialPrompt,
-			ReadyWhenStable:       mf.ReadyWhenStable(config.AgentType),
-			StabilityScreen:       stabilityScreen,
-			FormatToolCall:        formatToolCall,
-			InitialPrompt:         ptyInitialPrompt(initialPrompt, config, stateDB, restored),
-			Logger:                logger,
-			InitialMessages:       restored.messages,
-		}, emitter)
+		conversation = newPTYConversation(ctx, config, ptyInitialPrompt(initialPrompt, config, stateDB, restored), restored, emitter, logger)
 	}
 
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
@@ -435,16 +335,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	dispatcher.OnURLChange(s.instanceChanged)
 	if stateDB != nil {
 		s.restoreQueue(restored.snapshot)
-		if stored := restored.snapshot.Meta[statedb.MetaWebhook]; stored != "" {
-			switch ok, err := dispatcher.Restore(stored); {
-			case err != nil:
-				logger.Warn("Ignoring the stored webhook settings", "error", err)
-			case ok:
-				logger.Info("Restored the webhook settings changed through the API")
-			default:
-				logger.Info("The webhook flags changed since its settings were changed through the API; using the flags")
-			}
-		}
+		restoreWebhook(dispatcher, restored.snapshot, logger)
 	}
 	if mcpconfig.SupportedAgent(config.AgentType) {
 		store, err := mcpconfig.NewStore(config.AgentType, config.CWD)
@@ -494,6 +385,156 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	s.startJSONLWatcher(config.PTY.AgentPID)
 
 	return s, nil
+}
+
+// newServerID returns a random ID for this run of the server.
+func newServerID() (string, error) {
+	var serverBytes [16]byte
+	if _, err := rand.Read(serverBytes[:]); err != nil {
+		return "", fmt.Errorf("generate server ID: %w", err)
+	}
+	return hex.EncodeToString(serverBytes[:]), nil
+}
+
+// newEventEmitter returns the emitter of the conversation's events, which
+// tells dispatcher of status changes, keeps the conversation in the state
+// database if there is one and, with withTerminal, says a terminal is
+// offered.
+func newEventEmitter(config ServerConfig, serverID string, dispatcher *webhook.Dispatcher, withTerminal bool) *EventEmitter {
+	options := []convstate.EventEmitterOption{
+		convstate.WithAgentType(config.AgentType),
+		convstate.WithTransport(config.Transport),
+		convstate.WithServerID(serverID),
+		convstate.WithTerminalColumns(config.PTY.TerminalColumns),
+		convstate.WithClock(config.Clock),
+		convstate.WithStatusChangeHandler(dispatcher.StatusChanged),
+		convstate.WithInstance(dispatcher.Instance),
+	}
+	if config.StateDB != nil {
+		options = append(options, convstate.WithPersister(config.StateDB))
+	}
+	if withTerminal {
+		options = append(options, convstate.WithTerminal())
+	}
+	return convstate.NewEventEmitter(options...)
+}
+
+// newRouter returns the router with the middleware every request goes
+// through: the host check (publicIP says whether a hostname is the
+// webhook's current public address), request logs, compression, CORS, the
+// cross-origin check and, with an API token, its authentication.
+func newRouter(config ServerConfig, logger *slog.Logger, allowedHosts, allowedOrigins []string, publicIP func(string) bool) (chi.Router, *tokenAuth) {
+	router := chi.NewMux()
+
+	// Enforce allowed hosts in a custom middleware that ignores the port during matching.
+	badHostHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "Invalid host header. Allowed hosts: "+strings.Join(allowedHosts, ", "), http.StatusBadRequest)
+	})
+	router.Use(hostAuthorizationMiddleware(allowedHosts, publicIP, badHostHandler))
+
+	router.Use(requestLogMiddleware(logger))
+	router.Use(Compress())
+
+	corsMiddleware := cors.New(cors.Options{
+		AllowedOrigins:   allowedOrigins,
+		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
+		ExposedHeaders:   []string{"Link"},
+		AllowCredentials: true,
+		MaxAge:           300, // Maximum value not ignored by any of major browsers
+	})
+	router.Use(corsMiddleware.Handler)
+
+	// After CORS, so that a refused request's 403 has the CORS headers.
+	router.Use(CrossOriginProtection(allowedOrigins, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger.Warn("Refused a request a page of another origin sent", "method", r.Method, "path", r.URL.Path, "origin", r.Header.Get("Origin"))
+		http.Error(w, "A page of another origin sent this request. To let it, add its origin to --allowed-origins.", http.StatusForbidden)
+	})))
+
+	// Token auth runs after CORS: preflight requests carry no credentials
+	// and are answered by the CORS middleware, and a 401 still gets the CORS
+	// headers, so a chat UI on another origin can read it and ask for the
+	// token.
+	var auth *tokenAuth
+	if config.APIToken != "" {
+		logger.Info("API token authentication enabled")
+		auth = newTokenAuth(config.APIToken)
+		router.Use(auth.middleware)
+	}
+	return router, auth
+}
+
+// newNativeConversation returns the conversation of a native agent, which
+// continues the restored one.
+func newNativeConversation(config ServerConfig, restored restoredState, emitter *EventEmitter, uploads *uploadStore, logger *slog.Logger) *native.Conversation {
+	observer := &nativeObserver{emitter: emitter}
+	if config.StateDB != nil {
+		observer.persister = config.StateDB
+	}
+	return native.NewConversation(native.Config{
+		Factory:         config.Native.Factory,
+		ResumeRef:       restored.resumeRef,
+		Settings:        restored.settings,
+		LimitStop:       restored.limitStop,
+		AutoContinue:    config.Native.AutoContinue,
+		InitialMessages: restored.messages,
+		InitialPrompt:   config.InitialPrompt,
+		Emitter:         emitter,
+		Observer:        observer,
+		Logger:          logger,
+		Clock:           config.Clock,
+		RestartDelays:   config.Native.RestartDelays,
+		PrepareRichMessage: func(msg *transcript.RichMessage) {
+			uploads.storeRichImages(msg, logger)
+		},
+	})
+}
+
+// newPTYConversation returns the conversation of an agent in a terminal,
+// which starts anew below the restored messages and sends initialPrompt
+// once the agent is ready for it.
+func newPTYConversation(ctx context.Context, config ServerConfig, initialPrompt []conv.MessagePart, restored restoredState, emitter *EventEmitter, logger *slog.Logger) conv.Conversation {
+	agentType := config.AgentType
+	return st.NewPTY(ctx, st.PTYConversationConfig{
+		AgentType:             agentType,
+		AgentIO:               config.PTY.AgentIO,
+		Clock:                 config.Clock,
+		SnapshotInterval:      snapshotInterval,
+		ScreenStabilityLength: 2 * time.Second,
+		FormatMessage: func(message string, userInput string) string {
+			return mf.FormatAgentMessage(agentType, message, userInput)
+		},
+		ReadyForInitialPrompt: func(message string) bool {
+			return mf.IsAgentReadyForInitialPrompt(agentType, message)
+		},
+		ReadyWhenStable: mf.ReadyWhenStable(agentType),
+		StabilityScreen: func(screen string) string {
+			return mf.StabilityRegion(agentType, screen)
+		},
+		FormatToolCall: func(message string) (string, []string) {
+			return mf.FormatToolCall(agentType, message)
+		},
+		InitialPrompt:   initialPrompt,
+		Logger:          logger,
+		InitialMessages: restored.messages,
+	}, emitter)
+}
+
+// restoreWebhook restores the webhook settings stored in snap, which were
+// changed through the API, unless its flags changed since.
+func restoreWebhook(dispatcher *webhook.Dispatcher, snap statedb.Snapshot, logger *slog.Logger) {
+	stored := snap.Meta[statedb.MetaWebhook]
+	if stored == "" {
+		return
+	}
+	switch ok, err := dispatcher.Restore(stored); {
+	case err != nil:
+		logger.Warn("Ignoring the stored webhook settings", "error", err)
+	case ok:
+		logger.Info("Restored the webhook settings changed through the API")
+	default:
+		logger.Info("The webhook flags changed since its settings were changed through the API; using the flags")
+	}
 }
 
 // Handler returns the underlying chi.Router for testing purposes.
