@@ -45,13 +45,6 @@ func ParseLevel(name string) (slog.Level, error) {
 	return 0, fmt.Errorf("unknown log level %q (one of: %s)", name, LevelNames)
 }
 
-// plucked from log/slog
-// remove once we update to go 1.24
-var DiscardHandler slog.Handler = discardHandler{}
-
-type discardHandler struct{}
-
-func (dh discardHandler) Enabled(context.Context, slog.Level) bool  { return false }
-func (dh discardHandler) Handle(context.Context, slog.Record) error { return nil }
-func (dh discardHandler) WithAttrs(attrs []slog.Attr) slog.Handler  { return dh }
-func (dh discardHandler) WithGroup(name string) slog.Handler        { return dh }
+// DiscardHandler drops every record. It predates slog.DiscardHandler
+// (Go 1.24), which it now is.
+var DiscardHandler slog.Handler = slog.DiscardHandler
