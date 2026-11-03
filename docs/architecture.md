@@ -904,10 +904,12 @@ the same build.
   and on Windows builds every test and runs those of the packages with
   Windows code. The Release workflow runs these tests (`go-test.yml`, called
   as a reusable workflow) on the commit it releases and releases only once
-  they pass, for a push to `main`, a manual run and a published release
-  alike; pull requests run them on their own. It checks that each binary is
-  built for its platform, and a push that a later push's release already
-  holds, or that is no longer on `main`, releases nothing.
+  the Linux jobs pass, for a push to `main`, a manual run and a published
+  release alike; the macOS and Windows jobs run in a second call that the
+  release doesn't wait for. Pull requests run every job on their own. The
+  Release workflow checks that each binary is built for its platform, and a
+  push that a later push's release already holds, or that is no longer on
+  `main`, releases nothing.
 
 ## Design principles
 

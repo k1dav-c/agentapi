@@ -43,7 +43,7 @@ Use `CGO_ENABLED=0` for tests. The project uses `testify` (assert/require) and `
 deterministic time mocking. Tests are colocated with source files. E2E tests in `e2e/` use
 `e2e/fakeclaude`, a scripted Claude Code. CI also runs `CGO_ENABLED=1 go test -race ./lib/...
 ./cmd/...` and every test on macOS. On Windows it builds every test and runs those of the packages
-with Windows code.
+with Windows code. Releases wait only for the Linux jobs.
 
 ## Architecture
 
@@ -109,7 +109,7 @@ value, update every switch and map literal over that type to pass lint.
 
 ## Conventions
 
-- Versioning: `internal/version.Version` stays `0.0.0-dev` in source; builds stamp the real version via `-ldflags -X` (`make build` uses the latest `vX.Y.Z` tag). Releases are cut by CI on push to `main` from Conventional Commit messages (`next-version.sh`), so use `feat:`/`fix:`/`feat!:` prefixes. The Release workflow runs the tests (`go-test.yml`) on the commit first and releases only if they pass, so a `main` that fails them doesn't release
+- Versioning: `internal/version.Version` stays `0.0.0-dev` in source; builds stamp the real version via `-ldflags -X` (`make build` uses the latest `vX.Y.Z` tag). Releases are cut by CI on push to `main` from Conventional Commit messages (`next-version.sh`), so use `feat:`/`fix:`/`feat!:` prefixes. The Release workflow runs the tests (`go-test.yml`) on the commit first and releases only if the Linux jobs pass, so a `main` that fails them doesn't release
 - OpenAPI schema is auto-generated: run `make gen` and commit `openapi.json`. Don't redirect `server --print-openapi` into the file yourself: it escapes `<`/`>` as `\u003c`/`\u003e`, `make gen` doesn't, and the Release workflow fails on the difference. Then run `bun run gen:api` in `chat/` and commit `chat/src/lib/api-schema.ts`, the chat's API types (a chat test fails until they match)
 - The chat UI build output goes to `lib/httpapi/chat/` with a base-path placeholder that gets replaced at runtime
 - AgentAPI-specific environment variables use the `AGENTAPI_` prefix (e.g., `AGENTAPI_ALLOWED_HOSTS`)

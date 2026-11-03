@@ -677,9 +677,9 @@ AgentAPI 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
   （OpenAPI schema 必須和程式碼一致）；聊天介面有 eslint、`bun test` 和 `tsc`。CI 也以 race
   detector 執行 `lib/` 和 `cmd/` 的測試，在 macOS 上執行所有測試，在 Windows 上建置所有測試，
   並執行含 Windows 程式碼的套件的測試。Release workflow 會對要發行的 commit 執行這些測試
-  （以可重複使用的 workflow 呼叫 `go-test.yml`），通過後才發行；推送到 `main`、手動執行和手動發布
-  的發行版都一樣，pull request 則自己執行測試。它也會檢查每個執行檔都是為對應平台建置的。之後的推送
-  發行的版本已包含這個 commit，或這個 commit 已不在 `main` 上時，這次推送不會發行。
+  （以可重複使用的 workflow 呼叫 `go-test.yml`），Linux 的 job 通過後才發行；推送到 `main`、手動執行和
+  手動發布的發行版都一樣。macOS 和 Windows 的 job 在另一次呼叫中執行，發行不等它們。pull request 則
+  自己執行所有 job。Release workflow 也會檢查每個執行檔都是為對應平台建置的。之後的推送發行的版本已包含這個 commit，或這個 commit 已不在 `main` 上時，這次推送不會發行。
 
 ## 設計原則
 
