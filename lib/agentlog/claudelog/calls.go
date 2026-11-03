@@ -110,10 +110,14 @@ func (c *Calls) Line(line []byte) {
 		}
 		return
 	}
+	call := agentlog.Call{Time: at, Model: model, Tokens: tokens, Cost: -1}
 	if key != "" {
+		// Without an ID nothing tells the call apart from another: it
+		// counts, keyless, in the log it is in.
 		c.index[key] = len(c.calls)
+		call.Key = "claude:" + key
 	}
-	c.calls = append(c.calls, agentlog.Call{Time: at, Model: model, Tokens: tokens, Key: "claude:" + key, Cost: -1})
+	c.calls = append(c.calls, call)
 }
 
 // Changed returns the calls read or changed since it last returned. The

@@ -79,3 +79,18 @@ func TestInteger(t *testing.T) {
 		assert.Equal(t, want, integer([]byte(value)), value)
 	}
 }
+
+// A call with neither a message ID nor a request ID has no key: every one
+// counts, rather than all of them as one.
+func TestCallsWithoutIDsHaveNoKey(t *testing.T) {
+	t.Parallel()
+	c := NewCalls(nil)
+	for range 3 {
+		c.Line([]byte(`{"type":"assistant","timestamp":"2026-10-20T10:00:00Z","message":{"model":"claude-opus-5-5","usage":{"input_tokens":3,"output_tokens":5}}}`))
+	}
+	_, calls := c.Changed()
+	require.Len(t, calls, 3)
+	for _, call := range calls {
+		assert.Empty(t, call.Key)
+	}
+}

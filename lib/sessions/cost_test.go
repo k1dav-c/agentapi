@@ -589,3 +589,22 @@ func TestCostsWhileTheAgentWrites(t *testing.T) {
 	d := matchesAFreshReading(t, store, "claude", "/w", "after the writes")
 	assert.Equal(t, 121, d.Cost("s1").Calls)
 }
+
+// Calls a log doesn't identify all count in the session's cost.
+func TestClaudeCostsOfCallsWithoutIDs(t *testing.T) {
+	config := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", config)
+	dir := filepath.Join(config, "projects", "-w")
+	call := func(at string) string {
+		return fmt.Sprintf(`{"type":"assistant","timestamp":%q,"sessionId":"s1","message":{"role":"assistant","model":"claude-opus-5-5","content":[],"usage":{"input_tokens":10,"output_tokens":20}}}`, at)
+	}
+	writeLog(t, filepath.Join(dir, "s1.jsonl"), time.Now(),
+		claudePromptLine("s1", "2026-10-20T10:00:00.000Z", "Go"),
+		call("2026-10-20T10:00:01.000Z"),
+		call("2026-10-20T10:00:02.000Z"),
+		call("2026-10-20T10:00:03.000Z"),
+	)
+	d, err := newStore(t, "claude", "/w").Costs()
+	require.NoError(t, err)
+	assert.Equal(t, 3, d.Cost("s1").Calls)
+}
