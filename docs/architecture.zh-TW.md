@@ -151,8 +151,16 @@ flowchart TB
    SIGUSR2（它的預設動作會結束行程），所以伺服器啟動或停止期間收到的 SIGUSR2 不會結束行程（服務前
    收到的，會在開始服務後重新啟動），接著記下參數、環境變數和程式：argv[0] 若就是正在執行的檔案，就採用 shell 找到它的方式（路徑，或 `PATH` 上
    的名稱），這樣更新改指向新版本的 symlink 也會跟著走；否則採用 `os.Executable`。更新取代檔案之後，
-   `/proc/self/exe` 指向的是已刪除的檔案。重新啟動前，先以 `--version` 執行程式；失敗時記下
-   原因並繼續提供服務。成功時，伺服器依第 5 步停止，但保留 PID 檔（PID 不變），再以
+   `/proc/self/exe` 指向的是已刪除的檔案。重新啟動前，先以 `--version` 執行程式，再以之後要用的
+   參數、環境變數加上隱藏的 `--validate`（`cmd/server/validate.go`）執行一次，各限 10 秒。
+   `--validate` 像正式啟動那樣解析旗標、環境變數和設定檔，並在不啟動任何東西的前提下檢查能檢查的
+   部分：各項值、佔位符、連接埠、agent 類型與傳輸方式、native agent 的參數或 PTY agent 的程式、
+   價格檔、允許的主機與來源、綁定位址、webhook（`httpapi.CheckConfig`），以及狀態資料庫（不加鎖
+   讀取、不做遷移，`statedb.Check`）。它不會監聽連接埠、不啟動 agent、不寫任何檔案，成功時印出
+   `ok state-db-schema=N`，失敗時以非零狀態結束並說明原因。伺服器開著的狀態資料庫其他行程讀不到，
+   所以新程式會略過它，改由伺服器拿 N 檢查（`statedb.DB.CheckWriter`）。比 `--validate` 早的程式
+   會把它當成未知旗標拒絕，這時只以 `--version` 檢查。任一檢查失敗時，伺服器記下原因（程式寫出的
+   最後一行）並繼續提供服務。成功時，伺服器依第 5 步停止，但保留 PID 檔（PID 不變），再以
    `syscall.Exec` 重新執行程式，沿用 stdin、stdout 和 stderr；Go 開啟的其他檔案都會在 exec 時關閉。
    不帶值的 `--api-token` 產生的 token 會透過 `AGENTAPI_GENERATED_API_TOKEN` 傳下去，新程式直接
    採用它而不另外產生，並從自己的環境變數移除，用戶端因此不必重新登入。
@@ -536,8 +544,9 @@ webhook 事件的 delivery ID 也以同樣方式寫入 `instances.deliveries.jso
   重新開始。`agentapi restart [port…|--all]`（`cmd/restart`）讀取登記目錄（呼叫者的；透過 `sudo`
   執行時是 `SUDO_USER` 的家目錄），挑出這台機器上、行程屬於該使用者、執行的是 `agentapi server`
   （`/proc/<pid>`，其他系統用 `ps`）且能原地重新啟動的登記檔，逐一送出訊號（自己所在的那個最後），
-  並等每個 AgentAPI 以新的 server ID 重新登記、在原連接埠回應 `GET /status`。`agentapi update
-  --restart` 會對仍在執行舊執行檔的 AgentAPI 做同樣的事。hub 不會原地重新啟動，由服務管理工具
+  並等每個 AgentAPI 以新的 server ID 重新登記、在原連接埠回應 `GET /status`。新執行檔沒通過停止
+  前的檢查（`--version`、`--validate`）時，AgentAPI 照原樣繼續執行，指令會在 `--timeout` 到了之後
+  回報，原因寫在它的紀錄裡。`agentapi update --restart` 會對仍在執行舊執行檔的 AgentAPI 做同樣的事。hub 不會原地重新啟動，由服務管理工具
   重新啟動。
 - 開啟 `--allow-update` 時，`POST /update`（`update.go`）會把 AgentAPI 更新到最新發行版並原地重新
   啟動，由一個跟著伺服器生命週期的 goroutine 執行。`checking` 查詢發行版，並以 `--version` 執行
@@ -545,8 +554,9 @@ webhook 事件的 delivery ID 也以同樣方式寫入 `instances.deliveries.jso
   AgentAPI 已經更新過、磁碟上的程式夠新時就略過。`waiting` 會暫停佇列，等到 agent 處於 stable、
   沒有待回覆的請求或終端機對話框，每次狀態變化時檢查一次。`restarting` 在 `s.mu` 底下開始：從此
   訊息留在佇列、不會開始重新啟動 agent，人工回覆協定也不提供內容。接著呼叫和 SIGUSR2 相同的
-  重新啟動。`"now"` 會略過等待，`DELETE /update` 在重新啟動前都能取消更新。失敗時狀態變成
-  `failed` 並附上錯誤，伺服器繼續提供服務。每一步都會改變摘要的 `update`，`summary_update` 會把
+  重新啟動。`"now"` 會略過等待，`DELETE /update` 在重新啟動前都能取消更新。失敗時（包括重新
+  啟動前的檢查：新發行版無法以目前的設定或狀態資料庫啟動），狀態變成 `failed` 並附上錯誤，伺服器
+  繼續提供服務。每一步都會改變摘要的 `update`，`summary_update` 會把
   它帶給 hub。每次請求都會重新解析程式路徑，`blocked` 也每分鐘重新檢查，所以中途設好的 symlink
   會馬上生效。
 - `/status` 會回報生命週期：`starting`、`ready`、`running`、`restarting`、`exited` 或

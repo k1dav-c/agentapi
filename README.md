@@ -1556,7 +1556,9 @@ curl -X POST localhost:3284/update -H 'Content-Type: application/json' -d '{"whe
 - `POST /update` installs the latest official release of k1dav-c/agentapi for the machine's OS and
   architecture, then restarts AgentAPI in place into it, as [`agentapi restart`](#agentapi-restart)
   does: the same PID, a new `server_id` and version. The download must match the release's
-  `checksums.txt` and run as that version. The request can't choose a version or a URL.
+  `checksums.txt` and run as that version. The request can't choose a version or a URL. A release
+  that wouldn't start with this AgentAPI's settings or state database fails the update before the
+  restart, and AgentAPI goes on serving.
 - `"when": "idle"`, the default, installs at once and restarts once the agent is idle: stable, with
   no request (approval, question or plan) or terminal dialog open. Queued messages stay queued and
   go out after the restart. `"now"` restarts at once and interrupts the agent.
@@ -2102,8 +2104,11 @@ agentapi restart --all      # every AgentAPI of yours on this machine
 ```
 
 `agentapi restart` finds them in the [registry](#watching-many-instances) and sends each SIGUSR2.
-An AgentAPI first runs the program it was started from with `--version`; if that fails, it logs why
-and goes on serving. Otherwise it stops as for a shutdown (the agent is interrupted and closed, the
+An AgentAPI first runs the program it was started from with `--version`, then with the arguments
+and environment it will run with and a check that it would start with them: its flags, `AGENTAPI_*`
+variables and config file, its agent's arguments, and a state database it can write. If either
+fails (an update brought a release that refuses a setting, say), it logs why and goes on serving,
+and `agentapi restart` reports that it still runs as before. Otherwise it stops as for a shutdown (the agent is interrupted and closed, the
 state database written, the registry entry removed, and the webhook sends `instance.stopped`), then
 runs the same path again with the same arguments and environment, in the same process. Its PID
 stays, so a PID file and a parent shell that waits for it, such as a Coder workspace's start

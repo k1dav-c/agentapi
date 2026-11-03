@@ -174,7 +174,22 @@ answers write keys directly to the agent's terminal.
    that is the running file, so a symlink an update repoints is followed;
    else `os.Executable`. It is taken then because once an update replaced
    the file, `/proc/self/exe` names a deleted one. The program first runs
-   with `--version`; if it fails, the server logs why and goes on. Otherwise the server stops as in step 5, keeps its PID file (the PID
+   with `--version`, then with the arguments and environment it will run
+   with plus the hidden `--validate` (`cmd/server/validate.go`), 10 s each.
+   `--validate` resolves the flags, variables and config file as a start
+   does and checks what it can without starting anything: values,
+   placeholders, the port, agent type and transport, the native agent's
+   arguments or a PTY agent's program, the prices file, the allowed hosts
+   and origins, the bind address, the webhook (`httpapi.CheckConfig`) and
+   the state DB, read without locks and not migrated (`statedb.Check`). It
+   doesn't listen, start the agent or write a file, and prints
+   `ok state-db-schema=N` or exits non-zero with the reason. The state DB
+   the server holds open can't be read by another process, so the new
+   program skips it and the server checks it against N
+   (`statedb.DB.CheckWriter`). A program that predates `--validate`
+   refuses it as an unknown flag and is only run with `--version`. If a
+   check fails, the server logs why (the last line the program wrote) and
+   goes on. Otherwise the server stops as in step 5, keeps its PID file (the PID
    stays), and `syscall.Exec` runs the program again with stdin, stdout and
    stderr; every other file Go opened closes on exec. A token a bare
    `--api-token` generated goes along in `AGENTAPI_GENERATED_API_TOKEN`,
@@ -688,9 +703,11 @@ one), which keeps the conversation from then on. SIGUSR1 flushes the state datab
   restart in place and whose process is the user's and runs
   `agentapi server` (`/proc/<pid>`, `ps` elsewhere). It signals them one at
   a time, the one it runs under last, and waits until each registers again
-  with a new server ID and answers `GET /status` on its port. `agentapi
-  update --restart` does that for the AgentAPIs that run the binary it
-  replaced.
+  with a new server ID and answers `GET /status` on its port. One whose
+  new binary failed the checks before the stop (`--version`, `--validate`)
+  still runs as before, which the command reports once `--timeout` passes;
+  its log says why. `agentapi update --restart` does that for the
+  AgentAPIs that run the binary it replaced.
   The hub doesn't restart in place; its service manager restarts it.
 - With `--allow-update`, `POST /update` (`update.go`) updates AgentAPI to the
   latest release and restarts it in place. A goroutine bound to the server's
@@ -703,8 +720,9 @@ one), which keeps the conversation from then on. SIGUSR1 flushes the state datab
   under `s.mu`: from then on messages wait in the queue, no agent restart
   begins and the human-reply protocol offers nothing. It calls the restart
   SIGUSR2 uses. `"now"` skips the wait, and `DELETE /update` cancels the
-  update until it restarts. A failure leaves the state `failed` with the
-  error, and the server serving. Every step changes the summary's `update`,
+  update until it restarts. A failure, also one of the restart's checks
+  (a new release that wouldn't start with these settings or this state
+  DB), leaves the state `failed` with the error, and the server serving. Every step changes the summary's `update`,
   so `summary_update` carries it to a hub. The program's path is resolved
   again on each request, and once a minute for `blocked`, so a symlink set
   up meanwhile counts at once.

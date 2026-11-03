@@ -1306,6 +1306,7 @@ curl -X POST localhost:3284/update -H 'Content-Type: application/json' -d '{"whe
 - `POST /update` 安裝 k1dav-c/agentapi 符合這台機器作業系統與架構的最新正式發行版，再像
   [`agentapi restart`](#agentapi-restart) 一樣原地重新啟動成新版本：PID 不變，`server_id` 和版本
   換新。下載的檔案必須符合發行版的 `checksums.txt`，執行起來也必須是那個版本。請求無法指定版本或網址。
+  新發行版若無法以這個 AgentAPI 的設定或狀態資料庫啟動，更新會在重新啟動前失敗，AgentAPI 繼續提供服務。
 - 預設的 `"when": "idle"` 會立刻安裝，等 agent 閒置再重新啟動，也就是 agent 處於 stable，沒有待回覆的
   請求（核准、提問或計畫）或終端機對話框。佇列中的訊息會留在佇列，重新啟動後再送出。`"now"` 會立刻
   重新啟動，中斷 agent 手上的工作。
@@ -1806,7 +1807,10 @@ agentapi restart --all      # 你在這台機器上的所有 AgentAPI
 ```
 
 `agentapi restart` 從[登記目錄](#監看多個實例)找到這些 AgentAPI，並送出 SIGUSR2。AgentAPI 會先以
-`--version` 執行啟動時的程式；失敗時記下原因並繼續提供服務。成功時就像關閉那樣停止（中斷並
+`--version` 執行啟動時的程式，再以之後要用的參數和環境變數執行一次，確認它能以這些設定啟動：
+旗標、`AGENTAPI_*` 環境變數和設定檔、agent 的參數，以及它能寫入的狀態資料庫。任一項失敗時（例如
+更新帶來的發行版不接受某個設定），記下原因並繼續提供服務，`agentapi restart` 也會回報它仍照原樣
+執行。成功時就像關閉那樣停止（中斷並
 關閉 agent、寫入狀態資料庫、刪除登記檔，webhook 也會送出 `instance.stopped`），再在同一個行程中
 以相同的參數和環境變數執行同一個路徑。PID 不變，所以 PID 檔和等待它的上層 shell（例如 Coder
 工作區的啟動腳本）仍然有效，輸出也照舊寫到原本的地方。這個指令會等到每個 AgentAPI 以新的
