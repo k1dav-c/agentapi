@@ -55,8 +55,7 @@ flowchart TB
 ```
 
 The server drives the agent through a `native.Conversation`, which reports changes to the event
-emitter. Handlers call the conversation and read state from the emitter. AgentAPI 2's PTY
-transport, which drove an agent's terminal UI, is gone; v2.5.1 is its last release.
+emitter. Handlers call the conversation and read state from the emitter.
 
 ## Repository layout
 
@@ -67,9 +66,9 @@ transport, which drove an agent's terminal UI, is gone; v2.5.1 is its last relea
 | `lib/convstate/` | The conversation state clients read, without HTTP: the `EventEmitter` (its changes numbered by epoch and seq, subscriptions and replay), the tasks and the summary it derives, the queue as the server reported it, and the `Persister` it hands every change to |
 | `lib/webhook/` | Webhook delivery (`Dispatcher`: queue, retries, signatures, heartbeats, `{ip}` in the public URL) and the observer that turns the emitter's events into webhook events (`Observe`, through `Source`) |
 | `lib/workspacefs/` | What the file viewer reads of the working directory (`Dir`): a file's text, its diff through git, an HTML preview, a file to serve, the search for a path; a refusal is an `Error` whose kind `lib/httpapi` turns into a status |
-| `lib/conversation/` | Shared types (imported as `conv`): messages, roles, status and error levels, and the `Emitter` the native conversation reports changes to |
+| `lib/conversation/` | Shared types (imported as `conv`): messages, roles, status and error levels, and the `Emitter` the agent's conversation (`lib/native`) reports changes to |
 | `lib/transcript/` | The structured transcript's types: rich messages with their content blocks, and timeline events |
-| `lib/agentlog/` | The agents' session-log formats, one package each (`claudelog`, `codexlog`, `pilog`): their records, the parsers into rich messages and timeline events (the native adapters use them too), prompts and injected context, model calls and file layout; plus line reading, the incremental file index and format-drift warnings |
+| `lib/agentlog/` | The agents' session-log formats, one package each (`claudelog`, `codexlog`, `pilog`): their records, the parsers into rich messages and timeline events (the adapters use them too), prompts and injected context, model calls and file layout; plus line reading, the incremental file index and format-drift warnings |
 | `lib/sessions/` | A server-held `Store` reads earlier sessions and their conversations (`history.go`), subagents (`subagents.go`) and costs (`cost.go`) for a directory |
 | `lib/pricing/` | Model prices per million tokens (built-in `prices.json` and a `--prices` file), and per-call cost calculation |
 | `lib/native/` | The native transport: `Conversation`, the `Adapter` and `Sink` contracts, requests, settings, usage, logins |
@@ -207,7 +206,7 @@ The handlers are grouped by file:
 | `conversation_api.go`, `queue.go`, `sse.go` | Messages, status and timeline; the queue, its dispatch (with a continuation that is due first, `beforeQueue`) and `queue_update`; `GET /events` |
 | `tasks_api.go` | `GET /tasks`: the tasks the emitter derives (`lib/convstate`) |
 | `summary_api.go`, `spend.go`, `registry.go` | `GET /summary` and `POST /tasks/seen`, the summary the emitter keeps for clients that watch many AgentAPIs; the spend worked out once a minute; the server's registry entry (`instanceRegistry`) |
-| `native.go` | Delivering a message, requests, settings, interrupt, compaction, login retry; the native observer |
+| `native.go` | Delivering a message, requests, settings, interrupt, compaction, login retry; the observer (`nativeObserver`) |
 | `limit.go`, `sessions.go`, `subagents.go` | A turn a usage limit stopped (`/limit`); the agent's earlier sessions and what they cost (`/sessions`, `/cost`); its subagents (`/subagents`) |
 | `terminal.go`, `files_api.go` | The shell terminal (`terminalAPI`); the file viewer and the search for a file the agent named relative to a repository (`fileAPI`, over `lib/workspacefs`) |
 | `webhook_api.go`, `handoff.go` | The webhook's configuration (`GET`/`PUT /webhook`, `POST /webhook/test`), the instance it describes and its start (`lib/webhook` delivers); the human-reply API |
@@ -352,7 +351,7 @@ type Factory func(resume Resume) (Adapter, error)
   longer exist.
 - **Log formats.** Each format is decoded in one place (`lib/agentlog`):
   what is a prompt, injected context or a tool result is decided once, for
-  the native adapters, the history and the costs alike.
+  the adapters, the history and the costs alike.
   Records a parser doesn't know, lines it can't decode, and model calls
   without a model or usage, or whose usage reads as no tokens (a renamed
   field, which would cost $0 without a word), are logged once per log and
@@ -545,7 +544,7 @@ The queue is persisted with the conversation, on every change (`storeQueue`, fro
 - The file is opened in exclusive locking mode with WAL, so no second
   AgentAPI can use it, and is created with mode 0600.
 - On startup the server restores the conversation, the queue and the session
-  reference, which the native conversation passes to the factory so the agent
+  reference, which the conversation passes to the factory so the agent
   resumes its own session. A file AgentAPI 2 kept for the same agent with
   the PTY transport opens too: it has no session to resume, so the agent
   starts a new one below its conversation, and `meta` says native from then
@@ -705,7 +704,7 @@ of the content's SHA-256, so a path never changes; unused ones are removed after
 
 - There are no separate user accounts or roles. A client that passes the
   host and origin checks, and token authentication when enabled, has the
-  agent's capabilities: native agents start in the bypass permission mode,
+  agent's capabilities: agents start in the bypass permission mode,
   and the shell terminal runs commands.
 - `--api-token`: compared in constant time. Browsers sign in with
   `POST /auth/session`, which sets an HttpOnly, SameSite=Strict cookie holding
@@ -806,7 +805,7 @@ markers. The filtering is implemented in [lib/procenv/procenv.go](../lib/procenv
 | AgentAPI's secrets: `AGENTAPI_*_TOKEN` and `AGENTAPI_*_SECRET` (`AGENTAPI_API_TOKEN`, `AGENTAPI_WEBHOOK_SECRET`, `AGENTAPI_HUB_SECRET`, `AGENTAPI_HUB_TOKEN`, `AGENTAPI_HUB_INSTANCE_TOKEN`, `AGENTAPI_GENERATED_API_TOKEN`) |
 
 Configuration such as `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `PI_CODING_AGENT_DIR`,
-and `ANTHROPIC_*` is preserved. After filtering, the native Claude Code adapter
+and `ANTHROPIC_*` is preserved. After filtering, the Claude Code adapter
 sets `CLAUDE_CODE_ENTRYPOINT=sdk-cli` and `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1`
 again, with the values its protocol relies on. The shared shell also removes
 AgentAPI's own `AGENTAPI_*` variables.
@@ -839,7 +838,7 @@ the same build.
   message the replay sends as another one, a request made before the
   replay's first message. `EventSourceConnection`
   (`lib/event-source.ts`, and the `use-event-source.ts` hook) keeps it, the
-  hub page's stream and the terminals' open: a stream that ends is opened
+  hub page's stream and the shell terminal's open: a stream that ends is opened
   again at once, without a notice, unless that keeps failing; one that fails
   (a 401, a proxy's 502), after a backoff; one with heartbeats that goes
   quiet, by a watchdog; and any when the browser comes back online or to the
@@ -887,7 +886,7 @@ the same build.
 
 - Go tests sit next to the code and run with `CGO_ENABLED=0`; code that
   depends on time uses `coder/quartz` clocks.
-- The native adapters have harnesses that fake the agent process, replay
+- The adapters have harnesses that fake the agent process, replay
   tests built from sanitized captures of the real CLIs (`testdata/`), and
   parity tests that compare their rich messages with what the session-log
   parsers produce. `nativetest` provides a fake adapter for the conversation

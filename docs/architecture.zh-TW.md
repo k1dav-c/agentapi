@@ -54,8 +54,7 @@ flowchart TB
 ```
 
 伺服器透過 `native.Conversation` 驅動 agent，對話把變更回報給事件發送器（emitter）。處理常式
-呼叫對話，從 emitter 讀取狀態。AgentAPI 2 驅動 agent 終端機介面的 PTY transport 已移除；最後
-一個提供它的版本是 v2.5.1。
+呼叫對話，從 emitter 讀取狀態。
 
 ## 儲存庫結構
 
@@ -66,9 +65,9 @@ flowchart TB
 | `lib/convstate/` | 用戶端讀取的對話狀態，不碰 HTTP：`EventEmitter`（變更以 epoch 和 seq 編號、訂閱與重播）、它推導出的任務和摘要、伺服器最後回報的佇列，以及它把每個變更交給的 `Persister` |
 | `lib/webhook/` | Webhook 傳送（`Dispatcher`：佇列、重試、簽章、心跳、public URL 中的 `{ip}`），以及把 emitter 的事件轉成 webhook 事件的 observer（`Observe`，透過 `Source`） |
 | `lib/workspacefs/` | 檔案檢視器從工作目錄讀取的內容（`Dir`）：檔案文字、透過 git 取得的 diff、HTML 預覽、要提供的檔案、路徑搜尋；拒絕的請求是 `Error`，由 `lib/httpapi` 依它的種類轉成狀態碼 |
-| `lib/conversation/` | 共用型別（以 `conv` 匯入）：訊息、角色、狀態與錯誤等級，以及 native 對話回報變更的 `Emitter` |
+| `lib/conversation/` | 共用型別（以 `conv` 匯入）：訊息、角色、狀態與錯誤等級，以及 agent 的對話（`lib/native`）回報變更的 `Emitter` |
 | `lib/transcript/` | 結構化對話的型別：結構化訊息與其內容區塊、時間軸事件 |
-| `lib/agentlog/` | 各 agent 工作階段紀錄的格式，一種 agent 一個套件（`claudelog`、`codexlog`、`pilog`）：紀錄型別、解析成結構化訊息與時間軸事件的 parser（native adapter 也使用）、prompt 與注入內容的辨識、模型呼叫與檔案配置；另有逐行讀取、增量檔案索引和格式變動警告 |
+| `lib/agentlog/` | 各 agent 工作階段紀錄的格式，一種 agent 一個套件（`claudelog`、`codexlog`、`pilog`）：紀錄型別、解析成結構化訊息與時間軸事件的 parser（adapter 也使用）、prompt 與注入內容的辨識、模型呼叫與檔案配置；另有逐行讀取、增量檔案索引和格式變動警告 |
 | `lib/sessions/` | 伺服器持有的 `Store` 讀取目錄中先前的工作階段與對話（`history.go`）、sub agent（`subagents.go`）及花費（`cost.go`） |
 | `lib/pricing/` | 每百萬 tokens 的模型價格（內建 `prices.json` 與 `--prices` 檔案），以及單次呼叫的花費計算 |
 | `lib/native/` | Native transport：`Conversation`、`Adapter` 與 `Sink` 的約定、請求、設定、用量、登入 |
@@ -170,7 +169,7 @@ flowchart TB
 | `conversation_api.go`、`queue.go`、`sse.go` | 訊息、狀態與時間軸；佇列、派送（先送出到期的繼續，`beforeQueue`）與 `queue_update`；`GET /events` |
 | `tasks_api.go` | `GET /tasks`：emitter 推導出的任務（`lib/convstate`） |
 | `summary_api.go`、`spend.go`、`registry.go` | `GET /summary` 與 `POST /tasks/seen`，也就是 emitter 為監看多個 AgentAPI 的用戶端保存的摘要；每分鐘計算的花費；伺服器的登記檔（`instanceRegistry`） |
-| `native.go` | 送出訊息、請求、設定、中斷、壓縮、重試登入；native observer |
+| `native.go` | 送出訊息、請求、設定、中斷、壓縮、重試登入；observer（`nativeObserver`） |
 | `limit.go`、`sessions.go`、`subagents.go` | 因用量限制停下的回合（`/limit`）；agent 先前的工作階段和它們的花費（`/sessions`、`/cost`）；它的 sub agent（`/subagents`） |
 | `terminal.go`、`files_api.go` | Shell 終端機（`terminalAPI`）；檔案檢視器與搜尋 agent 用 repo 相對路徑提到的檔案（`fileAPI`，底層是 `lib/workspacefs`） |
 | `webhook_api.go`、`handoff.go` | Webhook 設定（`GET`／`PUT /webhook`、`POST /webhook/test`）、它描述的實例與啟動（由 `lib/webhook` 傳送）；人工回覆 API |
@@ -287,7 +286,7 @@ type Factory func(resume Resume) (Adapter, error)
   以同樣的順序讀過全部紀錄檔，如果上限淘汰的是最久沒讀的檔案，被淘汰的每次都正好是下一個要讀的。
   索引會移除已不存在的紀錄檔。
 - **紀錄格式。** 每種格式只在一個地方解碼（`lib/agentlog`）：什麼是 prompt、注入的內容或工具
-  結果只判斷一次，native adapter、歷史和花費都用同一套。parser 不認得的紀錄、無法
+  結果只判斷一次，adapter、歷史和花費都用同一套。parser 不認得的紀錄、無法
   解碼的行，以及沒有模型或用量、或讀出的用量是 0 的模型呼叫（欄位改了名，不然會默默算成 $0），
   每個紀錄檔的每一種只會以 Warn 記錄一次，並附上紀錄中的 CLI 版本，所以格式改變時會出現在
   伺服器的 log 裡。Claude Code 自己寫的訊息（`<synthetic>`）、Codex 只有用量上限的計數，以及 Pi
@@ -417,7 +416,7 @@ context 結束，避免不再讀取的 agent 佔住 `s.mu`。
 - 寫入會先排隊，每 200 毫秒在一個交易中寫入，所以串流不必等待磁碟。正常關閉時會將檔案標示為
   已正常關閉；當機之後，對話會換成新的 epoch，用戶端會重新載入完整的對話。
 - 檔案以獨占鎖定模式搭配 WAL 開啟，所以第二個 AgentAPI 無法使用它；新建立的檔案權限為 0600。
-- 啟動時伺服器會還原對話、佇列和工作階段參照；native 對話會把參照交給 factory，讓 agent
+- 啟動時伺服器會還原對話、佇列和工作階段參照；對話會把參照交給 factory，讓 agent
   接續它自己的工作階段。AgentAPI 2 以 PTY transport 為同一個 agent 保存的檔案也能開啟：它沒有
   可接續的工作階段，所以 agent 會在對話下方開始新的工作階段，之後 `meta` 記為 native（不讀取它的
   `initial_prompt`）。還原後，先前待處理的請求會標示為已過期。
@@ -533,7 +532,7 @@ Content-Security-Policy。
 
 - 系統沒有獨立的使用者帳號或角色。通過 token 驗證（若已啟用）及主機、來源檢查的用戶端，
   即可使用 agent 的能力：
-  native agent 以 bypass 權限模式啟動，shell 終端機可以執行指令。
+  agent 以 bypass 權限模式啟動，shell 終端機可以執行指令。
 - `--api-token`：以固定時間比對。瀏覽器透過 `POST /auth/session` 登入，它會設定一個
   HttpOnly、SameSite=Strict 的 cookie，裡面存的是 token 的 HMAC 而不是 token 本身，所以更換
   token 會讓所有瀏覽器登出。靜態的聊天介面檔案和 `/auth/session` 會略過 token 檢查；登入時
@@ -614,7 +613,7 @@ AgentAPI 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
 | AgentAPI 的機密：`AGENTAPI_*_TOKEN` 與 `AGENTAPI_*_SECRET`（`AGENTAPI_API_TOKEN`、`AGENTAPI_WEBHOOK_SECRET`、`AGENTAPI_HUB_SECRET`、`AGENTAPI_HUB_TOKEN`、`AGENTAPI_HUB_INSTANCE_TOKEN`、`AGENTAPI_GENERATED_API_TOKEN`） |
 
 `CLAUDE_CONFIG_DIR`、`CODEX_HOME`、`PI_CODING_AGENT_DIR` 與 `ANTHROPIC_*` 等設定會保留。
-清除之後，native Claude Code adapter 會再設定它的協定需要的 `CLAUDE_CODE_ENTRYPOINT=sdk-cli`
+清除之後，Claude Code adapter 會再設定它的協定需要的 `CLAUDE_CODE_ENTRYPOINT=sdk-cli`
 與 `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1`。共用的 shell 另外會移除 AgentAPI 自己的
 `AGENTAPI_*` 變數。
 
@@ -638,7 +637,7 @@ AgentAPI 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
   才取代；屬於別的對話的會立刻拿掉：重播送來的同 ID 訊息已是另一則的任務，以及在重播第一則訊息
   之前就提出的請求。
   `EventSourceConnection`（`lib/event-source.ts`，以及 hook `use-event-source.ts`）讓它、hub 頁面
-  的串流和終端機的串流保持連線：結束的串流會立刻重新開啟、不顯示提示，除非一直失敗；失敗的串流
+  的串流和 shell 終端機的串流保持連線：結束的串流會立刻重新開啟、不顯示提示，除非一直失敗；失敗的串流
   （401、proxy 的 502）在退避後重試；有心跳的串流沒了動靜，由 watchdog 重新連線；瀏覽器恢復連網
   或回到分頁時也會重新連線。事件內容的型別來自產生的 schema（`lib/events.ts`），null 的清單在
   事件抵達時就換成空清單。chat 不認得的任務或 sub agent 狀態（來自較新的伺服器；hub 會用自己的
@@ -668,7 +667,7 @@ AgentAPI 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
 
 - Go 測試和程式碼放在一起，以 `CGO_ENABLED=0` 執行；和時間有關的程式碼使用 `coder/quartz`
   的時鐘。
-- Native adapter 有模擬 agent 行程的測試骨架、以真實 CLI 的去識別化擷取資料建立的重播測試
+- Adapter 有模擬 agent 行程的測試骨架、以真實 CLI 的去識別化擷取資料建立的重播測試
   （`testdata/`），以及把它們的結構化訊息和工作階段紀錄解析器的結果相比對的一致性測試。
   `nativetest` 為對話與 HTTP 測試提供假 adapter。
 - `e2e/` 以腳本化的 Claude Code `e2e/fakeclaude` 測試伺服器執行檔，包括原地重新啟動。
