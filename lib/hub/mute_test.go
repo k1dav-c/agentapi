@@ -58,18 +58,18 @@ func TestMute(t *testing.T) {
 	code, instance := patch(`{"muted": true}`)
 	require.Equal(t, http.StatusOK, code)
 	assert.Equal(t, "login", instance.Muted)
-	h.unmuteChanged("dev:1", &login)
+	h.applySummary(t.Context(), "dev:1", "http://dev:1", login)
 	assert.Equal(t, "login", muted(), "still waits for the login")
-	h.unmuteChanged("dev:1", &instanceapi.SummaryBody{Attention: instanceapi.AttentionNone})
+	h.applySummary(t.Context(), "dev:1", "http://dev:1", instanceapi.SummaryBody{Attention: instanceapi.AttentionNone})
 	assert.Empty(t, muted(), "logged in")
 
 	first := instanceapi.SummaryBody{Attention: instanceapi.AttentionRequest, Request: &instanceapi.SummaryRequest{ID: "r1"}}
 	set(first)
 	_, instance = patch(`{"muted": true}`)
 	assert.Equal(t, "request:r1", instance.Muted)
-	h.unmuteChanged("dev:1", &first)
+	h.applySummary(t.Context(), "dev:1", "http://dev:1", first)
 	assert.Equal(t, "request:r1", muted())
-	h.unmuteChanged("dev:1", &instanceapi.SummaryBody{Attention: instanceapi.AttentionRequest, Request: &instanceapi.SummaryRequest{ID: "r2"}})
+	h.applySummary(t.Context(), "dev:1", "http://dev:1", instanceapi.SummaryBody{Attention: instanceapi.AttentionRequest, Request: &instanceapi.SummaryRequest{ID: "r2"}})
 	assert.Empty(t, muted(), "another request")
 
 	set(login)
@@ -148,4 +148,23 @@ func TestStoreTellsWhatBrowsersSee(t *testing.T) {
 	assert.True(t, heard())
 	_, _, _ = s.update("dev:1", false, func(i *Instance) { i.LastSeen = now.Add(2 * time.Minute) })
 	assert.True(t, heard(), "offline since then")
+}
+
+// A summary that ends a mute is one change: browsers hear of it once.
+func TestSummaryThatEndsAMuteIsOneEvent(t *testing.T) {
+	h, err := New(Config{Token: "t", Secret: "s"})
+	require.NoError(t, err)
+	login := instanceapi.SummaryBody{Attention: instanceapi.AttentionLogin}
+	_, _, err = h.store.update("dev:1", true, func(i *Instance) {
+		i.URL = "http://dev:1"
+		i.Summary = &login
+		i.Muted = instanceapi.AttentionKey(&login)
+	})
+	require.NoError(t, err)
+	_, events := h.store.subscribe()
+	require.True(t, h.applySummary(t.Context(), "dev:1", "http://dev:1", instanceapi.SummaryBody{Attention: instanceapi.AttentionNone}))
+	require.Len(t, events, 1)
+	event := <-events
+	assert.Empty(t, event.Instance.Muted)
+	assert.Equal(t, ConnectionConnected, event.Instance.Connection)
 }

@@ -94,7 +94,6 @@ func (h *Hub) follow(ctx context.Context, id string) {
 			connected = true
 			failing = time.Time{}
 			wait = watchRetryMin
-			h.unmuteChanged(id, &summary)
 			h.applySummary(ctx, id, instance.URL, summary)
 		})
 		if ctx.Err() != nil {
@@ -169,7 +168,9 @@ func (h *Hub) follow(ctx context.Context, id string) {
 
 // applySummary takes a summary that the watch of url read, and reports
 // whether it did. One that comes after the instance stopped, or from a URL
-// it left, is from a watch that ends.
+// it left, is from a watch that ends. It ends the instance's mute once
+// what it waits for changed (it logged in, or asks something else): the
+// next thing counts again. One change of the store, so one event.
 func (h *Hub) applySummary(ctx context.Context, id, url string, summary instanceapi.SummaryBody) bool {
 	now := h.clock.Now()
 	applied := false
@@ -178,6 +179,10 @@ func (h *Hub) applySummary(ctx context.Context, id, url string, summary instance
 			return
 		}
 		applied = true
+		if i.Muted != "" && i.Muted != instanceapi.AttentionKey(&summary) {
+			h.logger.Info("An instance's mute ended: what it waits for changed", "instance", id)
+			i.Muted = ""
+		}
 		i.Summary = &summary
 		i.Connection = ConnectionConnected
 		i.Error = ""
@@ -260,22 +265,4 @@ func (h *Hub) readSummaries(ctx context.Context, instance Instance, got func(ins
 		return errors.New("the event stream went silent")
 	}
 	return nil
-}
-
-// unmuteChanged ends the instance's mute once what it waits for changed
-// (it logged in, or asks something else): the next thing counts again.
-func (h *Hub) unmuteChanged(id string, summary *instanceapi.SummaryBody) {
-	current, ok := h.store.get(id)
-	if !ok || current.Muted == "" || current.Muted == instanceapi.AttentionKey(summary) {
-		return
-	}
-	_, _, err := h.store.update(id, false, func(i *Instance) {
-		if i.Muted == current.Muted {
-			i.Muted = ""
-		}
-	})
-	if err != nil {
-		h.logger.Warn("Failed to keep the hub's instances", "error", err)
-	}
-	h.logger.Info("An instance's mute ended: what it waits for changed", "instance", id)
 }
