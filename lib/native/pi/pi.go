@@ -254,15 +254,12 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 		return err
 	}
 
-	res, err := a.request(ctx, cmdQuery, simpleCommand{Type: "get_state"})
-	if err == nil {
-		err = res.err
-	}
+	res, err := a.query(ctx, simpleCommand{Type: "get_state"})
 	if err != nil {
 		return a.startError(err)
 	}
 	var state sessionState
-	if err := a.drift.Decode("get_state response", res.data, &state); err != nil {
+	if err := a.drift.Decode("get_state response", res, &state); err != nil {
 		// Not ours to judge: the session opens without what it says.
 		a.log.Warn("Malformed Pi session state", "error", err)
 	} else if !state.hasModel() {
