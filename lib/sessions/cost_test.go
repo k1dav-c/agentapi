@@ -1,6 +1,7 @@
 package sessions
 
 import (
+	"bytes"
 	"fmt"
 	"hash/fnv"
 	"log/slog"
@@ -128,8 +129,10 @@ func TestClaudeCostReconciled(t *testing.T) {
 	dir := filepath.Join(config, "projects", "-w")
 	opus, _ := pricing.Builtin().Lookup("claude-opus-5-5")
 	logged := opus.Cost(pricing.Tokens{Input: 10, CacheRead: 20000, Output: 500})
-	// Claude Code counted more than its log lists: a compaction, say.
-	report := fmt.Sprintf(`{"type":"cost-state","sessionId":"s1","totalCostUSD":%f,"modelUsage":{"claude-opus-5-5":{"inputTokens":5010,"outputTokens":900,"cacheReadInputTokens":20000,"cacheCreationInputTokens":0,"costUSD":%f}}}`, logged+0.5, logged+0.5)
+	compacted := opus.Cost(pricing.Tokens{Input: 5000, Output: 400})
+	// Claude Code counted more tokens than its log lists: a compaction,
+	// say.
+	report := fmt.Sprintf(`{"type":"cost-state","sessionId":"s1","totalCostUSD":%f,"modelUsage":{"claude-opus-5-5":{"inputTokens":5010,"outputTokens":900,"cacheReadInputTokens":20000,"cacheCreationInputTokens":0,"costUSD":%f}}}`, logged+compacted, logged+compacted)
 	writeLog(t, filepath.Join(dir, "s1.jsonl"), time.Now(),
 		claudePromptLine("s1", "2026-10-20T10:00:00.000Z", "Fix the bug"),
 		claudeCall("s1", "2026-10-20T10:00:05.000Z", "msg_1", 10, 20000, 0, 0, 500),
@@ -141,7 +144,7 @@ func TestClaudeCostReconciled(t *testing.T) {
 	d, err := newStore(t, "claude", "/w").Costs()
 	require.NoError(t, err)
 	c := d.Cost("s1")
-	assert.InDelta(t, 2*logged+0.5, c.USD, 1e-6)
+	assert.InDelta(t, 2*logged+compacted, c.USD, 1e-6)
 	var unitemized []ModelCall
 	for _, call := range d.Sessions["s1"] {
 		if call.Unitemized {
@@ -149,7 +152,7 @@ func TestClaudeCostReconciled(t *testing.T) {
 		}
 	}
 	require.Len(t, unitemized, 1)
-	assert.InDelta(t, 0.5, unitemized[0].USD, 1e-6)
+	assert.InDelta(t, compacted, unitemized[0].USD, 1e-9, "priced as any call")
 	assert.Equal(t, time.Date(2026, 10, 20, 10, 5, 0, 0, time.UTC), unitemized[0].Time, "at the line before the report")
 	assert.Equal(t, pricing.Tokens{Input: 5000, Output: 400}, unitemized[0].Tokens)
 	// The tokens Claude Code counted but didn't log count in the hour, as
@@ -157,6 +160,41 @@ func TestClaudeCostReconciled(t *testing.T) {
 	require.Len(t, c.Hourly, 1)
 	assert.Equal(t, pricing.Tokens{Input: 5020, CacheRead: 40000, Output: 1400}, c.Hourly[0].Tokens)
 	assert.Equal(t, c.Tokens, c.Hourly[0].Tokens)
+}
+
+// Claude Code's cost of the same tokens at other prices (a price it
+// changed, a --prices file) isn't a call it didn't log: no unitemized call
+// is added, the costs are AgentAPI's, and the difference is logged once.
+func TestClaudeCostPriceDriftAddsNoCall(t *testing.T) {
+	config := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", config)
+	dir := filepath.Join(config, "projects", "-w")
+	opus, _ := pricing.Builtin().Lookup("claude-opus-5-5")
+	logged := opus.Cost(pricing.Tokens{Input: 10, CacheRead: 20000, Output: 500})
+	report := fmt.Sprintf(`{"type":"cost-state","sessionId":"s1","modelUsage":{"claude-opus-5-5":{"inputTokens":10,"outputTokens":500,"cacheReadInputTokens":20000,"cacheCreationInputTokens":0,"costUSD":%f}}}`, logged+0.5)
+	path := filepath.Join(dir, "s1.jsonl")
+	writeLog(t, path, time.Now(),
+		claudePromptLine("s1", "2026-10-20T10:00:00.000Z", "Fix the bug"),
+		claudeCall("s1", "2026-10-20T10:00:05.000Z", "msg_1", 10, 20000, 0, 0, 500),
+		report,
+	)
+	var logs bytes.Buffer
+	store, err := New("claude", "/w", Config{Logger: slog.New(slog.NewTextHandler(&logs, nil))})
+	require.NoError(t, err)
+	d, err := store.Costs()
+	require.NoError(t, err)
+	c := d.Cost("s1")
+	assert.InDelta(t, logged, c.USD, 1e-9)
+	assert.Equal(t, 1, c.Calls)
+	for _, call := range d.Sessions["s1"] {
+		assert.False(t, call.Unitemized)
+	}
+	assert.Equal(t, 1, strings.Count(logs.String(), "differs from AgentAPI's prices"), logs.String())
+	// The session goes on; the next reading finds the difference again.
+	appendLines(t, path, report+"\n")
+	_, err = store.Costs()
+	require.NoError(t, err)
+	assert.Equal(t, 1, strings.Count(logs.String(), "differs from AgentAPI's prices"), "once per model")
 }
 
 func TestCodexCosts(t *testing.T) {
@@ -466,7 +504,7 @@ func TestCostsUnchangedAreTheLastReadings(t *testing.T) {
 }
 
 // reconcileSorting is reconcile as it was, sorting all the calls twice.
-func reconcileSorting(calls []ModelCall) []ModelCall {
+func reconcileSorting(calls []ModelCall, prices *pricing.Table) []ModelCall {
 	var reports []ModelCall
 	calls = slices.DeleteFunc(calls, func(c ModelCall) bool {
 		if c.report != nil {
@@ -495,19 +533,22 @@ func reconcileSorting(calls []ModelCall) []ModelCall {
 		for _, model := range slices.Sorted(maps.Keys(r.report)) {
 			reported := r.report[model]
 			c := counted[model]
-			missing := reported.USD - c.USD
-			if missing < unitemizedMin {
-				continue
-			}
 			tokens := pricing.Tokens{
 				Input:      max(0, reported.Tokens.Input-c.Tokens.Input),
 				CacheRead:  max(0, reported.Tokens.CacheRead-c.Tokens.CacheRead),
 				CacheWrite: max(0, reported.Tokens.CacheWrite-c.Tokens.CacheWrite-c.Tokens.CacheWrite1h),
 				Output:     max(0, reported.Tokens.Output-c.Tokens.Output),
 			}
-			call := ModelCall{Time: r.Time, Model: model, Tokens: tokens, USD: missing, Priced: true, Unitemized: true, cost: -1}
+			price, known := prices.Lookup(model)
+			if tokens.IsZero() || (known && price.Cost(tokens) < unitemizedMin) {
+				continue
+			}
+			call := ModelCall{Time: r.Time, Model: model, Tokens: tokens, Unitemized: true, cost: -1}
+			if known {
+				call.USD, call.Priced = price.Cost(tokens), true
+			}
 			added = append(added, call)
-			c.USD += missing
+			c.USD += call.USD
 			c.Tokens = c.Tokens.Add(tokens)
 			counted[model] = c
 		}
@@ -537,15 +578,15 @@ func TestReconcileAsSorting(t *testing.T) {
 			if rng.IntN(6) == 0 {
 				report := map[string]agentlog.ModelReport{}
 				for _, m := range models[:1+rng.IntN(2)] {
-					report[m] = agentlog.ModelReport{USD: rng.Float64() * float64(i), Tokens: pricing.Tokens{Input: rng.IntN(1000), Output: rng.IntN(100)}}
+					report[m] = agentlog.ModelReport{USD: rng.Float64() * float64(i), Tokens: pricing.Tokens{Input: rng.IntN(1000 * (i + 1)), Output: rng.IntN(100 * (i + 1))}}
 				}
 				calls = append(calls, ModelCall{Time: at, report: report, cost: -1})
 				continue
 			}
 			calls = append(calls, ModelCall{Time: at, Model: models[rng.IntN(2)], Tokens: pricing.Tokens{Input: rng.IntN(1000), Output: rng.IntN(100)}, USD: rng.Float64(), Priced: true, key: fmt.Sprint(i), cost: -1})
 		}
-		want := reconcileSorting(slices.Clone(calls))
-		got := reconcile(slices.Clone(calls))
+		want := reconcileSorting(slices.Clone(calls), pricing.Builtin())
+		got, _ := reconcile(slices.Clone(calls), pricing.Builtin())
 		require.Equal(t, len(want), len(got))
 		for i := range want {
 			require.Equal(t, want[i], got[i], i)

@@ -338,8 +338,9 @@ type Factory func(resume Resume) (Adapter, error)
   the directory, its subagents' included, from the same logs (`GET /sessions`,
   `GET /cost`): Claude Code's assistant messages (one per message id), Codex's
   token counts, Pi's reported costs. `lib/pricing` prices each call; Claude
-  Code's `cost-state` records add what its log doesn't list (compaction) as
-  unitemized calls. Calls copied by a fork count once, in the earliest
+  Code's `cost-state` records add the tokens its log doesn't list
+  (compaction) as unitemized calls at the same prices; a cost that differs
+  for the same tokens adds nothing and is logged once per model. Calls copied by a fork count once, in the earliest
   session, by the logs' creation times (statx on Linux, stat on macOS;
   elsewhere their first lines'). The Store indexes each log's size, read
   offset and reader state, with its calls priced. It reads only complete new

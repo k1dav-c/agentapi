@@ -846,9 +846,10 @@ providers' list prices. This is an API-equivalent cost: Claude and ChatGPT subsc
 charge per token, so it estimates what the same work would cost with an API key.
 
 - Claude Code: every call in the session's log and in its subagents' logs, with the cache writes
-  priced as Anthropic's 5-minute or one-hour cache. Calls Claude Code counts in its own total but
-  doesn't log one by one, such as compacting the context, are added from its cost records as
-  unitemized calls.
+  priced as Anthropic's 5-minute or one-hour cache. Tokens Claude Code counts in its own total but
+  doesn't log call by call, such as compacting the context, are added from its cost records as
+  unitemized calls, priced like the others. Where Claude Code's own cost of the same tokens differs
+  (its prices aren't these), the costs stay AgentAPI's and the server logs a warning once per model.
 - Codex: each turn's token counts, its subagents' included; input read from the cache is priced as a
   cache read, and the rest as input.
 - Pi: the cost Pi reports for each call.

@@ -711,8 +711,10 @@ AgentAPI 從 agent 的工作階段紀錄讀出每次模型呼叫用掉的 tokens
 key 做同樣的工作要花多少錢。
 
 - Claude Code：工作階段紀錄和它的 sub agent 紀錄中的每次呼叫，cache 寫入分別以 Anthropic 的
-  5 分鐘或一小時 cache 計價。Claude Code 計入自己的總額、卻沒有逐筆記錄的呼叫（例如壓縮
-  context），會從它的花費紀錄補上，列為未逐筆列出（unitemized）的呼叫。
+  5 分鐘或一小時 cache 計價。Claude Code 計入自己的總額、卻沒有逐筆記錄的 token（例如壓縮
+  context），會從它的花費紀錄補上，列為未逐筆列出（unitemized）的呼叫，計價方式和其他呼叫相同。
+  同樣的 token 在 Claude Code 自己算出的金額不同時（它用的價格不同），花費仍以 AgentAPI 的為準，
+  伺服器會為每個模型記錄一次警告。
 - Codex：每個回合的 token 計數，含它的 sub agent；從 cache 讀取的輸入以 cache 讀取計價，其餘以
   輸入計價。
 - Pi：Pi 為每次呼叫回報的金額。
