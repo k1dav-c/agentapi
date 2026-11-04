@@ -219,7 +219,8 @@ the token.
 ![The overview: how many need you, a tile per state, and a card for each request](screenshots/hub-desktop.png)
 
 With no agent open, the right side says how many agents need you and why. A tile per state (need
-you, working, finished unseen, offline) counts them; pick one to filter the list. Below, a card per
+you, working, finished unseen, offline) counts them; pick one to filter the list by that state,
+keeping the agents picked ([below](#the-list)). Below, a card per
 agent that needs you names what it waits for (the approval's command, the question, the login, the
 usage limit) and since when, with **Answer** or **Open**. Running agents show their prompt and how
 long they've run; finished ones you haven't seen show their title. Between the tiles and these cards
@@ -391,8 +392,17 @@ instead. Each state has a shape of its own, so it reads without its color:
 | Square | Stopped, Exited | The AgentAPI stopped (or missed three heartbeats while unreachable), or its agent exited and AgentAPI gave up starting it again |
 
 Search (**/**) matches any word of a name, group, title, machine, agent or version. The chips under
-it show all agents or only those that need you, work, finished unseen, or are offline, each with its
-count.
+it show all agents or only those that need you, work, finished unseen, or are offline. Once the hub
+watches more than one kind of agent, a second row picks agents, with a chip for each kind it
+watches: Claude Code, Codex, Pi, and **Other** for the rest (an AgentAPI 2's agent such as aider,
+`native-demo`, or one that hasn't reported its agent yet). Pick several to see any of them; pick one
+again to take it out, or **Any agent** to clear them all. An agent shows when it matches the search,
+the state and one of the agents picked. Each chip counts what the other row lets through, so its number is what picking it
+shows; the search doesn't change the counts. **Show all** on an empty list clears all three. Each
+browser remembers the agents picked.
+
+![The list filtered to Claude Code and Codex agents that need you](screenshots/hub-agent-filter.png)
+
 The header says whether the hub's stream is live and how many agents there are; the tab's title and
 icon count the ones that need you, so a pinned tab shows it. The stream reconnects as the chat's
 does, and a stream silent for 45 s (the hub sends a heartbeat every 15 s) counts as lost.
