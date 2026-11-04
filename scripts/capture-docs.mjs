@@ -1058,6 +1058,17 @@ try {
       await elementShot(page, page.locator('aside'), 'hub-recent.png');
       await order.getByRole('button', {name: 'Groups'}).click();
       await groupHeader.waitFor();
+      // The list filtered by agent and state at once: Claude Code and Codex, those that need you.
+      const byAgent = page.getByRole('group', {name: 'Filter by agent'});
+      await byAgent.getByRole('button', {name: /^Claude Code/}).click();
+      await byAgent.getByRole('button', {name: /^Codex/}).click();
+      await page.getByRole('group', {name: 'Filter the agents'}).getByRole('button', {name: /^Need you/}).click();
+      await page.locator('[data-hub-row]').nth(4).waitFor({state: 'detached'});
+      await page.waitForTimeout(300);
+      await elementShot(page, page.locator('aside'), 'hub-agent-filter.png');
+      await page.getByRole('group', {name: 'Filter the agents'}).getByRole('button', {name: /^All/}).click();
+      await byAgent.getByRole('button', {name: /^Any agent/}).click();
+      await groupHeader.waitFor();
       // The Add dialog: joining a machine, the secret masked, and adding an instance by its URL.
       await page.getByRole('button', {name: 'Add agents'}).click();
       const addDialog = page.getByRole('dialog');

@@ -1,6 +1,6 @@
 {
-  "captured_at": "2026-11-03T15:43:47.910Z",
-  "agentapi_version": "3.0.0",
+  "captured_at": "2026-11-04T01:24:50.082Z",
+  "agentapi_version": "3.0.1",
   "agents": [
     "native-demo",
     "native-demo posing as Claude Code",
@@ -67,6 +67,7 @@
     "hub-work.png",
     "hub-versions.png",
     "hub-recent.png",
+    "hub-agent-filter.png",
     "hub-add.png",
     "hub-instance.png",
     "hub-desktop-dark.png",

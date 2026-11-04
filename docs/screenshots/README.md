@@ -2,7 +2,7 @@
 
 The [chat UI guide](../chat-ui.md) and [README](../../README.md) use these screenshots and GIFs.
 Chromium captured them from AgentAPI 3.0.0, built from the source with `make build`, serving the
-production chat UI and API.
+production chat UI and API; the hub's views that show its list, and its versions card, from 3.0.1.
 
 [scripts/capture-docs.mjs](../../scripts/capture-docs.mjs) starts its own servers on a small sample
 project, `my-app` (a page with a stylesheet, a script and release notes, two commits and
@@ -22,7 +22,7 @@ uncommitted changes):
   stopped and one was killed, so the hub can't reach it. Six are in two groups, and two of those
   are pinned to the top. The one that asks questions can run a binary stamped with an older
   version (`AGENTAPI_OLDER_BINARY`), so that it shows as older than the hub: 2.0.0 beside the
-  hub's 3.0.0 in the screenshots. The hub starts on a file that says how long each instance
+  hub's 3.0.1 in the screenshots. The hub starts on a file that says how long each instance
   worked over the last week, as a hub that watched them would keep it, since a demo doesn't run
   for hours. A second, empty hub shows the guide for the first agents. The rows name the machine;
   the screenshots show placeholders (`dev-1` and so on).
@@ -77,6 +77,7 @@ device scale factor of 1.
 | [hub-list.png](hub-list.png) | The hub's list: two pinned agents, then two groups and Ungrouped, with every state's glyph: approval, question, login, usage limit, working, finished, idle, unreachable, stopped; and each agent's AgentAPI version, one older than the hub |
 | [hub-add.png](hub-add.png) | The Add dialog: joining a machine (the hub's address, updates from the hub, the command and a prompt for an agent, the secret masked), or adding an instance by its URL and token |
 | [hub-recent.png](hub-recent.png) | The hub's list by the agents' latest changes: the pinned agents, then one list without group headers, the most recent first, and each row's group where it has room |
+| [hub-agent-filter.png](hub-agent-filter.png) | The hub's list filtered by agent and state: Claude Code and Codex, those that need you |
 | [hub-phone.png](hub-phone.png) | The hub's list on a phone: the pinned agents, then the groups |
 | [hub-phone-menu.png](hub-phone-menu.png) | A row's menu on a phone: Pin to top, its group, a new one, and Forget |
 | [hub-muted.png](hub-muted.png) | The list on a phone with an agent's login wait muted |
