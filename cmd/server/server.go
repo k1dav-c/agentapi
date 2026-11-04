@@ -160,10 +160,12 @@ func runServer(ctx context.Context, logger *slog.Logger, args []string, self *se
 // database it starts a new session, which would get the prompt again.
 const initialPromptSentEnv = "AGENTAPI_INITIAL_PROMPT_SENT"
 
-// initialPromptOnce returns the initial prompt to send, prompt or none if
-// the program that restarted in place into this one sent it, and has self
-// run again with initialPromptSentEnv. With a state database it returns
-// prompt: the restored conversation has it, so it isn't sent again.
+// initialPromptOnce returns the initial prompt to send: prompt, or none if
+// the program that restarted in place into this one sent it, in which case
+// self carries that on to the next restart. Otherwise self carries it once
+// the agent got the prompt (markInitialPromptSent). With a state database
+// it returns prompt: the restored conversation has it, so it isn't sent
+// again.
 func initialPromptOnce(prompt string, stateDB bool, logger *slog.Logger, self *selfExec) string {
 	_, sent := os.LookupEnv(initialPromptSentEnv)
 	_ = os.Unsetenv(initialPromptSentEnv)
@@ -171,8 +173,11 @@ func initialPromptOnce(prompt string, stateDB bool, logger *slog.Logger, self *s
 	if prompt == "" || stateDB {
 		return prompt
 	}
-	self.setEnv(initialPromptSentEnv, "1")
+	if self != nil {
+		self.carryPromptSent = true
+	}
 	if sent {
+		self.markInitialPromptSent()
 		logger.Info("Not sending the initial prompt again after the restart in place")
 		return ""
 	}
@@ -230,19 +235,20 @@ func isGeneratedAPIToken(token string) bool {
 // self, if set, restarts it in place.
 func serverConfig(opts serverOptions, agent *runningAgent, stateDB *statedb.DB, apiToken, cwd string, prices *pricing.Table, self *selfExec) httpapi.ServerConfig {
 	config := httpapi.ServerConfig{
-		AgentType:      opts.agentType,
-		Port:           opts.port,
-		ChatBasePath:   opts.chatBasePath,
-		AllowedHosts:   opts.allowedHosts,
-		AllowedOrigins: opts.allowedOrigins,
-		InitialPrompt:  opts.initialPrompt,
-		CWD:            cwd,
-		APIToken:       apiToken,
-		Bind:           opts.bind,
-		Webhook:        opts.webhook,
-		Name:           opts.name,
-		StateDB:        stateDB,
-		RegistryDir:    opts.registryDir,
+		AgentType:         opts.agentType,
+		Port:              opts.port,
+		ChatBasePath:      opts.chatBasePath,
+		AllowedHosts:      opts.allowedHosts,
+		AllowedOrigins:    opts.allowedOrigins,
+		InitialPrompt:     opts.initialPrompt,
+		InitialPromptSent: self.markInitialPromptSent,
+		CWD:               cwd,
+		APIToken:          apiToken,
+		Bind:              opts.bind,
+		Webhook:           opts.webhook,
+		Name:              opts.name,
+		StateDB:           stateDB,
+		RegistryDir:       opts.registryDir,
 		// SIGUSR2 (handleSignals).
 		RestartsInPlace: runtime.GOOS != "windows",
 		Update:          httpapi.UpdateConfig{Allowed: opts.allowUpdate},

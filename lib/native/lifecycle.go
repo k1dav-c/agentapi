@@ -127,6 +127,9 @@ func (c *Conversation) beginInitialPromptLocked(prompt Input) *pendingTurn {
 		c.cfg.Emitter.EmitError(fmt.Sprintf("Failed to send the initial prompt: %v", err), conv.ErrorLevelError)
 		return nil
 	}
+	if c.cfg.InitialPromptSent != nil {
+		c.cfg.InitialPromptSent()
+	}
 	return &t
 }
 

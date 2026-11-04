@@ -72,10 +72,13 @@ type Config struct {
 	// AgentAPI restarted). The initial prompt is not sent again.
 	InitialMessages []conv.Message
 	InitialPrompt   string
-	Emitter         conv.Emitter
-	Observer        Observer
-	Logger          *slog.Logger
-	Clock           quartz.Clock
+	// InitialPromptSent, if set, is called once the initial prompt's turn
+	// began, under the conversation's lock.
+	InitialPromptSent func()
+	Emitter           conv.Emitter
+	Observer          Observer
+	Logger            *slog.Logger
+	Clock             quartz.Clock
 	// StartTimeout bounds how long Start waits for the agent to accept
 	// turns. Zero means two minutes.
 	StartTimeout time.Duration

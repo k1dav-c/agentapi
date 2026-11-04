@@ -11,7 +11,8 @@
 - The chat keeps the 50 closed requests the server keeps (it kept 100), so a chat that resumes with
   `?since=` holds the same requests as one that loads the full state.
 - Without `--state-db`, a restart in place (SIGUSR2, `POST /update`, `agentapi restart`) no longer
-  sends `--initial-prompt` again into the new session.
+  sends `--initial-prompt` again into the new session once the agent got it; a restart before then
+  still sends it.
 - Claude Code costs: an unitemized call now holds only tokens Claude Code counted that its log
   didn't list, priced at AgentAPI's prices. A difference in price alone (the same tokens) no longer
   shows as an unitemized call; the server logs it once per model.
