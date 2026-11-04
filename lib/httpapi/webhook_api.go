@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -148,6 +149,11 @@ func (w *webhookAPI) getWebhookConfig(_ context.Context, _ *struct{}) (*WebhookC
 }
 
 func (w *webhookAPI) updateWebhookConfig(_ context.Context, request *WebhookConfigRequest) (*WebhookConfigResponse, error) {
+	// Omitted fields keep their value: the read, the change and the write
+	// (and the copy kept in the state database) are one step, so a
+	// concurrent PUT can't write over this one's fields.
+	w.updateMu.Lock()
+	defer w.updateMu.Unlock()
 	config := w.webhook.Config()
 	previousURL := config.URL
 	config.URL = request.Body.URL
@@ -215,8 +221,10 @@ func (w *webhookAPI) testWebhook(ctx context.Context, _ *struct{}) (*WebhookTest
 // webhookAPI reads and changes the webhook, and keeps a change in the
 // state database (nil without one).
 type webhookAPI struct {
-	webhook *webhook.Dispatcher
-	stateDB *statedb.DB
+	// updateMu makes PUT /webhook requests take turns.
+	updateMu sync.Mutex
+	webhook  *webhook.Dispatcher
+	stateDB  *statedb.DB
 	// instanceChanged tells the summary's subscribers and the registry the
 	// instance's ID or URL may have changed.
 	instanceChanged func()

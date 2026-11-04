@@ -321,3 +321,63 @@ func TestWebhookObserverRunsForItsEvents(t *testing.T) {
 	put("", "*")
 	assert.Zero(t, subscriptions(), "stopped when the URL went")
 }
+
+// Concurrent PUT /webhook requests, each changing one optional field, all
+// keep their change: a PUT reads the configuration, changes it and writes
+// it back, and none of them may write over another's.
+func TestWebhookConcurrentUpdatesKeepEveryField(t *testing.T) {
+	t.Parallel()
+	d := testDispatcher(t, WebhookConfig{}, quartz.NewReal())
+	d.SetInstance(WebhookInstance{ID: "dev-1:3285", Port: 3285})
+	api := &webhookAPI{webhook: d}
+
+	base := func() *WebhookConfigRequest {
+		request := &WebhookConfigRequest{}
+		request.Body.URL = "https://example.com/hook"
+		request.Body.TimeoutSeconds = 5
+		request.Body.MaxAttempts = 3
+		return request
+	}
+	for round := range 50 {
+		reset := base()
+		empty, zero, none := "", 0, []string{}
+		reset.Body.PayloadTemplate, reset.Body.Secret, reset.Body.InstanceID, reset.Body.PublicURL = &empty, &empty, &empty, &empty
+		reset.Body.HeartbeatSeconds, reset.Body.Events = &zero, &none
+		_, err := api.updateWebhookConfig(t.Context(), reset)
+		require.NoError(t, err)
+
+		tmpl, secret, id, public, heartbeat, events := `{"r":1}`, "s3cret", "inst-1", "http://example.com:3285", 7, []string{"*"}
+		changes := []func(*WebhookConfigRequest){
+			func(r *WebhookConfigRequest) { r.Body.PayloadTemplate = &tmpl },
+			func(r *WebhookConfigRequest) { r.Body.Secret = &secret },
+			func(r *WebhookConfigRequest) { r.Body.InstanceID = &id },
+			func(r *WebhookConfigRequest) { r.Body.PublicURL = &public },
+			func(r *WebhookConfigRequest) { r.Body.HeartbeatSeconds = &heartbeat },
+			func(r *WebhookConfigRequest) { r.Body.Events = &events },
+		}
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		for _, change := range changes {
+			request := base()
+			change(request)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				_, err := api.updateWebhookConfig(context.Background(), request)
+				assert.NoError(t, err)
+			}()
+		}
+		close(start)
+		wg.Wait()
+
+		got, err := api.getWebhookConfig(t.Context(), nil)
+		require.NoError(t, err)
+		require.Equal(t, tmpl, got.Body.PayloadTemplate, "round %d", round)
+		require.True(t, got.Body.SecretSet, "round %d", round)
+		require.Equal(t, id, got.Body.InstanceID, "round %d", round)
+		require.Equal(t, public, got.Body.PublicURL, "round %d", round)
+		require.Equal(t, heartbeat, got.Body.HeartbeatSeconds, "round %d", round)
+		require.Equal(t, events, got.Body.Events, "round %d", round)
+	}
+}
