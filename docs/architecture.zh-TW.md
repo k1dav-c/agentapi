@@ -355,6 +355,9 @@ type Factory func(resume Resume) (Adapter, error)
 - 收回訊息等無法用更新表達的變更，會產生新的 epoch 並結束對話訂閱。用戶端以舊 epoch
   重新連線後，會收到 SSE id 正確的完整重播。訂閱落後超過緩衝，或開啟工作階段需串流超過
   緩衝四分之一的結構化訊息時，也會結束訂閱。
+- emitter 保留待處理的請求，以及最後關閉的 50 個（`native.MaxClosedRequests`）。更早關閉的請求
+  被丟掉時不會送出事件，所以以 `since=` 接續的用戶端也要套用同樣的上限：手上已關閉的請求只留
+  `closed_at` 最晚的 50 個，也就是完整重播會給的那些。聊天介面在 `mergeRequests` 裡這樣做。
 - emitter 推導任務（`tasks.go`）。使用者訊息開始任務，執行中加入的訊息會
   steer 該任務；agent 閒置且沒有待處理請求時，任務結束。回答後若 agent
   暫時閒置，計時器會先留 3 秒讓它恢復工作；這段時間送出的訊息會開始新任務，因為 agent 沒有在工作。

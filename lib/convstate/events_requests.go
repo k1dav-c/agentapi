@@ -42,7 +42,9 @@ func (e *EventEmitter) EmitRequest(state native.RequestState) {
 
 // trimRequestsLocked drops the closed requests beyond the
 // native.MaxClosedRequests the conversation keeps too: those that closed
-// first. Caller holds e.mu.
+// first. Caller holds e.mu. No event says so: a client keeps the same
+// bound (the chat's mergeRequests), so what it holds after a replay since
+// a seq is what a full replay gives.
 func (e *EventEmitter) trimRequestsLocked() {
 	drop := native.ExcessClosed(len(e.requests), func(i int) *native.RequestState { return &e.requests[i] })
 	for n, i := range drop {

@@ -451,6 +451,11 @@ usage limit stop, login).
   with the old epoch to receive a full replay with the correct SSE IDs.
   Subscriptions also close if they fall behind their buffer, or if opening
   a session would stream more than a quarter of a buffer of rich messages.
+- The emitter keeps the pending requests and the 50 that closed last
+  (`native.MaxClosedRequests`). It drops an older closed request without an
+  event, so a client that resumes with `since=` keeps the same bound: of the
+  closed requests it holds, the 50 with the latest `closed_at`, which is what
+  a full replay gives. The chat does this in `mergeRequests`.
 - The emitter derives tasks (`tasks.go`). A user message
   starts a task; messages added during it steer the task. It ends when the
   agent is idle with no open request. After an answer
