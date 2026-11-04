@@ -171,7 +171,10 @@ emitter. Handlers call the conversation and read state from the emitter.
    stderr; every other file Go opened closes on exec. A token a bare
    `--api-token` generated goes along in `AGENTAPI_GENERATED_API_TOKEN`,
    which the new program takes instead of generating one and removes from
-   its environment, so clients stay signed in. A shutdown signal
+   its environment, so clients stay signed in. Without a state DB, an
+   initial prompt that went out is marked in `AGENTAPI_INITIAL_PROMPT_SENT`,
+   so the new session doesn't get it again; with one, the restored
+   conversation has it. A shutdown signal
    during the stop wins. Each registry entry says the server restarts in
    place (`restarts_in_place`), for `agentapi restart`.
 

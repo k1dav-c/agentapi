@@ -142,7 +142,9 @@ flowchart TB
    最後一行）並繼續提供服務。成功時，伺服器依第 5 步停止，但保留 PID 檔（PID 不變），再以
    `syscall.Exec` 重新執行程式，沿用 stdin、stdout 和 stderr；Go 開啟的其他檔案都會在 exec 時關閉。
    不帶值的 `--api-token` 產生的 token 會透過 `AGENTAPI_GENERATED_API_TOKEN` 傳下去，新程式直接
-   採用它而不另外產生，並從自己的環境變數移除，用戶端因此不必重新登入。
+   採用它而不另外產生，並從自己的環境變數移除，用戶端因此不必重新登入。沒有狀態資料庫時，送出過的
+   初始提示會以 `AGENTAPI_INITIAL_PROMPT_SENT` 標記，新的工作階段不會再收到；有狀態資料庫時，
+   還原的對話已經有它了。
    停止期間收到關閉訊號時，以關閉為準。每個登記檔都會註明伺服器能原地重新啟動
    （`restarts_in_place`），供 `agentapi restart` 判斷。
 

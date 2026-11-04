@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -249,4 +250,41 @@ func TestGeneratedAPITokenSurvivesRestart(t *testing.T) {
 		_, ok := envValue(self.env, generatedAPITokenEnv)
 		assert.False(t, ok, given)
 	}
+}
+
+// Without a state database, the program a restart in place runs gets the
+// same --initial-prompt but doesn't send it again: initialPromptSentEnv
+// says it went out. With one, the restored conversation has it, and the
+// variable isn't carried.
+func TestInitialPromptNotSentAgainAfterRestart(t *testing.T) {
+	logger := slog.New(slog.DiscardHandler)
+	t.Setenv(initialPromptSentEnv, "")
+	require.NoError(t, os.Unsetenv(initialPromptSentEnv))
+
+	self := &selfExec{env: []string{"PATH=/usr/bin"}}
+	assert.Equal(t, "fix the bug", initialPromptOnce("fix the bug", false, logger, self))
+	sent, ok := envValue(self.env, initialPromptSentEnv)
+	require.True(t, ok, "the restarted program is told")
+
+	// The program runs again with self.env.
+	t.Setenv(initialPromptSentEnv, sent)
+	again := &selfExec{env: self.env}
+	assert.Empty(t, initialPromptOnce("fix the bug", false, logger, again))
+	_, set := os.LookupEnv(initialPromptSentEnv)
+	assert.False(t, set, "the agent's environment doesn't get it")
+	_, ok = envValue(again.env, initialPromptSentEnv)
+	assert.True(t, ok, "and a further restart doesn't send it either")
+
+	// With a state database the prompt goes to the conversation, which
+	// skips it once restored, and nothing is carried.
+	t.Setenv(initialPromptSentEnv, sent)
+	withDB := &selfExec{env: slices.Clone(self.env)}
+	assert.Equal(t, "fix the bug", initialPromptOnce("fix the bug", true, logger, withDB))
+	_, ok = envValue(withDB.env, initialPromptSentEnv)
+	assert.False(t, ok)
+
+	// No prompt, nothing carried.
+	none := &selfExec{}
+	assert.Empty(t, initialPromptOnce("", false, logger, none))
+	assert.Empty(t, none.env)
 }

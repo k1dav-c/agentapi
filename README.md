@@ -1867,7 +1867,7 @@ answers on its port again with a new `server_id`, and prints its new version.
 
 - With `--state-db`, the conversation stays and the agent resumes its
   session. Without it, the AgentAPI starts a new conversation, as after any
-  restart.
+  restart, without the `--initial-prompt` it sent before.
 - Only your own AgentAPIs restart, and only when the registry entry names a
   running `agentapi server`. Under `sudo`, they are those of the user who ran
   `sudo`. An AgentAPI of an earlier release can't restart in place:

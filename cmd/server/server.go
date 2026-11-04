@@ -94,6 +94,7 @@ func runServer(ctx context.Context, logger *slog.Logger, args []string, self *se
 			return err
 		}
 	}
+	opts.initialPrompt = initialPromptOnce(opts.initialPrompt, opts.stateDB != "" && !opts.printOpenAPI, logger, self)
 	if opts.pidFile != "" {
 		if err := writePIDFile(opts.pidFile, logger); err != nil {
 			return fmt.Errorf("failed to write PID file: %w", err)
@@ -151,6 +152,31 @@ func runServer(ctx context.Context, logger *slog.Logger, args []string, self *se
 		logger.Warn(warning)
 	}
 	return serve(ctx, logger, srv, self)
+}
+
+// initialPromptSentEnv tells the program a restart in place runs that
+// the initial prompt went out already: it gets the same arguments
+// (--initial-prompt, or AGENTAPI_INITIAL_PROMPT), and without a state
+// database it starts a new session, which would get the prompt again.
+const initialPromptSentEnv = "AGENTAPI_INITIAL_PROMPT_SENT"
+
+// initialPromptOnce returns the initial prompt to send, prompt or none if
+// the program that restarted in place into this one sent it, and has self
+// run again with initialPromptSentEnv. With a state database it returns
+// prompt: the restored conversation has it, so it isn't sent again.
+func initialPromptOnce(prompt string, stateDB bool, logger *slog.Logger, self *selfExec) string {
+	_, sent := os.LookupEnv(initialPromptSentEnv)
+	_ = os.Unsetenv(initialPromptSentEnv)
+	self.setEnv(initialPromptSentEnv, "")
+	if prompt == "" || stateDB {
+		return prompt
+	}
+	self.setEnv(initialPromptSentEnv, "1")
+	if sent {
+		logger.Info("Not sending the initial prompt again after the restart in place")
+		return ""
+	}
+	return prompt
 }
 
 // generatedAPITokenEnv carries a generated API token to the program a

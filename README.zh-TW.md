@@ -1593,7 +1593,7 @@ workspace 的啟動腳本）仍然有效，輸出也照舊寫到原本的地方�
 `server_id` 在原連接埠上回應，並印出新版本。
 
 - 使用 `--state-db` 時，對話會保留，agent 也會接續原本的工作階段；沒有時，AgentAPI 會和
-  其他重新啟動一樣開始新的對話。
+  其他重新啟動一樣開始新的對話，但不會再送出先前送過的 `--initial-prompt`。
 - 只會重新啟動你自己的 AgentAPI，而且登記檔必須對應到執行中的 `agentapi server`。透過 `sudo`
   執行時，指的是執行 `sudo` 那位使用者的 AgentAPI。較早的版本無法原地重新啟動，
   `agentapi restart` 會指出來：這一次請自行重新啟動。
