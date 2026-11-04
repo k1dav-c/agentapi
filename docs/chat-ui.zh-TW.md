@@ -5,7 +5,7 @@
 開啟 `/chat` 即可使用 `agentapi` 執行檔內建的聊天介面。適用於桌面與手機，
 透過 [HTTP API](../README.zh-TW.md#http-api-參考) 與伺服器溝通。
 
-截圖和動畫是 AgentAPI v3.0.0 搭配內建 `native-demo` agent 處理一個小型範例網站的畫面；
+截圖和動畫是 AgentAPI v3.1.0 搭配內建 `native-demo` agent 處理一個小型範例網站的畫面；
 demo 的回覆、工具結果、模型和用量都是模擬的。動畫會
 在滑鼠指標所在及點擊的位置畫上藍點。[scripts/capture-docs.mjs](../scripts/capture-docs.mjs)
 可以重新擷取所有截圖和動畫（見[截圖說明](screenshots/README.md)）。
@@ -431,7 +431,7 @@ agent 的警告和錯誤（失敗的回合、它忽略的設定）會以角落�
 [hub](../README.zh-TW.md#執行-hub)（`agentapi hub serve`）會替它監看的每個 AgentAPI 提供這個聊天
 介面。它的清單把釘選的 agent 排在最上方，其他的則把需要你處理的排前面，也可以改成最近變動的排前面；
 每種狀態都有自己的圖示，並寫出每個 agent 在等什麼（核准的指令、提問）或在做什麼；可以用搜尋和標籤
-篩選。桌面上的總覽會統計各種狀態，列出需要你處理、工作中和你上次查看後完成的 agent，並加總最近
+（狀態、agent）篩選。桌面上的總覽會統計各種狀態，列出需要你處理、工作中和你上次查看後完成的 agent，並加總最近
 24 小時和 7 天的花費、token 和工作時間。點選一個 agent，就會在清單旁（手機上則取代清單，並有返回
 按鈕）以這個聊天介面開啟它，上方只有一列：hub 的列，聊天介面自己的按鈕也放在裡面。
 開啟時透過 hub，hub 會替你送出實例的 token。

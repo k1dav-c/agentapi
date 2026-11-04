@@ -6,7 +6,7 @@ AgentAPI 提供統一的 HTTP API，讓你控制 [Claude Code](https://github.co
 
 ![AgentAPI 聊天介面中的兩個任務：提示詞、工具呼叫、思考旁註和輸入框](docs/screenshots/chat-desktop.png)
 
-截圖使用 AgentAPI v3.0.0 與內建的 `native-demo` agent；回覆、工具結果、模型和用量都是模擬的。
+截圖使用 AgentAPI v3.1.0 與內建的 `native-demo` agent；回覆、工具結果、模型和用量都是模擬的。
 功能與動畫見[聊天介面導覽](docs/chat-ui.zh-TW.md)，重新擷取的方法見[截圖說明](docs/screenshots/README.md)。
 
 AgentAPI 可以用來：

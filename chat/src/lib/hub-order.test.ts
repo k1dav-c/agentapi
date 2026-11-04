@@ -1,5 +1,5 @@
 import {describe, expect, test} from "bun:test";
-import {groupInstances, type HubInstance, type Summary} from "./hub";
+import {groupInstances, type HubAgent, type HubInstance, type Summary} from "./hub";
 import {changedAt, listSections, movePin, parseListOrder, pinnedKey, pinOf, recentKey, sortPinned, sortRecent, type ListSection} from "./hub-order";
 
 const summary = (overrides: Partial<Summary> = {}): Summary =>
@@ -16,6 +16,9 @@ const summary = (overrides: Partial<Summary> = {}): Summary =>
     seen_at: "2026-10-26T00:00:00Z",
     ...overrides,
   }) as Summary;
+
+// No agent picked: every agent.
+const none = new Set<HubAgent>();
 
 const instance = (id: string, overrides: Partial<HubInstance> = {}): HubInstance => ({
   id,
@@ -126,7 +129,7 @@ describe("listSections", () => {
   const shape = (sections: ListSection[]) => sections.map((section) => [section.label, ids(section.instances)]);
 
   test("groups: what groupInstances makes of what passes, each with a header once there is a group", () => {
-    const sections = listSections(rows, {filter: "all", query: "", order: "groups"});
+    const sections = listSections(rows, {agents: none, filter: "all", query: "", order: "groups"});
     expect(sections.map(({name, instances, needsYou}) => ({name, instances, needsYou}))).toEqual(groupInstances(rows));
     expect(sections.map((section) => [section.key, section.label])).toEqual([
       ["Clients", "Clients"],
@@ -137,29 +140,29 @@ describe("listSections", () => {
 
   test("groups: no group, no headers", () => {
     const ungrouped = rows.map((row) => ({...row, group: undefined}));
-    expect(shape(listSections(ungrouped, {filter: "all", query: "", order: "groups"}))).toEqual([["", ["checkout", "billing", "docs", "site", "legacy"]]]);
+    expect(shape(listSections(ungrouped, {agents: none, filter: "all", query: "", order: "groups"}))).toEqual([["", ["checkout", "billing", "docs", "site", "legacy"]]]);
   });
 
   test("recent: one block with no header, those with tasks first, each part by the latest change", () => {
-    const sections = listSections(rows, {filter: "all", query: "", order: "recent"});
+    const sections = listSections(rows, {agents: none, filter: "all", query: "", order: "recent"});
     expect(sections.map((section) => [section.key, section.label, section.name, ids(section.instances), section.needsYou])).toEqual([
       [recentKey, "", "", ["billing", "docs", "checkout", "legacy", "site"], 1],
     ]);
   });
 
   test("the filter and the search apply to both orders", () => {
-    expect(listSections(rows, {filter: "offline", query: "", order: "recent"}).map((section) => ids(section.instances))).toEqual([["legacy"]]);
-    expect(listSections(rows, {filter: "all", query: "deploy", order: "recent"}).map((section) => ids(section.instances))).toEqual([["docs", "checkout"]]);
-    expect(shape(listSections(rows, {filter: "all", query: "deploy", order: "groups"}))).toEqual([
+    expect(listSections(rows, {agents: none, filter: "offline", query: "", order: "recent"}).map((section) => ids(section.instances))).toEqual([["legacy"]]);
+    expect(listSections(rows, {agents: none, filter: "all", query: "deploy", order: "recent"}).map((section) => ids(section.instances))).toEqual([["docs", "checkout"]]);
+    expect(shape(listSections(rows, {agents: none, filter: "all", query: "deploy", order: "groups"}))).toEqual([
       ["Clients", ["checkout"]],
       ["Ungrouped", ["docs"]],
     ]);
-    expect(listSections(rows, {filter: "working", query: "deploy", order: "recent"})).toEqual([]);
-    expect(listSections(rows, {filter: "working", query: "deploy", order: "groups"})).toEqual([]);
+    expect(listSections(rows, {agents: none, filter: "working", query: "deploy", order: "recent"})).toEqual([]);
+    expect(listSections(rows, {agents: none, filter: "working", query: "deploy", order: "groups"})).toEqual([]);
   });
 
   test("groups: the pinned ones first, in their order, and not again in their groups", () => {
-    const sections = listSections(pinned, {filter: "all", query: "", order: "groups"});
+    const sections = listSections(pinned, {agents: none, filter: "all", query: "", order: "groups"});
     expect(sections.map((section) => [section.key, section.label, ids(section.instances)])).toEqual([
       [pinnedKey, "Pinned", ["billing", "docs"]],
       ["Clients", "Clients", ["checkout", "site"]],
@@ -170,7 +173,7 @@ describe("listSections", () => {
   });
 
   test("recent: the pinned ones first, then the others by their latest change, under a header of their own", () => {
-    expect(shape(listSections(pinned, {filter: "all", query: "", order: "recent"}))).toEqual([
+    expect(shape(listSections(pinned, {agents: none, filter: "all", query: "", order: "recent"}))).toEqual([
       ["Pinned", ["billing", "docs"]],
       ["Recent changes", ["checkout", "legacy", "site"]],
     ]);
@@ -178,7 +181,7 @@ describe("listSections", () => {
 
   test("pinned ones and no group: the others under Ungrouped", () => {
     const ungrouped = pinned.map((row) => ({...row, group: undefined}));
-    expect(shape(listSections(ungrouped, {filter: "all", query: "", order: "groups"}))).toEqual([
+    expect(shape(listSections(ungrouped, {agents: none, filter: "all", query: "", order: "groups"}))).toEqual([
       ["Pinned", ["billing", "docs"]],
       ["Ungrouped", ["checkout", "site", "legacy"]],
     ]);
@@ -186,20 +189,43 @@ describe("listSections", () => {
 
   test("the pinned ones' section counts what needs you there", () => {
     const asks = pinned.map((row) => (row.id === "checkout" ? {...row, pin: 3} : row));
-    const [top] = listSections(asks, {filter: "all", query: "", order: "groups"});
+    const [top] = listSections(asks, {agents: none, filter: "all", query: "", order: "groups"});
     expect([ids(top.instances), top.needsYou]).toEqual([["billing", "docs", "checkout"], 1]);
   });
 
   test("the filter and the search apply to the pinned ones too; a section none passes isn't there", () => {
-    expect(shape(listSections(pinned, {filter: "working", query: "", order: "groups"}))).toEqual([["Pinned", ["billing"]]]);
-    expect(shape(listSections(pinned, {filter: "all", query: "deploy", order: "recent"}))).toEqual([
+    expect(shape(listSections(pinned, {agents: none, filter: "working", query: "", order: "groups"}))).toEqual([["Pinned", ["billing"]]]);
+    expect(shape(listSections(pinned, {agents: none, filter: "all", query: "deploy", order: "recent"}))).toEqual([
       ["Pinned", ["docs"]],
       ["Recent changes", ["checkout"]],
     ]);
     // No pinned one passes: the list as it is without pins.
-    expect(shape(listSections(pinned, {filter: "offline", query: "", order: "recent"}))).toEqual([["", ["legacy"]]]);
-    expect(shape(listSections(pinned, {filter: "needs-you", query: "", order: "groups"}))).toEqual([["Clients", ["checkout"]]]);
-    expect(listSections(pinned, {filter: "all", query: "nothing like it", order: "groups"})).toEqual([]);
+    expect(shape(listSections(pinned, {agents: none, filter: "offline", query: "", order: "recent"}))).toEqual([["", ["legacy"]]]);
+    expect(shape(listSections(pinned, {agents: none, filter: "needs-you", query: "", order: "groups"}))).toEqual([["Clients", ["checkout"]]]);
+    expect(listSections(pinned, {agents: none, filter: "all", query: "nothing like it", order: "groups"})).toEqual([]);
+  });
+
+  test("the agents picked apply with the filter and the search, to the pinned ones too", () => {
+    // billing and checkout run Codex, legacy an agent of AgentAPI 2; the rest Claude Code.
+    const agentOf: Record<string, string> = {billing: "codex", checkout: "codex", legacy: "aider"};
+    const mixed = pinned.map((row) => ({...row, agent_type: agentOf[row.id] ?? "claude"}));
+    const view = (agents: HubAgent[], filter: "all" | "working" = "all", query = "") => shape(listSections(mixed, {agents: new Set(agents), filter, query, order: "groups"}));
+    expect(view(["codex"])).toEqual([
+      ["Pinned", ["billing"]],
+      ["Clients", ["checkout"]],
+    ]);
+    expect(view(["codex", "other"])).toEqual([
+      ["Pinned", ["billing"]],
+      ["Clients", ["checkout"]],
+      ["Internal", ["legacy"]],
+    ]);
+    expect(view(["codex"], "working")).toEqual([["Pinned", ["billing"]]]);
+    expect(view(["claude"], "all", "deploy")).toEqual([["Pinned", ["docs"]]]);
+    expect(view(["pi"])).toEqual([]);
+    expect(shape(listSections(mixed, {agents: new Set(["codex"]), filter: "all", query: "", order: "recent"}))).toEqual([
+      ["Pinned", ["billing"]],
+      ["Recent changes", ["checkout"]],
+    ]);
   });
 });
 

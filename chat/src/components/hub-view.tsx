@@ -4,12 +4,31 @@ import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from
 import {Bell, BellOff, Plus, Search, X} from "lucide-react";
 import {ModeToggle} from "@/components/mode-toggle";
 import {Button} from "@/components/ui/button";
-import {chatURL, countFilters, displayName, formatUSD, groupNames, groupOf, hubRoot, spendTitle, spendTotals, type HubFilter} from "@/lib/hub";
+import {
+  agentsIn,
+  chatURL,
+  countAgents,
+  countFilters,
+  displayName,
+  formatUSD,
+  groupNames,
+  groupOf,
+  hubRoot,
+  matchesAgents,
+  nothingMatches,
+  parseAgents,
+  shownAgents,
+  spendTitle,
+  spendTotals,
+  type HubAgent,
+  type HubFilter,
+} from "@/lib/hub";
 import {listSections, movePin, pinOf, sortPinned} from "@/lib/hub-order";
 import {useStableCallback} from "@/lib/use-stable-callback";
 import {cn} from "@/lib/utils";
 import {HubMark} from "./hub/brand";
 import {AddInstance, GroupName, type Naming} from "./hub/dialogs";
+import {AgentChips, StatusChips} from "./hub/filter-chips";
 import {HubClock} from "./hub/clock";
 import {basePath, FrameInfo, InstanceBar} from "./hub/instance-bar";
 import {GroupHeader, InstanceRow, type RowActions} from "./hub/instance-row";
@@ -26,17 +45,11 @@ import {useHubKeys} from "./hub/use-hub-keys";
 import {useHubStream} from "./hub/use-hub-stream";
 import {useNeedsYou} from "./hub/use-needs-you";
 
-// Where the browser keeps which groups are folded, and whether to notify.
+// Where the browser keeps which groups are folded, whether to notify, and
+// the agents the list is filtered by.
 const collapsedKey = "agentapi.hub.collapsed";
 const notifyKey = "agentapi.hub.notify";
-
-const filters: {id: HubFilter; label: string}[] = [
-  {id: "all", label: "All"},
-  {id: "needs-you", label: "Need you"},
-  {id: "working", label: "Working"},
-  {id: "unread", label: "Unseen"},
-  {id: "offline", label: "Offline"},
-];
+const agentsKey = "agentapi.hub.agents";
 
 // HubView is the hub's page: sign in, the instances in a sidebar (what
 // needs you first), and on the right either the overview or the chat of
@@ -48,6 +61,7 @@ export function HubView() {
     typeof window === "undefined" ? undefined : decodeURIComponent(window.location.hash.slice(1)) || undefined,
   );
   const [filter, setFilter] = useState<HubFilter>("all");
+  const [picked, setPicked] = useState<Set<HubAgent>>(() => parseAgents(readStorage<unknown>(agentsKey, [])));
   const [query, setQuery] = useState("");
   const [adding, setAdding] = useState(false);
   const [naming, setNaming] = useState<Naming | null>(null);
@@ -62,7 +76,14 @@ export function HubView() {
   const counts = useMemo(() => countFilters(all), [all]);
   const waiting = counts["needs-you"];
   const spend = useMemo(() => spendTotals(all), [all]);
-  const sections = useMemo(() => listSections(all, {filter, query, order}), [all, filter, query, order]);
+  // The agents the instances run get chips once there are two; the list is
+  // filtered by those picked that it has.
+  const presentAgents = useMemo(() => agentsIn(all), [all]);
+  const agents = useMemo(() => shownAgents(picked, presentAgents), [picked, presentAgents]);
+  // Each row of chips counts what the other row lets through.
+  const statusCounts = useMemo(() => (agents.size === 0 ? counts : countFilters(all.filter((instance) => matchesAgents(instance, agents)))), [all, agents, counts]);
+  const agentCounts = useMemo(() => countAgents(all, filter), [all, filter]);
+  const sections = useMemo(() => listSections(all, {filter, agents, query, order}), [all, filter, agents, query, order]);
   // The same list while the names are the same, so the rows don't render
   // again for it.
   const nameList = groupNames(all).join("\n");
@@ -124,6 +145,11 @@ export function HubView() {
       if (instance) void actions.setPinned(id, pinOf(instance) === undefined);
     },
   });
+
+  const pickAgents = useCallback((next: Set<HubAgent>) => {
+    setPicked(next);
+    writeStorage(agentsKey, [...next]);
+  }, []);
 
   const changeCollapsed = useCallback((change: (next: Set<string>) => void) => {
     setCollapsed((previous) => {
@@ -206,7 +232,7 @@ export function HubView() {
   if (session === "signed-out") return <SignIn root={root} onSignedIn={signedIn} />;
 
   const current = selected ? instances.get(selected) : undefined;
-  const filtered = filter !== "all" || query.trim() !== "";
+  const filtered = filter !== "all" || agents.size > 0 || query.trim() !== "";
   return (
     <HubClock fast={counts.working > 0}>
       <main className="app-frame flex overflow-hidden bg-background">
@@ -285,31 +311,9 @@ export function HubView() {
               </div>
               <ListOrderSwitch order={order} onChange={setOrder} />
             </div>
-            <div
-              role="group"
-              aria-label="Filter the agents"
-              className="-mx-4 flex gap-1.5 overflow-x-auto px-4 pb-0.5 [mask-image:linear-gradient(to_right,black_calc(100%-28px),transparent)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-            >
-              {filters.map((f) => {
-                const active = filter === f.id;
-                const count = counts[f.id];
-                return (
-                  <button
-                    key={f.id}
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => setFilter(active && f.id !== "all" ? "all" : f.id)}
-                    className={cn(
-                      "flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-medium outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50",
-                      active ? "border-foreground bg-foreground text-background" : "bg-background text-muted-foreground hover:text-foreground",
-                      !active && f.id === "needs-you" && count > 0 && "border-state-needs/40 text-state-needs",
-                    )}
-                  >
-                    {f.label}
-                    <span className={cn("tabular-nums", active ? "text-background/70" : "text-muted-foreground/70")}>{count}</span>
-                  </button>
-                );
-              })}
+            <div className="space-y-2">
+              <StatusChips filter={filter} counts={statusCounts} onChange={setFilter} />
+              {presentAgents.length > 1 && <AgentChips agents={presentAgents} picked={agents} counts={agentCounts} onChange={pickAgents} />}
             </div>
           </header>
 
@@ -343,7 +347,7 @@ export function HubView() {
               <li className="px-6 py-12 text-center">
                 <p className="text-sm font-medium">Nothing matches</p>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  {query ? `No agent matches “${query.trim()}”` : "No agent is in this state right now"}.
+                  {nothingMatches(query, filter, agents)}.
                 </p>
                 <Button
                   variant="outline"
@@ -351,6 +355,7 @@ export function HubView() {
                   className="mt-4"
                   onClick={() => {
                     setFilter("all");
+                    pickAgents(new Set());
                     setQuery("");
                   }}
                 >

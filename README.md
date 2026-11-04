@@ -7,7 +7,7 @@ Use AgentAPI to control [Claude Code](https://github.com/anthropics/claude-code)
 
 ![The AgentAPI chat with two tasks: prompts, tool calls, thinking notes and the composer](docs/screenshots/chat-desktop.png)
 
-The screenshots show AgentAPI v3.0.0 running the built-in `native-demo` agent. Its replies, tool
+The screenshots show AgentAPI v3.1.0 running the built-in `native-demo` agent. Its replies, tool
 results, models and usage are simulated. See the [chat UI guide](docs/chat-ui.md) for features and
 animations, or the [screenshot guide](docs/screenshots/README.md) to reproduce the captures.
 

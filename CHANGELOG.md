@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- The hub's list filters by agent too: a row of chips for Claude Code, Codex, Pi and Other (any
+  number at once), with the state filter and the search. The browser keeps the choice.
+
 ## v3.0.1
 
 ### Fixes

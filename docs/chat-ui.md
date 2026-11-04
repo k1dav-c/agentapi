@@ -5,7 +5,7 @@ English | [繁體中文](chat-ui.zh-TW.md)
 Open `/chat` to use the chat UI embedded in the `agentapi` binary. It works on desktops and phones,
 and talks to the server through the [HTTP API](../README.md#http-api-reference).
 
-Screenshots and animations show AgentAPI v3.0.0 running `native-demo` on a sample site. The demo's
+Screenshots and animations show AgentAPI v3.1.0 running `native-demo` on a sample site. The demo's
 replies, tool results, models and usage are simulated. A blue dot marks the pointer and clicks. To
 reproduce the captures, use [scripts/capture-docs.mjs](../scripts/capture-docs.mjs) as described in the
 [screenshot guide](screenshots/README.md).
@@ -471,7 +471,7 @@ While the keyboard is up, the page ends above it, so the composer and the key ba
 A [hub](../README.md#running-a-hub) (`agentapi hub serve`) serves this chat for every AgentAPI it
 watches. Its list puts the agents you pin on top, then what needs you first or the latest change
 first. Each state has a glyph of its own, and each row says what the agent waits for (the
-approval's command, the question) or does; search and chips filter the list. On a desktop, an
+approval's command, the question) or does; search and chips (state, agent) filter the list. On a desktop, an
 overview counts each state, shows what needs you, works or finished since you looked, and totals the
 spend, tokens and work time of the last 24 hours and 7 days. Picking an agent opens it in this chat
 beside the list (or instead of it on a phone, with a back button), under one bar: the hub's, with
