@@ -3,7 +3,7 @@
 // first, whatever the group. Each browser keeps its choice. The instances
 // pinned on the hub come first in both, in their own order.
 
-import {activity, displayName, instanceState, groupInstances, groupNames, matchesFilter, matchesSearch, needsYou, type HubFilter, type HubGroup, type HubInstance} from "./hub";
+import {activity, displayName, instanceState, groupInstances, groupNames, matchesAgents, matchesFilter, matchesSearch, needsYou, type HubAgent, type HubFilter, type HubGroup, type HubInstance} from "./hub";
 
 export type ListOrder = "groups" | "recent";
 
@@ -100,10 +100,12 @@ export function movePin(order: readonly string[], shown: readonly string[], id: 
   return moved;
 }
 
-// ListView is how the list shows the instances: which ones (the filter and
-// the search) and in what order.
+// ListView is how the list shows the instances: which ones (the filter, the
+// agents and the search) and in what order.
 export interface ListView {
   filter: HubFilter;
+  // agents are the agents picked; none is every agent.
+  agents: ReadonlySet<HubAgent>;
   query: string;
   order: ListOrder;
 }
@@ -124,14 +126,14 @@ export interface ListSection extends HubGroup {
   pinned?: true;
 }
 
-// listSections is what the list shows: the instances that pass the filter
-// and the search, the pinned ones first, then the others in their groups or
+// listSections is what the list shows: the instances that pass the filter,
+// the agents and the search, the pinned ones first, then the others in their groups or
 // by their latest change; none when none passes. Once there is a group, the
 // groups get headers; below pinned ones every section does, so that the
 // pinned ones read apart from the rest.
-export function listSections(instances: Iterable<HubInstance>, {filter, query, order}: ListView): ListSection[] {
+export function listSections(instances: Iterable<HubInstance>, {filter, agents, query, order}: ListView): ListSection[] {
   const all = [...instances];
-  const visible = all.filter((instance) => matchesFilter(instance, filter) && matchesSearch(instance, query));
+  const visible = all.filter((instance) => matchesFilter(instance, filter) && matchesAgents(instance, agents) && matchesSearch(instance, query));
   const pinned = sortPinned(visible);
   const rest = visible.filter((instance) => pinOf(instance) === undefined);
   const headers = pinned.length > 0 || (order === "groups" && groupNames(all).length > 0);
