@@ -195,9 +195,9 @@ export const ToolCallCard = React.memo(function ToolCallCard({
   const isFailed = view.failed;
   const isPending = view.pending;
   const storageScope = useChatSelector((chat) => chat.storageScope);
-  const features = useChatSelector((chat) => chat.features);
+  const subagentsShown = useChatSelector((chat) => chat.features.subagents);
   const requests = useChatSelector((chat) => chat.requests);
-  const request = features.requests ? requests.findLast((candidate) => candidate.tool_use_id === toolCall.id) : undefined;
+  const request = requests.findLast((candidate) => candidate.tool_use_id === toolCall.id);
   const requestBadge = request ? toolRequestBadge(request) : null;
   const [localIsOpen, setLocalIsOpen] = useState(Boolean(searchQuery));
   const isOpen = open ?? localIsOpen;
@@ -268,7 +268,7 @@ export const ToolCallCard = React.memo(function ToolCallCard({
               {view.summary && <span className="ml-2 text-muted-foreground">{view.summary}</span>}
             </span>
           )}
-          {features.subagents && isSubagentTool(toolCall.name) && (
+          {subagentsShown && isSubagentTool(toolCall.name) && (
             <button
               type="button"
               className="shrink-0 rounded-full border bg-background px-2 py-0.5 font-sans text-[11px] font-medium text-muted-foreground outline-none transition hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"

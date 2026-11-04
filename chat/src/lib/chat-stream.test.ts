@@ -18,8 +18,6 @@ function stream(sync = new SyncTracker()) {
     apply: (batch) => batches.push(batch),
     replayed: () => calls.push("replayed"),
     statusChange: (event) => calls.push(`status ${event.status}`),
-    transport: (transport) => calls.push(`transport ${transport}`),
-    askTransport: () => calls.push("ask transport"),
     agentError: (event) => calls.push(`error ${event.message}`),
     opened: () => calls.push("opened"),
     failed: () => calls.push("failed"),
@@ -47,7 +45,7 @@ describe("ChatStream", () => {
     expect(batches).toHaveLength(0);
     // The replay's last event carries an SSE id.
     source.emit("status_change", {status: "stable", agent_type: "claude", transport: "native", seq: 3}, "3");
-    expect(calls).toEqual(["opened", "status stable", "transport native"]);
+    expect(calls).toEqual(["opened", "status stable"]);
     env.clock.advance(0);
     expect(batches).toHaveLength(1);
     expect(batches[0]).toMatchObject({replace: true, point: {epoch: "e1", seq: 3}});
@@ -246,19 +244,6 @@ describe("ChatStream", () => {
     source.emit("request_update", {id: "r1", kind: "approval", title: "Run make", status: "pending", created_at: "2026-10-27T10:00:00Z", response_capability: "live", seq: 3}, "3");
     expect(batches).toHaveLength(2);
     expect(batches[1].requests.map((r) => r.id)).toEqual(["r1"]);
-  });
-
-  test("a status without the transport asks for it once per connection", () => {
-    const {env, calls} = stream();
-    const source = env.latest();
-    source.open();
-    source.emit("status_change", {status: "stable", agent_type: "claude"});
-    source.emit("status_change", {status: "running", agent_type: "claude"});
-    expect(calls.filter((call) => call === "ask transport")).toHaveLength(1);
-    source.fail();
-    env.latest().open();
-    env.latest().emit("status_change", {status: "stable", agent_type: "claude"});
-    expect(calls.filter((call) => call === "ask transport")).toHaveLength(2);
   });
 
   test("a stream the server closes comes back at once, from where the chat is, without showing", () => {

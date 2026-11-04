@@ -34,7 +34,6 @@ import {
   type Capabilities,
   type DispatchContext,
   type DispatchMode,
-  type Transport,
 } from "@/lib/dispatch";
 import {
   mergeListedRequests,
@@ -166,12 +165,9 @@ export interface ChatState {
   serverStatus: ServerStatus;
   connectionStatus: ConnectionStatus;
   queuedMessages: QueuedMessage[];
-  // How the server drives the agent: "native" (AgentAPI 3 has no other
-  // transport) until the server says otherwise.
-  transport: Transport;
-  // Optional operations of a native agent; null for other transports.
+  // Optional operations of the agent; null until it reports them.
   capabilities: Capabilities | null;
-  // What the chat offers for the transport and the agent (lib/features).
+  // What the chat offers for the agent (lib/features).
   features: Features;
   // Number of requests the agent waits on (native transport), counted from
   // requests so that both always agree.
@@ -267,7 +263,6 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
   const [serverWorkspaceUrl, setServerWorkspaceUrl] = useState<string>();
   const [messages, setMessages] = useState<(Message | DraftMessage)[]>([]);
   const [richMessages, setRichMessages] = useState<RichMessage[]>([]);
-  const [transport, setTransport] = useState<Transport>("native");
   // The agent's status, from status_change events (lib/agent-status). An
   // event that changes nothing leaves it as it is; the ref has the latest,
   // for the event handlers.
@@ -326,7 +321,6 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
     setRichMessages,
     setRequests,
     setTasks: setServerTasks,
-    setTransport,
     updateAgentStatus,
     agentStatusRef,
     refreshQueue,
@@ -334,18 +328,18 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
     queueMayHaveSent,
     onReplayed,
   });
-  useSessionCache({agentAPIUrl, synced, messages, richMessages, requests, tasks: serverTasks, transport});
+  useSessionCache({agentAPIUrl, synced, messages, richMessages, requests, tasks: serverTasks});
   const pendingRequestCount = useMemo(() => pendingRequests(requests).length, [requests]);
   const agentStarting = lifecycle === "starting";
   const needs = {pendingRequestCount, loginRequired: loginRequired !== null, limitStop: limitStop !== null};
   const agentState = getAgentState({serverStatus, connectionStatus, ...needs});
   const dispatch = useMemo<DispatchContext>(
-    () => ({transport, capabilities: agentStarting ? null : capabilities, serverStatus, pendingRequestCount}),
-    [agentStarting, capabilities, pendingRequestCount, serverStatus, transport],
+    () => ({capabilities: agentStarting ? null : capabilities, serverStatus, pendingRequestCount}),
+    [agentStarting, capabilities, pendingRequestCount, serverStatus],
   );
   const chatFeatures = useMemo(
-    () => features(transport, capabilities, terminalAvailable, agentType),
-    [agentType, capabilities, terminalAvailable, transport],
+    () => features(capabilities, terminalAvailable, agentType),
+    [agentType, capabilities, terminalAvailable],
   );
   const sessionCost = useSessionCost(api, chatFeatures.cost, serverStatus, lifecycle !== "starting" && lifecycle !== "restarting");
   const currentTask = useMemo(() => lastUserMessage(messages), [messages]);
@@ -477,7 +471,6 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
     messages,
     richMessages,
     loading,
-    transport,
     capabilities,
     features: chatFeatures,
     pendingRequestCount,

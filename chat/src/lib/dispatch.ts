@@ -4,15 +4,6 @@
 import { isImeComposing, type ImeKeyEvent } from "./keys";
 
 export type DispatchMode = "queue" | "steer" | "interrupt";
-// AgentAPI 3 only has "native"; older servers also report "pty" (and
-// "acp"), where the chat offers none of the native features.
-export type Transport = "pty" | "acp" | "native";
-
-// The transport a status_change event, GET /status or the cache reports, or
-// null for anything else (a server too old to report it).
-export function parseTransport(value: unknown): Transport | null {
-  return value === "pty" || value === "acp" || value === "native" ? value : null;
-}
 
 export interface Capabilities {
   steer: boolean;
@@ -27,9 +18,8 @@ export interface Capabilities {
 }
 
 export interface DispatchContext {
-  transport: Transport;
-  // Optional operations of a native agent; null for other transports and
-  // while the agent starts, when there is no turn to steer or stop.
+  // Optional operations of the agent; null while it starts, when there is
+  // no turn to steer or stop.
   capabilities: Capabilities | null;
   serverStatus: string;
   // Requests the agent waits on; the turn is still open while it waits.
@@ -39,16 +29,15 @@ export interface DispatchContext {
 // Whether the agent is in the middle of a turn: working, or waiting on an
 // answer to a request it made during the turn.
 export function turnActive(context: DispatchContext): boolean {
-  return context.serverStatus === "running" || (context.transport === "native" && context.pendingRequestCount > 0);
+  return context.serverStatus === "running" || context.pendingRequestCount > 0;
 }
 
 // Whether the running turn can be stopped with POST /interrupt.
 export function canInterrupt(context: DispatchContext): boolean {
-  return context.transport === "native" && Boolean(context.capabilities?.interrupt) && turnActive(context);
+  return Boolean(context.capabilities?.interrupt) && turnActive(context);
 }
 
-// Whether Stop can stop what the agent is doing: POST /interrupt on the
-// native transport. An older server's other transports can't.
+// Whether Stop can stop what the agent is doing: POST /interrupt.
 export function canStop(context: DispatchContext): boolean {
   return canInterrupt(context);
 }
@@ -56,7 +45,7 @@ export function canStop(context: DispatchContext): boolean {
 // Whether a message can be added to the turn the agent is working on. Not
 // while it waits on a request: answer that first.
 export function canSteer(context: DispatchContext): boolean {
-  return context.transport === "native" && Boolean(context.capabilities?.steer) && context.serverStatus === "running";
+  return Boolean(context.capabilities?.steer) && context.serverStatus === "running";
 }
 
 // The ways to send a message now, the default first.

@@ -4,7 +4,6 @@
 // (SyncTracker), and keeps the connection open (EventSourceConnection).
 // use-event-stream.ts applies what it hands on to the React state.
 
-import {parseTransport, type Transport} from "./dispatch";
 import {
   messageFromEvent,
   queueFromEvent,
@@ -52,10 +51,6 @@ export interface ChatStreamHandlers {
   // of what the server dropped meanwhile (closed requests).
   replayed(): void;
   statusChange(event: StatusChangeEvent): void;
-  transport(transport: Transport): void;
-  // The status didn't say the transport (an older server): GET /status
-  // does. Asked once per connection.
-  askTransport(): void;
   agentError(event: AgentErrorEvent): void;
   // The stream opened: the queue is read on every connection.
   opened(): void;
@@ -147,7 +142,6 @@ export class ChatStream {
   // The listeners of one connection.
   private listeners(): StreamListeners {
     const {sync, pending, handlers} = this;
-    let askedTransport = false;
     // Servers that predate session_sync replay everything on every
     // connection without saying so; treat that replay as the full state.
     let synced = false;
@@ -184,7 +178,7 @@ export class ChatStream {
         pending.addRichMessage(richMessageFromEvent(JSON.parse(event.data) as RichMessageUpdateEvent));
         this.schedule(event);
       },
-      // A request the agent waits on (native transport) opened or changed.
+      // A request the agent waits on opened or changed.
       // Requests are part of the replay, like messages; a full replay's
       // replace the chat's once it is complete (PendingEvents). Outside a
       // replay one applies at once: the status_change the server sends
@@ -214,14 +208,6 @@ export class ChatStream {
         // The replay's last event may be its status.
         if (sync.replaying) this.schedule(event);
         handlers.statusChange(data);
-        // The transport decides what the chat offers (lib/features).
-        const reported = parseTransport(data.transport);
-        if (reported) {
-          handlers.transport(reported);
-        } else if (!askedTransport) {
-          askedTransport = true;
-          handlers.askTransport();
-        }
       },
       agent_error: (event) => {
         if (sync.replaying) this.schedule(event);

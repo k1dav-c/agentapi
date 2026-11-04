@@ -6,7 +6,6 @@ import {
   dispatchModeForKey,
   dispatchModes,
   moveInQueue,
-  parseTransport,
   sendNotice,
   turnActive,
   type DispatchContext,
@@ -14,7 +13,6 @@ import {
 
 const caps = {steer: true, interrupt: true, resume: true, images: true};
 const native = (overrides: Partial<DispatchContext> = {}): DispatchContext => ({
-  transport: "native",
   capabilities: caps,
   serverStatus: "running",
   pendingRequestCount: 0,
@@ -31,20 +29,6 @@ const key = (
   ctrlKey: false,
   nativeEvent: {isComposing: false},
   ...overrides,
-});
-
-describe("parseTransport", () => {
-  test("known transports", () => {
-    expect(parseTransport("pty")).toBe("pty");
-    expect(parseTransport("acp")).toBe("acp");
-    expect(parseTransport("native")).toBe("native");
-  });
-
-  test("missing or unknown", () => {
-    expect(parseTransport(undefined)).toBeNull();
-    expect(parseTransport("")).toBeNull();
-    expect(parseTransport("ssh")).toBeNull();
-  });
 });
 
 describe("dispatchModes", () => {
@@ -67,12 +51,6 @@ describe("dispatchModes", () => {
     expect(dispatchModes(native({capabilities: {...caps, steer: false}}))).toEqual(["queue", "interrupt"]);
     expect(dispatchModes(native({capabilities: null}))).toEqual(["queue"]);
   });
-
-  test("other transports only queue", () => {
-    expect(dispatchModes(native({transport: "pty"}))).toEqual(["queue"]);
-    expect(dispatchModes(native({transport: "acp"}))).toEqual(["queue"]);
-    expect(turnActive(native({transport: "pty", serverStatus: "stable", pendingRequestCount: 1}))).toBe(false);
-  });
 });
 
 describe("canStop", () => {
@@ -83,11 +61,6 @@ describe("canStop", () => {
     expect(canStop(native({capabilities: {...caps, interrupt: false}}))).toBe(false);
     // Starting (e.g. restarting after a lost login): no turn to stop.
     expect(canStop(native({capabilities: null}))).toBe(false);
-  });
-
-  test("an older server's other transports can't stop the agent", () => {
-    expect(canStop(native({transport: "pty", capabilities: null}))).toBe(false);
-    expect(canStop(native({transport: "acp", capabilities: null}))).toBe(false);
   });
 });
 

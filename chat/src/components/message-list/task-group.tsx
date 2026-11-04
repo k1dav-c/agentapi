@@ -13,7 +13,6 @@ import { groupConsecutiveTools, splitAtThinking } from "@/lib/activity-groups";
 import { ToolCallCard, ToolCallGroup } from "./tool-call";
 import { MessageItem } from "./message-item";
 import { AgentMark } from "../agent-mark";
-import {useChatSelector} from "../chat-provider";
 import {AgentType} from "@/lib/agents";
 import type { TaskSection, TaskStatus } from "@/lib/task-timeline";
 import { TASK_STATUS_META, getTaskActivity, toSearchableTask } from "@/lib/task-timeline";
@@ -87,10 +86,9 @@ export const TaskGroup = React.memo(function TaskGroup({
   const agentName = AgentType[agentType as keyof typeof AgentType]?.displayName ?? "Agent";
   const statusMeta = waitingForUser ? {label: "Waiting for you", className: "text-state-needs"} : TASK_STATUS_META[status];
   const live = status === "running";
-  const features = useChatSelector((chat) => chat.features);
   const activity = useMemo(() => {
     if (deferred) return [];
-    const raw = getTaskActivity(task, {transcriptOnly: features.structuredTranscript});
+    const raw = getTaskActivity(task, {transcriptOnly: true});
     // When rich activity provides real interleaving (text + tool entries),
     // tools are already positioned where they occurred in the conversation.
     // Only group consecutive tools in the fallback path, where
@@ -99,7 +97,7 @@ export const TaskGroup = React.memo(function TaskGroup({
       task.richActivity.some(item => item.type === "message" || item.type === "thinking") &&
       task.richActivity.some(item => item.type === "tool");
     return hasRichInterleaving ? raw : groupConsecutiveTools(raw);
-  }, [task, deferred, features.structuredTranscript]);
+  }, [task, deferred]);
   // A long task shows its latest steps; earlier ones load on request.
   // Rendering hundreds of steps (Markdown, highlighted code) at once froze
   // slower devices. Search shows every step so matches can be found.

@@ -180,10 +180,10 @@ export function Chat() {
             dock={
               <>
                 <StateStrip />
-                {features.requests && <LoginCard onRunInTerminal={hasShell ? openShell : undefined} />}
-                {features.requests && <RequestCard />}
-                {features.requests && <LimitCard />}
-                {features.usage && <CacheNotice />}
+                <LoginCard onRunInTerminal={hasShell ? openShell : undefined} />
+                <RequestCard />
+                <LimitCard />
+                <CacheNotice />
               </>
             }
             onSendMessage={sendMessage}

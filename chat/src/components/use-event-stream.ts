@@ -7,7 +7,6 @@ import {initialConnectionState, type ConnectionState} from "@/lib/event-source";
 import {loadSession, mergeByKey} from "@/lib/session-cache";
 import {bootstrapSession, ensureSession, reconnectWhenSignedIn, withCredentials} from "@/lib/auth";
 import type {createChatAPI} from "@/lib/chat-api";
-import {parseTransport, type Transport} from "@/lib/dispatch";
 import {isLoginNotice} from "@/lib/login";
 import type {NativeRequest} from "@/lib/native-requests";
 import type {ServerTask} from "@/lib/server-tasks";
@@ -35,7 +34,6 @@ export function useEventStream({
   setRichMessages,
   setRequests,
   setTasks,
-  setTransport,
   updateAgentStatus,
   agentStatusRef,
   refreshQueue,
@@ -50,7 +48,6 @@ export function useEventStream({
   setRichMessages: Dispatch<SetStateAction<RichMessage[]>>;
   setRequests: Dispatch<SetStateAction<NativeRequest[]>>;
   setTasks: Dispatch<SetStateAction<ServerTask[]>>;
-  setTransport: Dispatch<SetStateAction<Transport>>;
   updateAgentStatus: (change: (status: AgentStatus) => AgentStatus) => void;
   agentStatusRef: RefObject<AgentStatus>;
   // Reading the queue (GET /queue), as every connection does; applying a
@@ -139,14 +136,6 @@ export function useEventStream({
         updateAgentStatus((status) => applyStatusChange(status, data));
         queueMayHaveSent();
       },
-      transport: setTransport,
-      askTransport: () => {
-        void api.getStatus().then((status) => {
-          if (!disposed) setTransport(status.transport);
-        }).catch(() => {
-          // Reported through the connection status.
-        });
-      },
       agentError: (data) => {
         const key = agentErrorKey(data);
         // Shown on this page already, or closed before a reload.
@@ -195,8 +184,6 @@ export function useEventStream({
           setRichMessages(cached.richMessages);
           setRequests(cached.requests);
           setTasks(cached.tasks);
-          const cachedTransport = parseTransport(cached.transport);
-          if (cachedTransport) setTransport(cachedTransport);
         }
         start();
       });
@@ -210,7 +197,7 @@ export function useEventStream({
       stream.stop();
       streamRef.current = null;
     };
-  }, [agentAPIUrl, agentStatusRef, api, apply, markSynced, onReplayed, queueMayHaveSent, refreshQueue, setMessages, setRequests, setRichMessages, setTasks, setTransport, syncRef, updateAgentStatus]);
+  }, [agentAPIUrl, agentStatusRef, api, apply, markSynced, onReplayed, queueMayHaveSent, refreshQueue, setMessages, setRequests, setRichMessages, setTasks, syncRef, updateAgentStatus]);
 
   return {
     connectionStatus: connection.status,

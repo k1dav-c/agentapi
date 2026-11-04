@@ -3,7 +3,6 @@
 import {useEffect, useLayoutEffect, useRef} from "react";
 import {saveSession} from "@/lib/session-cache";
 import type {SyncPoint} from "@/lib/pending-events";
-import type {Transport} from "@/lib/dispatch";
 import type {NativeRequest} from "@/lib/native-requests";
 import type {ServerTask} from "@/lib/server-tasks";
 import {isDraftMessage, type DraftMessage, type Message, type RichMessage} from "@/lib/conversation";
@@ -22,7 +21,6 @@ export function useSessionCache({
   richMessages,
   requests,
   tasks,
-  transport,
 }: {
   agentAPIUrl: string;
   // The point of the conversation the state is at (see useEventStream).
@@ -31,14 +29,13 @@ export function useSessionCache({
   richMessages: RichMessage[];
   requests: NativeRequest[];
   tasks: ServerTask[];
-  transport: Transport;
 }) {
   const saveRequestRef = useRef<() => void>(() => {});
   // The state last rendered, and its point: what is saved is a state and
   // the changes it holds, so that a reload resumes from there.
-  const latestRef = useRef({synced, messages, richMessages, requests, tasks, transport});
+  const latestRef = useRef({synced, messages, richMessages, requests, tasks});
   useLayoutEffect(() => {
-    latestRef.current = {synced, messages, richMessages, requests, tasks, transport};
+    latestRef.current = {synced, messages, richMessages, requests, tasks};
   });
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -57,7 +54,6 @@ export function useSessionCache({
         richMessages: latestRef.current.richMessages,
         requests: latestRef.current.requests,
         tasks: latestRef.current.tasks,
-        transport: latestRef.current.transport,
       });
     };
     const onHide = () => {

@@ -4,28 +4,22 @@ import {features} from "./features";
 const all = {steer: true, interrupt: true, resume: true, images: true, settings: true, compact: true};
 
 describe("features", () => {
-  test("ACP has neither", () => {
-    expect(Object.values(features("acp", all, true)).some(Boolean)).toBe(false);
-  });
-  test("a native agent's features follow its capabilities and the shell", () => {
-    const full = features("native", all, true);
-    expect(full.shell && full.requests && full.settings && full.steer && full.interrupt).toBe(true);
-    const bare = features("native", {steer: false, interrupt: false, resume: false, images: false}, false);
+  test("an agent's features follow its capabilities and the shell", () => {
+    const full = features(all, true);
+    expect(full.shell && full.settings && full.steer && full.interrupt).toBe(true);
+    const bare = features({steer: false, interrupt: false, resume: false, images: false}, false);
     expect(bare.shell || bare.settings || bare.steer || bare.interrupt).toBe(false);
-    expect(bare.requests && bare.slashCommands && bare.usage).toBe(true);
     // While the agent starts there are no capabilities yet.
-    expect(features("native", null, true).steer).toBe(false);
+    expect(features(null, true).steer).toBe(false);
   });
 
   test("session history for the agents with session logs", () => {
-    expect(features("native", null, false, "claude").sessionHistory).toBe(true);
-    expect(features("native", null, false, "pi").sessionHistory).toBe(true);
-    expect(features("native", null, false, "custom").sessionHistory).toBe(false);
-    expect(features("pty", null, false, "claude").sessionHistory).toBe(false);
-    expect(features("native", null, false, "claude").subagents).toBe(true);
-    expect(features("native", null, false, "pi").subagents).toBe(false);
-    expect(features("native", null, false, "codex").cost).toBe(true);
-    expect(features("native", null, false, "custom").cost).toBe(false);
-    expect(features("pty", null, false, "claude").cost).toBe(false);
+    expect(features(null, false, "claude").sessionHistory).toBe(true);
+    expect(features(null, false, "pi").sessionHistory).toBe(true);
+    expect(features(null, false, "custom").sessionHistory).toBe(false);
+    expect(features(null, false, "claude").subagents).toBe(true);
+    expect(features(null, false, "pi").subagents).toBe(false);
+    expect(features(null, false, "codex").cost).toBe(true);
+    expect(features(null, false, "custom").cost).toBe(false);
   });
 });
