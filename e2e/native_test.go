@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -50,6 +51,31 @@ func TestNativeClaude(t *testing.T) {
 		s.waitStable(ctx, "")
 		require.Equal(t, append(before, "after restart", "Echo: after restart"), s.messages(ctx))
 	})
+
+	// The restarted program gets the same --initial-prompt. Without a state
+	// database it starts a new conversation, which doesn't get it again;
+	// with one, the restored conversation has it already.
+	for _, tc := range []struct {
+		name  string
+		flags []string
+		after []string
+	}{
+		{"initial_prompt_once/state_db", nil, []string{"first prompt", "Echo: first prompt"}},
+		{"initial_prompt_once/no_state_db", []string{"--state-db="}, []string{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+			defer cancel()
+			s := startNative(ctx, t, append(tc.flags, "--initial-prompt=first prompt")...)
+			firstID := s.waitStable(ctx, "")
+			s.waitMessages(ctx, []string{"first prompt", "Echo: first prompt"})
+
+			require.NoError(t, s.cmd.Process.Signal(syscall.SIGUSR2))
+			s.waitStable(ctx, firstID)
+			// A prompt's turn begins before the agent is reported stable.
+			require.Equal(t, tc.after, s.messages(ctx))
+		})
+	}
 
 	for _, tc := range []struct{ name, flag string }{
 		{"api_token_kept_on_restart/value", "--api-token=e2e-secret-token"},
@@ -238,6 +264,20 @@ func (s *nativeServer) messages(ctx context.Context) []string {
 		contents = append(contents, strings.TrimSpace(m.Content))
 	}
 	return contents
+}
+
+// waitMessages waits until the conversation's messages are want.
+func (s *nativeServer) waitMessages(ctx context.Context, want []string) {
+	s.t.Helper()
+	deadline := time.Now().Add(operationTimeout)
+	var got []string
+	for time.Now().Before(deadline) && ctx.Err() == nil {
+		if got = s.messages(ctx); slices.Equal(got, want) {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	s.t.Fatalf("messages: want %q, got %q", want, got)
 }
 
 // tokens are the API tokens the server printed.

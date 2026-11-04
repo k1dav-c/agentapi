@@ -45,8 +45,11 @@ export function normalizeRequest<T extends RequestPayload>(request: T): Omit<T, 
   return {...request, response: {...request.response, answers: fixed}};
 }
 
-// How many closed requests the client keeps; the server keeps 50.
-const MAX_CLOSED = 100;
+// How many closed requests the client keeps: as many as the server
+// (native.MaxClosedRequests), which drops the one that closed first without
+// an event. Dropping the same ones keeps an incremental replay's state the
+// same as a full one's.
+const MAX_CLOSED = 50;
 
 // Applies one update to the stored state of a request. Events carry a seq
 // and arrive in order, so a later seq always wins (that includes a request

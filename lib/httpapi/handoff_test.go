@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -189,4 +190,28 @@ func TestHandoffRestartInvalidatesRequest(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "superseded", replyToHandoff(t, s, pending, "late", "continue"))
 	assert.Equal(t, []string{"Check the build"}, turnTexts(a), "the old agent got nothing more")
+}
+
+// The receipts are bounded, but only the oldest goes when a new one comes:
+// a reply retried right after the bound was reached still finds its
+// receipt instead of being delivered twice.
+func TestHandoffReceiptsDropTheOldestOnly(t *testing.T) {
+	t.Parallel()
+	var h handoffState
+	id := func(i int) string { return "request-" + strconv.Itoa(i) }
+	for i := range maxHandoffReceipts {
+		h.record(id(i), "reply-"+strconv.Itoa(i), handoff.Result{Outcome: "applied"})
+	}
+	h.record(id(maxHandoffReceipts), "reply-new", handoff.Result{Outcome: "applied"})
+
+	_, ok := h.receipt(id(0))
+	assert.False(t, ok, "the oldest receipt is dropped")
+	for i := 1; i <= maxHandoffReceipts; i++ {
+		_, ok := h.receipt(id(i))
+		require.True(t, ok, "receipt %d is kept", i)
+	}
+	// Recording a known request again keeps the bound.
+	h.record(id(5), "reply-5", handoff.Result{Outcome: "queued"})
+	assert.Len(t, h.receipts, maxHandoffReceipts)
+	assert.Len(t, h.order, maxHandoffReceipts)
 }

@@ -77,7 +77,6 @@ function LimitRow({ limit, now }: { limit: RateLimit; now: number }) {
 // toolbar; its menu adds the account's rate limits (native agents that
 // report them).
 export function UsageMeter() {
-  const usageShown = useChatSelector((chat) => chat.features.usage);
   const agentUsage = useChatSelector((chat) => chat.agentUsage);
   // Reset times count down while the menu is open.
   const [now, setNow] = useState(() => Date.now());
@@ -91,7 +90,7 @@ export function UsageMeter() {
 
   const context = agentUsage?.context;
   const limits = agentUsage?.rate_limits ?? [];
-  if (!usageShown || (!context && limits.length === 0)) return null;
+  if (!context && limits.length === 0) return null;
 
   const fullest = fullestLimit(limits);
   const percent = context ? contextPercent(context) : fullest?.used_percent ?? 0;
@@ -154,11 +153,10 @@ export function UsageMeter() {
 // Whether the context or a usage limit is filling up (amber or red), which
 // is worth showing where the meter is otherwise out of the way.
 export function useUsageAlert(): boolean {
-  const usageShown = useChatSelector((chat) => chat.features.usage);
   const agentUsage = useChatSelector((chat) => chat.agentUsage);
   const context = agentUsage?.context;
   const limits = agentUsage?.rate_limits ?? [];
-  if (!usageShown || (!context && limits.length === 0)) return false;
+  if (!context && limits.length === 0) return false;
   const fullest = fullestLimit(limits);
   const tones = [context ? usageTone(contextPercent(context)) : "ok", fullest ? usageTone(fullest.used_percent, fullest.status) : "ok"];
   return tones.some((tone) => tone !== "ok");

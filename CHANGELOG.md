@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- Concurrent `PUT /webhook` requests no longer drop each other's fields: each one reads, changes
+  and writes the configuration in turn.
+- The human reply protocol drops only its oldest receipt past 256; it cleared all of them, and a
+  reply retried right after that was delivered twice.
+- The chat keeps the 50 closed requests the server keeps (it kept 100), so a chat that resumes with
+  `?since=` holds the same requests as one that loads the full state.
+- Without `--state-db`, a restart in place (SIGUSR2, `POST /update`, `agentapi restart`) no longer
+  sends `--initial-prompt` again into the new session once the agent got it; a restart before then
+  still sends it.
+- Claude Code costs: an unitemized call now holds only tokens Claude Code counted that its log
+  didn't list, priced at AgentAPI's prices. A difference in price alone (the same tokens) no longer
+  shows as an unitemized call; the server logs it once per model.
+
+### Changes
+
+- The chat no longer handles the PTY transport, which AgentAPI 3 doesn't have.
+
 ## v3.1.0
 
 ### Features

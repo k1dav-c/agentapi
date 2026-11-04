@@ -104,17 +104,16 @@ describe("requests", () => {
 });
 
 describe("getStatus", () => {
-  test("reads the transport and the login", async () => {
+  test("reads the login", async () => {
     mockFetch(json({transport: "native", login_required: {agent: "Codex", message: "Not logged in.", command: "codex login"}}));
     expect(await createChatAPI(BASE).getStatus()).toEqual({
-      transport: "native",
       login_required: {agent: "Codex", message: "Not logged in.", command: "codex login", detail: undefined, host: undefined, user: undefined},
     });
   });
 
-  test("older servers drive the agent through a terminal", async () => {
+  test("no login asked for", async () => {
     mockFetch(json({status: "stable"}));
-    expect(await createChatAPI(BASE).getStatus()).toEqual({transport: "pty", login_required: null});
+    expect(await createChatAPI(BASE).getStatus()).toEqual({login_required: null});
   });
 });
 

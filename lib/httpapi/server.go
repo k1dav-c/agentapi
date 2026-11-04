@@ -89,8 +89,11 @@ type ServerConfig struct {
 	AllowedHosts   []string
 	AllowedOrigins []string
 	InitialPrompt  string
-	Clock          quartz.Clock
-	CWD            string // Working directory (used by Codex resolver)
+	// InitialPromptSent, if set, is called once the agent got the initial
+	// prompt.
+	InitialPromptSent func()
+	Clock             quartz.Clock
+	CWD               string // Working directory (used by Codex resolver)
 	// Webhook sends an event whenever the agent status changes.
 	Webhook WebhookConfig
 	// Name is what clients call this AgentAPI (GET /summary, webhook
@@ -383,18 +386,19 @@ func newNativeConversation(config ServerConfig, restored restoredState, emitter 
 		observer.persister = config.StateDB
 	}
 	return native.NewConversation(native.Config{
-		Factory:         config.Native.Factory,
-		ResumeRef:       restored.resumeRef,
-		Settings:        restored.settings,
-		LimitStop:       restored.limitStop,
-		AutoContinue:    config.Native.AutoContinue,
-		InitialMessages: restored.messages,
-		InitialPrompt:   config.InitialPrompt,
-		Emitter:         emitter,
-		Observer:        observer,
-		Logger:          logger,
-		Clock:           config.Clock,
-		RestartDelays:   config.Native.RestartDelays,
+		Factory:           config.Native.Factory,
+		ResumeRef:         restored.resumeRef,
+		Settings:          restored.settings,
+		LimitStop:         restored.limitStop,
+		AutoContinue:      config.Native.AutoContinue,
+		InitialMessages:   restored.messages,
+		InitialPrompt:     config.InitialPrompt,
+		InitialPromptSent: config.InitialPromptSent,
+		Emitter:           emitter,
+		Observer:          observer,
+		Logger:            logger,
+		Clock:             config.Clock,
+		RestartDelays:     config.Native.RestartDelays,
 		PrepareRichMessage: func(msg *transcript.RichMessage) {
 			uploads.storeRichImages(msg, logger)
 		},

@@ -122,7 +122,7 @@ function memoryStorage() {
 
 const message = (id: number, content: string): Message => ({id, role: id % 2 ? "agent" : "user", content, time: "2026-10-22T10:00:00Z"});
 const rich = (id: string, text: string): RichMessage => ({message_id: id, role: "assistant", timestamp: "2026-10-22T10:00:01Z", content: [{type: "text", text}]});
-const session = (messages: Message[], richMessages: RichMessage[], seq: number, tasks: ServerTask[] = []): CachedSession => ({epoch: "e1", seq, messages, richMessages, requests: [], tasks, transport: "native"});
+const session = (messages: Message[], richMessages: RichMessage[], seq: number, tasks: ServerTask[] = []): CachedSession => ({epoch: "e1", seq, messages, richMessages, requests: [], tasks});
 const serverTask = (id: number, status: ServerTask["status"], seq: number): ServerTask => ({id, status, prompt: `task ${id}`, started_at: "2026-10-22T10:00:00Z", errors: [], steered: [], seq});
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 

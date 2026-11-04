@@ -142,7 +142,9 @@ flowchart TB
    最後一行）並繼續提供服務。成功時，伺服器依第 5 步停止，但保留 PID 檔（PID 不變），再以
    `syscall.Exec` 重新執行程式，沿用 stdin、stdout 和 stderr；Go 開啟的其他檔案都會在 exec 時關閉。
    不帶值的 `--api-token` 產生的 token 會透過 `AGENTAPI_GENERATED_API_TOKEN` 傳下去，新程式直接
-   採用它而不另外產生，並從自己的環境變數移除，用戶端因此不必重新登入。
+   採用它而不另外產生，並從自己的環境變數移除，用戶端因此不必重新登入。沒有狀態資料庫時，送出過的
+   初始提示會以 `AGENTAPI_INITIAL_PROMPT_SENT` 標記，新的工作階段不會再收到；有狀態資料庫時，
+   還原的對話已經有它了。
    停止期間收到關閉訊號時，以關閉為準。每個登記檔都會註明伺服器能原地重新啟動
    （`restarts_in_place`），供 `agentapi restart` 判斷。
 
@@ -277,7 +279,8 @@ type Factory func(resume Resume) (Adapter, error)
 - **花費。** `sessions.Store.Costs` 從同樣的紀錄讀出目錄中每個工作階段（含 sub agent）的模型呼叫
   （`GET /sessions`、`GET /cost`）：Claude Code 的 assistant 訊息（每個 message id 一次）、Codex 的
   token 計數、Pi 回報的金額。`lib/pricing` 為每次呼叫計價；Claude Code 的 `cost-state` 紀錄會把
-  紀錄檔沒有列出的部分（壓縮）補成未逐筆列出的呼叫。分支複製的呼叫只算一次，算在最先建立的
+  紀錄檔沒有列出的 token（壓縮）以同樣的價格補成未逐筆列出的呼叫；token 相同而金額不同時不補，
+  只為每個模型記錄一次。分支複製的呼叫只算一次，算在最先建立的
   工作階段，依紀錄檔的建立時間判斷（Linux 用 statx，macOS 用 stat；其他系統用第一行的時間）。
   Store 索引每個紀錄檔的大小、讀取位置、讀取器狀態和已計價的呼叫：只讀取新增的完整行，也只替
   這些行新增或補完的呼叫計價；檔案縮小或被替換時重新讀取。如果沒有任何紀錄檔的呼叫改變，
@@ -355,6 +358,9 @@ type Factory func(resume Resume) (Adapter, error)
 - 收回訊息等無法用更新表達的變更，會產生新的 epoch 並結束對話訂閱。用戶端以舊 epoch
   重新連線後，會收到 SSE id 正確的完整重播。訂閱落後超過緩衝，或開啟工作階段需串流超過
   緩衝四分之一的結構化訊息時，也會結束訂閱。
+- emitter 保留待處理的請求，以及最後關閉的 50 個（`native.MaxClosedRequests`）。更早關閉的請求
+  被丟掉時不會送出事件，所以以 `since=` 接續的用戶端也要套用同樣的上限：手上已關閉的請求只留
+  `closed_at` 最晚的 50 個，也就是完整重播會給的那些。聊天介面在 `mergeRequests` 裡這樣做。
 - emitter 推導任務（`tasks.go`）。使用者訊息開始任務，執行中加入的訊息會
   steer 該任務；agent 閒置且沒有待處理請求時，任務結束。回答後若 agent
   暫時閒置，計時器會先留 3 秒讓它恢復工作；這段時間送出的訊息會開始新任務，因為 agent 沒有在工作。

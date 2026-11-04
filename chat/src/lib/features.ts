@@ -1,8 +1,7 @@
-// What the chat offers, decided in one place from the server's transport
-// and what its agent can do. Components ask for a feature rather than test
-// the transport themselves.
+// What the chat offers, decided in one place from what the agent can do.
+// Components ask for a feature rather than test the agent themselves.
 
-import type {Capabilities, Transport} from "./dispatch";
+import type {Capabilities} from "./dispatch";
 import type {AgentType} from "./agents";
 
 // The agents whose earlier sessions AgentAPI reads from their session logs,
@@ -12,48 +11,33 @@ const SUBAGENT_AGENTS: readonly AgentType[] = ["claude", "codex"];
 
 export interface Features {
   // A shell in the agent's working directory: the terminal panel and the
-  // login card's "Run in terminal" (native, unless --terminal=false).
+  // login card's "Run in terminal" (unless --terminal=false).
   shell: boolean;
-  // The agent's requests (approvals, questions, plans) as decision cards,
-  // and the login card (native).
-  requests: boolean;
-  // A task's activity comes from the agent's structured messages alone,
-  // not its screen (native).
-  structuredTranscript: boolean;
-  // The chat's slash commands (native).
-  slashCommands: boolean;
-  // The mode, model and effort menus (native agents that report them).
+  // The mode, model and effort menus (agents that report them).
   settings: boolean;
-  // Adding a message to the running turn, and stopping it (native agents
-  // that can).
+  // Adding a message to the running turn, and stopping it (agents that
+  // can).
   steer: boolean;
   interrupt: boolean;
-  // The context and rate limits meter (native).
-  usage: boolean;
-  // The agent's earlier sessions, to open one or a copy of it (native
-  // Claude Code, Codex and Pi).
+  // The agent's earlier sessions, to open one or a copy of it (Claude Code,
+  // Codex and Pi).
   sessionHistory: boolean;
-  // The subagents the agent ran, and what each did (native Claude Code and
-  // Codex).
+  // The subagents the agent ran, and what each did (Claude Code and Codex).
   subagents: boolean;
-  // What sessions and tasks spent, from the session logs (native Claude
-  // Code, Codex and Pi).
+  // What sessions and tasks spent, from the session logs (Claude Code,
+  // Codex and Pi).
   cost: boolean;
 }
 
-export function features(transport: Transport, capabilities: Capabilities | null, shellAvailable: boolean, agentType?: AgentType): Features {
-  const native = transport === "native";
+export function features(capabilities: Capabilities | null, shellAvailable: boolean, agentType?: AgentType): Features {
+  const logs = agentType !== undefined && SESSION_HISTORY_AGENTS.includes(agentType);
   return {
-    shell: native && shellAvailable,
-    requests: native,
-    structuredTranscript: native,
-    slashCommands: native,
-    settings: native && Boolean(capabilities?.settings),
-    steer: native && Boolean(capabilities?.steer),
-    interrupt: native && Boolean(capabilities?.interrupt),
-    usage: native,
-    sessionHistory: native && agentType !== undefined && SESSION_HISTORY_AGENTS.includes(agentType),
-    subagents: native && agentType !== undefined && SUBAGENT_AGENTS.includes(agentType),
-    cost: native && agentType !== undefined && SESSION_HISTORY_AGENTS.includes(agentType),
+    shell: shellAvailable,
+    settings: Boolean(capabilities?.settings),
+    steer: Boolean(capabilities?.steer),
+    interrupt: Boolean(capabilities?.interrupt),
+    sessionHistory: logs,
+    subagents: agentType !== undefined && SUBAGENT_AGENTS.includes(agentType),
+    cost: logs,
   };
 }

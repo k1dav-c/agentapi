@@ -171,7 +171,10 @@ emitter. Handlers call the conversation and read state from the emitter.
    stderr; every other file Go opened closes on exec. A token a bare
    `--api-token` generated goes along in `AGENTAPI_GENERATED_API_TOKEN`,
    which the new program takes instead of generating one and removes from
-   its environment, so clients stay signed in. A shutdown signal
+   its environment, so clients stay signed in. Without a state DB, an
+   initial prompt that went out is marked in `AGENTAPI_INITIAL_PROMPT_SENT`,
+   so the new session doesn't get it again; with one, the restored
+   conversation has it. A shutdown signal
    during the stop wins. Each registry entry says the server restarts in
    place (`restarts_in_place`), for `agentapi restart`.
 
@@ -335,8 +338,9 @@ type Factory func(resume Resume) (Adapter, error)
   the directory, its subagents' included, from the same logs (`GET /sessions`,
   `GET /cost`): Claude Code's assistant messages (one per message id), Codex's
   token counts, Pi's reported costs. `lib/pricing` prices each call; Claude
-  Code's `cost-state` records add what its log doesn't list (compaction) as
-  unitemized calls. Calls copied by a fork count once, in the earliest
+  Code's `cost-state` records add the tokens its log doesn't list
+  (compaction) as unitemized calls at the same prices; a cost that differs
+  for the same tokens adds nothing and is logged once per model. Calls copied by a fork count once, in the earliest
   session, by the logs' creation times (statx on Linux, stat on macOS;
   elsewhere their first lines'). The Store indexes each log's size, read
   offset and reader state, with its calls priced. It reads only complete new
@@ -451,6 +455,11 @@ usage limit stop, login).
   with the old epoch to receive a full replay with the correct SSE IDs.
   Subscriptions also close if they fall behind their buffer, or if opening
   a session would stream more than a quarter of a buffer of rich messages.
+- The emitter keeps the pending requests and the 50 that closed last
+  (`native.MaxClosedRequests`). It drops an older closed request without an
+  event, so a client that resumes with `since=` keeps the same bound: of the
+  closed requests it holds, the 50 with the latest `closed_at`, which is what
+  a full replay gives. The chat does this in `mergeRequests`.
 - The emitter derives tasks (`tasks.go`). A user message
   starts a task; messages added during it steer the task. It ends when the
   agent is idle with no open request. After an answer

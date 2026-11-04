@@ -639,7 +639,7 @@ export function hasStructuredTranscript(task: TaskSection): boolean {
 // Without a transcript, the screen text and the tool calls are shown in
 // time order.
 //
-// transcriptOnly (the native transport) never shows the agent messages: they
+// transcriptOnly (what the chat shows) never shows the agent messages: they
 // are the transcript's text joined, so they would repeat it.
 //
 // The messages steered into the task show where they came, by their time.

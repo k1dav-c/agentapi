@@ -27,8 +27,9 @@ export type TerminalOutputEvent = Schemas["TerminalOutputBody"];
 export type TerminalExitEvent = Schemas["TerminalExitBody"];
 
 // A server older than the chat (the chat in development, or served apart
-// from it) leaves out what it didn't have yet: the transport (GET /status
-// says then), the lifecycle, the version and some capabilities.
+// from it) leaves out what it didn't have yet: the transport (which the
+// chat doesn't read: AgentAPI 3 is native only), the lifecycle, the version
+// and some capabilities.
 type Missing = "transport" | "lifecycle" | "agentapi_version";
 export type StatusChangeEvent = Omit<Schemas["StatusChangeBody"], Missing | "capabilities"> &
   Partial<Pick<Schemas["StatusChangeBody"], Missing>> & {capabilities?: Capabilities};

@@ -711,8 +711,10 @@ AgentAPI 從 agent 的工作階段紀錄讀出每次模型呼叫用掉的 tokens
 key 做同樣的工作要花多少錢。
 
 - Claude Code：工作階段紀錄和它的 sub agent 紀錄中的每次呼叫，cache 寫入分別以 Anthropic 的
-  5 分鐘或一小時 cache 計價。Claude Code 計入自己的總額、卻沒有逐筆記錄的呼叫（例如壓縮
-  context），會從它的花費紀錄補上，列為未逐筆列出（unitemized）的呼叫。
+  5 分鐘或一小時 cache 計價。Claude Code 計入自己的總額、卻沒有逐筆記錄的 token（例如壓縮
+  context），會從它的花費紀錄補上，列為未逐筆列出（unitemized）的呼叫，計價方式和其他呼叫相同。
+  同樣的 token 在 Claude Code 自己算出的金額不同時（它用的價格不同），花費仍以 AgentAPI 的為準，
+  伺服器會為每個模型記錄一次警告。
 - Codex：每個回合的 token 計數，含它的 sub agent；從 cache 讀取的輸入以 cache 讀取計價，其餘以
   輸入計價。
 - Pi：Pi 為每次呼叫回報的金額。
@@ -1593,7 +1595,7 @@ workspace 的啟動腳本）仍然有效，輸出也照舊寫到原本的地方�
 `server_id` 在原連接埠上回應，並印出新版本。
 
 - 使用 `--state-db` 時，對話會保留，agent 也會接續原本的工作階段；沒有時，AgentAPI 會和
-  其他重新啟動一樣開始新的對話。
+  其他重新啟動一樣開始新的對話，但不會再送出先前送過的 `--initial-prompt`。
 - 只會重新啟動你自己的 AgentAPI，而且登記檔必須對應到執行中的 `agentapi server`。透過 `sudo`
   執行時，指的是執行 `sudo` 那位使用者的 AgentAPI。較早的版本無法原地重新啟動，
   `agentapi restart` 會指出來：這一次請自行重新啟動。

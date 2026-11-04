@@ -25,9 +25,9 @@ type ModelCall struct {
 	Priced bool    `json:"priced" doc:"The model's price is known."`
 	// SubagentID is set on a subagent's calls.
 	SubagentID string `json:"subagent_id,omitempty" doc:"The subagent that made the call; missing for the agent's own."`
-	// Unitemized marks what Claude Code counted that its log doesn't list
-	// call by call (compacting the context, among others).
-	Unitemized bool `json:"unitemized,omitempty" doc:"Calls Claude Code counted in its own total but didn't log one by one, such as compacting the context: the difference up to this point."`
+	// Unitemized marks the tokens Claude Code counted that its log doesn't
+	// list call by call (compacting the context, among others).
+	Unitemized bool `json:"unitemized,omitempty" doc:"Tokens Claude Code counted in its own total but didn't log call by call, such as compacting the context: those up to this point, priced as any call."`
 	// report is a Claude Code cost-state line: what it counted so far.
 	report map[string]agentlog.ModelReport
 	// key identifies the call across logs: a fork's log copies the calls of
@@ -353,7 +353,9 @@ func (s *Store) readSessionCost(logs, subs logReader, path string, subagents fun
 	if sc.fresh {
 		sc.grown = grown(sc.reads, reads)
 		sc.before, sc.reads = sc.reads, reads
-		sc.calls = assemble(snap.calls, subCalls)
+		var drift map[string]costDrift
+		sc.calls, drift = assemble(snap.calls, subCalls, s.prices)
+		s.warnDrift(drift)
 		sc.logCalls = append(make([][]ModelCall, 0, len(reads)), snap.calls)
 		for _, sub := range subCalls {
 			sc.logCalls = append(sc.logCalls, sub.calls)
@@ -523,11 +525,12 @@ func (sc *sessionCost) ownCalls(owner map[string]*sessionCost) []ModelCall {
 }
 
 // assemble returns a session's calls: its log's, and its subagents',
-// reconciled with Claude Code's own count. Without either, they are its
-// log's calls as they are.
-func assemble(own []ModelCall, subs []subagentCalls) []ModelCall {
+// reconciled with Claude Code's own count at prices, and the models whose
+// cost differs from Claude Code's (see reconcile). Without either, they
+// are its log's calls as they are.
+func assemble(own []ModelCall, subs []subagentCalls, prices *pricing.Table) ([]ModelCall, map[string]costDrift) {
 	if len(subs) == 0 && !slices.ContainsFunc(own, func(c ModelCall) bool { return c.report != nil }) {
-		return own
+		return own, nil
 	}
 	n := len(own)
 	for _, sub := range subs {
@@ -541,11 +544,24 @@ func assemble(own []ModelCall, subs []subagentCalls) []ModelCall {
 			calls = append(calls, call)
 		}
 	}
-	calls = reconcile(calls)
+	calls, drift := reconcile(calls, prices)
 	if len(calls) == 0 {
-		return nil
+		return nil, drift
 	}
-	return calls
+	return calls, drift
+}
+
+// warnDrift logs, once for each model, that Claude Code's own cost of the
+// tokens differs from what the store's prices make of them.
+func (s *Store) warnDrift(drift map[string]costDrift) {
+	for _, model := range slices.Sorted(maps.Keys(drift)) {
+		if _, warned := s.drifted.LoadOrStore(model, true); warned {
+			continue
+		}
+		d := drift[model]
+		s.logger.Warn("Claude Code's own cost of a model's tokens differs from AgentAPI's prices; costs use AgentAPI's (--prices changes them)",
+			"agent", s.agent, "model", model, "claude_code_usd", d.reported, "agentapi_usd", d.priced)
+	}
 }
 
 // costLogs lists the logs a reading of the costs reads: the sessions', and
@@ -649,16 +665,30 @@ func priced(call ModelCall, prices *pricing.Table) ModelCall {
 	return call
 }
 
-// unitemizedMin is the smallest difference to Claude Code's own count that
-// is added as unitemized: below it, rounding.
+// unitemizedMin is the smallest cost of tokens Claude Code counted but
+// didn't log that is added as unitemized, and the smallest difference
+// between its cost and ours that is drift: below it, rounding.
 const unitemizedMin = 0.01
 
+// costDrift is Claude Code's own cost of a model's tokens and what the
+// prices make of them, where they differ by more than rounding.
+type costDrift struct{ reported, priced float64 }
+
+// drifted reports whether Claude Code's cost reported differs from ours,
+// priced: by more than unitemizedMin and 1%.
+func drifted(reported, priced float64) bool {
+	diff := math.Abs(reported - priced)
+	return diff >= unitemizedMin && diff > 0.01*math.Abs(reported)
+}
+
 // reconcile turns Claude Code's cost-state lines among calls into calls
-// for what it counted but didn't log call by call: at each line, what it
-// counted for a model so far less the calls of that model up to then. The
-// session's calls, its subagents' included, then add up to Claude Code's
-// own total. The lines themselves are dropped.
-func reconcile(calls []ModelCall) []ModelCall {
+// for the tokens it counted but didn't log call by call: at each line,
+// the tokens it counted for a model so far less those of the calls of that
+// model up to then, priced at prices. The session's calls, its subagents'
+// included, then add up to Claude Code's own token count. A difference in
+// cost alone (the same tokens at other prices) adds no call: the models
+// it is found for are returned. The lines themselves are dropped.
+func reconcile(calls []ModelCall, prices *pricing.Table) ([]ModelCall, map[string]costDrift) {
 	var reports []ModelCall
 	calls = slices.DeleteFunc(calls, func(c ModelCall) bool {
 		if c.report != nil {
@@ -668,12 +698,13 @@ func reconcile(calls []ModelCall) []ModelCall {
 		return false
 	})
 	if len(reports) == 0 {
-		return calls
+		return calls, nil
 	}
 	if !slices.IsSortedFunc(calls, byTime) {
 		slices.SortStableFunc(calls, byTime)
 	}
 	counted := make(map[string]agentlog.ModelReport)
+	var drift map[string]costDrift
 	next := 0
 	var added []ModelCall
 	for _, r := range reports {
@@ -691,31 +722,43 @@ func reconcile(calls []ModelCall) []ModelCall {
 		for _, model := range slices.Sorted(maps.Keys(r.report)) {
 			reported := r.report[model]
 			c := counted[model]
-			missing := reported.USD - c.USD
-			if missing < unitemizedMin {
-				continue
-			}
 			tokens := pricing.Tokens{
 				Input:      max(0, reported.Tokens.Input-c.Tokens.Input),
 				CacheRead:  max(0, reported.Tokens.CacheRead-c.Tokens.CacheRead),
 				CacheWrite: max(0, reported.Tokens.CacheWrite-c.Tokens.CacheWrite-c.Tokens.CacheWrite1h),
 				Output:     max(0, reported.Tokens.Output-c.Tokens.Output),
 			}
-			// Priced by Claude Code itself.
-			call := ModelCall{Time: r.Time, Model: model, Tokens: tokens, USD: missing, Priced: true, Unitemized: true, cost: -1}
-			added = append(added, call)
-			c.USD += missing
-			c.Tokens = c.Tokens.Add(tokens)
-			counted[model] = c
+			price, known := prices.Lookup(model)
+			if !tokens.IsZero() && (!known || price.Cost(tokens) >= unitemizedMin) {
+				call := ModelCall{Time: r.Time, Model: model, Tokens: tokens, Unitemized: true, cost: -1}
+				if known {
+					call.USD, call.Priced = price.Cost(tokens), true
+				}
+				added = append(added, call)
+				c.USD += call.USD
+				c.Tokens = c.Tokens.Add(tokens)
+				counted[model] = c
+			}
+			// The same tokens, another cost: the prices differ. Where the
+			// log has more tokens than Claude Code counted, the costs
+			// differ for that.
+			same := c.Tokens.Input == reported.Tokens.Input && c.Tokens.CacheRead == reported.Tokens.CacheRead &&
+				c.Tokens.CacheWrite+c.Tokens.CacheWrite1h == reported.Tokens.CacheWrite && c.Tokens.Output == reported.Tokens.Output
+			if known && same && drifted(reported.USD, c.USD) {
+				if drift == nil {
+					drift = make(map[string]costDrift)
+				}
+				drift[model] = costDrift{reported: reported.USD, priced: c.USD}
+			}
 		}
 	}
 	if len(added) == 0 {
-		return calls
+		return calls, drift
 	}
 	if !slices.IsSortedFunc(added, byTime) {
 		calls = append(calls, added...)
 		slices.SortStableFunc(calls, byTime)
-		return calls
+		return calls, drift
 	}
 	// Both in order: merged, the calls first at one time, as sorting them
 	// one after the other would.
@@ -728,7 +771,7 @@ func reconcile(calls []ModelCall) []ModelCall {
 		}
 	}
 	merged = append(merged, calls...)
-	return append(merged, added...)
+	return append(merged, added...), drift
 }
 
 // byTime orders calls by their time.

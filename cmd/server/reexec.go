@@ -45,6 +45,11 @@ type selfExec struct {
 	// requested is set once a restart stopped the server to run it again;
 	// a shutdown signal clears it.
 	requested atomic.Bool
+	// carryPromptSent is set when a restart has to tell the program it
+	// runs whether the initial prompt went out (no state database);
+	// promptSent is set once it did.
+	carryPromptSent bool
+	promptSent      atomic.Bool
 
 	// mu makes a restart and a shutdown one after the other, so that the
 	// second sees what the first did.
@@ -278,5 +283,21 @@ func (s *selfExec) setEnv(name, value string) {
 // exec runs the program again in this process. It returns only if it
 // couldn't.
 func (s *selfExec) exec() error {
-	return execProgram(s.path, s.argv, s.env)
+	return execProgram(s.path, s.argv, s.execEnv())
+}
+
+// execEnv is the environment the program runs again with.
+func (s *selfExec) execEnv() []string {
+	if s.carryPromptSent && s.promptSent.Load() {
+		return append(slices.Clone(s.env), initialPromptSentEnv+"=1")
+	}
+	return s.env
+}
+
+// markInitialPromptSent records that the agent got the initial prompt, so
+// a restart in place doesn't send it again.
+func (s *selfExec) markInitialPromptSent() {
+	if s != nil {
+		s.promptSent.Store(true)
+	}
 }

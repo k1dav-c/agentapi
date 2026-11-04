@@ -478,7 +478,7 @@ function updatedAt(spend: Spend): number {
 export interface SpendTotals {
   day: number;
   week: number;
-  // How many connected instances report a spend; the others (PTY, older
+  // How many connected instances report a spend; the others (older
   // AgentAPIs, those the hub doesn't follow now) don't count.
   counted: number;
 }
@@ -546,8 +546,8 @@ export function countedTokens(instances: Iterable<HubInstance>): {instance: HubI
 export interface TokenTotals {
   day: Tokens;
   week: Tokens;
-  // How many connected instances report their tokens; the others (PTY,
-  // earlier AgentAPIs, those the hub doesn't follow now) don't count.
+  // How many connected instances report their tokens; the others (earlier
+  // AgentAPIs, those the hub doesn't follow now) don't count.
   counted: number;
 }
 

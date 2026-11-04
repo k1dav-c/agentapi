@@ -1,6 +1,6 @@
 import {authFetch, withAuthRetry} from "./auth";
 import type {FileUploadResponse, QueuedMessage, SendResult} from "@/components/chat-provider";
-import {parseTransport, type DispatchMode, type Transport} from "./dispatch";
+import type {DispatchMode} from "./dispatch";
 import {normalizeRequest, type NativeRequest, type RequestPayload, type RequestResponse} from "./native-requests";
 import {normalizeRichMessage, type RichMessage} from "./conversation";
 import {parseLoginRequired, type LoginRequired, type LoginRetryOutcome} from "./login";
@@ -94,8 +94,7 @@ async function errorDetail(response: Response, fallback: string): Promise<string
 }
 
 export interface ServerStatusInfo {
-  transport: Transport;
-  // Set while the agent waits for someone to log it in (native transport).
+  // Set while the agent waits for someone to log it in.
   login_required: LoginRequired | null;
 }
 
@@ -242,11 +241,10 @@ export function createChatAPI(baseURL: string) {
     },
 
     async getStatus(): Promise<ServerStatusInfo> {
-      const data = await jsonRequest<{transport?: unknown; login_required?: unknown}>("/status", {
+      const data = await jsonRequest<{login_required?: unknown}>("/status", {
         fallback: "Failed to read the agent status",
       });
       return {
-        transport: parseTransport(data.transport) ?? "pty",
         login_required: parseLoginRequired(data.login_required),
       };
     },

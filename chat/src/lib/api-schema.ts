@@ -61,7 +61,7 @@ export interface paths {
         };
         /**
          * What the session spent
-         * @description Returns what the session the agent has open spent, its subagents included, and its model calls one by one, read from the agent's logs: the tokens of each call priced at the model providers' list prices (the API-equivalent cost, which a subscription doesn't charge), or at Pi's own prices for Pi. A model without a known price counts its tokens and no cost; --prices adds prices. For Claude Code, what it counted but didn't log call by call (compacting the context) comes as unitemized calls. Claude Code, Codex and Pi only.
+         * @description Returns what the session the agent has open spent, its subagents included, and its model calls one by one, read from the agent's logs: the tokens of each call priced at the model providers' list prices (the API-equivalent cost, which a subscription doesn't charge), or at Pi's own prices for Pi. A model without a known price counts its tokens and no cost; --prices adds prices. For Claude Code, the tokens it counted but didn't log call by call (compacting the context) come as unitemized calls, priced as any call. Claude Code, Codex and Pi only.
          */
         get: operations["get-cost"];
         put?: never;
@@ -1324,7 +1324,7 @@ export interface components {
             time: string;
             /** @description The tokens it used. */
             tokens: components["schemas"]["Tokens"];
-            /** @description Calls Claude Code counted in its own total but didn't log one by one, such as compacting the context: the difference up to this point. */
+            /** @description Tokens Claude Code counted in its own total but didn't log call by call, such as compacting the context: those up to this point, priced as any call. */
             unitemized?: boolean;
             /**
              * Format: double

@@ -26,14 +26,10 @@ export interface CachedSession {
   seq: number;
   messages: Message[];
   richMessages: RichMessage[];
-  // Requests the agent made (native transport).
+  // Requests the agent made.
   requests: NativeRequest[];
   // The tasks as the server derives them; none from servers that don't.
   tasks: ServerTask[];
-  // How the server drives the agent ("native"; older servers also "pty"),
-  // so the cached transcript renders for the right transport before the
-  // server says.
-  transport?: string;
 }
 
 // How long a cache is kept after it was last used (loaded or saved).
@@ -52,7 +48,6 @@ type Lists = Record<Kind, readonly unknown[]>;
 export interface CacheMeta {
   epoch: string;
   seq: number;
-  transport?: string;
   // When the cache was last loaded or saved.
   usedAt: number;
   // How many records of each kind there are.
@@ -130,7 +125,6 @@ export class SessionCache {
       saved &&
       saved.meta.epoch === session.epoch &&
       saved.meta.seq === session.seq &&
-      saved.meta.transport === session.transport &&
       KINDS.every((kind) => sameItems(saved.lists[kind], lists[kind]))
     ) {
       return;
@@ -138,7 +132,6 @@ export class SessionCache {
     const meta: CacheMeta = {
       epoch: session.epoch,
       seq: session.seq,
-      transport: session.transport,
       usedAt: this.now(),
       counts: {messages: lists.messages.length, richMessages: lists.richMessages.length, requests: lists.requests.length, tasks: lists.tasks.length},
       writer: `${this.page}:${++this.writes}`,
@@ -212,7 +205,6 @@ export function parseCachedSession(value: unknown): CachedSession | null {
     richMessages: items<RichMessagePayload>(session.richMessages).map(normalizeRichMessage),
     requests: items<RequestPayload>(session.requests).map(normalizeRequest),
     tasks: items<components["schemas"]["Task"]>(session.tasks).map(normalizeTask),
-    transport: typeof session.transport === "string" ? session.transport : undefined,
   };
 }
 

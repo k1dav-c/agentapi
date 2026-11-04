@@ -55,6 +55,9 @@ type Store struct {
 	readers atomic.Uint64
 	// unpriced holds the models without a price that were logged.
 	unpriced sync.Map
+	// drifted holds the models whose cost differing from Claude Code's
+	// was logged.
+	drifted sync.Map
 	// models holds the names of the models called, by themselves (intern).
 	modelsMu sync.Mutex
 	models   map[string]string

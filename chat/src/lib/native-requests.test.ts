@@ -108,9 +108,9 @@ describe("mergeRequests", () => {
   });
 
   test("drops the oldest closed requests beyond the cap", () => {
-    const closed = Array.from({length: 105}, (_, i) => approval({id: `c${i}`, status: "resolved", seq: i + 1}));
+    const closed = Array.from({length: 55}, (_, i) => approval({id: `c${i}`, status: "resolved", seq: i + 1}));
     const merged = mergeRequests([], [...closed, question({seq: 200})]);
-    expect(merged).toHaveLength(101);
+    expect(merged).toHaveLength(51);
     expect(merged[0].id).toBe("c5");
     expect(merged.at(-1)?.id).toBe("req-2");
   });
@@ -118,11 +118,24 @@ describe("mergeRequests", () => {
   test("keeps the most recently closed requests, whenever they opened", () => {
     const at = (second: number) => new Date(Date.UTC(2026, 9, 18, 9, 0, second)).toISOString();
     const late = approval({id: "late", status: "resolved", closed_at: at(59), seq: 1});
-    const closed = Array.from({length: 100}, (_, i) => approval({id: `c${i}`, status: "resolved", closed_at: at(i % 50), seq: i + 2}));
+    const closed = Array.from({length: 50}, (_, i) => approval({id: `c${i}`, status: "resolved", closed_at: at(i % 25), seq: i + 2}));
     const merged = mergeRequests([], [late, ...closed]);
-    expect(merged).toHaveLength(100);
+    expect(merged).toHaveLength(50);
     expect(merged[0].id).toBe("late");
     expect(merged.map((request) => request.id)).not.toContain("c0");
+  });
+
+  test("an incremental replay keeps the closed requests a full one does", () => {
+    // The server keeps 50 closed requests and drops the one that closed
+    // first without an event: a client resuming with ?since= must drop it
+    // too, or it keeps a request a full replay no longer has.
+    const at = (second: number) => new Date(Date.UTC(2026, 9, 18, 9, 0, second)).toISOString();
+    const closed = Array.from({length: 51}, (_, i) => approval({id: `c${i}`, status: "resolved", closed_at: at(i), seq: i + 1}));
+    const cached = mergeRequests([], closed.slice(0, 50));
+    const incremental = mergeRequests(cached, [closed[50]]);
+    const full = mergeRequests([], closed.slice(1));
+    expect(incremental.map((request) => request.id)).toEqual(full.map((request) => request.id));
+    expect(incremental.map((request) => request.id)).not.toContain("c0");
   });
 
   test("does not keep the answers to secret questions", () => {

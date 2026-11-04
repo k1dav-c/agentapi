@@ -106,8 +106,8 @@ export default function MessageInput({
   // A slash command that runs: a second Enter doesn't run it again.
   const commandRunning = useRef(false);
   // The chat's own slash commands, offered while the command word is typed
-  // (native agents, which have no terminal UI for them).
-  const slashSuggestions = features.slashCommands ? matchingCommands(message).filter((command) => runsHere(command, features)) : [];
+  // (the agents have no terminal UI for them).
+  const slashSuggestions = matchingCommands(message).filter((command) => runsHere(command, features));
   const completeSlashCommand = (text: string) => {
     setMessage(text);
     textareaRef.current?.focus();
@@ -122,7 +122,7 @@ export default function MessageInput({
   const [settingsAsked, setSettingsAsked] = useState(false);
   const usageAlert = useUsageAlert();
   const hasSettings = useChatSelector(
-    (chat) => (chat.features.settings && chat.agentSettings !== null) || (chat.features.usage && Boolean(chat.agentUsage)),
+    (chat) => (chat.features.settings && chat.agentSettings !== null) || Boolean(chat.agentUsage),
   );
   useEffect(() => {
     const show = () => setSettingsAsked(true);
@@ -133,7 +133,7 @@ export default function MessageInput({
 
   const submit = async (mode: DispatchMode = "queue") => {
     if (sendBlocked || (serverStatus !== "running" && serverStatus !== "stable")) return;
-    const command = features.slashCommands ? parseSlashCommand(message) : null;
+    const command = parseSlashCommand(message);
     if (command && slashCommands.handles(command)) {
       if (commandRunning.current) return;
       commandRunning.current = true;
