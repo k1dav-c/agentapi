@@ -88,7 +88,6 @@ export function instanceState(instance: HubInstance): InstanceState {
 const attentionLabel: Record<Summary["attention"], string> = {
   login: "Needs login",
   request: "Needs your answer",
-  dialog: "Needs your answer",
   limit: "Usage limit",
   exited: "Agent exited",
   none: "",
@@ -308,7 +307,6 @@ export interface Activity {
 function waitsFor(summary: Summary | null | undefined): Activity {
   if (summary?.attention === "login") return {label: "Login", text: summary.login_required?.message || "Log in to continue", tone: "needs"};
   if (summary?.attention === "limit") return {label: "Usage limit", text: summary.limit_stop?.message || "The account reached its limit", tone: "needs", since: summary.limit_stop?.stopped_at};
-  if (summary?.attention === "dialog") return {label: "Dialog", text: "Answer it in the agent's terminal", tone: "needs"};
   const request = summary?.request;
   if (request) return {label: requestLabels[request.kind] ?? "Request", text: request.title, tone: "needs", since: request.created_at};
   return {label: "Needs you", text: "Waiting for your answer", tone: "needs"};

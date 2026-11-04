@@ -34,17 +34,12 @@ const (
 )
 
 // Transport is how AgentAPI talks to its agent: natively since AgentAPI 3.
+// An AgentAPI 2 may report "pty", which a client shows as it came.
 type Transport string
 
-const (
-	// TransportPTY is what an AgentAPI 2 that drove the agent's terminal
-	// UI reports.
-	TransportPTY    Transport = "pty"
-	TransportNative Transport = "native"
-)
+const TransportNative Transport = "native"
 
 var TransportValues = []Transport{
-	TransportPTY,
 	TransportNative,
 }
 

@@ -895,7 +895,7 @@ export interface components {
          * @example none
          * @enum {string}
          */
-        Attention: "dialog" | "exited" | "limit" | "login" | "none" | "request";
+        Attention: "exited" | "limit" | "login" | "none" | "request";
         AuthSessionBody: {
             /**
              * Format: uri
@@ -2038,7 +2038,7 @@ export interface components {
             readonly $schema?: string;
             /** @description The agent's own session, as in GET /status. */
             agent_session_id?: string;
-            /** @description Why the agent waits for the user: login, request (an approval, question or plan), limit (a usage limit stopped its turn), exited, or none; an AgentAPI 2 with the PTY transport also reports dialog (in the agent's terminal). */
+            /** @description Why the agent waits for the user: login, request (an approval, question or plan), limit (a usage limit stopped its turn), exited, or none. */
             attention: components["schemas"]["Attention"];
             /** @description Who this AgentAPI is: its ID (--instance-id), name (--name), server ID, host, port, directory, agent and URL, as in webhook events. */
             instance: components["schemas"]["WebhookInstance"];
@@ -2078,8 +2078,6 @@ export interface components {
              * @description How many tasks the conversation has.
              */
             tasks: number;
-            /** @description The bottom of the agent's terminal while it shows a dialog to answer; only from an AgentAPI 2 with the PTY transport. */
-            terminal_prompt?: string;
             /** @description The name the agent gave the session, else the start of the latest task's prompt; empty before the first task. */
             title: string;
             /** @description The latest task ended after a client last showed the conversation to the user (POST /tasks/seen): its result wasn't seen yet. */
@@ -2155,7 +2153,7 @@ export interface components {
         SummaryUpdateBody: {
             /** @description The agent's own session, as in GET /status. */
             agent_session_id?: string;
-            /** @description Why the agent waits for the user: login, request (an approval, question or plan), limit (a usage limit stopped its turn), exited, or none; an AgentAPI 2 with the PTY transport also reports dialog (in the agent's terminal). */
+            /** @description Why the agent waits for the user: login, request (an approval, question or plan), limit (a usage limit stopped its turn), exited, or none. */
             attention: components["schemas"]["Attention"];
             /** @description Who this AgentAPI is: its ID (--instance-id), name (--name), server ID, host, port, directory, agent and URL, as in webhook events. */
             instance: components["schemas"]["WebhookInstance"];
@@ -2195,8 +2193,6 @@ export interface components {
              * @description How many tasks the conversation has.
              */
             tasks: number;
-            /** @description The bottom of the agent's terminal while it shows a dialog to answer; only from an AgentAPI 2 with the PTY transport. */
-            terminal_prompt?: string;
             /** @description The name the agent gave the session, else the start of the latest task's prompt; empty before the first task. */
             title: string;
             /** @description The latest task ended after a client last showed the conversation to the user (POST /tasks/seen): its result wasn't seen yet. */
@@ -2382,10 +2378,10 @@ export interface components {
         };
         /**
          * Transport
-         * @example pty
+         * @example native
          * @enum {string}
          */
-        Transport: "native" | "pty";
+        Transport: "native";
         UpdateQueuedMessageRequestBody: {
             /**
              * Format: uri

@@ -84,6 +84,7 @@ func TestMovedInstanceLeavesItsToken(t *testing.T) {
 		i.Source = SourceWebhook
 		i.Token = "for-dev-1"
 		i.Connection = ConnectionUnreachable
+		i.failed = true
 	})
 	h.upsertFromWebhook(instanceapi.WebhookInstance{ID: "dev:1", ServerID: "s2"}, "http://dev:2", 60)
 	instance, _ := h.store.get("dev:1")
@@ -173,4 +174,54 @@ func TestDeliveriesExpire(t *testing.T) {
 	assert.Equal(t, []string{"b"}, again.order, "a expired")
 	assert.False(t, again.add("b", now.Add(20*time.Minute), later))
 	assert.True(t, again.add("a", later.Add(time.Minute), later), "its signature no longer holds")
+}
+
+// An event moves a joined instance only once the hub knows its URL is
+// dead: it failed there past the connect grace, or another AgentAPI
+// answers there. Never while the hub reaches it or connects to it (after
+// the hub restarted, or a stream dropped). One stopped as an event said is
+// tried at its URL first.
+func TestMoveNeedsADeadURL(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		connection Connection
+		failed     bool
+		answeredBy string
+		moves      bool
+		connecting bool
+	}{
+		{name: "connected", connection: ConnectionConnected},
+		{name: "connecting", connection: ConnectionConnecting},
+		{name: "connecting after it failed", connection: ConnectionConnecting, failed: true},
+		{name: "unreachable", connection: ConnectionUnreachable, failed: true, moves: true},
+		{name: "another answers", connection: ConnectionUnreachable, answeredBy: "dev:9", moves: true},
+		{name: "stopped after its heartbeats", connection: ConnectionStopped, failed: true, moves: true},
+		{name: "stopped as an event said", connection: ConnectionStopped, connecting: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h, err := New(Config{Token: "t", Secret: "s"})
+			require.NoError(t, err)
+			_, _ = h.store.update("dev:1", true, func(i *Instance) {
+				i.URL = "http://dev:1"
+				i.ServerID = "s1"
+				i.Source = SourceWebhook
+				i.Connection = test.connection
+				i.failed = test.failed
+				i.answeredBy = test.answeredBy
+			})
+			h.upsertFromWebhook(instanceapi.WebhookInstance{ID: "dev:1", ServerID: "s1"}, "http://elsewhere:1", 60)
+			instance, _ := h.store.get("dev:1")
+			if test.moves {
+				assert.Equal(t, "http://elsewhere:1", instance.URL)
+				assert.Equal(t, ConnectionConnecting, instance.Connection)
+				return
+			}
+			assert.Equal(t, "http://dev:1", instance.URL)
+			if test.connecting {
+				assert.Equal(t, ConnectionConnecting, instance.Connection, "tried at its URL")
+			} else {
+				assert.Equal(t, test.connection, instance.Connection)
+			}
+		})
+	}
 }

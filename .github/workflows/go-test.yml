@@ -2,16 +2,31 @@ name: Go Tests
 
 # Pull requests run the tests here. Pushes to main, manual releases and
 # published releases run them through the Release workflow (workflow_call),
-# which releases only once they pass.
+# which releases only once the Linux jobs (test, race, lint) pass; it calls
+# this workflow a second time for the macOS and Windows jobs, which no release
+# waits for.
+#
+# The inputs skip jobs rather than select them so that a pull request run,
+# where inputs are null, runs every job.
 on:
     pull_request:
     workflow_call:
+        inputs:
+            skip-linux:
+                description: Skip the Linux jobs (test, race, lint)
+                type: boolean
+                default: false
+            skip-platforms:
+                description: Skip the macOS and Windows jobs
+                type: boolean
+                default: false
 
 permissions:
     contents: read
 
 jobs:
     test:
+        if: ${{ !inputs.skip-linux }}
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v4
@@ -25,6 +40,7 @@ jobs:
               run: CGO_ENABLED=0 go test -count=1 -v ./...
 
     race:
+        if: ${{ !inputs.skip-linux }}
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v4
@@ -43,6 +59,7 @@ jobs:
     # signals; the rest skip themselves there or are Unix-only files.
     platforms:
         name: test (${{ matrix.os }})
+        if: ${{ !inputs.skip-platforms }}
         strategy:
             fail-fast: false
             matrix:
@@ -76,6 +93,7 @@ jobs:
               run: go test -count=1 ./lib/selfupdate/... ./lib/registry/... ./lib/agentlog ./lib/statedb/...
 
     lint:
+        if: ${{ !inputs.skip-linux }}
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v4

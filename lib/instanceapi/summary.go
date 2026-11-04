@@ -105,9 +105,6 @@ const (
 	AttentionLogin Attention = "login"
 	// AttentionRequest: an approval, question or plan waits for an answer.
 	AttentionRequest Attention = "request"
-	// AttentionDialog: the agent's terminal shows a dialog to answer
-	// (AgentAPI 2's PTY transport).
-	AttentionDialog Attention = "dialog"
 	// AttentionLimit: a usage limit stopped the agent's turn.
 	AttentionLimit Attention = "limit"
 	// AttentionExited: the agent exited.
@@ -115,7 +112,7 @@ const (
 )
 
 var AttentionValues = []Attention{
-	AttentionNone, AttentionLogin, AttentionRequest, AttentionDialog, AttentionLimit, AttentionExited,
+	AttentionNone, AttentionLogin, AttentionRequest, AttentionLimit, AttentionExited,
 }
 
 func (a Attention) Schema(r huma.Registry) *huma.Schema {
@@ -129,7 +126,7 @@ type SummaryBody struct {
 	Status   AgentStatus     `json:"status" doc:"Whether the agent works (running) or waits (stable)."`
 	// Lifecycle tells a failed or exited agent from one that waits.
 	Lifecycle LifecycleState `json:"lifecycle" doc:"The agent process's lifecycle state."`
-	Attention Attention      `json:"attention" doc:"Why the agent waits for the user: login, request (an approval, question or plan), limit (a usage limit stopped its turn), exited, or none; an AgentAPI 2 with the PTY transport also reports dialog (in the agent's terminal)."`
+	Attention Attention      `json:"attention" doc:"Why the agent waits for the user: login, request (an approval, question or plan), limit (a usage limit stopped its turn), exited, or none."`
 	// Title is the session's name, else the start of the latest prompt.
 	Title          string `json:"title" doc:"The name the agent gave the session, else the start of the latest task's prompt; empty before the first task."`
 	SessionName    string `json:"session_name,omitempty" doc:"The name the agent gave the session, as in GET /status."`
@@ -137,9 +134,6 @@ type SummaryBody struct {
 	// PendingRequests and QueuedMessages count what waits.
 	PendingRequests int `json:"pending_requests" doc:"Requests (approvals, questions, plans) the agent waits on; see GET /requests."`
 	QueuedMessages  int `json:"queued_messages" doc:"Messages waiting in the queue; see GET /queue."`
-	// TerminalPrompt is only reported by an AgentAPI 2 with the PTY
-	// transport.
-	TerminalPrompt string `json:"terminal_prompt,omitempty" doc:"The bottom of the agent's terminal while it shows a dialog to answer; only from an AgentAPI 2 with the PTY transport."`
 	// Task is the latest task, nil before the first.
 	Task  *Task `json:"task,omitempty" doc:"The latest task, as in GET /tasks; missing before the first."`
 	Tasks int   `json:"tasks" doc:"How many tasks the conversation has."`

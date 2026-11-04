@@ -10,12 +10,18 @@ name: Release
 # by hand still works: its binaries are built with the release's tag as the
 # version.
 #
-# Nothing is released unless the tests (go-test.yml, called here) pass on the
-# same commit, whatever started the run: AgentAPIs with --allow-update install
-# the latest release. The tests run in this workflow rather than the release
-# waiting for the Go Tests workflow (workflow_run), so that one mechanism
-# covers every trigger and the commit tested is github.sha; go-test.yml
-# therefore doesn't run on pushes to main itself.
+# Nothing is released unless the Linux tests (go-test.yml, called here) pass on
+# the same commit, whatever started the run: AgentAPIs with --allow-update
+# install the latest release. The tests run in this workflow rather than the
+# release waiting for the Go Tests workflow (workflow_run), so that one
+# mechanism covers every trigger and the commit tested is github.sha;
+# go-test.yml therefore doesn't run on pushes to main itself.
+#
+# The macOS and Windows tests run here too, as a separate call that the
+# release doesn't need: their hosted runners are sometimes unavailable for
+# long enough to cancel the job, and a release shouldn't wait on that. A
+# failure there fails the run but not the release; re-running the failed jobs
+# re-runs only them.
 #
 # The release is created in this workflow, not by a separate release-triggered
 # one, because releases created with GITHUB_TOKEN don't trigger other workflows.
@@ -40,9 +46,18 @@ jobs:
   test:
     name: Go Tests
     uses: ./.github/workflows/go-test.yml
+    with:
+      skip-platforms: true
+
+  platforms:
+    name: Go Tests (macOS, Windows)
+    uses: ./.github/workflows/go-test.yml
+    with:
+      skip-linux: true
 
   release:
     name: Build and Release
+    # Only the Linux tests; see above.
     needs: test
     runs-on: ubuntu-latest
     permissions:

@@ -56,6 +56,14 @@ type Instance struct {
 	// answeredBy is the ID of another AgentAPI that answers at URL, while
 	// it does: the proxy doesn't send it this instance's requests.
 	answeredBy string
+	// failed is whether the hub's watch failed at URL past the connect
+	// grace since it last reached it there: the URL is dead, and an event
+	// may move the instance (refuseMove).
+	failed bool
+	// confirmedURL is the URL at which the hub last read the instance's
+	// summary, kept in the file: after a restart the hub follows it there
+	// first, not at a URL an event moved it to that never answered.
+	confirmedURL string
 	// refusedRun is the server ID of the last run whose URL change the hub
 	// refused, to log it once.
 	refusedRun string
@@ -239,19 +247,21 @@ type storedInstance struct {
 	// Activity is its activityKey: after a restart, a summary that says
 	// what the last one did isn't a change.
 	Activity string `json:"activity,omitempty"`
+	// ConfirmedURL is its confirmedURL. A hub before 3.0.1 ignores it.
+	ConfirmedURL string `json:"confirmed_url,omitempty"`
 	// Work is when the hub saw it working; the store tells a change of it
 	// apart (workLog.track), so kept leaves it out.
 	Work *storedWork `json:"work,omitempty"`
 }
 
 func (i Instance) stored() storedInstance {
-	return storedInstance{record: i.record, Stopped: i.Connection == ConnectionStopped, Activity: i.activity, Work: i.work.stored()}
+	return storedInstance{record: i.record, Stopped: i.Connection == ConnectionStopped, Activity: i.activity, ConfirmedURL: i.confirmedURL, Work: i.work.stored()}
 }
 
 // kept is what the file keeps of the instance, but when it was last seen
 // and its work, to compare.
 func (i Instance) kept() storedInstance {
-	stored := storedInstance{record: i.record, Stopped: i.Connection == ConnectionStopped, Activity: i.activity}
+	stored := storedInstance{record: i.record, Stopped: i.Connection == ConnectionStopped, Activity: i.activity, ConfirmedURL: i.confirmedURL}
 	stored.LastSeen = time.Time{}
 	return stored
 }
@@ -273,8 +283,13 @@ func newStore(path string, logger *slog.Logger, clock quartz.Clock) (*store, err
 		if si.Stopped {
 			connection = ConnectionStopped
 		}
-		i := &Instance{record: si.record, Connection: connection, activity: si.Activity, work: si.Work.log(si.LastSeen, now)}
+		i := &Instance{record: si.record, Connection: connection, activity: si.Activity, confirmedURL: si.ConfirmedURL, work: si.Work.log(si.LastSeen, now)}
 		i.Pin = max(i.Pin, 0)
+		if i.confirmedURL != "" && i.Source != SourceManual {
+			// Moved by an event to a URL that never answered: the hub
+			// tries where it last reached it first.
+			i.URL = i.confirmedURL
+		}
 		i.State = i.state()
 		s.instances[si.ID] = i
 	}

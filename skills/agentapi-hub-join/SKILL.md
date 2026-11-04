@@ -150,7 +150,8 @@ A machine joined with a fixed address in `--public-url`, such as `http://192.168
 keeps reporting it after DHCP gives the machine another one (a Coder workspace that restarted, for
 example), and the hub shows its agents as unreachable (`no route to host`). Run `join` again with
 the same hub URL and `--public-url 'http://{ip}:{port}'` (steps 1 to 5). The hub moves each
-instance to the new address with its next heartbeat, within a minute, and after every later change.
+instance to the new address with its next heartbeat, within a minute, and after every later change
+once the old address stops answering, within about two minutes.
 
 ## Rules
 

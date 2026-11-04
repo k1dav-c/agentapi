@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- The hub moves a joined instance to the URL an event names only once its old URL is dead to the
+  hub: unreachable past the 10 s grace, stopped after missed heartbeats, or answered by another
+  AgentAPI. A machine with the hub secret could take over another's instance while the hub
+  connected to it, after a restart or a dropped stream, and get its token, messages and approvals.
+  An instance stopped by `instance.stopped` is tried at its old URL first. A machine whose address
+  changed moves at most a minute later than before, about two minutes after the change.
+- The hub's proxy forwards an instance's requests, the update included, only while it is connected
+  (reads its summary at its URL); otherwise it answers 503 and sends nothing.
+- `instances.json` keeps the URL where the hub last read each instance's summary
+  (`confirmed_url`); a restarted hub follows the instance there first. A hub before 3.0.1 ignores
+  the field.
+
+### Changes
+
+- The hub no longer reads the PTY-era fields of an AgentAPI 2: a 2.x PTY agent's terminal dialog
+  no longer shows as needing you on a 3.0.1 hub (its row shows it idle or working; answer the
+  dialog in that AgentAPI's own chat). `terminal_prompt` and the `dialog` attention leave the
+  summary schema, `pty` the `Transport` enum; AgentAPI 3 never sent them. The hub still follows a
+  2.x instance and shows the rest of its summary.
+
+### Internal
+
+- A release waits only for the Linux tests (test, race, lint). macOS and Windows still run on every
+  push to `main` and every PR, but no longer hold a release up: a macOS job that got no runner
+  skipped the v3.0.0 release twice.
+
 ## v3.0.0
 
 ### Breaking changes

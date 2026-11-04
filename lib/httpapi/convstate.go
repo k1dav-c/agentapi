@@ -63,7 +63,6 @@ const (
 	AttentionNone    = convstate.AttentionNone
 	AttentionLogin   = convstate.AttentionLogin
 	AttentionRequest = convstate.AttentionRequest
-	AttentionDialog  = convstate.AttentionDialog
 	AttentionLimit   = convstate.AttentionLimit
 	AttentionExited  = convstate.AttentionExited
 )

@@ -439,13 +439,36 @@ func TestHubKeepsTheRunItFollows(t *testing.T) {
 	assert.Equal(t, joined.ServerID, kept.ServerID)
 	assert.Equal(t, hub.ConnectionConnected, kept.Connection)
 
-	// Once the one it follows stopped, the other is the instance.
+	// Once the one it follows stopped, the other is the instance; but an
+	// instance.stopped is no sign its URL is dead (anyone with the secret
+	// can send one): the hub tries that URL first, and stays while the
+	// instance answers there.
 	stopped := map[string]any{
 		"id": "s1", "type": "instance.stopped", "created_at": time.Now(),
 		"instance": map[string]any{"id": joined.ID, "server_id": joined.ServerID, "url": instSrv.URL},
 	}
 	require.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, stopped, hubSecret, time.Now()))
+	require.Equal(t, hub.ConnectionStopped, instances(t, hubSrv.URL)[0].Connection)
 	require.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, twin("t3", "instance.heartbeat"), hubSecret, time.Now()))
+	require.Eventually(t, func() bool {
+		return instances(t, hubSrv.URL)[0].Connection == hub.ConnectionConnected
+	}, 10*time.Second, 20*time.Millisecond, "it still answers")
+	kept = instances(t, hubSrv.URL)[0]
+	assert.Equal(t, instSrv.URL, kept.URL)
+	assert.Equal(t, joined.ServerID, kept.ServerID)
+
+	// Gone for real: once the hub fails there, the other's next event
+	// moves it.
+	stopped["id"] = "s2"
+	require.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, stopped, hubSecret, time.Now()))
+	_ = instSrv.Listener.Close()
+	instSrv.CloseClientConnections()
+	require.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, twin("t4", "instance.heartbeat"), hubSecret, time.Now()))
+	require.Eventually(t, func() bool {
+		return instances(t, hubSrv.URL)[0].Connection == hub.ConnectionUnreachable
+	}, 10*time.Second, 20*time.Millisecond)
+	assert.Equal(t, instSrv.URL, instances(t, hubSrv.URL)[0].URL, "not before it failed there")
+	require.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, twin("t5", "instance.heartbeat"), hubSecret, time.Now()))
 	moved := instances(t, hubSrv.URL)[0]
 	assert.Equal(t, "http://127.0.0.1:1", moved.URL)
 	assert.Equal(t, "twin", moved.ServerID)
@@ -548,6 +571,134 @@ func TestHubFollowsANewAddress(t *testing.T) {
 	assert.Empty(t, moved.Error)
 	assert.Len(t, instances(t, hubSrv.URL), 1, "moved, not added")
 	assert.Equal(t, http.StatusOK, request(t, http.MethodGet, hubSrv.URL+"/i/"+joined.ID+"/status", hubToken, nil, nil), "requests go to the new address")
+}
+
+// gatedInstance serves an AgentAPI whose summary stream (GET /events) can
+// be held: while hold is set, a stream the hub opens waits, unanswered,
+// until release (or the hub gives up): the hub connects, and doesn't
+// reach it yet.
+type gatedInstance struct {
+	*httptest.Server
+	inst    *httpapi.Server
+	hold    atomic.Bool
+	release chan struct{}
+}
+
+func startGatedInstance(t *testing.T) *gatedInstance {
+	t.Helper()
+	_, inst := startInstanceOn(t, nil, "dev-1:3285")
+	g := &gatedInstance{inst: inst, release: make(chan struct{})}
+	g.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/events" && g.hold.Load() {
+			select {
+			case <-g.release:
+			case <-r.Context().Done():
+				return
+			}
+		}
+		inst.Handler().ServeHTTP(w, r)
+	}))
+	t.Cleanup(g.Close)
+	return g
+}
+
+// hijack is a heartbeat of another machine that has the hub's secret,
+// for the instance joined, with its own URL.
+func hijack(id string, joined hub.Instance, url string) map[string]any {
+	return map[string]any{
+		"id": id, "type": "instance.heartbeat", "created_at": time.Now(),
+		"instance": map[string]any{"id": joined.ID, "server_id": joined.ServerID, "url": url, "agent_type": "claude"},
+		"data":     map[string]any{"heartbeat_seconds": 60},
+	}
+}
+
+// A machine that has the hub's secret can't take over another's instance
+// while the hub connects to it after it restarted: the hub follows it
+// where it last reached it, sends nothing through the proxy until it
+// reaches it there, and nothing to the other URL.
+func TestHubRestartRefusesAMove(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "instances.json")
+	inst := startGatedInstance(t)
+	first := startHub(t, statePath)
+	joined := joinInstance(t, first.URL, inst.URL)
+	otherURL, got := elsewhere(t)
+	flushHub(t, first.URL)
+
+	inst.hold.Store(true)
+	again := startHubGrace(t, statePath, 5*time.Second)
+	require.Equal(t, hub.ConnectionConnecting, instances(t, again.URL)[0].Connection)
+	assert.Equal(t, http.StatusNoContent, postEvent(t, again.URL, hijack("h1", joined, otherURL), hubSecret, time.Now()))
+	kept := instances(t, again.URL)[0]
+	assert.Equal(t, inst.URL, kept.URL)
+	assert.Equal(t, hub.ConnectionConnecting, kept.Connection)
+	assert.Equal(t, http.StatusServiceUnavailable, request(t, http.MethodGet, again.URL+"/i/"+joined.ID+"/status", hubToken, nil, nil), "not connected yet")
+
+	close(inst.release)
+	require.Eventually(t, func() bool {
+		return instances(t, again.URL)[0].Connection == hub.ConnectionConnected
+	}, 10*time.Second, 20*time.Millisecond)
+	assert.Equal(t, inst.URL, instances(t, again.URL)[0].URL)
+	assert.Equal(t, http.StatusOK, request(t, http.MethodGet, again.URL+"/i/"+joined.ID+"/status", hubToken, nil, nil))
+	assert.Never(t, func() bool { return got.Load() > 0 }, 300*time.Millisecond, 20*time.Millisecond, "nothing went to the other URL")
+}
+
+// Nor while its summary stream dropped and the hub connects again, within
+// the connect grace.
+func TestHubStreamDropRefusesAMove(t *testing.T) {
+	inst := startGatedInstance(t)
+	hubSrv := startHubGrace(t, "", 5*time.Second)
+	joined := joinInstance(t, hubSrv.URL, inst.URL)
+	otherURL, got := elsewhere(t)
+
+	inst.hold.Store(true)
+	inst.CloseClientConnections()
+	require.Eventually(t, func() bool {
+		return instances(t, hubSrv.URL)[0].Connection == hub.ConnectionConnecting
+	}, 10*time.Second, 20*time.Millisecond)
+	assert.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, hijack("h1", joined, otherURL), hubSecret, time.Now()))
+	assert.Equal(t, inst.URL, instances(t, hubSrv.URL)[0].URL)
+	assert.Equal(t, http.StatusServiceUnavailable, request(t, http.MethodGet, hubSrv.URL+"/i/"+joined.ID+"/status", hubToken, nil, nil))
+
+	close(inst.release)
+	require.Eventually(t, func() bool {
+		return instances(t, hubSrv.URL)[0].Connection == hub.ConnectionConnected
+	}, 10*time.Second, 20*time.Millisecond)
+	assert.Equal(t, inst.URL, instances(t, hubSrv.URL)[0].URL)
+	assert.Never(t, func() bool { return got.Load() > 0 }, 300*time.Millisecond, 20*time.Millisecond, "nothing went to the other URL")
+}
+
+// An instance moved to a URL that doesn't answer as it gets nothing
+// through the proxy there: only the hub's watch, which waits for its
+// summary.
+func TestHubProxyWaitsForAMovedInstance(t *testing.T) {
+	inst, _ := startInstanceOn(t, nil, "dev-1:3285")
+	hubSrv := startHub(t, "")
+	joined := joinInstance(t, hubSrv.URL, inst.URL)
+	var mu sync.Mutex
+	var paths []string
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		paths = append(paths, r.URL.Path)
+		mu.Unlock()
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(other.Close)
+
+	_ = inst.Listener.Close()
+	inst.CloseClientConnections()
+	require.Eventually(t, func() bool {
+		return instances(t, hubSrv.URL)[0].Connection == hub.ConnectionUnreachable
+	}, 10*time.Second, 20*time.Millisecond)
+	require.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, hijack("m1", joined, other.URL), hubSecret, time.Now()))
+	assert.Equal(t, other.URL, instances(t, hubSrv.URL)[0].URL, "its URL is dead: it moves")
+	for _, path := range []string{"/status", "/message", "/update"} {
+		assert.Equal(t, http.StatusServiceUnavailable, request(t, http.MethodGet, hubSrv.URL+"/i/"+joined.ID+path, hubToken, nil, nil), path)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	for _, path := range paths {
+		assert.Equal(t, "/events", path, "only the hub's watch")
+	}
 }
 
 // An instance added by hand stays at its URL: no event moves it, not even

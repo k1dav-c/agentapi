@@ -43,7 +43,7 @@ func restoreState(config ServerConfig, db *statedb.DB, emitter *EventEmitter, lo
 	if err := checkRestoredIdentity(snap, config); err != nil {
 		return restoredState{}, err
 	}
-	if snap.Meta[statedb.MetaTransport] == string(instanceapi.TransportPTY) {
+	if snap.Meta[statedb.MetaTransport] == transportPTY {
 		// AgentAPI 2 kept it for the agent's terminal UI, which has no
 		// session to resume: the agent starts a new one below it, and the
 		// conversation goes on natively from now on.
@@ -96,6 +96,10 @@ func restoreState(config ServerConfig, db *statedb.DB, emitter *EventEmitter, lo
 	return restoredState{snapshot: snap, messages: state.Messages, resumeRef: resumeRef, settings: settings, limitStop: limitStop}, nil
 }
 
+// transportPTY is the transport AgentAPI 2 kept in the state database of a
+// PTY agent.
+const transportPTY = "pty"
+
 // checkRestoredIdentity refuses a state database written for another agent
 // or directory: resuming its session would continue the wrong work. One
 // AgentAPI 2 wrote for the same agent with the PTY transport is fine.
@@ -103,7 +107,7 @@ func checkRestoredIdentity(snap statedb.Snapshot, config ServerConfig) error {
 	if snap.Empty() {
 		return nil
 	}
-	if transport := snap.Meta[statedb.MetaTransport]; transport != string(instanceapi.TransportNative) && transport != string(instanceapi.TransportPTY) {
+	if transport := snap.Meta[statedb.MetaTransport]; transport != string(instanceapi.TransportNative) && transport != transportPTY {
 		return fmt.Errorf("the state database belongs to another session (%s is %q, not %q); use another --state-db or remove it", statedb.MetaTransport, transport, instanceapi.TransportNative)
 	}
 	for key, want := range map[string]string{

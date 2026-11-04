@@ -41,9 +41,14 @@ hub never has to be on the public internet.
    missed three heartbeats, such as one whose workspace was killed, counts as stopped, and the hub
    stops trying until its next heartbeat. These events only add instances and say where they are;
    what each one does comes from its summary. An event that names another URL moves the instance
-   there only while the hub isn't connected to it, and never one added by hand: an AgentAPI whose
-   machine got another address (`{ip}` in its `--public-url`) moves with its first heartbeat after
-   the old address stopped answering.
+   there only once the old URL is dead to the hub: it failed there past the 10 s grace
+   (unreachable, or stopped after missed heartbeats), or another AgentAPI answers there. Never while
+   the hub is connected or still connecting (after the hub restarts, or within 10 s of a dropped
+   stream), and never one added by hand. One stopped by `instance.stopped` is tried at its old URL
+   first. An AgentAPI whose machine got another address (`{ip}` in its `--public-url`) moves with
+   its first heartbeat after the old address became unreachable: within about two minutes (see
+   [Troubleshooting](#troubleshooting)). The file keeps the URL where the hub last read each
+   instance's summary, and a restarted hub follows it there first.
 2. The hub follows each instance's summary (`GET /events?only=summary`), the source of truth for
    what the instance does: its state, what it waits for, its title, latest task, queue and usage
    limits. One connection per instance, reopened after 1 s, then up to every 30 s when it fails. A
@@ -375,7 +380,6 @@ instead. Each state has a shape of its own, so it reads without its color:
 | Glyph | Second line starts with | Meaning |
 | --- | --- | --- |
 | Amber ! | Approval, Question, Plan | A request waits for your answer; the line shows it |
-| Amber ! | Dialog | An AgentAPI 2's PTY agent shows a dialog in its terminal, which the hub's chat can't show ([Limits](#limits)) |
 | Amber ! | Login | The agent can't work until you log in on its machine |
 | Amber ! | Usage limit | A usage limit stopped its turn; queued messages wait for the reset |
 | Turning blue arc | Working | The agent works on the task shown |
@@ -579,19 +583,24 @@ instance that joined with its webhook comes back the next time it starts.
   instance token to. The hub keeps the IDs for as long as their event's signature holds, in
   `instances.deliveries.json`, so a copy is refused after a restart too. It reads an event for at
   most 10 seconds, and 1 MiB.
-- A signed event can add an instance the hub doesn't have, and move one the hub doesn't follow
-  right now (stopped, or its summary stream isn't open) to the event's URL. It never moves an
-  instance the hub follows, whatever run it names, or one added by hand. An `instance.*` event
-  must name its run (`server_id`, which AgentAPI 1.0 and later send). An instance that moves leaves
-  the token given for its old URL behind; `--instance-token` still applies.
+- A signed event can add an instance the hub doesn't have, and move one whose URL is dead to the
+  hub (unreachable past the 10 s grace, stopped after missed heartbeats, or another AgentAPI
+  answers there) to the event's URL. It never moves an instance the hub is connected or connecting
+  to, whatever run it names, or one added by hand. An `instance.stopped` is no sign the URL is
+  dead: the hub tries the old URL first. An `instance.*` event must name its run (`server_id`,
+  which AgentAPI 1.0 and later send). An instance that moves leaves the token given for its old URL
+  behind; `--instance-token` still applies.
 - Every joined machine has the same secret, in a file any agent there can read (one in the bypass
   permission mode reads files without asking). Such an agent, steered by something it read, can
-  still announce an instance ID the hub isn't following right now at an address of its own. The
-  hub then sends that address `--instance-token`, and the messages and approvals you send that
-  instance. Join only machines you would give the instance token, and add an instance by hand if
+  still announce, at an address of its own, a new instance ID, or one whose address stopped
+  answering (such as while its machine restarts). The hub then sends that address
+  `--instance-token`, and once it answers as that instance, the messages and approvals you send
+  it. Join only machines you would give the instance token, and add an instance by hand if
   it must never move. A key per machine would close this; the hub doesn't have one yet.
-- The hub sends an instance's requests only while the AgentAPI at its URL says it is that
-  instance.
+- The hub forwards an instance's requests (the chat, approvals, updates) only while it is
+  connected: it reads that instance's summary at its URL. While it connects, after the hub
+  restarts, a stream drops or an event moved the instance, the proxy answers 503 and sends
+  nothing.
 - The session cookie is HttpOnly and SameSite=Lax, derived from the hub token rather than holding
   it. The proxy drops the browser's cookies and its `Authorization`, `Origin`, `Referer` and
   `Sec-Fetch-*` headers, and drops the instance's `Set-Cookie`, so neither side's credentials
@@ -644,7 +653,10 @@ instance that joined with its webhook comes back the next time it starts.
 | Unreachable (`no route to host`, or timed out) after the machine got a new IP address | It joined with a fixed IP in `--public-url`, which DHCP changed, as after a Coder workspace restarts | Run `agentapi hub join` again with `--public-url 'http://{ip}:{port}'`; the hub follows it with its next heartbeat, and after every later change |
 | Unreachable: `another AgentAPI answers at this URL` | The instance's address now belongs to another machine (a new DHCP lease), or `--public-url` names another machine | Check `--public-url`; an instance that moved sends its new address with its next heartbeat, within a minute |
 | The hub logs "Two AgentAPIs report the same instance ID" | Two machines have the same name, so their AgentAPIs on the same port have the same ID; the hub keeps the one it follows | Rename one machine, or give its AgentAPIs `--instance-id` |
-| The hub logs "An instance's event names another URL" | Its `--public-url` changed while the hub follows it at the old one | Nothing: the hub keeps the URL that works, and takes the new one once the old one stops answering |
+| The hub logs "An instance's event names another URL" (or "… while the hub connects to its URL") | Its `--public-url` changed while the hub follows it, or still connects to it, at the old one | Nothing: the hub keeps the URL that works, and takes the new one once the old one is unreachable |
+| An instance whose machine got a new address stays unreachable for a minute or two before it moves | The hub moves it only once the old address failed for 10 s (more when it doesn't answer at all: each try then takes up to 30 s, and a stream that goes silent counts as lost after 45 s), at the instance's next heartbeat, every minute. A hub before 3.0.1 moved it at the first heartbeat after the stream dropped | Nothing: it moves at most a minute later than it did |
+| The hub logs "A stopped instance's event names another URL" | An instance that sent `instance.stopped` started at another URL | Nothing: the hub tries the old URL first, and moves it with the next heartbeat once that fails |
+| Opening an instance answers `the hub isn't connected to the instance yet` (503) | The hub hasn't read its summary at its URL since the hub started, the stream dropped, or the instance moved | Wait until its row shows it connected |
 | The hub logs "An instance added by hand keeps its URL" | It was added by one URL, and its webhook names another | Make `--public-url` the URL it was added by, or forget it and let its webhook add it |
 | The hub logs "Refused an instance event that names no server ID" | Something that isn't AgentAPI 1.0 or later sent it, signed with the hub's secret | Update the sender; if you don't know it, find which machine with the secret sends it |
 | Unreachable, and the hub's VPN client runs in userspace | The hub's connections don't go through the VPN | Set `ALL_PROXY` to the VPN client's SOCKS5 proxy for the hub |
@@ -743,7 +755,7 @@ Every endpoint but `/hooks` and `/api/session` needs the session cookie or
 | --- | --- | --- |
 | `~/.agentapi/config.yaml` | `agentapi hub join` | The hub's webhook and `allow-update`, read by every `agentapi server` |
 | `~/.agentapi/instances/` | `agentapi server` | The AgentAPIs running on this machine, for `join` and `agentapi list` |
-| `~/.agentapi/hub/instances.json` | `agentapi hub serve` | The instances the hub knows, their groups and pins, when each last changed, when each worked in the last 7 days, and tokens of the ones added by hand |
+| `~/.agentapi/hub/instances.json` | `agentapi hub serve` | The instances the hub knows, their groups and pins, when each last changed, when each worked in the last 7 days, the URL where the hub last read each one's summary, and tokens of the ones added by hand |
 | `~/.agentapi/hub/instances.json.bak` | `agentapi hub serve` | The file of instances as the hub found it when it last started |
 | `~/.agentapi/hub/instances.deliveries.json` | `agentapi hub serve` | The delivery IDs of the events the hub took whose signature still holds, to refuse copies |
 
@@ -756,14 +768,15 @@ cd ~/.agentapi/hub && jq .instances instances.json > instances.json.new && mv in
 ```
 
 Each instance's work time is an extra field (`work`) inside the same version 1. A hub of 2.3 or 2.4
-ignores it, and drops it the next time it writes the file.
+ignores it, and drops it the next time it writes the file. So does a hub before 3.0.1 with
+`confirmed_url`, the URL where the hub last read the instance's summary.
 
 ## Limits
 
 - The hub serves the chat of its own version to every instance. Run the same AgentAPI version on
-  the hub and the instances; [Versions](#versions) shows the ones that differ. AgentAPI 3's chat
-  doesn't show an agent's terminal: answer an AgentAPI 2's terminal dialog in that AgentAPI's own
-  chat, at its URL.
+  the hub and the instances; [Versions](#versions) shows the ones that differ. The hub doesn't
+  show an AgentAPI 2's PTY agent waiting on a dialog in its terminal: the row shows it idle or
+  working. Answer the dialog in that AgentAPI's own chat, at its URL.
 - One hub token for everyone: there are no per-user accounts or permissions.
 - [Work time](#work-time) is what the hub saw: not before it had the feature, nor while it was down
   or couldn't reach an agent. One hub doesn't know what another counted.

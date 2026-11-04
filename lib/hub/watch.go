@@ -146,6 +146,7 @@ func (h *Hub) streamFailed(ctx context.Context, id string, err error, heard, now
 			i.Connection = ConnectionStopped
 			i.Error = ""
 			i.answeredBy = ""
+			i.failed = true
 			stopped = true
 			return
 		}
@@ -158,6 +159,7 @@ func (h *Hub) streamFailed(ctx context.Context, id string, err error, heard, now
 			i.Connection = ConnectionUnreachable
 			i.Error = message
 			i.answeredBy = other.id
+			i.failed = true
 			return
 		}
 		i.answeredBy = ""
@@ -171,12 +173,14 @@ func (h *Hub) streamFailed(ctx context.Context, id string, err error, heard, now
 		}
 		i.Connection = ConnectionUnreachable
 		i.Error = message
+		i.failed = true
 	})
 	return stopped
 }
 
 // applySummary takes a summary that the watch of url read, and reports
-// whether it did. One that comes after the instance stopped, or from a URL
+// whether it did: the instance is connected, and url where the hub last
+// confirmed it. One that comes after the instance stopped, or from a URL
 // it left, is from a watch that ends. It ends the instance's mute once
 // what it waits for changed (it logged in, or asks something else): the
 // next thing counts again. One change of the store, so one event.
@@ -196,6 +200,8 @@ func (h *Hub) applySummary(ctx context.Context, id, url string, summary instance
 		i.Connection = ConnectionConnected
 		i.Error = ""
 		i.answeredBy = ""
+		i.failed = false
+		i.confirmedURL = url
 		i.LastSeen = now
 		// Who it is, as it says: after a restart in place, another run
 		// with its own server ID and version, also before its events say

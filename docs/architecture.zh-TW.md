@@ -551,11 +551,13 @@ Content-Security-Policy。
   只取代使用者能寫入其目錄的程式，否則回報一次性的修正方式（`blocked`）。`POST /update` 會造成
   改動，所以其他來源的網頁送不出這個請求；它也和其他端點一樣需要 token。
 - hub（`lib/hub`）持有實例的 API token，只會送到以它的 secret 簽章的事件（timestamp 和 body 的
-  HMAC，不超過 10 分鐘，每次傳送只處理一次）或已登入者加入的實例網址。實例的網址由另一個 AgentAPI
-  回應時（摘要裡是別的實例 ID），代理拒絕轉送。事件必須寫明是哪一次執行（`server_id`），而且只能
-  搬動 hub 目前沒在追蹤的實例（摘要串流沒有連上），手動加入的實例一律不動；實例搬走後，hub 不再送出
-  它自己的 token。每台加入的機器都有同一個 secret，所以任何一台仍然可以把 hub 沒在追蹤的實例 ID
-  指向自己的位址，拿到 `--instance-token`；每台機器各用一把金鑰才能根除。瀏覽器以 hub token 登入，換取
+  HMAC，不超過 10 分鐘，每次傳送只處理一次）或已登入者加入的實例網址。代理只轉送到已連上的實例
+  （hub 正從它的網址讀到這個實例的摘要），所以連線中不轉送，網址由另一個 AgentAPI 回應時（摘要裡是
+  別的實例 ID）也不轉送。事件必須寫明是哪一次執行（`server_id`），而且只能搬動 hub 確定網址已失效的
+  實例（超過連線寬限仍連不上，或那裡回應的是另一個 AgentAPI），已連上或連線中的實例、手動加入的實例
+  一律不動；實例搬走後，hub 不再送出它自己的 token。檔案記下 hub 最後一次讀到各實例摘要的網址，hub
+  重新啟動後先從那裡追蹤。每台加入的機器都有同一個 secret，所以任何一台仍然可以把新的實例 ID，或位址
+  已經不回應的實例 ID，指向自己的位址，拿到 `--instance-token`；每台機器各用一把金鑰才能根除。瀏覽器以 hub token 登入，換取
   由 token 推導出的 HttpOnly、SameSite=Lax cookie；代理會移除瀏覽器的 cookie 以及 `Authorization`、
   `Origin`、`Referer`、`Sec-Fetch-*` 標頭，也會移除實例的 `Set-Cookie`，雙方的憑證都不會傳到另一邊。
   hub 和 AgentAPI 一樣，拒絕其他來源的網頁送出會造成改動的請求；設定 `--allowed-hosts` 時，只回應
@@ -675,9 +677,9 @@ AgentAPI 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
   （OpenAPI schema 必須和程式碼一致）；聊天介面有 eslint、`bun test` 和 `tsc`。CI 也以 race
   detector 執行 `lib/` 和 `cmd/` 的測試，在 macOS 上執行所有測試，在 Windows 上建置所有測試，
   並執行含 Windows 程式碼的套件的測試。Release workflow 會對要發行的 commit 執行這些測試
-  （以可重複使用的 workflow 呼叫 `go-test.yml`），通過後才發行；推送到 `main`、手動執行和手動發布
-  的發行版都一樣，pull request 則自己執行測試。它也會檢查每個執行檔都是為對應平台建置的。之後的推送
-  發行的版本已包含這個 commit，或這個 commit 已不在 `main` 上時，這次推送不會發行。
+  （以可重複使用的 workflow 呼叫 `go-test.yml`），Linux 的 job 通過後才發行；推送到 `main`、手動執行和
+  手動發布的發行版都一樣。macOS 和 Windows 的 job 在另一次呼叫中執行，發行不等它們。pull request 則
+  自己執行所有 job。Release workflow 也會檢查每個執行檔都是為對應平台建置的。之後的推送發行的版本已包含這個 commit，或這個 commit 已不在 `main` 上時，這次推送不會發行。
 
 ## 設計原則
 

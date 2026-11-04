@@ -269,7 +269,7 @@ func sameRun(current, serverID string) bool {
 
 // upsertFromWebhook adds or updates the instance an instance.* event
 // describes, and (re)starts watching it. An event that names another URL
-// moves the instance there only when the hub doesn't follow it now, and
+// moves the instance there only once the hub knows its URL is dead, and
 // never one added by hand (refuseMove): the hub sends the instance's token,
 // and the user's messages, where it is.
 func (h *Hub) upsertFromWebhook(instance instanceapi.WebhookInstance, url string, heartbeatSeconds int) {
@@ -277,8 +277,18 @@ func (h *Hub) upsertFromWebhook(instance instanceapi.WebhookInstance, url string
 	now := h.clock.Now()
 	updated, _ := h.store.update(instance.ID, true, func(i *Instance) {
 		moved := i.URL != "" && i.URL != url
-		if moved && h.refuseMove(i, instance, url) {
-			return
+		if moved {
+			refuse, check := h.refuseMove(i, instance, url)
+			if check {
+				// Stopped, as an event said: whether its URL still
+				// answers decides.
+				i.Connection = ConnectionConnecting
+				i.Error = ""
+				restart = true
+			}
+			if refuse {
+				return
+			}
 		}
 		restart = i.URL != url || i.ServerID != instance.ServerID || i.Connection == ConnectionStopped
 		if moved {
@@ -297,6 +307,8 @@ func (h *Hub) upsertFromWebhook(instance instanceapi.WebhookInstance, url string
 			h.logger.Info("Following an instance", "instance", instance.ID, "url", url, "server_id", instance.ServerID)
 			i.Connection = ConnectionConnecting
 			i.Error = ""
+			i.failed = false
+			i.answeredBy = ""
 		}
 	})
 	if restart {
@@ -306,27 +318,38 @@ func (h *Hub) upsertFromWebhook(instance instanceapi.WebhookInstance, url string
 
 // refuseMove reports whether an event of instance must not move i to url,
 // and logs why once per run. An instance added by hand stays where it was
-// added. One the hub follows stays where the hub reaches it, whatever run
-// the event names: two machines with the same name (and so the same
-// instance ID) would take turns at every heartbeat, and an event of
-// another machine that has the secret would take it over.
-func (h *Hub) refuseMove(i *Instance, instance instanceapi.WebhookInstance, url string) bool {
+// added. A joined one moves only once the hub knows its URL is dead: it
+// failed past the connect grace there (unreachable, or stopped after it
+// missed its heartbeats), or another AgentAPI answers there. Not while the
+// hub reaches it, nor while it connects (after the hub restarted, or a
+// stream dropped): an event of another machine that has the secret would
+// take it over, and get its token, messages and approvals. Two machines
+// with the same name (the same instance ID) would also take turns at every
+// heartbeat. check is set for one stopped as an event said, which is no
+// sign its URL is dead: the hub tries that URL again, and the event after
+// it fails there moves it.
+func (h *Hub) refuseMove(i *Instance, instance instanceapi.WebhookInstance, url string) (refuse, check bool) {
 	var reason string
 	switch {
 	case i.Source == SourceManual:
 		reason = "An instance added by hand keeps its URL; refused an event that names another"
-	case i.Connection != ConnectionConnected:
-		return false
+	case i.answeredBy != "" || (i.failed && (i.Connection == ConnectionUnreachable || i.Connection == ConnectionStopped)):
+		return false, false
+	case i.Connection == ConnectionStopped:
+		check = true
+		reason = "A stopped instance's event names another URL; the hub tries its URL first, and moves it if that doesn't answer"
+	case i.Connection == ConnectionConnecting:
+		reason = "An instance's event names another URL while the hub connects to its URL; it moves only if that doesn't answer"
 	case sameRun(i.ServerID, instance.ServerID):
 		reason = "An instance's event names another URL; the hub keeps following it where it reaches it"
 	default:
 		reason = "Two AgentAPIs report the same instance ID; keeping the one the hub follows"
 	}
-	if i.refusedRun != instance.ServerID {
+	if i.refusedRun != instance.ServerID || check {
 		h.logger.Warn(reason, "instance", instance.ID, "url", i.URL, "refused_url", url, "refused_server_id", instance.ServerID)
 		i.refusedRun = instance.ServerID
 	}
-	return true
+	return true, check
 }
 
 // stopped marks an instance stopped and stops watching it, unless a newer

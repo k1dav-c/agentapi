@@ -31,9 +31,16 @@ func (h *Hub) proxy(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "no such instance")
 		return
 	}
-	if instance.answeredBy != "" {
+	switch {
+	case instance.answeredBy != "":
 		// Its approvals would go to another agent.
 		writeError(w, http.StatusBadGateway, "another AgentAPI answers at this instance's URL ("+instance.answeredBy+")")
+		return
+	case instance.Connection != ConnectionConnected:
+		// Only to a URL where the hub reads the instance's summary: one an
+		// event just named gets no request, nor the instance's token,
+		// before it answers as the instance.
+		writeError(w, http.StatusServiceUnavailable, proxyRefusal(instance))
 		return
 	}
 	target, err := url.Parse(instance.URL)
@@ -104,4 +111,17 @@ func changesWebhook(method, path string) bool {
 	}
 	clean := pathpkg.Clean("/" + unescaped)
 	return clean == "/webhook" || strings.HasPrefix(clean, "/webhook/")
+}
+
+// proxyRefusal says why the proxy sends nothing to instance, which the hub
+// isn't connected to.
+func proxyRefusal(instance Instance) string {
+	switch instance.Connection {
+	case ConnectionStopped:
+		return "the instance stopped"
+	case ConnectionUnreachable:
+		return "the instance is unreachable: " + instance.Error
+	default:
+		return "the hub isn't connected to the instance yet; try again once it is"
+	}
 }
