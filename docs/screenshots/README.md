@@ -1,8 +1,8 @@
 # Documentation screenshots
 
 The [chat UI guide](../chat-ui.md) and [README](../../README.md) use these screenshots and GIFs.
-Chromium captured them from AgentAPI 3.0.0, built from the source with `make build`, serving the
-production chat UI and API; the hub's views that show its list, and its versions card, from 3.0.1.
+Chromium captured them from AgentAPI 3.1.0, built from the source with `make build`, serving the
+production chat UI and API.
 
 [scripts/capture-docs.mjs](../../scripts/capture-docs.mjs) starts its own servers on a small sample
 project, `my-app` (a page with a stylesheet, a script and release notes, two commits and
@@ -22,7 +22,7 @@ uncommitted changes):
   stopped and one was killed, so the hub can't reach it. Six are in two groups, and two of those
   are pinned to the top. The one that asks questions can run a binary stamped with an older
   version (`AGENTAPI_OLDER_BINARY`), so that it shows as older than the hub: 2.0.0 beside the
-  hub's 3.0.1 in the screenshots. The hub starts on a file that says how long each instance
+  hub's 3.1.0 in the screenshots. The hub starts on a file that says how long each instance
   worked over the last week, as a hub that watched them would keep it, since a demo doesn't run
   for hours. A second, empty hub shows the guide for the first agents. The rows name the machine;
   the screenshots show placeholders (`dev-1` and so on).
@@ -149,7 +149,7 @@ version, browser, capture time, viewports and images. It stops the servers and r
 files even if a step fails. The run takes about five minutes; a chat error fails it.
 
 The binary's version shows in the chat's header. To show the version a merge will release, build
-with it: `make build VERSION=3.0.0`.
+with it: `make build VERSION=3.1.0`.
 
 Review the new images before updating the [chat UI guide](../chat-ui.md), its
 [Traditional Chinese translation](../chat-ui.zh-TW.md) and the READMEs.

@@ -5,7 +5,7 @@ English | [繁體中文](chat-ui.zh-TW.md)
 Open `/chat` to use the chat UI embedded in the `agentapi` binary. It works on desktops and phones,
 and talks to the server through the [HTTP API](../README.md#http-api-reference).
 
-Screenshots and animations show AgentAPI v3.0.0 running `native-demo` on a sample site. The demo's
+Screenshots and animations show AgentAPI v3.1.0 running `native-demo` on a sample site. The demo's
 replies, tool results, models and usage are simulated. A blue dot marks the pointer and clicks. To
 reproduce the captures, use [scripts/capture-docs.mjs](../scripts/capture-docs.mjs) as described in the
 [screenshot guide](screenshots/README.md).
