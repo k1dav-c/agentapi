@@ -28,7 +28,12 @@ type handoffState struct {
 	mu         sync.Mutex
 	suppressed string
 	receipts   map[string]handoffReceipt
+	// order is the request ids in receipts, oldest first.
+	order []string
 }
+
+// maxHandoffReceipts bounds the receipts kept; past it the oldest goes.
+const maxHandoffReceipts = 256
 
 // suppress stops offering the request id.
 func (h *handoffState) suppress(id string) {
@@ -60,8 +65,14 @@ func (h *handoffState) record(id, replyID string, result handoff.Result) {
 	if h.receipts == nil {
 		h.receipts = make(map[string]handoffReceipt)
 	}
-	if _, ok := h.receipts[id]; !ok && len(h.receipts) >= 256 {
-		clear(h.receipts)
+	if _, ok := h.receipts[id]; !ok {
+		// Drop the oldest alone: the reply just recorded, retried, must
+		// still find its receipt rather than be delivered again.
+		if len(h.order) >= maxHandoffReceipts {
+			delete(h.receipts, h.order[0])
+			h.order = h.order[1:]
+		}
+		h.order = append(h.order, id)
 	}
 	h.suppressed = id
 	h.receipts[id] = handoffReceipt{replyID, result}
