@@ -98,14 +98,14 @@ AgentAPI 可以用來：
 
 **維運與整合**
 
-- [hub](#執行-hub)（`agentapi hub serve`）監看多台機器上的 AgentAPI，需要你處理的排最前面，並能在
-  聊天介面中開啟任何一個，桌面和手機都能用；[`agentapi hub join`](#加入-hub) 把一台機器上的
+- [hub](#執行-hub)（`agentapi hub serve`）監看多台主機上的 AgentAPI，需要你處理的排最前面，並能在
+  聊天介面中開啟任何一個，桌面和手機都能用；[`agentapi hub join`](#加入-hub) 把一台主機上的
   AgentAPI 接到 hub，重新啟動後也一樣。
 - [Webhook](#webhook) 把任務、請求、訊息和心跳推送到監看多個 agent 的中控平台，並以 HMAC
   簽章。連到多個 AgentAPI 的用戶端，每個只要開一條[摘要串流](#監看多個實例)。搭配
   [人工回覆 API](#人工回覆-api)，機器人可以在 agent 停下來時通知你，並把你的回覆傳回去。
 - AgentAPI 的[自我更新](#agentapi-update)，會比對發行版的 checksum，並可[原地重新啟動](#agentapi-restart)
-  為新的執行檔。選擇開放的機器也能[透過 API 更新](#透過-api-更新)，例如從 hub 更新。
+  為新的執行檔。選擇開放的主機也能[透過 API 更新](#透過-api-更新)，例如從 hub 更新。
 - [安全性](#安全性)：API token（聊天介面以 cookie 登入）、監聽位址，以及允許的主機與來源。
 
 ## 快速開始
@@ -394,18 +394,18 @@ SIGKILL。
 ### 登入
 
 AgentAPI 使用 agent CLI 儲存的登入資訊。請以執行 AgentAPI 的同一個作業系統帳號登入，
-可以使用聊天介面的[終端機](#終端機)或同一台機器上的其他終端機。
+可以使用聊天介面的[終端機](#終端機)或同一台主機上的其他終端機。
 登入卡片的 **Run in terminal** 按鈕與 `/login` 指令，都會在聊天介面的終端機執行登入指令。
 
 ![登入卡片：要執行的指令、在哪裡執行、Run in terminal 和 Check again](docs/screenshots/login-card.png)
 
 - Claude Code：`claude auth login` 預設使用 Claude 訂閱；加上 `--console` 則使用
-  Anthropic Console 的 API 計費。在沒有瀏覽器的機器上，可用 `claude setup-token` 建立
+  Anthropic Console 的 API 計費。在沒有瀏覽器的主機上，可用 `claude setup-token` 建立
   `CLAUDE_CODE_OAUTH_TOKEN` 所需的 token。用 `claude auth status` 檢查登入狀態。
 - Codex：`codex login --device-auth` 讓你從任何裝置以 ChatGPT 方案登入：開啟它顯示的連結，
   再輸入它提供的一次性代碼。登入卡片和 `/login` 執行的就是這個指令，因為 AgentAPI 通常在沒有
-  瀏覽器的伺服器上執行。`codex login` 的瀏覽器登入會導向執行 Codex 那台機器的
-  `localhost:1455`，其他機器上的瀏覽器連不到；同一台機器上有瀏覽器時仍可使用。
+  瀏覽器的伺服器上執行。`codex login` 的瀏覽器登入會導向執行 Codex 那台主機的
+  `localhost:1455`，其他主機上的瀏覽器連不到；同一台主機上有瀏覽器時仍可使用。
   使用 API 金鑰時執行 `printenv OPENAI_API_KEY | codex login --with-api-key`。
   用 `codex login status` 檢查登入狀態。
 - Pi：在 `pi` 中執行 `/login`，或在 AgentAPI 的環境中設定供應商金鑰，例如 `ANTHROPIC_API_KEY`。
@@ -1030,7 +1030,7 @@ AgentAPI，用[人工回覆 API](#人工回覆-api)讓機器人代為回覆 agen
   Claude Code、Codex 和 Pi 才有的 `spend`：agent 在工作目錄裡所有工作階段最近 24 小時（`day_usd`）
   和 7 天（`week_usd`）換算成 API 價格的金額，每分鐘從紀錄檔重新計算一次，並附上同一批呼叫的 token
   （`day_tokens` 和 `week_tokens`：`input`、`output`、`cache_write`、`cache_read` 和合計 `total`）、
-  金額最後變動的時間（`updated_at`）和 `scope`。同一台機器上，同一個 agent 在同一個目錄的 AgentAPI 回報的是同一批
+  金額最後變動的時間（`updated_at`）和 `scope`。同一台主機上，同一個 agent 在同一個目錄的 AgentAPI 回報的是同一批
   工作階段，`scope` 也相同：加總多個 AgentAPI 的用戶端每個 scope 只算一次。`update` 則說明用戶端
   能不能[更新這個 AgentAPI](#透過-api-更新)，以及更新進行到哪裡。
 - `attention` 依優先順序標示需要使用者處理的原因：`login`、`request`（核准、提問或計畫）、
@@ -1044,7 +1044,7 @@ AgentAPI，用[人工回覆 API](#人工回覆-api)讓機器人代為回覆 agen
   `POST /tasks/seen` 會替這個實例的所有用戶端把任務標為已讀；聊天介面顯示對話時會自動呼叫它。
   [狀態資料庫](#持久保存的工作階段)會保存這項資訊，所以沒看過的任務在重新啟動後仍是未讀。
 
-要找出一台機器上的實例，可以讀取登記目錄：每個 AgentAPI 執行期間會在 `~/.agentapi/instances`
+要找出一台主機上的實例，可以讀取登記目錄：每個 AgentAPI 執行期間會在 `~/.agentapi/instances`
 （`--registry-dir`；`--registry=false` 可關閉）保留一份登記檔，內容有 `id`、`name`、`server_id`、
 `url`（`--public-url`，沒有的話是監聽位址）、PID、目錄、agent、`auth_required`（不含 token）和
 `restarts_in_place`（收到 SIGUSR2 會原地重新啟動，見 [`agentapi restart`](#agentapi-restart)）。
@@ -1061,7 +1061,7 @@ AgentAPI，用[人工回覆 API](#人工回覆-api)讓機器人代為回覆 agen
 
 #### 執行 hub
 
-hub 監看它連得到的任何機器上的多個 AgentAPI：把它放在會一直開著的地方（例如常開的
+hub 監看它連得到的任何主機上的多個 AgentAPI：把它放在會一直開著的地方（例如常開的
 workspace），並透過私有網路（例如你自己的 VPN）連到它和各個 AgentAPI。一步步的架設方式、每種
 狀態、各個 token、疑難排解和 hub 的 API，見 [hub 指南](docs/hub.zh-TW.md)。
 
@@ -1072,14 +1072,15 @@ agentapi hub serve --token "$HUB_TOKEN" --secret "$HUB_SECRET" --instance-token 
 ![hub：左側是所有 agent，右側是需要你處理的總覽，每個請求一張卡片](docs/screenshots/hub-desktop.png)
 
 在桌面或手機開啟 `http://<hub>:3290/`，用 `--token` 登入。清單列出每個實例：釘選的排在最上方，
-其他的則把需要你處理的排前面，也可以改依最近一次變動排序。
+其他的則依群組把需要你處理的排前面，也可以改依最近一次變動排序；打開 **By machine**，兩種排序都會把
+同一台主機的 agent 收進一張卡片，每個 agent 一個分頁。
 每個實例顯示它在等什麼（核准或提問、登入、用量限制）、工作中、完成了你還沒看過的任務、閒置、
-連不到或已停止，以及標題、agent、機器、AgentAPI 版本、佇列和用量限制。分頁標題會顯示需要你處理的
+連不到或已停止，以及標題、agent、主機、AgentAPI 版本、佇列和用量限制。分頁標題會顯示需要你處理的
 數量。點選一個就會在聊天介面中開啟。手機上清單和聊天介面輪流顯示。
 
 - AgentAPI 用 [`agentapi hub join`](#加入-hub) 加入：hub 收到它們有簽章的 `instance.*` 事件就會新增實例，
-  hub 再以一條連線追蹤每個實例的[摘要串流](#監看多個實例)。`+` 備有讓機器加入的指令，已填好 hub 的位址
-  和 secret，另附給那台機器上 agent 的提示；也可以在那裡輸入網址（和 token）手動加入。每一列的 `⋯`
+  hub 再以一條連線追蹤每個實例的[摘要串流](#監看多個實例)。`+` 備有讓主機加入的指令，已填好 hub 的位址
+  和 secret，另附給那台主機上 agent 的提示；也可以在那裡輸入網址（和 token）手動加入。每一列的 `⋯`
   選單可以把實例釘選在最上方、放進自己建立的群組、把它正在等的事
   靜音到改變為止（例如不打算處理的登入），或移除已停止、連不到的實例。
 - hub 透過自己開啟實例（`/i/<id>/...`），以實例的 API token（`--instance-token`，或加入時給的）
@@ -1098,7 +1099,7 @@ agentapi hub serve --token "$HUB_TOKEN" --secret "$HUB_SECRET" --instance-token 
 
 #### 加入 hub
 
-[`agentapi hub join`](#agentapi-hub) 不必改變 AgentAPI 的啟動方式就能把一台機器上的 AgentAPI
+[`agentapi hub join`](#agentapi-hub) 不必改變 AgentAPI 的啟動方式就能把一台主機上的 AgentAPI
 接到 hub，所以由腳本以固定參數啟動的 AgentAPI（例如 Coder workspace 的）也適用：
 
 ```bash
@@ -1110,20 +1111,20 @@ agentapi hub join http://hub.vpn:3290/hooks --secret "$HUB_SECRET" --public-url 
 `~/.agentapi/config.yaml`，這個使用者的每個 `agentapi server` 啟動時都會讀取；同時套用到正在執行、
 已登記的 AgentAPI：它們會立刻送 `instance.heartbeat` 給 hub。重新啟動（例如 workspace 重開）後，
 AgentAPI 會依設定檔送出 `instance.started`。`--public-url` 是 hub 連回它們的網址，`{port}` 和
-`{hostname}` 會替每個實例填入；`{ip}` 則是這台機器通往 hub 那條路由上的 IPv4 位址，每個 AgentAPI
-執行期間會重新查詢：DHCP 給了機器新位址時，下一次 heartbeat 就會帶著它，hub 也會跟著改用。1.2 之前啟動的 AgentAPI 沒有登記，需要重新啟動一次。
+`{hostname}` 會替每個實例填入；`{ip}` 則是這台主機通往 hub 那條路由上的 IPv4 位址，每個 AgentAPI
+執行期間會重新查詢：DHCP 給了主機新位址時，下一次 heartbeat 就會帶著它，hub 也會跟著改用。1.2 之前啟動的 AgentAPI 沒有登記，需要重新啟動一次。
 `agentapi hub status` 顯示 hub 以及每個執行中的 AgentAPI 回報到哪裡；`agentapi hub leave` 會移除 hub。
 加上 `--allow-update` 時，hub 也能[更新它們](#透過-api-更新)。
 `join` 會先送給 hub 一個有簽章的測試事件，hub 沒收下就停止（連不到、被登入頁擋住，或 secret 不同）；
 hub 還沒啟動時，可以用 `--no-check` 略過。
 hub 的頁面已經備好這行指令：`+` 會填好 hub 的位址，設了 token 的 hub 也會填好 secret，旁邊還有一段
-提示，讓那台機器上的 agent 替你加入。hub 啟動時也會在 log 裡為它的每個位址寫下這行指令，但不含 secret。
+提示，讓那台主機上的 agent 替你加入。hub 啟動時也會在 log 裡為它的每個位址寫下這行指令，但不含 secret。
 也可以用 [agentapi-hub-join skill](skills/agentapi-hub-join/SKILL.md) 交給 agent 處理，安裝方式見
-[hub 指南](docs/hub.zh-TW.md#3-讓每台機器的-agentapi-加入)。
+[hub 指南](docs/hub.zh-TW.md#3-讓每台主機的-agentapi-加入)。
 
 #### 透過 API 更新
 
-監看多個 AgentAPI 的用戶端（例如 hub）可以把其中一個更新到最新發行版。只有選擇開放的機器才行：
+監看多個 AgentAPI 的用戶端（例如 hub）可以把其中一個更新到最新發行版。只有選擇開放的主機才行：
 以 `--allow-update`（或 `AGENTAPI_ALLOW_UPDATE=true`）啟動 AgentAPI，或在 `~/.agentapi/config.yaml`
 加上 `allow-update: true`，讓這個使用者的每個 AgentAPI 都開放；`agentapi hub join --allow-update`
 會替你寫入。執行中的 AgentAPI 要重新啟動（`agentapi restart --all`）才會套用。
@@ -1132,7 +1133,7 @@ hub 的頁面已經備好這行指令：`+` 會填好 hub 的位址，設了 tok
 curl -X POST localhost:3284/update -H 'Content-Type: application/json' -d '{"when": "idle"}'
 ```
 
-- `POST /update` 安裝 k1dav-c/agentapi 符合這台機器作業系統與架構的最新正式發行版，再像
+- `POST /update` 安裝 k1dav-c/agentapi 符合這台主機作業系統與架構的最新正式發行版，再像
   [`agentapi restart`](#agentapi-restart) 一樣原地重新啟動成新版本：PID 不變，`server_id` 和版本
   換新。下載的檔案必須符合發行版的 `checksums.txt`，執行起來也必須是那個版本。請求無法指定版本或網址。
   新發行版若無法以這個 AgentAPI 的設定或狀態資料庫啟動，更新會在重新啟動前失敗，AgentAPI 繼續提供服務。
@@ -1309,7 +1310,7 @@ AgentAPI 沒有使用者或角色的概念：連得到 API 的人，就能做 ag
 token，在所有網路介面上監聽，只要 `Host` 標頭指向本機（`localhost`、`127.0.0.1`、
 `[::1]`）就接受連線。主機檢查能防止網頁透過 DNS rebinding 呼叫它，但擋不住網路上的程式，
 因為它們可以送出任何 `Host` 標頭。在其他人連得到這個埠之前，請先把伺服器保護好。
-沒有設定 token、又監聽其他機器連得到的位址時，AgentAPI 會在啟動時記錄一則警告。
+沒有設定 token、又監聽其他主機連得到的位址時，AgentAPI 會在啟動時記錄一則警告。
 
 ### API token 驗證
 
@@ -1353,13 +1354,13 @@ HMAC 而不是 token 本身，所以更換 token 會讓所有瀏覽器登出；c
 SameSite=Strict，其他網站的頁面無法帶著它發出請求。從其他 origin 提供的聊天介面（例如在
 3000 連接埠執行的 `bun run dev`）需要把該 origin 加進 `--allowed-origins`；
 `--allowed-origins '*'` 不允許帶 cookie 的請求。不同的埠不算不同的網站，而預設允許的來源
-包含給聊天介面開發用的 `http://localhost:3000` 和 `http://localhost:3001`：在共用的機器上，
+包含給聊天介面開發用的 `http://localhost:3000` 和 `http://localhost:3001`：在共用的主機上，
 請把 `--allowed-origins` 設成你實際使用的來源，讓已登入瀏覽器的 cookie 只對它們有效。
 
 ### 監聽位址
 
 伺服器預設監聽所有網路介面。用 `--bind`（或 `AGENTAPI_BIND`）可以只監聽一個位址，
-例如只監聽 loopback，讓網路上的其他機器無法連線。它接受不含連接埠的 IP 位址或主機
+例如只監聽 loopback，讓網路上的其他主機無法連線。它接受不含連接埠的 IP 位址或主機
 名稱；連接埠仍由 `--port` 指定。
 
 ```bash
@@ -1470,7 +1471,7 @@ codex-cli 0.163.0 和 Pi 1.3.0，在 Linux、4 核心的 Intel Xeon Silver 4210�
 - 沒有計入：agent 啟動的 MCP 伺服器、它執行的指令、shell 終端機（開啟時有一個 shell）以及
   瀏覽器分頁。
 
-規劃機器時，每個工作階段請預留約 30 MiB 給 AgentAPI，再加上 agent 本身（Claude Code 或 Codex
+規劃主機時，每個工作階段請預留約 30 MiB 給 AgentAPI，再加上 agent 本身（Claude Code 或 Codex
 約 350 MiB，Pi 約 150 MiB），以及它的 MCP 伺服器和指令所需的資源。
 
 ## CLI 參考
@@ -1536,7 +1537,7 @@ state-db: ~/.agentapi/state/{port}.db
 | `--name` | 工作目錄的名稱 | 監看多個 AgentAPI 的用戶端顯示的名稱 |
 | `--registry` | `true` | 執行期間在登記目錄保留登記檔；見[監看多個實例](#監看多個實例) |
 | `--registry-dir` | `~/.agentapi/instances` | 登記目錄 |
-| `--public-url` | | 可以連到這個 AgentAPI 的網址，會放在 `GET /summary` 和每個 webhook 事件中；`{port}` 和 `{hostname}` 會被填入，`{ip}` 則填入這台機器通往 webhook 網址那條路由上的 IPv4 位址（沒有 webhook 網址時，取第一個私有網路位址，其次是 CGNAT 位址），執行期間最多每 30 秒重新查詢一次；查不到時沿用上一個位址。`{ip}` 代表的位址一律是允許的主機 |
+| `--public-url` | | 可以連到這個 AgentAPI 的網址，會放在 `GET /summary` 和每個 webhook 事件中；`{port}` 和 `{hostname}` 會被填入，`{ip}` 則填入這台主機通往 webhook 網址那條路由上的 IPv4 位址（沒有 webhook 網址時，取第一個私有網路位址，其次是 CGNAT 位址），執行期間最多每 30 秒重新查詢一次；查不到時沿用上一個位址。`{ip}` 代表的位址一律是允許的主機 |
 | `--config` | `~/.agentapi/config.yaml` | 設定檔：以旗標名稱設定，優先順序低於旗標和環境變數 |
 | `--allow-update` | `false` | 讓 API 用戶端（例如 hub）把 AgentAPI 更新到最新發行版，再原地重新啟動；見[透過 API 更新](#透過-api-更新) |
 | `--webhook-timeout` | `10s` | 每次傳送的逾時時間 |
@@ -1581,7 +1582,7 @@ agentapi update --restart  # 更新後讓執行中的 AgentAPI 改用新版本
 
 ```bash
 agentapi restart 3285 3286  # 這些連接埠上的 AgentAPI
-agentapi restart --all      # 你在這台機器上的所有 AgentAPI
+agentapi restart --all      # 你在這台主機上的所有 AgentAPI
 ```
 
 `agentapi restart` 從[登記目錄](#監看多個實例)找到這些 AgentAPI，並送出 SIGUSR2。AgentAPI 會先以
@@ -1606,7 +1607,7 @@ workspace 的啟動腳本）仍然有效，輸出也照舊寫到原本的地方�
 
 ### `agentapi list`
 
-從[登記目錄](#監看多個實例)列出這台機器上執行中的 AgentAPI，以及每個 `GET /summary` 的內容：
+從[登記目錄](#監看多個實例)列出這台主機上執行中的 AgentAPI，以及每個 `GET /summary` 的內容：
 閒置、工作中、需要你處理什麼（`needs request`），以及未讀的任務。
 
 ```bash
@@ -1621,7 +1622,7 @@ frontend  codex   working                http://localhost:3285  Add the settings
 
 ### `agentapi hub`
 
-執行監看多個 AgentAPI 的 hub，或把這台機器上的 AgentAPI 接到 hub；見[執行 hub](#執行-hub) 和
+執行監看多個 AgentAPI 的 hub，或把這台主機上的 AgentAPI 接到 hub；見[執行 hub](#執行-hub) 和
 [加入 hub](#加入-hub)。
 
 ```bash
@@ -1639,7 +1640,7 @@ agentapi hub leave
 
 `join` 把 hub 的 webhook 寫進 `~/.agentapi/config.yaml`，並套用到正在執行、已登記的 AgentAPI。
 `--secret`（或 `AGENTAPI_HUB_SECRET`）為事件簽章，`--events` 選擇事件（預設 `instance.*`，hub 只需要
-這些，其餘都從摘要得知），`--public-url` 是 hub 連回它們的網址（`{ip}` 會跟著機器的位址走；
+這些，其餘都從摘要得知），`--public-url` 是 hub 連回它們的網址（`{ip}` 會跟著主機的位址走；
 設定檔和 2.1.2 之後的 AgentAPI 保留 `{ip}`，較舊的則拿到當下的位址），
 `--api-token`（或 `AGENTAPI_API_TOKEN`）會送給需要 token 的實例，`--config` 和 `--registry-dir`
 可指定其他檔案。當下無法修改的 AgentAPI，會在重新啟動時套用設定檔。`--allow-update` 會另外寫入

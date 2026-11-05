@@ -5,16 +5,17 @@ import {ArrowLeft, ExternalLink, X} from "lucide-react";
 import {AgentMark} from "@/components/agent-mark";
 import {Button} from "@/components/ui/button";
 import {HEADER_ACTIONS_ID} from "@/app/header";
-import {fromFrame, instanceFromHub, type FrameInstance} from "@/lib/hub-frame";
+import {fromFrame, instanceFromHub, openFromFrame, type FrameInstance} from "@/lib/hub-frame";
 import {cn} from "@/lib/utils";
+import {MachineSwitch} from "./machine-tabs";
 import {StatusGlyph, stateTone} from "./status-glyph";
 import {UpdateStatus} from "./update-chip";
 import {VersionTag} from "./version-tag";
 
 // FrameBar heads a chat the hub opens: back to the hub's list or overview,
-// what the instance is and does (the hub tells it), and the chat's own
-// actions in the same bar, so a phone keeps its height for the
-// conversation.
+// what the instance is and does (the hub tells it), the other agents of its
+// machine, which the hub opens in its place, and the chat's own actions in
+// the same bar, so a phone keeps its height for the conversation.
 export function FrameBar() {
   const [instance, setInstance] = useState<FrameInstance>();
   useEffect(() => {
@@ -65,6 +66,9 @@ export function FrameBar() {
           )}
         </p>
       </div>
+      {instance?.machine && (
+        <MachineSwitch agents={instance.machine} current={instance.id} onOpen={(id) => window.parent.postMessage(openFromFrame(id), window.location.origin)} />
+      )}
       {/* The chat's actions (search, terminal, Explorer) render here. */}
       <div id={HEADER_ACTIONS_ID} className="flex shrink-0 items-center gap-0.5" />
       {instance && (

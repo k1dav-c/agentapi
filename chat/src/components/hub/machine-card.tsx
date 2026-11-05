@@ -1,0 +1,357 @@
+"use client";
+
+import {memo, useCallback, useEffect, useId, useRef, useState} from "react";
+import {Folder, Server} from "lucide-react";
+import {
+  activeAgent,
+  activity,
+  displayName,
+  formatAgo,
+  formatUSD,
+  groupOf,
+  instanceState,
+  instanceVersion,
+  olderThanHub,
+  sharedVersion,
+  spendTitle,
+  spendTotals,
+  stateLabel,
+  tabOrder,
+  tokenTotals,
+  usagePercent,
+  type HubInstance,
+  type HubMachine,
+} from "@/lib/hub";
+import {changedAt, recentAgent, type ListOrder} from "@/lib/hub-order";
+import {shownUpdate, updateBadge} from "@/lib/hub-update";
+import {cn} from "@/lib/utils";
+import {useHubTime} from "./clock";
+import {activityTone, agentName, RowMenu, RowWork, UsageBar, type RowActions} from "./instance-row";
+import {AgentTabMark, shortAgent} from "./machine-tabs";
+import {readStorage, writeStorage} from "./storage";
+import {stateTone} from "./status-glyph";
+import {UpdateChip} from "./update-chip";
+import {VersionTag} from "./version-tag";
+
+export interface MachineCardProps {
+  // card tells the card from the others, as it remembers the tab picked:
+  // a machine with agents in two groups has a card in each.
+  card: string;
+  machine: HubMachine;
+  // order is the list's: in the recent order the card shows its latest
+  // change, and its agents' changes.
+  order: ListOrder;
+  // hubVersion is the hub's own version, which marks the older instances.
+  hubVersion: string;
+  // root is the hub's address, whose proxy takes the instance's update.
+  root: string;
+  groups: string[];
+  // selected is the instance open beside the list, if any.
+  selected?: string;
+  actions: RowActions;
+}
+
+// Where the browser keeps the tab picked on each card and when, the latest
+// last, so a reload shows the same ones; it forgets the oldest past
+// MAX_PICKS. A pick from before it kept when has none.
+const picksKey = "agentapi.hub.machine-tabs";
+const MAX_PICKS = 200;
+
+// A tab picked: the agent, and when (milliseconds since the epoch).
+type Pick = {id: string; at?: number};
+
+// readPicks is the tabs picked, as the browser keeps them.
+function readPicks(): Map<string, Pick> {
+  const stored = readStorage<unknown>(picksKey, []);
+  const picks = new Map<string, Pick>();
+  if (!Array.isArray(stored)) return picks;
+  for (const entry of stored) {
+    if (!Array.isArray(entry) || typeof entry[0] !== "string" || typeof entry[1] !== "string") continue;
+    picks.set(entry[0], {id: entry[1], at: typeof entry[2] === "number" ? entry[2] : undefined});
+  }
+  return picks;
+}
+
+// keepPick remembers the tab picked on a card, in the browser too.
+function keepPick(card: string, pick: Pick) {
+  const kept = readPicks();
+  const was = kept.get(card);
+  if (was?.id === pick.id && was.at === pick.at) return;
+  kept.delete(card);
+  kept.set(card, pick);
+  for (const oldest of kept.keys()) {
+    if (kept.size <= MAX_PICKS) break;
+    kept.delete(oldest);
+  }
+  writeStorage(
+    picksKey,
+    [...kept].map(([key, {id, at}]) => (at === undefined ? [key, id] : [key, id, at])),
+  );
+}
+
+// useActiveAgent is the agent a card shows (activeAgent; in the recent
+// order, recentAgent), and picks another: the one picked last on it, until
+// the agent open beside the list becomes one of its own.
+function useActiveAgent(card: string, machine: HubMachine, order: ListOrder, selected?: string): [string, (id: string) => void] {
+  const onCard = selected && machine.instances.some((instance) => instance.id === selected) ? selected : undefined;
+  const [picked, setPicked] = useState<Pick | undefined>(() => (onCard ? {id: onCard, at: Date.now()} : readPicks().get(card)));
+  const [opened, setOpened] = useState(onCard);
+  if (onCard !== opened) {
+    setOpened(onCard);
+    if (onCard) setPicked({id: onCard, at: Date.now()});
+  }
+  useEffect(() => {
+    if (picked) keepPick(card, picked);
+  }, [card, picked]);
+  const pick = useCallback((id: string) => setPicked({id, at: Date.now()}), []);
+  return [order === "recent" ? recentAgent(machine, picked, onCard) : activeAgent(machine, picked?.id, onCard), pick];
+}
+
+// MachineCard is a machine in the hub's list, by machine: its name and what
+// its agents share (their directory's name, the AgentAPI version, what they
+// spent in the last 24 hours; in the recent order, how long ago the latest
+// changed), a tab per agent, and the agent of the tab picked (AgentPanel).
+// A tab opens its agent; the arrows move between the tabs, and on the panel
+// switch it without opening.
+export function MachineCard({card, machine, order, hubVersion, root, groups, selected, actions}: MachineCardProps) {
+  const {hostname, instances} = machine;
+  const names = new Set(instances.map(displayName));
+  // The name of their directory, once, when all of them say the same one
+  // and the machine's name doesn't say it already.
+  const shared = names.size === 1 ? [...names][0] : "";
+  const name = shared && !hostname.toLowerCase().includes(shared.toLowerCase()) ? shared : "";
+  const version = sharedVersion(instances);
+  const lastKnown = instances.every((instance) => instance.connection !== "connected");
+  const spend = spendTotals(instances);
+  const tokens = tokenTotals(instances);
+  const spent = spendTitle(spend.day, spend.week, false, tokens.counted > 0 ? tokens.day.total : undefined);
+  const [active, pick] = useActiveAgent(card, machine, order, selected);
+  const recent = order === "recent";
+  // The recent order puts the machine of the latest change first: the age
+  // of its first agent's.
+  const latest = useHubTime((now) => (recent ? formatAgo(changedAt(instances[0]), now) : ""));
+  const tabs = tabOrder(instances);
+  const current = instances.find((instance) => instance.id === active)!;
+  const id = useId();
+  const list = useRef<HTMLDivElement>(null);
+  const tabID = (agent: string) => `${id}-tab-${tabs.findIndex((tab) => tab.id === agent)}`;
+  // step picks the tab before (-1) or after (1) the active one, round the
+  // ends; focus moves to it when the focus is on the tabs.
+  const step = (by: -1 | 1 | "first" | "last", focus: boolean) => {
+    const at = tabs.findIndex((tab) => tab.id === active);
+    const next = by === "first" ? 0 : by === "last" ? tabs.length - 1 : (at + by + tabs.length) % tabs.length;
+    pick(tabs[next].id);
+    if (focus) list.current?.querySelectorAll<HTMLElement>("[role=tab]")[next]?.focus();
+  };
+  const keys = {ArrowLeft: -1, ArrowRight: 1, Home: "first", End: "last"} as const;
+  return (
+    <li className="px-2 py-1" data-hub-card>
+      <div className="rounded-xl border bg-card/60">
+        <div className="flex min-w-0 items-start gap-2 px-3.5 pt-2.5 pb-1 text-xs leading-5 text-muted-foreground">
+          <Server aria-hidden="true" className="mt-[3px] size-3.5 shrink-0" />
+          {/* Machines often share a long prefix, so the name wraps rather than
+              losing its end. */}
+          <span className="min-w-0 flex-1 text-[13px] font-medium [overflow-wrap:anywhere] text-foreground" title={hostname} data-hub-host>
+            {hostname}
+          </span>
+          {name && <span className="max-w-[35%] min-w-0 shrink-0 truncate">{name}</span>}
+          {version && <VersionTag version={version} hubVersion={hubVersion} lastKnown={lastKnown} />}
+          {spend.week > 0 && (
+            <span className="shrink-0 tabular-nums" title={spent}>
+              <span className="sr-only">{spent}</span>
+              <span aria-hidden="true">
+                {formatUSD(spend.day)}
+                <span className="text-muted-foreground/60">/24h</span>
+              </span>
+            </span>
+          )}
+          {latest && (
+            <span className="shrink-0 tabular-nums" title="The latest change of its agents">
+              {latest}
+            </span>
+          )}
+        </div>
+        <div
+          ref={list}
+          role="tablist"
+          aria-label={`Agents on ${hostname}`}
+          className="flex flex-wrap gap-1 px-2 pb-1"
+          onKeyDown={(event) => {
+            const by = keys[event.key as keyof typeof keys];
+            if (by === undefined) return;
+            event.preventDefault();
+            step(by, true);
+          }}
+        >
+          {tabs.map((instance) => {
+            const on = instance.id === active;
+            const agent = agentName(instance) || "Agent";
+            return (
+              <button
+                key={instance.id}
+                type="button"
+                role="tab"
+                id={tabID(instance.id)}
+                aria-selected={on}
+                aria-controls={`${id}-panel`}
+                tabIndex={on ? 0 : -1}
+                aria-label={`${agent}, ${displayName(instance)}, ${stateLabel(instance)}`}
+                title={`${agent}, ${displayName(instance)}: ${stateLabel(instance)}`}
+                data-hub-tab={instance.id}
+                onClick={() => {
+                  pick(instance.id);
+                  actions.select(instance.id);
+                }}
+                className={cn(
+                  "flex h-7 min-w-0 items-center gap-1.5 rounded-md px-2 text-xs outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50",
+                  on ? "bg-background font-medium text-foreground shadow-xs ring-1 ring-border dark:bg-accent" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+                )}
+              >
+                <AgentTabMark agentType={instance.agent_type} state={instanceState(instance)} />
+                <span className="truncate">{shortAgent(instance.agent_type, agent)}</span>
+              </button>
+            );
+          })}
+        </div>
+        <div role="tabpanel" id={`${id}-panel`} aria-labelledby={tabID(active)} className="px-1 pb-1">
+          <AgentPanel
+            instance={current}
+            hubVersion={hubVersion}
+            root={root}
+            groups={groups}
+            named={!shared && displayName(current) !== hostname}
+            versioned={!version}
+            selected={current.id === selected}
+            recent={recent}
+            latest={current === instances[0]}
+            actions={actions}
+            onStep={(by) => step(by, false)}
+          />
+        </div>
+      </div>
+    </li>
+  );
+}
+
+interface AgentPanelProps {
+  instance: HubInstance;
+  hubVersion: string;
+  root: string;
+  groups: string[];
+  // named: the panel names its instance, as its machine's agents don't
+  // share one name; versioned: it shows its version, as they don't share
+  // one.
+  named: boolean;
+  versioned: boolean;
+  selected: boolean;
+  // recent: the list's order is the recent one, where the panel's age is
+  // that of its agent's latest change, as a row's is there, and it names
+  // its group; none for the card's latest, whose age the header shows.
+  recent: boolean;
+  latest: boolean;
+  actions: RowActions;
+  // onStep shows the agent of the tab before (-1) or after (1).
+  onStep: (by: -1 | 1) => void;
+}
+
+// AgentPanel is the agent of a MachineCard's tab: what it does, what it
+// spent and worked, opened as an InstanceRow is, with the same menu. The
+// list's keys step to it as to a row; the left and right arrows show the
+// card's other agents.
+const AgentPanel = memo(
+  function AgentPanel({instance, hubVersion, root, groups, named, versioned, selected, recent, latest, actions, onStep}: AgentPanelProps) {
+    const state = instanceState(instance);
+    const summary = instance.summary;
+    const usage = usagePercent(summary);
+    const usageShown = usage !== undefined && usage >= 60;
+    const agent = agentName(instance) || "Agent";
+    const doing = activity(instance);
+    const ago = useHubTime((now) => (recent && latest ? "" : formatAgo(recent ? changedAt(instance) : doing.since, now)));
+    const group = recent ? groupOf(instance) : "";
+    const spend = summary?.spend;
+    const lastKnown = instance.connection !== "connected";
+    const version = instanceVersion(instance);
+    const update = shownUpdate(instance);
+    const id = instance.id;
+    return (
+      <div className="group/row relative">
+        <div className={cn("flex items-stretch rounded-lg transition-colors", selected ? "bg-accent ring-1 ring-border" : "hover:bg-accent/60")}>
+          {selected && <span aria-hidden="true" className="absolute inset-y-2.5 left-0 w-[3px] rounded-r-full bg-state-working" />}
+          <button
+            type="button"
+            data-hub-row={id}
+            onClick={() => actions.select(id)}
+            onKeyDown={(event) => {
+              if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+              event.preventDefault();
+              onStep(event.key === "ArrowLeft" ? -1 : 1);
+            }}
+            aria-current={selected ? "true" : undefined}
+            aria-label={`${agent}, ${displayName(instance)}, ${stateLabel(instance)}${ago ? `, ${ago}` : ""}: ${doing.text}${olderThanHub(instance, hubVersion) ? ". Older than the hub" : ""}${update ? `. ${updateBadge(update).title}` : ""}`}
+            className="flex min-w-0 flex-1 flex-col rounded-lg py-1.5 pr-1 pl-2.5 text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          >
+            <span className={cn("block w-full truncate text-[13px] leading-5", activityTone[doing.tone])}>
+              {doing.label && (
+                <>
+                  <span className={cn("font-medium", stateTone[state])}>{doing.label}</span>
+                  <span className="text-muted-foreground/60"> · </span>
+                </>
+              )}
+              {doing.text}
+            </span>
+            <span className="flex w-full min-w-0 items-center gap-2 text-xs leading-5 text-muted-foreground">
+              {named && (
+                <span className="min-w-0 truncate" title={displayName(instance)}>
+                  {displayName(instance)}
+                </span>
+              )}
+              {versioned && version && <VersionTag version={version} hubVersion={hubVersion} lastKnown={lastKnown} />}
+              {summary && summary.queued_messages > 0 && (
+                <span className="shrink-0 rounded-full bg-muted px-1.5 py-px font-medium text-foreground/80">{summary.queued_messages} queued</span>
+              )}
+              {spend && spend.week_usd > 0 && (
+                <span
+                  className={cn("shrink-0 tabular-nums", lastKnown && "opacity-55")}
+                  title={spendTitle(spend.day_usd, spend.week_usd, lastKnown, spend.day_tokens?.total)}
+                  data-spend-last-known={lastKnown || undefined}
+                >
+                  <span className="sr-only">{spendTitle(spend.day_usd, spend.week_usd, lastKnown, spend.day_tokens?.total)}</span>
+                  <span aria-hidden="true">
+                    {formatUSD(spend.day_usd)}
+                    <span className="text-muted-foreground/60">/24h</span>
+                  </span>
+                </span>
+              )}
+              {/* The usage limit's bar needs the room more. */}
+              {usageShown ? <UsageBar percent={usage} /> : <RowWork instance={instance} />}
+              {group && (
+                <span className="min-w-0 truncate" title={`Group: ${group}`}>
+                  <Folder className="mr-1 inline size-3 align-[-2px]" aria-hidden="true" />
+                  {group}
+                </span>
+              )}
+              {ago && <span className="ml-auto shrink-0 tabular-nums">{ago}</span>}
+            </span>
+            {update && (
+              <span className="mt-1 flex text-xs">
+                <UpdateChip update={update} />
+              </span>
+            )}
+          </button>
+          <RowMenu instance={instance} hubVersion={hubVersion} root={root} groups={groups} actions={actions} className="size-8" />
+        </div>
+      </div>
+    );
+  },
+  (a, b) =>
+    a.instance === b.instance &&
+    a.hubVersion === b.hubVersion &&
+    a.root === b.root &&
+    a.groups === b.groups &&
+    a.named === b.named &&
+    a.versioned === b.versioned &&
+    a.selected === b.selected &&
+    a.recent === b.recent &&
+    a.latest === b.latest &&
+    a.actions === b.actions,
+);

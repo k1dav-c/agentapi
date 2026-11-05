@@ -1,6 +1,6 @@
 import {describe, expect, test} from "bun:test";
 import type {HubInstance} from "./hub";
-import {frameInstance, frameMessage, fromFrame, instanceFromHub, onFrameMessage, toFrame, type FromFrame} from "./hub-frame";
+import {frameInstance, frameMessage, fromFrame, instanceFromHub, onFrameMessage, openFromFrame, toFrame, type FromFrame} from "./hub-frame";
 
 const ORIGIN = "http://hub.test";
 
@@ -55,6 +55,7 @@ describe("the hub's side", () => {
 
   test("the info it posts", () => {
     expect(frameInstance(instance, {hubVersion: "2.2.0", agent: "Claude Code", tab: "/chat/?url=x"})).toEqual({
+      id: "dev-1:3284",
       name: "checkout-api",
       state: "idle",
       label: "Idle",
@@ -72,12 +73,29 @@ describe("the hub's side", () => {
     expect(stopped.hostname).toBeUndefined();
     expect(stopped.agent).toBeUndefined();
     expect(stopped.hubVersion).toBeUndefined();
+    expect(stopped.machine).toBeUndefined();
+  });
+
+  test("the agents of its machine, for the bar's switch, when there is another", () => {
+    const agents = [
+      {id: "dev-1:3284", name: "checkout-api", state: "idle" as const, label: "Idle", agentType: "claude", agent: "Claude Code"},
+      {id: "dev-1:3285", name: "checkout-api", state: "needs-you" as const, label: "Needs your answer", agentType: "codex", agent: "Codex"},
+    ];
+    expect(frameInstance(instance, {hubVersion: "", agent: "", tab: "t", machine: agents}).machine).toEqual(agents);
+    expect(frameInstance(instance, {hubVersion: "", agent: "", tab: "t", machine: agents.slice(0, 1)}).machine).toBeUndefined();
+  });
+
+  test("open is an ask for another agent, with its ID", () => {
+    const framed = {instance: "a", ready: 1};
+    expect(onFrameMessage(framed, openFromFrame("b"), "a")).toEqual({framed, open: "b"});
+    expect(onFrameMessage(framed, {source: "agentapi.hub", type: "open", id: 7} as unknown as FromFrame, "a")).toEqual({framed});
+    expect(onFrameMessage(framed, {source: "agentapi.hub", type: "open", id: ""} as FromFrame, "a")).toEqual({framed});
   });
 });
 
 describe("the chat's side (FrameBar)", () => {
   const parent = {};
-  const told = toFrame({name: "checkout-api", state: "idle", label: "Idle", tab: "t"});
+  const told = toFrame({id: "dev-1:3284", name: "checkout-api", state: "idle", label: "Idle", tab: "t"});
 
   test("takes the instance from the page that frames it", () => {
     expect(instanceFromHub({origin: ORIGIN, data: told, source: parent as MessageEventSource}, parent, ORIGIN)).toEqual(told.instance);

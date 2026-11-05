@@ -231,7 +231,7 @@ are the [Spend](#spend), [Tokens](#token-usage) and [Work time](#work-time) card
 
 ### Spend
 
-![What the agents spent: the last 24 hours and 7 days, and the agents that spent the most](screenshots/hub-spend.png)
+![What the agents spent: the last 24 hours and 7 days, the agents that spent the most, and each machine](screenshots/hub-spend.png)
 
 Once a minute, each AgentAPI works out from its agent's session logs what the agent's sessions in
 its working directory cost over the last 24 hours and the last 7 days, and puts it in its summary
@@ -241,17 +241,25 @@ PTY agents show none.
 
 A row shows its agent's last 24 hours (`$110/24h`), a group header its group's, and the top of the
 list all of them; hover for the 7 days too. On a desktop the overview has a **Spend** card: the 24
-hours and 7 days of every agent that reports it, and the five that spent the most this week.
+hours and 7 days of every agent that reports it, the five that spent the most this week, and
+**By machine**, each machine's figures once the agents run on more than one.
 
 Two AgentAPIs of one agent in one directory of a machine read the same sessions and report the same
 amounts, with the same `scope` (a hash of the machine, the agent, the directory and where the agent
 keeps its logs). The totals count each scope once, with its latest figure (`updated_at`). An agent
 the hub doesn't follow right now (stopped, unreachable, connecting) shows its last figure dimmed,
-as last known, and the totals leave it out.
+as last known, and the totals leave it out. A scope belongs to one machine, so the machines add up
+to the totals.
+
+The overview's tables name each agent's machine after its name, since agents on different machines
+often share one (their home directory's). **By machine** puts the most this week first and leaves
+out the machines with none. With more than eight, the seven with the most show and the rest add up
+in one row (**Other 9 machines**). Agents that don't report their machine add up under
+**Not reported**.
 
 ### Token usage
 
-![The tokens the agents used: the last 24 hours and 7 days, by kind, the agents that used the most, and each group](screenshots/hub-tokens.png)
+![The tokens the agents used: the last 24 hours and 7 days, by kind, the agents that used the most, each group and each machine](screenshots/hub-tokens.png)
 
 The spend's pass also counts the tokens of the same calls: `spend` has them for the last 24 hours
 (`day_tokens`) and 7 days (`week_tokens`), as `input`, `output`, `cache_write` (Anthropic's
@@ -261,15 +269,15 @@ without a known price count their tokens and no cost. What Claude Code counted b
 by call (compacting the context) counts with the tokens its own count gives it.
 
 Below Spend, the overview's **Tokens** card has the 24 hours and 7 days of every agent that reports
-them, by kind, each group's when there are groups, and the five that used the most this week. They
-add up as the spend does: each scope once, connected agents only. AgentAPI 2.4.0 and older send
+them, by kind, the five that used the most this week, each group's when there are groups, and each
+machine's when there are several. They add up as the spend does: each scope once, connected agents only. AgentAPI 2.4.0 and older send
 their spend without tokens; the card says how many agents report them. Counts are short (`950`,
 `12k`, `3.4M`, `1.2B`); hover a total for the exact number. Rows have no room for another figure:
 hover a row's spend for its last 24 hours of tokens.
 
 ### Work time
 
-![How long the agents worked: the last 24 hours and 7 days, each group, and the agents that worked the most](screenshots/hub-work.png)
+![How long the agents worked: the last 24 hours and 7 days, the agents that worked the most, each group and each machine](screenshots/hub-work.png)
 
 The hub times each agent while its row says it works (`working`): from the summary that starts a
 turn to the one that ends it or asks you something. Waiting for you, idle, connecting, unreachable
@@ -280,8 +288,8 @@ again from its next summary.
 
 A row shows its agent's last 24 hours after the spend, with a timer (`2.3h`), unless it shows a
 usage limit; hover for the 7 days too. Below Tokens, the overview's **Work time** card has the 24
-hours and 7 days of all the agents, each group's when there are groups, and the five that worked the
-most this week. Figures are rounded down: minutes under an hour (`45m`), tenths of an hour under
+hours and 7 days of all the agents, the five that worked the most this week, each group's when there
+are groups, and each machine's when there are several. Figures are rounded down: minutes under an hour (`45m`), tenths of an hour under
 ten (`2.3h`), then hours (`31h`). Unlike spend, every agent counts, stopped ones too: the time is
 the hub's own record, per instance.
 
@@ -376,7 +384,8 @@ update under way, or one that failed, gets a line of its own
 ([Updating from the hub](#updating-from-the-hub)). [Pinned](#pinning) agents come first, in your
 order. Within a [group](#groups), the rows sort by state in this order, then by name;
 [Recent changes](#recent-changes) puts the agents with tasks first and sorts by the latest change
-instead. Each state has a shape of its own, so it reads without its color:
+instead; [By machine](#by-machine) puts each machine's agents together in either. Each state has a
+shape of its own, so it reads without its color:
 
 | Glyph | Second line starts with | Meaning |
 | --- | --- | --- |
@@ -427,7 +436,8 @@ change the hub refuses or doesn't get (a group, a pin, a mute, a forget) changes
 why in a notice.
 
 Once there is a group, the list gets a header per group, by name, with the instances in no group
-last under **Ungrouped**; [Recent changes](#recent-changes) shows no group headers. A header shows
+last under **Ungrouped**, [By machine](#by-machine) too; [Recent changes](#recent-changes) shows no
+group headers. A header shows
 how many instances the group has and, in amber, how many need you, so a folded group still tells
 you. Tap a header to fold or unfold it; each browser remembers which groups it folded. The pencil
 renames the group, moving all its instances. A group name has at most 40 characters, and a group
@@ -438,12 +448,13 @@ with no instance left disappears.
 ![The list by the agents' latest changes: the pinned agents, then one list without group headers, the most recent first](screenshots/hub-recent.png)
 
 The switch beside the search sets the list's order. **Groups**, the default, is the order above:
-what needs you first within each group. **Recent changes** is one list below the
+what needs you first within each group. The [By machine](#by-machine) toggle beside it puts each
+machine's agents together, in either order. **Recent changes** is one list below the
 [pinned](#pinning) agents, whatever the group: first the agents that have had a task (one runs,
 finished, or ran before), then those with no task yet and the muted ones, each part with the most
 recent change first, so an unused agent that just reconnected doesn't push the others down. Each row
 then shows how long ago it last changed and, where there is room, its group. The filters and the
-search apply in both orders, and `j` and `k` follow the rows as they show. Rows move as the agents
+search apply in every order, and `j` and `k` follow the rows as they show. Rows move as the agents
 change; the open one stays selected. Each browser remembers its order.
 
 These count as changes: a new state (it needs you, works, finishes, waits, stops, or the hub loses
@@ -458,15 +469,61 @@ restarting the hub doesn't reorder the list. For a new instance, that is when th
 A hub updated from an earlier version has no record yet: until an instance changes, the list places
 it by the time its row shows, else by when the hub last heard of it.
 
+### By machine
+
+![By machine in the groups: the pinned agents, then each group with a card per machine, a tab per agent and the picked one below](screenshots/hub-machines.png)
+
+A machine often runs two or three agents (Claude Code, Codex, Pi) in the same directory, so their
+rows look alike. **By machine**, the toggle beside the order's switch, puts each machine's agents
+together in one card, in either order; each browser remembers it. The card names the machine (its
+host name) once, with what its agents share: their directory's name, their AgentAPI version and,
+after it, what they spent in the last 24 hours. A long host name wraps rather than losing its end,
+and a directory name the host name already contains isn't repeated.
+
+Below the name, each agent has a tab: its mark, a short name (Claude, Codex, Pi) and a dot in its
+state's color: amber when it needs you, blue while it works, green when it finished unseen, grey
+when muted or stopped, red when unreachable, none while idle. Tabs keep their order, by agent,
+whatever their states. Under the tabs, the card shows one agent: what it waits for or does, how
+long ago, and its spend, work time, queue or usage limit, with a name or version the card's agents
+don't share. Click it to open the agent; its **⋯** menu is a list row's: pin, mute, group, update,
+forget. A click on a tab opens that agent, as a row would.
+
+In **Groups**, the groups stay, and within one the machine whose agent needs you the most comes
+first, then by name. A machine whose agents are in different groups has a card in each, with that
+group's agents. The card shows the agent open beside the list when it is one of its own; otherwise
+the tab picked last on it (the browser keeps it across reloads), else the agent that needs you the
+most.
+
+![By machine in the recent order: a card per machine, the machine of the latest change first](screenshots/hub-machines-recent.png)
+
+In **Recent changes**, there are no group headers: one card per machine, the machine whose agent
+changed last first, in the order of the [recent](#recent-changes) rows. The card's header says how
+long ago that change was. The card shows the agent open beside the list when it is one of its own;
+otherwise the tab picked on it, as long as you picked it after the card's latest change; else the
+agent that changed last. So a pick stays until something on the machine changes, and then the card
+shows what changed. The panel names the agent's group and how long ago it last changed, as a
+recent row does. Picks in Recent changes are apart from those in Groups.
+
+`j` and `k` step from card to card, to the agent the card shows, and ← and → show the card's other
+agents there without opening them; `Enter` opens the one shown. On the tabs themselves, ← and →
+(and `Home`, `End`) move between them, and `Enter` opens one.
+
+In both orders, [pinned](#pinning) agents keep their rows on top, and an agent that doesn't report
+its machine keeps a row of its own. The filters and the search apply to each agent: a card has tabs
+for the ones that match and disappears when none does, and the search matches the machine's name
+too. A machine with one agent has one tab. The section headers count agents, not machines. With
+**By machine** off, both orders show a row per agent.
+
 ### Pinning
 
 **Pin to top** in a row's **⋯** menu keeps an agent at the top of the list, under **Pinned**, in
-both orders. A new pin goes last. **Move up** and **Move down** in the same menu move it past the
+every order. A new pin goes last. **Move up** and **Move down** in the same menu move it past the
 next pinned agent the list shows, and **Unpin** takes it out. `p` pins or unpins the row with the
 focus.
 
-A pinned agent shows only there, not again in its group or below in the recent list. Its row has a
-pin after the name and, where there is room, names its group. The section's header counts its
+A pinned agent shows only there, not again in its group, its machine's card or below in the recent
+list; [By machine](#by-machine) too, it keeps a row of its own. The row has a pin after the name and,
+where there is room, names its group. The section's header counts its
 agents and those that need you, and folds like a group's. Below it, the rest of the list gets
 headers too: the groups and **Ungrouped**, or **Recent changes**. The filters and the search apply
 to pinned agents as well: one they leave out is hidden, and the section disappears once none is
@@ -489,14 +546,17 @@ again. **Unmute** in the same menu ends it sooner. Mutes are kept on the hub, li
 
 ### Opening an instance
 
-![An agent open beside the list, its approval ready to answer](screenshots/hub-instance.png)
+![An agent open beside the list, its approval ready to answer, its machine's agents in the bar](screenshots/hub-instance.png)
 
 Pick a row or a card to open the agent's chat beside the list: everything the chat does works here,
 answering requests included. The bar above it shows the agent's state, agent, machine and AgentAPI
-version, with the chat's own search, terminal and Explorer buttons; **New tab** opens the chat on
-its own, and **×** (or **Esc**) goes back to the overview. Opening an agent is a page in the
-browser's history, so Back returns to the list or the overview; moving from one
-agent to another doesn't add one. The URL keeps the agent (`#<id>`), so a reload or a bookmark
+version, with the chat's own search, terminal and Explorer buttons. When the machine runs other
+agents the hub watches, the bar has a button for each of them too, in any list order: their marks
+with the same state dots as the [By machine](#by-machine) tabs, the open one marked. A click opens
+another in its place, so you switch between Claude Code and Codex on one machine without the list.
+**New tab** opens the chat on its own, and **×** (or **Esc**) goes back to the overview. Opening an
+agent is a page in the browser's history, so Back returns to the list or the overview; moving from
+one agent to another doesn't add one. The URL keeps the agent (`#<id>`), so a reload or a bookmark
 comes back to it. An AgentAPI update under way shows in the bar too, with **Cancel** while it waits
 for the task ([Updating from the hub](#updating-from-the-hub)).
 
@@ -505,7 +565,8 @@ for the task ([Updating from the hub](#updating-from-the-hub)).
 | Key | Does |
 | --- | --- |
 | `/` | Search |
-| `j`, `k` (or the arrows) | Move between the rows |
+| `j`, `k` (or the arrows) | Move between the rows ([By machine](#by-machine): the cards) |
+| ←, → | [By machine](#by-machine): show a card's other agents |
 | `Enter` | Open the row |
 | `p` | Pin or unpin the row ([Pinning](#pinning)) |
 | `Esc` | Clear the search, or go back to the overview |
@@ -526,7 +587,7 @@ the hub's tab is in the background, and a screen reader hears the same as it hap
 
 On a narrow screen the list and the chat take turns; the back arrow at the top, or the phone's
 back gesture, goes back to the list. The chat keeps the screen for the conversation: one bar above
-it, and the composer one row. Answering an approval from the phone:
+it, with only the marks of the machine's other agents, and the composer one row. Answering an approval from the phone:
 
 ![Answering an approval from the hub on a phone](screenshots/demo-hub.gif)
 

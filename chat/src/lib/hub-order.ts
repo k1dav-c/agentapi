@@ -1,9 +1,27 @@
 // The hub list's two orders: in its groups, what needs you first in each
 // (groupInstances), or one list by the latest change, the most recent
-// first, whatever the group. Each browser keeps its choice. The instances
-// pinned on the hub come first in both, in their own order.
+// first, whatever the group. By machine, in either order, puts each
+// machine's agents together in one card. Each browser keeps its choices.
+// The instances pinned on the hub come first, in their own order.
 
-import {activity, displayName, instanceState, groupInstances, groupNames, matchesAgents, matchesFilter, matchesSearch, needsYou, type HubAgent, type HubFilter, type HubGroup, type HubInstance} from "./hub";
+import {
+  activity,
+  displayName,
+  instanceState,
+  groupByMachine,
+  groupInstances,
+  groupNames,
+  machinesInOrder,
+  matchesAgents,
+  matchesFilter,
+  matchesSearch,
+  needsYou,
+  type HubAgent,
+  type HubFilter,
+  type HubGroup,
+  type HubInstance,
+  type HubMachine,
+} from "./hub";
 
 export type ListOrder = "groups" | "recent";
 
@@ -11,6 +29,14 @@ export type ListOrder = "groups" | "recent";
 // the groups, the default.
 export function parseListOrder(stored: string | null | undefined): ListOrder {
   return stored === "recent" ? "recent" : "groups";
+}
+
+// storedView reads the order and By machine a browser stored (order,
+// byMachine: "true" or "false"). An order of "machines", which a build
+// before By machine kept, is the groups by machine.
+export function storedView(order: string | null | undefined, byMachine: string | null | undefined): {order: ListOrder; byMachine: boolean} {
+  if (order === "machines") return {order: "groups", byMachine: true};
+  return {order: parseListOrder(order), byMachine: byMachine === "true"};
 }
 
 // timeOf reads a timestamp: none for one that is missing or doesn't parse,
@@ -101,13 +127,14 @@ export function movePin(order: readonly string[], shown: readonly string[], id: 
 }
 
 // ListView is how the list shows the instances: which ones (the filter, the
-// agents and the search) and in what order.
+// agents and the search), in what order, and whether by machine.
 export interface ListView {
   filter: HubFilter;
   // agents are the agents picked; none is every agent.
   agents: ReadonlySet<HubAgent>;
   query: string;
   order: ListOrder;
+  byMachine?: boolean;
 }
 
 // The keys of the pinned section and of the recent order's rows, as the
@@ -124,26 +151,57 @@ export interface ListSection extends HubGroup {
   // label is its header; "" when the list shows none.
   label: string;
   pinned?: true;
+  // machines are its instances by machine, by machine; instances are then
+  // in the order the machines show them.
+  machines?: HubMachine[];
 }
 
 // listSections is what the list shows: the instances that pass the filter,
-// the agents and the search, the pinned ones first, then the others in their groups or
-// by their latest change; none when none passes. Once there is a group, the
-// groups get headers; below pinned ones every section does, so that the
-// pinned ones read apart from the rest.
-export function listSections(instances: Iterable<HubInstance>, {filter, agents, query, order}: ListView): ListSection[] {
+// the agents and the search, the pinned ones first, then the others in their
+// groups or by their latest change; none when none passes. By machine, each
+// machine's are together: in a group, the machine that needs you the most
+// first (groupByMachine); in the recent order, the machine of the latest
+// change first, each one's agents by their latest change. Once there is a
+// group, the groups get headers; below pinned ones every section does, so
+// that the pinned ones read apart from the rest. The pinned ones stay one by
+// one, in the order they were pinned.
+export function listSections(instances: Iterable<HubInstance>, {filter, agents, query, order, byMachine = false}: ListView): ListSection[] {
   const all = [...instances];
   const visible = all.filter((instance) => matchesFilter(instance, filter) && matchesAgents(instance, agents) && matchesSearch(instance, query));
   const pinned = sortPinned(visible);
   const rest = visible.filter((instance) => pinOf(instance) === undefined);
-  const headers = pinned.length > 0 || (order === "groups" && groupNames(all).length > 0);
+  const headers = pinned.length > 0 || (order !== "recent" && groupNames(all).length > 0);
   const sections: ListSection[] = [];
   if (pinned.length > 0) sections.push({key: pinnedKey, label: "Pinned", name: "", pinned: true, instances: pinned, needsYou: needsYou(pinned)});
-  if (order === "groups") {
+  if (order === "groups" && !byMachine) {
     for (const group of groupInstances(rest)) sections.push({...group, key: group.name, label: headers ? group.name || "Ungrouped" : ""});
+  } else if (order === "groups") {
+    for (const group of groupInstances(rest)) {
+      const machines = groupByMachine(group.instances);
+      const instances = machines.flatMap((machine) => machine.instances);
+      sections.push({...group, instances, machines, key: group.name, label: headers ? group.name || "Ungrouped" : ""});
+    }
   } else if (rest.length > 0) {
     const rows = sortRecent(rest);
-    sections.push({key: recentKey, label: headers ? "Recent changes" : "", name: "", instances: rows, needsYou: needsYou(rows)});
+    const section: ListSection = {key: recentKey, label: headers ? "Recent changes" : "", name: "", instances: rows, needsYou: needsYou(rows)};
+    if (byMachine) {
+      section.machines = machinesInOrder(rows);
+      section.instances = section.machines.flatMap((machine) => machine.instances);
+    }
+    sections.push(section);
   }
   return sections;
+}
+
+// recentAgent is the agent a machine's card shows in the recent order: the
+// one open beside the list when the card has it, else the one picked on it
+// if that was at its latest change or after (picked, at when; a pick that
+// doesn't say when is older than any change), else the latest change (the
+// first, as machinesInOrder keeps them).
+export function recentAgent(machine: HubMachine, picked?: {id: string; at?: number}, selected?: string): string {
+  const has = (id: string | undefined) => !!id && machine.instances.some((instance) => instance.id === id);
+  if (has(selected)) return selected!;
+  const latest = machine.instances[0];
+  if (picked && has(picked.id) && picked.at !== undefined && picked.at >= (timeOf(changedAt(latest)) ?? 0)) return picked.id;
+  return latest.id;
 }

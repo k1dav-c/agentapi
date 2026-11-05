@@ -1002,19 +1002,38 @@ try {
     '--token', 'docs-token', '--secret', 'docs-secret', '--state', path.join(hubHome, 'empty.json')]);
   await poll(async () => (await fetch(`http://127.0.0.1:${emptyPort}/api/session`)).ok, 'the empty hub');
 
-  // The rows name the machine; the screenshots show placeholders, also when a row renders again.
-  const hubHostStyle = `body { counter-reset: host; }
-    [data-hub-host] { font-size: 0; counter-increment: host; }
-    [data-hub-host]::after { content: "dev-" counter(host); font-size: 12px; }`;
+  // The demo's instances all run on this machine. The hub's page gets them as if they ran on three,
+  // named dev-1 to dev-3, for By machine, the overview's cards and the bar's switch of a
+  // machine's agents: the hub's events name another machine for each before the page reads them,
+  // so the screenshots show these placeholders. dev-2 has agents in both groups and in none.
+  const hubMachines = {
+    'checkout-api': 'dev-1', 'marketing-site': 'dev-1', 'mobile-app': 'dev-1',
+    'data-pipeline': 'dev-2', 'billing-service': 'dev-2', 'design-system': 'dev-2', 'prototype-2025': 'dev-2',
+    docs: 'dev-3', 'legacy-cms': 'dev-3',
+  };
+  const machinesScript = machines => {
+    const move = instance => { if (instance && machines[instance.name]) instance.hostname = machines[instance.name]; };
+    window.EventSource = class extends window.EventSource {
+      addEventListener(type, listener, options) {
+        if (type !== 'instances' && type !== 'instance') return super.addEventListener(type, listener, options);
+        return super.addEventListener(type, event => {
+          const data = JSON.parse(event.data);
+          if (type === 'instances') (data.instances ?? []).forEach(move);
+          else move(data);
+          listener.call(this, new MessageEvent(event.type, {data: JSON.stringify(data), lastEventId: event.lastEventId}));
+        }, options);
+      }
+    };
+  };
   const openHub = async (options, {signIn = true, pointer = false, theme = 'light', url = hubAPI} = {}) => {
     const context = await browser.newContext({...contextOptions, colorScheme: theme, ...options});
     context.on('weberror', event => errors.push(event.error().message));
     await context.addInitScript(value => { try { localStorage.setItem('theme', value); } catch {} }, theme);
     if (pointer) await context.addInitScript(pointerScript);
+    await context.addInitScript(machinesScript, hubMachines);
     const page = await context.newPage();
     page.setDefaultTimeout(20_000);
     await page.goto(`${url}/`);
-    await page.addStyleTag({content: hubHostStyle});
     await page.evaluate(() => document.fonts.ready);
     if (signIn) {
       await page.getByLabel('Hub token').fill('docs-token');
@@ -1042,12 +1061,6 @@ try {
     await shot(page, theme === 'light' ? 'hub-desktop.png' : 'hub-desktop-dark.png');
     if (theme === 'light') {
       await elementShot(page, page.locator('aside'), 'hub-list.png');
-      // What the agents spent: the overview's card.
-      await elementShot(page, page.locator('section[aria-labelledby="hub-spend"]'), 'hub-spend.png');
-      // The tokens of the same calls: the card below it.
-      await elementShot(page, page.locator('section[aria-labelledby="hub-tokens"]'), 'hub-tokens.png');
-      // How long they worked: the card below that.
-      await elementShot(page, page.locator('section[aria-labelledby="hub-work"]'), 'hub-work.png');
       // The AgentAPI versions they run: the overview's last card.
       await elementShot(page, page.locator('section[aria-labelledby="hub-versions"]'), 'hub-versions.png');
       // The list by the agents' latest changes, without groups; then the groups again.
@@ -1080,13 +1093,35 @@ try {
       // An instance that waits for an approval, open in the chat.
       await page.getByRole('list', {name: 'Instances'}).getByText('checkout-api').click();
       await page.frameLocator('iframe').getByRole('button', {name: 'Allow'}).first().waitFor();
-      // The bar the chat draws names the machine too.
-      await page.frame({url: /\/embed/}).addStyleTag({content: hubHostStyle});
       await page.waitForTimeout(800);
       await shot(page, 'hub-instance.png');
     }
     await page.context().close();
   }
+
+  // The list by machine, and the overview's cards with each machine's figures, while the agent
+  // works again.
+  if ((await hubInstances['billing-service'].status()).status === 'stable') await startWork();
+  const byMachine = await openHub(desktop);
+  await byMachine.getByText('Working', {exact: true}).first().waitFor();
+  await byMachine.getByRole('button', {name: 'By machine'}).click();
+  await byMachine.getByRole('tablist', {name: 'Agents on dev-3'}).waitFor();
+  await byMachine.waitForTimeout(800);
+  await elementShot(byMachine, byMachine.locator('aside'), 'hub-machines.png');
+  // By machine in the recent order: one card per machine, the latest change first.
+  const machinesOrder = byMachine.getByRole('group', {name: 'Order the agents'});
+  await machinesOrder.getByRole('button', {name: 'Recent changes'}).click();
+  await byMachine.locator('aside button[aria-expanded]', {hasText: 'Client work'}).waitFor({state: 'detached'});
+  await byMachine.waitForTimeout(800);
+  await elementShot(byMachine, byMachine.locator('aside'), 'hub-machines-recent.png');
+  await machinesOrder.getByRole('button', {name: 'Groups'}).click();
+  // What the agents spent: the overview's card.
+  await elementShot(byMachine, byMachine.locator('section[aria-labelledby="hub-spend"]'), 'hub-spend.png');
+  // The tokens of the same calls: the card below it.
+  await elementShot(byMachine, byMachine.locator('section[aria-labelledby="hub-tokens"]'), 'hub-tokens.png');
+  // How long they worked: the card below that.
+  await elementShot(byMachine, byMachine.locator('section[aria-labelledby="hub-work"]'), 'hub-work.png');
+  await byMachine.context().close();
 
   // A hub no agent has joined yet: how to join a machine, the secret masked.
   const empty = await openHub(desktop, {url: `http://127.0.0.1:${emptyPort}`});
