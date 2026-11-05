@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- The hub's machine cards read more clearly, on a phone especially. The host name has the first line
+  to itself, so it no longer wraps into three, and the start most machines' names share (such as
+  `coder-<user>-`) is dimmed. The version and spend sit beside the tabs, and only the picked tab
+  carries its agent's name. A card with one agent shown, such as with an agent filter, has a label
+  instead of a lone tab and shows its spend once. The directory's name moved from the card's header to
+  the agent below it.
+
 ## v3.2.0
 
 ### Features

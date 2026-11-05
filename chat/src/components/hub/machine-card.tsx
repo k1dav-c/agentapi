@@ -38,6 +38,8 @@ export interface MachineCardProps {
   // a machine with agents in two groups has a card in each.
   card: string;
   machine: HubMachine;
+  // prefix is the start most machines' names share (hostPrefix), dimmed.
+  prefix: string;
   // order is the list's: in the recent order the card shows its latest
   // change, and its agents' changes.
   order: ListOrder;
@@ -107,19 +109,21 @@ function useActiveAgent(card: string, machine: HubMachine, order: ListOrder, sel
   return [order === "recent" ? recentAgent(machine, picked, onCard) : activeAgent(machine, picked?.id, onCard), pick];
 }
 
-// MachineCard is a machine in the hub's list, by machine: its name and what
-// its agents share (their directory's name, the AgentAPI version, what they
-// spent in the last 24 hours; in the recent order, how long ago the latest
-// changed), a tab per agent, and the agent of the tab picked (AgentPanel).
+// splitHost parts a machine's name into the start it shares with most
+// machines and the rest; all of it is the rest when it doesn't start so.
+function splitHost(hostname: string, prefix: string): {start: string; rest: string} {
+  return prefix && hostname.startsWith(prefix) && hostname.length > prefix.length ? {start: prefix, rest: hostname.slice(prefix.length)} : {start: "", rest: hostname};
+}
+
+// MachineCard is a machine in the hub's list, by machine: its name (in the
+// recent order, with how long ago the latest of its agents changed), a tab
+// per agent with what they share beside them (the AgentAPI version, what
+// they spent in the last 24 hours), and the agent of the tab picked
+// (AgentPanel).
 // A tab opens its agent; the arrows move between the tabs, and on the panel
 // switch it without opening.
-export function MachineCard({card, machine, order, hubVersion, root, groups, selected, actions}: MachineCardProps) {
+export function MachineCard({card, machine, prefix, order, hubVersion, root, groups, selected, actions}: MachineCardProps) {
   const {hostname, instances} = machine;
-  const names = new Set(instances.map(displayName));
-  // The name of their directory, once, when all of them say the same one
-  // and the machine's name doesn't say it already.
-  const shared = names.size === 1 ? [...names][0] : "";
-  const name = shared && !hostname.toLowerCase().includes(shared.toLowerCase()) ? shared : "";
   const version = sharedVersion(instances);
   const lastKnown = instances.every((instance) => instance.connection !== "connected");
   const spend = spendTotals(instances);
@@ -131,6 +135,8 @@ export function MachineCard({card, machine, order, hubVersion, root, groups, sel
   // of its first agent's.
   const latest = useHubTime((now) => (recent ? formatAgo(changedAt(instances[0]), now) : ""));
   const tabs = tabOrder(instances);
+  const single = tabs.length === 1;
+  const shown = splitHost(hostname, prefix);
   const current = instances.find((instance) => instance.id === active)!;
   const id = useId();
   const list = useRef<HTMLDivElement>(null);
@@ -147,71 +153,80 @@ export function MachineCard({card, machine, order, hubVersion, root, groups, sel
   return (
     <li className="px-2 py-1" data-hub-card>
       <div className="rounded-xl border bg-card/60">
-        <div className="flex min-w-0 items-start gap-2 px-3.5 pt-2.5 pb-1 text-xs leading-5 text-muted-foreground">
+        <div className="flex min-w-0 items-start gap-2 px-3.5 pt-2.5 text-xs leading-5 text-muted-foreground">
           <Server aria-hidden="true" className="mt-[3px] size-3.5 shrink-0" />
-          {/* Machines often share a long prefix, so the name wraps rather than
-              losing its end. */}
+          {/* The name has the line to itself and wraps rather than losing its
+              end; the start most machines share is dimmed. */}
           <span className="min-w-0 flex-1 text-[13px] font-medium [overflow-wrap:anywhere] text-foreground" title={hostname} data-hub-host>
-            {hostname}
+            {shown.start && <span className="font-normal text-muted-foreground">{shown.start}</span>}
+            {shown.rest}
           </span>
-          {name && <span className="max-w-[35%] min-w-0 shrink-0 truncate">{name}</span>}
-          {version && <VersionTag version={version} hubVersion={hubVersion} lastKnown={lastKnown} />}
-          {spend.week > 0 && (
-            <span className="shrink-0 tabular-nums" title={spent}>
-              <span className="sr-only">{spent}</span>
-              <span aria-hidden="true">
-                {formatUSD(spend.day)}
-                <span className="text-muted-foreground/60">/24h</span>
-              </span>
-            </span>
-          )}
           {latest && (
             <span className="shrink-0 tabular-nums" title="The latest change of its agents">
               {latest}
             </span>
           )}
         </div>
-        <div
-          ref={list}
-          role="tablist"
-          aria-label={`Agents on ${hostname}`}
-          className="flex flex-wrap gap-1 px-2 pb-1"
-          onKeyDown={(event) => {
-            const by = keys[event.key as keyof typeof keys];
-            if (by === undefined) return;
-            event.preventDefault();
-            step(by, true);
-          }}
-        >
-          {tabs.map((instance) => {
-            const on = instance.id === active;
-            const agent = agentName(instance) || "Agent";
-            return (
-              <button
-                key={instance.id}
-                type="button"
-                role="tab"
-                id={tabID(instance.id)}
-                aria-selected={on}
-                aria-controls={`${id}-panel`}
-                tabIndex={on ? 0 : -1}
-                aria-label={`${agent}, ${displayName(instance)}, ${stateLabel(instance)}`}
-                title={`${agent}, ${displayName(instance)}: ${stateLabel(instance)}`}
-                data-hub-tab={instance.id}
-                onClick={() => {
-                  pick(instance.id);
-                  actions.select(instance.id);
-                }}
-                className={cn(
-                  "flex h-7 min-w-0 items-center gap-1.5 rounded-md px-2 text-xs outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50",
-                  on ? "bg-background font-medium text-foreground shadow-xs ring-1 ring-border dark:bg-accent" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
-                )}
-              >
-                <AgentTabMark agentType={instance.agent_type} state={instanceState(instance)} />
-                <span className="truncate">{shortAgent(instance.agent_type, agent)}</span>
-              </button>
-            );
-          })}
+        {/* The agents' tabs, and what they share on the right. */}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-2 pt-1 pb-1">
+          <div
+            ref={list}
+            role="tablist"
+            aria-label={`Agents on ${hostname}`}
+            className="flex min-w-0 flex-wrap gap-1"
+            onKeyDown={(event) => {
+              const by = keys[event.key as keyof typeof keys];
+              if (by === undefined) return;
+              event.preventDefault();
+              step(by, true);
+            }}
+          >
+            {tabs.map((instance) => {
+              const on = instance.id === active;
+              const agent = agentName(instance) || "Agent";
+              return (
+                <button
+                  key={instance.id}
+                  type="button"
+                  role="tab"
+                  id={tabID(instance.id)}
+                  aria-selected={on}
+                  aria-controls={`${id}-panel`}
+                  tabIndex={on ? 0 : -1}
+                  aria-label={`${agent}, ${displayName(instance)}, ${stateLabel(instance)}`}
+                  title={`${agent}, ${displayName(instance)}: ${stateLabel(instance)}`}
+                  data-hub-tab={instance.id}
+                  onClick={() => {
+                    pick(instance.id);
+                    actions.select(instance.id);
+                  }}
+                  className={cn(
+                    "flex h-7 min-w-0 items-center gap-1.5 rounded-md px-2 text-xs outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50",
+                    // A machine's only agent shown is a label rather than a tab to pick.
+                  single ? "-ml-0.5 px-1 font-medium text-foreground" : on ? "bg-background font-medium text-foreground shadow-xs ring-1 ring-border dark:bg-accent" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+                  )}
+                >
+                  <AgentTabMark agentType={instance.agent_type} state={instanceState(instance)} />
+                  {/* The other tabs are their marks, so the tabs and what the
+                    agents share fit one line; the label says them in full. */}
+                {(on || single) && <span className="truncate">{shortAgent(instance.agent_type, agent)}</span>}
+                </button>
+              );
+            })}
+          </div>
+          <span className="ml-auto flex shrink-0 items-center gap-2 text-xs leading-7 text-muted-foreground">
+            {version && <VersionTag version={version} hubVersion={hubVersion} lastKnown={lastKnown} />}
+            {/* The only agent's spend is its panel's. */}
+            {!single && spend.week > 0 && (
+              <span className="tabular-nums" title={spent}>
+                <span className="sr-only">{spent}</span>
+                <span aria-hidden="true">
+                  {formatUSD(spend.day)}
+                  <span className="text-muted-foreground/60">/24h</span>
+                </span>
+              </span>
+            )}
+          </span>
         </div>
         <div role="tabpanel" id={`${id}-panel`} aria-labelledby={tabID(active)} className="px-1 pb-1">
           <AgentPanel
@@ -219,7 +234,7 @@ export function MachineCard({card, machine, order, hubVersion, root, groups, sel
             hubVersion={hubVersion}
             root={root}
             groups={groups}
-            named={!shared && displayName(current) !== hostname}
+            named={!hostname.toLowerCase().includes(displayName(current).toLowerCase())}
             versioned={!version}
             selected={current.id === selected}
             recent={recent}
@@ -238,9 +253,9 @@ interface AgentPanelProps {
   hubVersion: string;
   root: string;
   groups: string[];
-  // named: the panel names its instance, as its machine's agents don't
-  // share one name; versioned: it shows its version, as they don't share
-  // one.
+  // named: the panel names its instance, as the machine's name doesn't say
+  // it; versioned: it shows its version, as its machine's agents don't
+  // share one.
   named: boolean;
   versioned: boolean;
   selected: boolean;

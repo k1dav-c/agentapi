@@ -475,17 +475,19 @@ it by the time its row shows, else by when the hub last heard of it.
 
 A machine often runs two or three agents (Claude Code, Codex, Pi) in the same directory, so their
 rows look alike. **By machine**, the toggle beside the order's switch, puts each machine's agents
-together in one card, in either order; each browser remembers it. The card names the machine (its
-host name) once, with what its agents share: their directory's name, their AgentAPI version and,
-after it, what they spent in the last 24 hours. A long host name wraps rather than losing its end,
-and a directory name the host name already contains isn't repeated.
+together in one card, in either order; each browser remembers it. The card's first line is the
+machine's host name alone, wrapped rather than cut; the start most machines' names share (such as
+`coder-<user>-`) is dimmed, so the rest tells them apart.
 
-Below the name, each agent has a tab: its mark, a short name (Claude, Codex, Pi) and a dot in its
-state's color: amber when it needs you, blue while it works, green when it finished unseen, grey
-when muted or stopped, red when unreachable, none while idle. Tabs keep their order, by agent,
-whatever their states. Under the tabs, the card shows one agent: what it waits for or does, how
-long ago, and its spend, work time, queue or usage limit, with a name or version the card's agents
-don't share. Click it to open the agent; its **⋯** menu is a list row's: pin, mute, group, update,
+Below the name, each agent has a tab with its mark and a dot in its state's color: amber when it
+needs you, blue while it works, green when it finished unseen, grey when muted or stopped, red when
+unreachable, none while idle. The picked tab also says the agent's short name (Claude, Codex, Pi);
+hover over the others for theirs. Tabs keep their order, by agent, whatever their states. Beside
+them is what the agents share: their AgentAPI version and what they spent in the last 24 hours. A
+card with one agent shown (the only one, or the only one a filter lets through) has a label instead
+of a tab, and its spend only once, below. Under the tabs, the card shows one agent: what it waits
+for or does, how long ago, and its spend, work time, queue or usage limit, with its directory's name
+when the host name doesn't contain it and its version when the card's agents don't share one. Click it to open the agent; its **⋯** menu is a list row's: pin, mute, group, update,
 forget. A click on a tab opens that agent, as a row would.
 
 In **Groups**, the groups stay, and within one the machine whose agent needs you the most comes

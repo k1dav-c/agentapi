@@ -13,7 +13,9 @@ import {
   formatUSD,
   groupNames,
   groupOf,
+  hostPrefix,
   hubRoot,
+  machineOf,
   matchesAgents,
   nothingMatches,
   parseAgents,
@@ -89,6 +91,8 @@ export function HubView() {
   // The same list while the names are the same, so the rows don't render
   // again for it.
   const nameList = groupNames(all).join("\n");
+  // The start most machines' names share, which their cards dim.
+  const prefix = useMemo(() => hostPrefix(all.map(machineOf)), [all]);
   const names = useMemo(() => (nameList ? nameList.split("\n") : []), [nameList]);
   // The pinned rows the list shows, which Move up and Move down step past.
   const shownPins = sections[0]?.pinned ? sections[0].instances.map((instance) => instance.id) : [];
@@ -404,6 +408,7 @@ export function HubView() {
                             key={machine.key}
                             card={`${section.key}\n${machine.key}`}
                             machine={machine}
+                            prefix={prefix}
                             order={order}
                             hubVersion={hubVersion}
                             root={root}

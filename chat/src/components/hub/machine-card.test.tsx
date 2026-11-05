@@ -49,12 +49,12 @@ const codex = agent(3285, "codex", {summary: summary({spend: {day_usd: 1, week_u
 
 const actions = {select() {}, forget() {}, group() {}, newGroup() {}, mute() {}, pin() {}, move() {}};
 
-const card = (instances: HubInstance[], selected?: string, hostname = "dev-1", order: ListOrder = "groups") => {
+const card = (instances: HubInstance[], selected?: string, hostname = "dev-1", order: ListOrder = "groups", prefix = "") => {
   const machine: HubMachine = {key: `host ${hostname}`, hostname, instances};
   const section = order === "recent" ? " recent" : "Group";
   return renderToStaticMarkup(
     <FixedHubClock now={Date.parse("2026-11-01T10:00:00Z")}>
-      <MachineCard card={`${section}\nhost ${hostname}`} machine={machine} order={order} hubVersion="3.1.0" root="" groups={[]} selected={selected} actions={actions} />
+      <MachineCard card={`${section}\nhost ${hostname}`} machine={machine} prefix={prefix} order={order} hubVersion="3.1.0" root="" groups={[]} selected={selected} actions={actions} />
     </FixedHubClock>,
   );
 };
@@ -67,16 +67,19 @@ describe("MachineCard", () => {
   test("the machine once, with what its agents share, a tab per agent, and the first one's panel", () => {
     const html = card([claude, codex]);
     const shown = text(html);
-    expect(shown).toContain("dev-1 home");
+    // The name alone on its line; the tabs (the picked one labelled, the
+    // others their marks), then what the agents share; the directory's name,
+    // which the machine's doesn't say, in the panel.
+    expect(shown).toContain(" dev-1 Claude AgentAPI v3.1.0");
+    expect(shown).toContain("Deploy the release home $4.20");
     // The version and the spend of the machine, once: $4.20 and $1.00 in the last 24 hours.
     expect(html.match(/>v3\.1\.0</g)).toHaveLength(1);
     expect(shown).toContain("$5.20 /24h");
     expect(html).toContain('role="tablist" aria-label="Agents on dev-1"');
     expect(tabs(html)).toEqual(["*dev-1:3284", "dev-1:3285"]);
-    expect(shown).toContain("Claude Codex");
     // One panel: the selected tab's agent, with its menu.
     expect(html).toContain('role="tabpanel"');
-    expect(shown).toContain("Finished · Deploy the release $4.20 in the last 24 hours");
+    expect(shown).toContain("Finished · Deploy the release home $4.20 in the last 24 hours");
     expect(shown).toContain("$4.20 /24h 20m");
     expect(html).toContain('data-hub-row="dev-1:3284"');
     expect(html).not.toContain('data-hub-row="dev-1:3285"');
@@ -133,8 +136,20 @@ describe("MachineCard", () => {
     expect(shown).not.toContain(" home ");
   });
 
-  test("a machine of one agent has one tab", () => {
-    expect(tabs(card([codex]))).toEqual(["*dev-1:3285"]);
+  test("a machine of one agent has one tab, which reads as a label", () => {
+    const html = card([codex]);
+    expect(tabs(html)).toEqual(["*dev-1:3285"]);
+    expect(html).not.toContain("ring-1 ring-border dark:bg-accent");
+    // Its spend once, in its panel.
+    expect(text(html).match(/\$1\.00 \/24h/g)).toHaveLength(1);
+    expect(card([claude, codex])).toContain("ring-1 ring-border dark:bg-accent");
+  });
+
+  test("the start most machines share is dimmed, the rest tells it apart", () => {
+    const html = card([claude, codex], undefined, "coder-dave-web", "groups", "coder-dave-");
+    expect(html).toContain('title="coder-dave-web" data-hub-host="true"><span class="font-normal text-muted-foreground">coder-dave-</span>web</span>');
+    // A machine whose name doesn't start so keeps it whole.
+    expect(card([claude], undefined, "gpu-9e61", "groups", "coder-dave-")).toContain('data-hub-host="true">gpu-9e61</span>');
   });
 
   describe("in the recent order", () => {
