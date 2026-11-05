@@ -33,7 +33,9 @@ import {HubClock} from "./hub/clock";
 import {basePath, FrameInfo, InstanceBar} from "./hub/instance-bar";
 import {GroupHeader, InstanceRow, type RowActions} from "./hub/instance-row";
 import {ListEdge, useListWidth} from "./hub/list-edge";
-import {ListOrderSwitch, useListOrder} from "./hub/list-order";
+import {MachineCard} from "./hub/machine-card";
+import {machineAgents} from "./hub/machine-tabs";
+import {ByMachineToggle, ListOrderSwitch, useListView} from "./hub/list-order";
 import {Onboarding, Overview} from "./hub/overview";
 import {SignIn} from "./hub/sign-in";
 import {readStorage, writeStorage} from "./hub/storage";
@@ -69,7 +71,7 @@ export function HubView() {
   const [notify, setNotify] = useState<boolean>(() => readStorage(notifyKey, false));
   const search = useRef<HTMLInputElement>(null);
   const listWidth = useListWidth();
-  const [order, setOrder] = useListOrder();
+  const {order, setOrder, byMachine, setByMachine} = useListView();
   const connected = status === "connected";
 
   const all = useMemo(() => [...instances.values()], [instances]);
@@ -83,7 +85,7 @@ export function HubView() {
   // Each row of chips counts what the other row lets through.
   const statusCounts = useMemo(() => (agents.size === 0 ? counts : countFilters(all.filter((instance) => matchesAgents(instance, agents)))), [all, agents, counts]);
   const agentCounts = useMemo(() => countAgents(all, filter), [all, filter]);
-  const sections = useMemo(() => listSections(all, {filter, agents, query, order}), [all, filter, agents, query, order]);
+  const sections = useMemo(() => listSections(all, {filter, agents, query, order, byMachine}), [all, filter, agents, query, order, byMachine]);
   // The same list while the names are the same, so the rows don't render
   // again for it.
   const nameList = groupNames(all).join("\n");
@@ -121,7 +123,17 @@ export function HubView() {
     setSelected(id);
   }, []);
 
-  const {frame, framed} = useHubFrame({onBack: () => select(undefined), onCancelUpdate: (id) => void cancelFromHub(root, id)});
+  const {frame, framed} = useHubFrame({
+    onBack: () => select(undefined),
+    onCancelUpdate: (id) => void cancelFromHub(root, id),
+    // Another agent of the open one's machine, from the bar's switch.
+    onOpen: (id) => {
+      if (instances.has(id)) select(id);
+    },
+  });
+  // The agents of the open one's machine, for the bar's switch.
+  const open = selected ? instances.get(selected) : undefined;
+  const machine = useMemo(() => (open ? machineAgents(all, open) : []), [all, open]);
 
   // Back and forward show what the URL names.
   useEffect(() => {
@@ -310,6 +322,7 @@ export function HubView() {
                 )}
               </div>
               <ListOrderSwitch order={order} onChange={setOrder} />
+              <ByMachineToggle on={byMachine} onChange={setByMachine} />
             </div>
             <div className="space-y-2">
               <StatusChips filter={filter} counts={statusCounts} onChange={setFilter} />
@@ -383,7 +396,38 @@ export function HubView() {
                       onRename={() => setNaming({mode: "rename", from: section.name})}
                     />
                   )}
-                  {!folded && (
+                  {!folded && section.machines && (
+                    <ul aria-label={section.label || undefined}>
+                      {section.machines.map((machine) =>
+                        machine.hostname ? (
+                          <MachineCard
+                            key={machine.key}
+                            card={`${section.key}\n${machine.key}`}
+                            machine={machine}
+                            order={order}
+                            hubVersion={hubVersion}
+                            root={root}
+                            groups={names}
+                            selected={selected}
+                            actions={rowActions}
+                          />
+                        ) : (
+                          // An instance that doesn't name its machine is a row of its own.
+                          <InstanceRow
+                            key={machine.key}
+                            instance={machine.instances[0]}
+                            hubVersion={hubVersion}
+                            root={root}
+                            groups={names}
+                            order={order}
+                            selected={machine.instances[0].id === selected}
+                            actions={rowActions}
+                          />
+                        ),
+                      )}
+                    </ul>
+                  )}
+                  {!folded && !section.machines && (
                     <ul aria-label={section.label || undefined}>
                       {section.instances.map((instance, index) => (
                         <InstanceRow
@@ -406,6 +450,11 @@ export function HubView() {
           </ul>
           <p className="hidden border-t px-4 py-2 text-[11px] text-muted-foreground md:block" aria-hidden="true">
             <kbd className="font-mono">/</kbd> search · <kbd className="font-mono">j</kbd> <kbd className="font-mono">k</kbd> move ·{" "}
+            {byMachine && (
+              <>
+                <kbd className="font-mono">←</kbd> <kbd className="font-mono">→</kbd> agent ·{" "}
+              </>
+            )}
             <kbd className="font-mono">↵</kbd> open · <kbd className="font-mono">p</kbd> pin · <kbd className="font-mono">esc</kbd> overview
           </p>
           <ListEdge controls="hub-list" {...listWidth} />
@@ -415,9 +464,9 @@ export function HubView() {
           {current ? (
             <>
               {framed?.instance === current.id ? (
-                <FrameInfo frame={frame} ready={framed.ready} instance={current} hubVersion={hubVersion} root={root} />
+                <FrameInfo frame={frame} ready={framed.ready} instance={current} machine={machine} hubVersion={hubVersion} root={root} />
               ) : (
-                <InstanceBar instance={current} hubVersion={hubVersion} root={root} onBack={() => select(undefined)} />
+                <InstanceBar instance={current} machine={machine} hubVersion={hubVersion} root={root} onBack={() => select(undefined)} onOpen={select} />
               )}
               <iframe
                 ref={frame}

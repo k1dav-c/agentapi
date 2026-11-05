@@ -1,6 +1,6 @@
 import {describe, expect, test} from "bun:test";
-import {groupInstances, type HubAgent, type HubInstance, type Summary} from "./hub";
-import {changedAt, listSections, movePin, parseListOrder, pinnedKey, pinOf, recentKey, sortPinned, sortRecent, type ListSection} from "./hub-order";
+import {groupInstances, machinesInOrder, type HubAgent, type HubInstance, type Summary} from "./hub";
+import {changedAt, listSections, movePin, parseListOrder, pinnedKey, pinOf, recentAgent, recentKey, sortPinned, sortRecent, storedView, type ListSection} from "./hub-order";
 
 const summary = (overrides: Partial<Summary> = {}): Summary =>
   ({
@@ -44,9 +44,23 @@ describe("parseListOrder", () => {
   });
 
   test("nothing stored, or anything else, is the groups", () => {
-    for (const stored of [null, undefined, "", " recent", "Recent", '"recent"', "flat", "null", "undefined", "[]"]) {
+    for (const stored of [null, undefined, "", " recent", "Recent", "machines", '"recent"', "flat", "null", "undefined", "[]"]) {
       expect(parseListOrder(stored)).toBe("groups");
     }
+  });
+});
+
+describe("storedView", () => {
+  test("the order and By machine as a browser stored them", () => {
+    expect(storedView("recent", "true")).toEqual({order: "recent", byMachine: true});
+    expect(storedView("groups", "false")).toEqual({order: "groups", byMachine: false});
+    expect(storedView(null, null)).toEqual({order: "groups", byMachine: false});
+    expect(storedView("recent", "yes")).toEqual({order: "recent", byMachine: false});
+  });
+
+  test("the machines order of an earlier build is the groups by machine", () => {
+    expect(storedView("machines", null)).toEqual({order: "groups", byMachine: true});
+    expect(storedView("machines", "false")).toEqual({order: "groups", byMachine: true});
   });
 });
 
@@ -148,6 +162,72 @@ describe("listSections", () => {
     expect(sections.map((section) => [section.key, section.label, section.name, ids(section.instances), section.needsYou])).toEqual([
       [recentKey, "", "", ["billing", "docs", "checkout", "legacy", "site"], 1],
     ]);
+  });
+
+  test("machines: the groups, each machine's agents together, the one that needs you first", () => {
+    // checkout and site on dev-1, billing and legacy on dev-2, docs on dev-1 and in no group.
+    const host: Record<string, string> = {checkout: "dev-1", site: "dev-1", docs: "dev-1", billing: "dev-2", legacy: "dev-2"};
+    const onMachines = rows.map((row) => ({...row, hostname: host[row.id]}));
+    const sections = listSections(onMachines, {agents: none, filter: "all", query: "", order: "groups", byMachine: true});
+    expect(sections.map((section) => [section.key, section.label, section.machines?.map((machine) => [machine.hostname, ids(machine.instances)])])).toEqual([
+      ["Clients", "Clients", [["dev-1", ["checkout", "site"]]]],
+      ["Internal", "Internal", [["dev-2", ["billing", "legacy"]]]],
+      ["", "Ungrouped", [["dev-1", ["docs"]]]],
+    ]);
+    // A machine that needs you comes before one that works, whatever their names.
+    const urgent = onMachines.map((row) => (row.id === "legacy" ? {...row, hostname: "dev-0"} : row.id === "billing" ? {...row, group: "Clients"} : row));
+    const [clients] = listSections(urgent, {agents: none, filter: "all", query: "", order: "groups", byMachine: true});
+    expect(clients.machines?.map((machine) => machine.hostname)).toEqual(["dev-1", "dev-2"]);
+    expect(ids(clients.instances)).toEqual(["checkout", "site", "billing"]);
+    // The filter, the agents and the search leave each machine the agents that pass.
+    expect(listSections(onMachines, {agents: none, filter: "all", query: "dev-2", order: "groups", byMachine: true}).map((section) => section.machines?.map((machine) => ids(machine.instances)))).toEqual([[["billing", "legacy"]]]);
+  });
+
+  test("machines: the pinned ones first, one by one; no group, no headers", () => {
+    const host: Record<string, string> = {checkout: "dev-1", site: "dev-1", docs: "dev-1", billing: "dev-1", legacy: "dev-2"};
+    const sections = listSections(
+      pinned.map((row) => ({...row, hostname: host[row.id]})),
+      {agents: none, filter: "all", query: "", order: "groups", byMachine: true},
+    );
+    expect(sections.map((section) => [section.label, ids(section.instances), section.machines?.length])).toEqual([
+      ["Pinned", ["billing", "docs"], undefined],
+      ["Clients", ["checkout", "site"], 1],
+      ["Internal", ["legacy"], 1],
+    ]);
+    const ungrouped = rows.map((row) => ({...row, group: undefined, hostname: host[row.id]}));
+    expect(listSections(ungrouped, {agents: none, filter: "all", query: "", order: "groups", byMachine: true}).map((section) => [section.label, section.machines?.map((machine) => machine.hostname)])).toEqual([
+      ["", ["dev-1", "dev-2"]],
+    ]);
+  });
+
+  test("recent by machine: one section, each machine's agents together, the latest change first", () => {
+    // checkout (2), site (1) and docs (5) on dev-1; billing (8) and legacy (9) on dev-2.
+    const host: Record<string, string> = {checkout: "dev-1", site: "dev-1", docs: "dev-1", billing: "dev-2", legacy: "dev-2"};
+    const onMachines = rows.map((row) => ({...row, hostname: host[row.id]}));
+    const sections = listSections(onMachines, {agents: none, filter: "all", query: "", order: "recent", byMachine: true});
+    expect(sections.map((section) => [section.key, section.label, section.machines?.map((machine) => [machine.hostname, ids(machine.instances)])])).toEqual([
+      // As the recent rows: billing, docs, checkout, then legacy and site with no task.
+      [recentKey, "", [["dev-2", ["billing", "legacy"]], ["dev-1", ["docs", "checkout", "site"]]]],
+    ]);
+    expect(ids(sections[0].instances)).toEqual(["billing", "legacy", "docs", "checkout", "site"]);
+    // Pinned ones stay apart, one by one.
+    const pinnedOnMachines = pinned.map((row) => ({...row, hostname: host[row.id]}));
+    expect(
+      listSections(pinnedOnMachines, {agents: none, filter: "all", query: "", order: "recent", byMachine: true}).map((section) => [section.label, ids(section.instances), section.machines?.map((machine) => machine.hostname)]),
+    ).toEqual([
+      ["Pinned", ["billing", "docs"], undefined],
+      ["Recent changes", ["checkout", "site", "legacy"], ["dev-1", "dev-2"]],
+    ]);
+  });
+
+  test("off by machine, the orders are as they were", () => {
+    const host: Record<string, string> = {checkout: "dev-1", site: "dev-1", docs: "dev-1", billing: "dev-2", legacy: "dev-2"};
+    const onMachines = rows.map((row) => ({...row, hostname: host[row.id]}));
+    for (const order of ["groups", "recent"] as const) {
+      const off = listSections(onMachines, {agents: none, filter: "all", query: "", order, byMachine: false});
+      expect(off).toEqual(listSections(onMachines, {agents: none, filter: "all", query: "", order}));
+      expect(off.some((section) => section.machines)).toBe(false);
+    }
   });
 
   test("the filter and the search apply to both orders", () => {
@@ -297,5 +377,34 @@ describe("movePin", () => {
         if (moved) expect([...moved].sort()).toEqual(order);
       }
     }
+  });
+});
+
+describe("recentAgent", () => {
+  // On dev-1: a changed at 9:30, b at 9:10, c at 9:05; in the recent order.
+  const machine = machinesInOrder([
+    changed("a", 30, {hostname: "dev-1", summary: summary({tasks: 1})}),
+    changed("b", 10, {hostname: "dev-1", summary: summary({tasks: 1})}),
+    changed("c", 5, {hostname: "dev-1", summary: summary({tasks: 1})}),
+  ])[0];
+  const at = (m: number) => Date.parse(`2026-11-01T09:${String(m).padStart(2, "0")}:00Z`);
+
+  test("the latest change, by default", () => {
+    expect(recentAgent(machine)).toBe("a");
+  });
+
+  test("a pick at the latest change or after it", () => {
+    expect(recentAgent(machine, {id: "c", at: at(31)})).toBe("c");
+    expect(recentAgent(machine, {id: "c", at: at(30)})).toBe("c");
+  });
+
+  test("the latest change over a pick before it, or one that doesn't say when", () => {
+    expect(recentAgent(machine, {id: "c", at: at(29)})).toBe("a");
+    expect(recentAgent(machine, {id: "c"})).toBe("a");
+  });
+
+  test("the agent open beside the list over all of them; picks and agents of other cards don't count", () => {
+    expect(recentAgent(machine, {id: "c", at: at(40)}, "b")).toBe("b");
+    expect(recentAgent(machine, {id: "x", at: at(40)}, "y")).toBe("a");
   });
 });

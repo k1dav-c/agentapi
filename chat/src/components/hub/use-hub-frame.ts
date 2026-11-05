@@ -8,13 +8,14 @@ import {frameMessage, onFrameMessage, type Framed, type FromFrame} from "@/lib/h
 // (FrameBar), with its own actions in it; until then the hub's bar shows.
 // A chat that loads again in the frame says it is ready again, and is told
 // the instance again (Framed.ready). The frame's element carries the
-// instance in data-instance.
-export function useHubFrame({onBack, onCancelUpdate}: {onBack: () => void; onCancelUpdate: (id: string) => void}) {
+// instance in data-instance. The bar's switch asks to open another agent of
+// the machine (onOpen).
+export function useHubFrame({onBack, onCancelUpdate, onOpen}: {onBack: () => void; onCancelUpdate: (id: string) => void; onOpen: (id: string) => void}) {
   const frame = useRef<HTMLIFrameElement>(null);
   const [framed, setFramed] = useState<Framed>();
-  const latest = useRef({onBack, onCancelUpdate});
+  const latest = useRef({onBack, onCancelUpdate, onOpen});
   useEffect(() => {
-    latest.current = {onBack, onCancelUpdate};
+    latest.current = {onBack, onCancelUpdate, onOpen};
   });
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
@@ -27,9 +28,10 @@ export function useHubFrame({onBack, onCancelUpdate}: {onBack: () => void; onCan
         setFramed((previous) => onFrameMessage(previous, message, instance).framed);
         return;
       }
-      const {ask} = onFrameMessage(undefined, message, instance);
+      const {ask, open} = onFrameMessage(undefined, message, instance);
       if (ask === "back") latest.current.onBack();
       else if (ask === "cancel-update") latest.current.onCancelUpdate(instance);
+      else if (open) latest.current.onOpen(open);
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);

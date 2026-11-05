@@ -38,7 +38,8 @@ export function useHubKeys({
           menuOrDialogOpen: !!document.querySelector("[role=dialog], [role=menu]"),
           inList: !!active?.closest("[data-hub-list]"),
           onBody: !active || active === document.body,
-          row: active?.dataset.hubRow,
+          // A machine card's tab stands for its agent.
+          row: active?.dataset.hubRow ?? active?.dataset.hubTab,
         },
         latest.current.query,
       );
@@ -62,7 +63,9 @@ export function useHubKeys({
           const rows = [...document.querySelectorAll<HTMLButtonElement>("[data-hub-row]")];
           if (rows.length === 0) return;
           event.preventDefault();
-          const at = rows.indexOf(active as HTMLButtonElement);
+          // From a machine card's tab, the steps start at its card's row.
+          const from = active?.dataset.hubTab ? active.closest("[data-hub-card]")?.querySelector<HTMLButtonElement>("[data-hub-row]") : active;
+          const at = rows.indexOf(from as HTMLButtonElement);
           const next = rows[at === -1 ? (action.step > 0 ? 0 : rows.length - 1) : Math.min(rows.length - 1, Math.max(0, at + action.step))];
           next.focus();
           next.scrollIntoView({block: "nearest"});

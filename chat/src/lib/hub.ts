@@ -241,6 +241,122 @@ export function groupSubtotals(rows: Iterable<{instance: HubInstance; day: numbe
   return [...byName.values()].filter((group) => group.week > 0).sort((a, b) => groupOrder(a.name, b.name));
 }
 
+// machineOf is the machine an instance runs on, its host name; "" when it
+// doesn't say.
+export function machineOf(instance: HubInstance): string {
+  return instance.hostname?.trim() ?? "";
+}
+
+// A machine's agents in the list: hostname is "" for an instance that
+// doesn't name its machine, which is one of its own (key tells them apart).
+export interface HubMachine {
+  key: string;
+  hostname: string;
+  instances: HubInstance[];
+}
+
+// groupByMachine puts the instances on the same machine together, each
+// machine's in sortInstances order: the machine whose agent needs you the
+// most first, ties by name. An instance that names no machine is one of its
+// own.
+export function groupByMachine(instances: Iterable<HubInstance>): HubMachine[] {
+  const byKey = new Map<string, HubMachine>();
+  for (const instance of sortInstances(instances)) {
+    const hostname = machineOf(instance);
+    const key = hostname ? `host ${hostname}` : `instance ${instance.id}`;
+    const machine = byKey.get(key) ?? {key, hostname, instances: []};
+    machine.instances.push(instance);
+    byKey.set(key, machine);
+  }
+  const rank = (machine: HubMachine) => stateRank[instanceState(machine.instances[0])];
+  const name = (machine: HubMachine) => machine.hostname || displayName(machine.instances[0]);
+  return [...byKey.values()].sort((a, b) => rank(a) - rank(b) || name(a).localeCompare(name(b)) || a.key.localeCompare(b.key));
+}
+
+// machinesInOrder puts the instances on the same machine together, in the
+// order of each machine's first one in rows, its own in their order there.
+// An instance that names no machine is one of its own.
+export function machinesInOrder(rows: readonly HubInstance[]): HubMachine[] {
+  const byKey = new Map<string, HubMachine>();
+  for (const instance of rows) {
+    const hostname = machineOf(instance);
+    const key = hostname ? `host ${hostname}` : `instance ${instance.id}`;
+    const machine = byKey.get(key) ?? {key, hostname, instances: []};
+    machine.instances.push(instance);
+    byKey.set(key, machine);
+  }
+  return [...byKey.values()];
+}
+
+// tabOrder orders a machine's agents as its tabs show them: by agent, in
+// the filter's order, then by name; unlike sortInstances, it doesn't move
+// as their states change.
+export function tabOrder(instances: Iterable<HubInstance>): HubInstance[] {
+  return [...instances].sort(
+    (a, b) =>
+      hubAgents.indexOf(agentOf(a)) - hubAgents.indexOf(agentOf(b)) ||
+      (a.agent_type ?? "").localeCompare(b.agent_type ?? "") ||
+      displayName(a).localeCompare(displayName(b)) ||
+      a.id.localeCompare(b.id),
+  );
+}
+
+// sameMachine is the agents on instance's machine, itself among them, in
+// tabOrder; none when it doesn't name its machine or is the only one there.
+export function sameMachine(instances: Iterable<HubInstance>, instance: HubInstance): HubInstance[] {
+  const machine = machineOf(instance);
+  if (!machine) return [];
+  const agents = [...instances].filter((other) => machineOf(other) === machine);
+  return agents.length > 1 ? tabOrder(agents) : [];
+}
+
+// activeAgent is the agent a machine's card shows: the one picked on it,
+// else the one open beside the list, else the one that needs you the most
+// (the first); picked and selected count only while the card has them.
+export function activeAgent(machine: HubMachine, picked?: string, selected?: string): string {
+  const has = (id: string | undefined) => !!id && machine.instances.some((instance) => instance.id === id);
+  if (has(picked)) return picked!;
+  if (has(selected)) return selected!;
+  return machine.instances[0].id;
+}
+
+// A machine's figures in the last 24 hours and 7 days: name is "" for the
+// instances that don't name theirs; others, when set, is the rest of the
+// machines, added up.
+export interface MachineSubtotal extends GroupSubtotal {
+  others?: number;
+}
+
+// machineSubtotals adds up each instance's figures by its machine, the most
+// this week first, leaving out the machines with none this week; past the
+// first limit, the rest add up in one, others. It is empty while the
+// instances run on one machine: the subtotal would be the total.
+export function machineSubtotals(rows: Iterable<{instance: HubInstance; day: number; week: number}>, limit = 8): MachineSubtotal[] {
+  const byName = new Map<string, MachineSubtotal>();
+  for (const {instance, day, week} of rows) {
+    const name = machineOf(instance);
+    const machine = byName.get(name) ?? {name, day: 0, week: 0};
+    machine.day += day;
+    machine.week += week;
+    byName.set(name, machine);
+  }
+  if (byName.size <= 1) return [];
+  const machines = [...byName.values()]
+    .filter((machine) => machine.week > 0)
+    .sort((a, b) => b.week - a.week || Number(!a.name) - Number(!b.name) || a.name.localeCompare(b.name));
+  if (machines.length <= limit) return machines;
+  const shown = machines.slice(0, limit - 1);
+  const rest = machines.slice(limit - 1);
+  return [...shown, {name: "", day: rest.reduce((sum, m) => sum + m.day, 0), week: rest.reduce((sum, m) => sum + m.week, 0), others: rest.length}];
+}
+
+// sharedVersion is the AgentAPI version all of a machine's agents run, ""
+// when they don't all say the same one.
+export function sharedVersion(instances: readonly HubInstance[]): string {
+  const versions = new Set(instances.map(instanceVersion));
+  return versions.size === 1 ? [...versions][0] : "";
+}
+
 // groupNames lists the groups in use, by name.
 export function groupNames(instances: Iterable<HubInstance>): string[] {
   const names = new Set<string>();

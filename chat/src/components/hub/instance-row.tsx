@@ -44,7 +44,8 @@ import {UpdateChip} from "./update-chip";
 import {useHubTime} from "./clock";
 import {VersionTag} from "./version-tag";
 
-const activityTone = {
+// activityTone is the color of the line that says what a row's instance does.
+export const activityTone = {
   needs: "text-state-needs",
   working: "text-foreground/80",
   ready: "text-foreground/80",
@@ -123,7 +124,6 @@ export const InstanceRow = memo(function InstanceRow({instance, hubVersion, root
   const since = recent ? changedAt(instance) : doing.since;
   const ago = useHubTime((now) => formatAgo(since, now));
   const group = recent || pinned ? groupOf(instance) : "";
-  const gone = state === "stopped" || state === "unreachable";
   const spend = summary?.spend;
   // The last spend and version of an instance the hub doesn't follow now:
   // shown, not counted.
@@ -131,7 +131,6 @@ export const InstanceRow = memo(function InstanceRow({instance, hubVersion, root
   const version = instanceVersion(instance);
   const update = shownUpdate(instance);
   const id = instance.id;
-  const [updating, setUpdating] = useState(false);
   return (
     <li className="group/row relative px-2">
       <div
@@ -210,73 +209,8 @@ export const InstanceRow = memo(function InstanceRow({instance, hubVersion, root
             )}
           </span>
         </button>
-        {/* Not modal: a modal menu that opens the naming dialog leaves the page
-            unclickable once both close (Radix's pointer-events lock). */}
-        <DropdownMenu modal={false}>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="my-auto mr-1 size-9 shrink-0 rounded-lg text-muted-foreground transition-opacity focus-visible:opacity-100 group-hover/row:opacity-100 data-[state=open]:opacity-100 [@media(hover:hover)]:opacity-0"
-              aria-label={`Actions for ${displayName(instance)}`}
-              data-hub-row-menu={instance.id}
-            >
-              <MoreHorizontal />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-60 max-w-[calc(100vw-1rem)]">
-            {pinned ? (
-              <>
-                <DropdownMenuItem onSelect={() => actions.pin(id, false)}>
-                  <PinOff /> Unpin
-                </DropdownMenuItem>
-                <DropdownMenuItem disabled={pinned.first} onSelect={() => actions.move(id, -1)}>
-                  <ArrowUp /> Move up
-                </DropdownMenuItem>
-                <DropdownMenuItem disabled={pinned.last} onSelect={() => actions.move(id, 1)}>
-                  <ArrowDown /> Move down
-                </DropdownMenuItem>
-              </>
-            ) : (
-              <DropdownMenuItem onSelect={() => actions.pin(id, true)}>
-                <Pin /> Pin to top
-              </DropdownMenuItem>
-            )}
-            <DropdownMenuSeparator />
-            {(state === "needs-you" || state === "muted") && (
-              <>
-                <DropdownMenuItem onSelect={() => actions.mute(id, state === "needs-you")}>
-                  {state === "needs-you" ? <BellOff /> : <Bell />}
-                  {state === "needs-you" ? "Mute until it changes" : "Unmute"}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-              </>
-            )}
-            <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">Move to group</DropdownMenuLabel>
-            <DropdownMenuRadioGroup value={groupOf(instance)} onValueChange={(name) => actions.group(id, name)}>
-              <DropdownMenuRadioItem value="">No group</DropdownMenuRadioItem>
-              {groups.map((name) => (
-                <DropdownMenuRadioItem key={name} value={name}>
-                  <span className="truncate">{name}</span>
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-            <DropdownMenuItem onSelect={() => actions.newGroup(id)}>
-              <FolderPlus /> New group…
-            </DropdownMenuItem>
-            <UpdateMenuItems instance={instance} onOpen={() => setUpdating(true)} onCancel={() => void cancelFromHub(root, instance.id)} />
-            {gone && (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem variant="destructive" onSelect={() => actions.forget(id)}>
-                  <Trash2 /> Forget
-                </DropdownMenuItem>
-              </>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <RowMenu instance={instance} hubVersion={hubVersion} root={root} groups={groups} pinned={pinned} actions={actions} />
       </div>
-      <UpdateDialog instance={instance} hubVersion={hubVersion} root={root} open={updating} onOpenChange={setUpdating} />
     </li>
   );
 }, (a, b) =>
@@ -289,6 +223,97 @@ export const InstanceRow = memo(function InstanceRow({instance, hubVersion, root
   a.actions === b.actions &&
   samePlace(a.pinned, b.pinned),
 );
+
+// RowMenu is a row's ⋯ menu: pin, mute, its group, update and forget, and
+// the update's dialog. pinned is the row's place among the pinned ones, as
+// InstanceRow has it; className sizes its button.
+export function RowMenu({
+  instance,
+  hubVersion,
+  root,
+  groups,
+  pinned,
+  actions,
+  className,
+}: Pick<InstanceRowProps, "instance" | "hubVersion" | "root" | "groups" | "pinned" | "actions"> & {className?: string}) {
+  const state = instanceState(instance);
+  const gone = state === "stopped" || state === "unreachable";
+  const id = instance.id;
+  const [updating, setUpdating] = useState(false);
+  return (
+    <>
+      {/* Not modal: a modal menu that opens the naming dialog leaves the page
+          unclickable once both close (Radix's pointer-events lock). */}
+      <DropdownMenu modal={false}>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn(
+              "my-auto mr-1 size-9 shrink-0 rounded-lg text-muted-foreground transition-opacity focus-visible:opacity-100 group-hover/row:opacity-100 data-[state=open]:opacity-100 [@media(hover:hover)]:opacity-0",
+              className,
+            )}
+            aria-label={`Actions for ${displayName(instance)}`}
+            data-hub-row-menu={instance.id}
+          >
+            <MoreHorizontal />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-60 max-w-[calc(100vw-1rem)]">
+          {pinned ? (
+            <>
+              <DropdownMenuItem onSelect={() => actions.pin(id, false)}>
+                <PinOff /> Unpin
+              </DropdownMenuItem>
+              <DropdownMenuItem disabled={pinned.first} onSelect={() => actions.move(id, -1)}>
+                <ArrowUp /> Move up
+              </DropdownMenuItem>
+              <DropdownMenuItem disabled={pinned.last} onSelect={() => actions.move(id, 1)}>
+                <ArrowDown /> Move down
+              </DropdownMenuItem>
+            </>
+          ) : (
+            <DropdownMenuItem onSelect={() => actions.pin(id, true)}>
+              <Pin /> Pin to top
+            </DropdownMenuItem>
+          )}
+          <DropdownMenuSeparator />
+          {(state === "needs-you" || state === "muted") && (
+            <>
+              <DropdownMenuItem onSelect={() => actions.mute(id, state === "needs-you")}>
+                {state === "needs-you" ? <BellOff /> : <Bell />}
+                {state === "needs-you" ? "Mute until it changes" : "Unmute"}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+            </>
+          )}
+          <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">Move to group</DropdownMenuLabel>
+          <DropdownMenuRadioGroup value={groupOf(instance)} onValueChange={(name) => actions.group(id, name)}>
+            <DropdownMenuRadioItem value="">No group</DropdownMenuRadioItem>
+            {groups.map((name) => (
+              <DropdownMenuRadioItem key={name} value={name}>
+                <span className="truncate">{name}</span>
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+          <DropdownMenuItem onSelect={() => actions.newGroup(id)}>
+            <FolderPlus /> New group…
+          </DropdownMenuItem>
+          <UpdateMenuItems instance={instance} onOpen={() => setUpdating(true)} onCancel={() => void cancelFromHub(root, instance.id)} />
+          {gone && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem variant="destructive" onSelect={() => actions.forget(id)}>
+                <Trash2 /> Forget
+              </DropdownMenuItem>
+            </>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <UpdateDialog instance={instance} hubVersion={hubVersion} root={root} open={updating} onOpenChange={setUpdating} />
+    </>
+  );
+}
 
 // GroupTag names a row's group in the recent order and among the pinned
 // ones, in the room its first line leaves before the age: whole, cut short,
@@ -347,7 +372,7 @@ export function GroupHeader({group, label, folded, onToggle, onRename}: {group: 
 // machine's name gives way to it. It reads the hub's clock for
 // the span going on: it renders again when its figure changes, the row
 // doesn't.
-function RowWork({instance}: {instance: HubInstance}) {
+export function RowWork({instance}: {instance: HubInstance}) {
   const title = useHubTime((now) => {
     const seconds = workSeconds(instance, now);
     return seconds.week > 0 ? workTitle(seconds.day, seconds.week) : "";

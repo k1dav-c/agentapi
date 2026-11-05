@@ -5,10 +5,11 @@ import {ArrowLeft, ExternalLink, X} from "lucide-react";
 import {AgentMark} from "@/components/agent-mark";
 import {Button} from "@/components/ui/button";
 import {chatURL, displayName, instanceState, instanceVersion, stateLabel, type HubInstance} from "@/lib/hub";
-import {frameInstance, toFrame} from "@/lib/hub-frame";
+import {frameInstance, toFrame, type MachineAgent} from "@/lib/hub-frame";
 import {shownUpdate} from "@/lib/hub-update";
 import {cn} from "@/lib/utils";
 import {agentName} from "./instance-row";
+import {MachineSwitch} from "./machine-tabs";
 import {StatusGlyph, stateTone} from "./status-glyph";
 import {cancelFromHub} from "./update";
 import {UpdateStatus} from "./update-chip";
@@ -18,21 +19,24 @@ import {VersionTag} from "./version-tag";
 export const basePath = (process.env.NEXT_PUBLIC_BASE_PATH ?? "/chat").replace(/\/$/, "");
 
 // FrameInfo tells the open instance's chat what its bar shows, whenever
-// that changes and whenever the chat says it is ready (ready counts it).
+// that changes and whenever the chat says it is ready (ready counts it):
+// machine is the agents of its machine, for the bar's switch.
 export function FrameInfo({
   frame,
   ready,
   instance,
+  machine,
   hubVersion,
   root,
 }: {
   frame: React.RefObject<HTMLIFrameElement | null>;
   ready: number;
   instance: HubInstance;
+  machine: MachineAgent[];
   hubVersion: string;
   root: string;
 }) {
-  const info = JSON.stringify(toFrame(frameInstance(instance, {hubVersion, agent: agentName(instance), tab: chatURL(basePath, root, instance.id)})));
+  const info = JSON.stringify(toFrame(frameInstance(instance, {hubVersion, agent: agentName(instance), tab: chatURL(basePath, root, instance.id), machine})));
   useEffect(() => {
     frame.current?.contentWindow?.postMessage(JSON.parse(info), window.location.origin);
   }, [frame, info, ready]);
@@ -40,8 +44,23 @@ export function FrameInfo({
 }
 
 // InstanceBar heads the open instance: back to the list or overview, what
-// it is and does, and its own chat in a tab of its own.
-export function InstanceBar({instance, hubVersion, root, onBack}: {instance: HubInstance; hubVersion: string; root: string; onBack: () => void}) {
+// it is and does, the other agents of its machine (machine; onOpen opens
+// one), and its own chat in a tab of its own.
+export function InstanceBar({
+  instance,
+  machine,
+  hubVersion,
+  root,
+  onBack,
+  onOpen,
+}: {
+  instance: HubInstance;
+  machine: MachineAgent[];
+  hubVersion: string;
+  root: string;
+  onBack: () => void;
+  onOpen: (id: string) => void;
+}) {
   const state = instanceState(instance);
   const agent = agentName(instance);
   const version = instanceVersion(instance);
@@ -83,6 +102,7 @@ export function InstanceBar({instance, hubVersion, root, onBack}: {instance: Hub
           )}
         </p>
       </div>
+      <MachineSwitch agents={machine} current={instance.id} onOpen={onOpen} />
       <Button variant="ghost" size="sm" className="hidden h-9 shrink-0 gap-1.5 text-muted-foreground sm:inline-flex" asChild>
         <a href={chatURL(basePath, root, instance.id)} target="_blank" rel="noreferrer" aria-label={`Open ${displayName(instance)} in a new tab`}>
           <ExternalLink className="size-4" />
