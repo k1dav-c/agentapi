@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- The hub's list has a **By machine** toggle beside the order's switch: in either order, each
+  machine's agents share one card. The card names the machine once with what its agents share
+  (their directory, AgentAPI version and spend of the last 24 hours), then a tab per agent with a
+  dot in its state's color, and below them one agent with its menu. A click on a tab opens that
+  agent; `j` and `k` step between the cards, ← and → switch the agent a card shows. In Groups the
+  machines come what-needs-you-first within each group; in Recent changes, without group headers,
+  the machine of the latest change first, its card showing the agent that changed last unless you
+  picked another since. Pinned agents stay one row each at the top. The browser keeps the toggle
+  (`agentapi.hub.by-machine`) and the tab picked on each card.
+- The bar above an agent opened from the hub has a button for each agent of its machine, with the
+  same state dots, in every list order: one click switches between, say, Claude Code and Codex on
+  one machine.
+- The hub overview's Spend, Tokens and Work time cards have a **By machine** table, the most this
+  week first, at most eight rows (the rest in one). Spend and tokens count each scope once, as the
+  totals do. The top-five tables name each agent's machine next to its name.
+
 ## v3.1.1
 
 ### Fixes
