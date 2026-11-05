@@ -24,8 +24,11 @@ uncommitted changes):
   version (`AGENTAPI_OLDER_BINARY`), so that it shows as older than the hub: 2.0.0 beside the
   hub's 3.1.0 in the screenshots. The hub starts on a file that says how long each instance
   worked over the last week, as a hub that watched them would keep it, since a demo doesn't run
-  for hours. A second, empty hub shows the guide for the first agents. The rows name the machine;
-  the screenshots show placeholders (`dev-1` and so on).
+  for hours. A second, empty hub shows the guide for the first agents. The instances all run on
+  one machine, so the hub's page gets them as if they ran on three, named `dev-1` to `dev-3`: the
+  script renames each one's machine in the hub's events before the page reads them. The rows, the
+  By machine views, the overview's cards and the switch of a machine's agents show these names.
+  Screenshots taken before 3.2.0 show `dev-1` and so on in turn, row by row.
 
 ## Gallery
 
@@ -71,21 +74,23 @@ device scale factor of 1.
 | [login-card.png](login-card.png) | A login card |
 | [hub-desktop.png](hub-desktop.png) | The hub's overview: how many need you, a tile per state, a card per request, what runs and what finished |
 | [hub-desktop-dark.png](hub-desktop-dark.png) | The same overview in the dark theme |
-| [hub-instance.png](hub-instance.png) | An agent open beside the list, its approval ready to answer |
+| [hub-instance.png](hub-instance.png) | An agent open beside the list, its approval ready to answer, with its machine's agents in the bar |
 | [hub-empty.png](hub-empty.png) | The guide an empty hub shows: the hub's address, the join command and a prompt for an agent on the machine, the secret masked |
 | [hub-sign-in.png](hub-sign-in.png) | Signing in to the hub, beside its picture of agents in their states |
 | [hub-list.png](hub-list.png) | The hub's list: two pinned agents, then two groups and Ungrouped, with every state's glyph: approval, question, login, usage limit, working, finished, idle, unreachable, stopped; and each agent's AgentAPI version, one older than the hub |
 | [hub-add.png](hub-add.png) | The Add dialog: joining a machine (the hub's address, updates from the hub, the command and a prompt for an agent, the secret masked), or adding an instance by its URL and token |
 | [hub-recent.png](hub-recent.png) | The hub's list by the agents' latest changes: the pinned agents, then one list without group headers, the most recent first, and each row's group where it has room |
+| [hub-machines.png](hub-machines.png) | The hub's list By machine in the groups: the pinned agents, then each group with a card per machine: the machine with its version and spend once, a tab per agent with its state's dot, and the picked agent below, one older than the hub |
+| [hub-machines-recent.png](hub-machines-recent.png) | The hub's list By machine in the recent order: the pinned agents, then a card per machine without group headers, the machine of the latest change first, each with the age of that change and the agent that changed last |
 | [hub-agent-filter.png](hub-agent-filter.png) | The hub's list filtered by agent and state: Claude Code and Codex, those that need you |
 | [hub-phone.png](hub-phone.png) | The hub's list on a phone: the pinned agents, then the groups |
 | [hub-phone-menu.png](hub-phone-menu.png) | A row's menu on a phone: Pin to top, its group, a new one, and Forget |
 | [hub-muted.png](hub-muted.png) | The list on a phone with an agent's login wait muted |
-| [hub-spend.png](hub-spend.png) | The overview's Spend card: the last 24 hours and 7 days, and the agents that spent the most |
-| [hub-tokens.png](hub-tokens.png) | The overview's Tokens card: the last 24 hours and 7 days, by kind, the agents that used the most, and each group |
-| [hub-work.png](hub-work.png) | The overview's Work time card: the last 24 hours and 7 days, the agents that worked the most, and each group |
+| [hub-spend.png](hub-spend.png) | The overview's Spend card: the last 24 hours and 7 days, the agents that spent the most with their machines, and each machine |
+| [hub-tokens.png](hub-tokens.png) | The overview's Tokens card: the last 24 hours and 7 days, by kind, the agents that used the most, each group and each machine |
+| [hub-work.png](hub-work.png) | The overview's Work time card: the last 24 hours and 7 days, the agents that worked the most, each group and each machine |
 | [hub-versions.png](hub-versions.png) | The overview's Versions card: how many agents run each AgentAPI version, on which machines, and how to update the older ones |
-| [hub-phone-chat.png](hub-phone-chat.png) | An instance open from the hub on a phone, with the way back to the list |
+| [hub-phone-chat.png](hub-phone-chat.png) | An instance open from the hub on a phone, with the way back to the list and its machine's agents |
 
 The GIFs use a 1100 × 720 window, or 390 × 844 for the phone view. A blue dot marks the pointer and
 clicks because headless Chromium draws no pointer. Frames store only changed pixels to keep files
