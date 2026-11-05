@@ -2,7 +2,7 @@ import {describe, expect, test} from "bun:test";
 import {renderToStaticMarkup} from "react-dom/server";
 import type {HubInstance, InstanceUpdate, Summary} from "@/lib/hub";
 import {FixedHubClock} from "./clock";
-import {TokensCard, VersionsCard, WorkCard} from "./overview-cards";
+import {SpendCard, TokensCard, VersionsCard, WorkCard} from "./overview-cards";
 
 const running = (id: string, version: string, hostname: string, overrides: Partial<HubInstance> = {}): HubInstance => ({
   id,
@@ -128,7 +128,7 @@ describe("WorkCard", () => {
       </FixedHubClock>,
     );
 
-  test("totals, the agents that worked the most and each group, with the span going on", () => {
+  test("totals, the agents that worked the most with their machines, each group and each machine, with the span going on", () => {
     const shown = text(
       card([
         running("a", "2.5.0", "dev-1", {name: "checkout-api", group: "Client work", work: {last_24h_seconds: 1800, last_7d_seconds: 4 * 3600}}),
@@ -139,14 +139,25 @@ describe("WorkCard", () => {
     );
     expect(shown).toContain("Last 24 hours 1.5h Last 7 days 6.1h");
     expect(shown).toContain("3 of 4 agents worked this week");
-    expect(shown).toContain("Worked the most this week 24 hours 7 days checkout-api 30m 4h billing 1h 2h docs 0m 10m");
+    expect(shown).toContain("Worked the most this week 24 hours 7 days checkout-api dev-1 30m 4h billing dev-2 1h 2h docs dev-3 0m 10m");
     expect(shown).toContain("By group 24 hours 7 days Client work 30m 4.1h Ungrouped 1h 2h");
+    expect(shown).toContain("By machine 24 hours 7 days dev-1 30m 4h dev-2 1h 2h dev-3 0m 10m");
   });
 
-  test("nothing without work time, and no groups when none is named", () => {
+  test("nothing without work time, and no groups when none is named, no machines on one", () => {
     expect(card([running("a", "2.4.0", "dev-1")])).toBe("");
-    const shown = text(card([running("a", "2.5.0", "dev-1", {work: {last_24h_seconds: 60, last_7d_seconds: 60}})]));
+    const shown = text(
+      card([running("a", "2.5.0", "dev-1", {work: {last_24h_seconds: 60, last_7d_seconds: 60}}), running("b", "2.5.0", "dev-1", {work: {last_24h_seconds: 60, last_7d_seconds: 60}})]),
+    );
     expect(shown).not.toContain("By group");
+    expect(shown).not.toContain("By machine");
+  });
+
+  test("the machines past the eighth add up in one", () => {
+    const machines = Array.from({length: 10}, (_, i) => running(`m${i}`, "2.5.0", `dev-${i}`, {work: {last_24h_seconds: 0, last_7d_seconds: (10 - i) * 3600}}));
+    const shown = text(card(machines));
+    expect(shown).toContain("dev-6 0m 4h Other 3 machines 0m 6h");
+    expect(shown).not.toContain("dev-7 ");
   });
 });
 
@@ -172,7 +183,7 @@ describe("TokensCard", () => {
     });
   const card = (instances: HubInstance[]) => text(renderToStaticMarkup(<TokensCard instances={instances} onOpen={() => {}} />));
 
-  test("totals, each kind, the agents that used the most and each group, each scope once", () => {
+  test("totals, each kind, the agents that used the most and each group, each scope once and its machine", () => {
     const shown = card([
       using("a", 120_000, "s1", {name: "checkout-api", group: "Client work"}),
       // The same sessions as a, figured a minute earlier: not counted.
@@ -184,14 +195,61 @@ describe("TokensCard", () => {
     expect(shown).toContain("Last 24 hours 1.5M Last 7 days 15M");
     expect(shown).toContain("3 of 5 agents report it");
     expect(shown).toContain("By kind 24 hours 7 days Input 150k 1.5M Output 300k 3M Cache write 450k 4.5M Cache read 600k 6M");
-    expect(shown).toContain("Used the most this week 24 hours 7 days checkout-api 1.2M 12M billing 300k 3M");
+    expect(shown).toContain("Used the most this week 24 hours 7 days checkout-api dev-1 1.2M 12M billing dev-1 300k 3M");
     expect(shown).not.toContain("checkout-api again");
     expect(shown).toContain("By group 24 hours 7 days Client work 1.2M 12M Ungrouped 300k 3M");
+    // All on dev-1: the machine would be the total.
+    expect(shown).not.toContain("By machine");
+  });
+
+  test("by machine: each scope once, as the totals count them", () => {
+    const shown = card([
+      using("a", 120_000, "s1", {name: "checkout-api"}),
+      using("b", 99_000, "s1", {name: "checkout-api"}, "2026-11-03T10:59:00Z"),
+      using("c", 30_000, "s2", {name: "billing", hostname: "dev-2"}),
+      using("d", 10_000, "s3", {name: "docs", hostname: undefined}),
+    ]);
+    expect(shown).toContain("By machine 24 hours 7 days dev-1 1.2M 12M dev-2 300k 3M Not reported 100k 1M");
   });
 
   test("nothing without tokens, and no groups when none is named", () => {
     expect(card([running("e", "2.3.0", "dev-2")])).toBe("");
     expect(card([using("a", 0, "s1")])).toBe("");
     expect(card([using("a", 5, "s1")])).not.toContain("By group");
+  });
+});
+
+describe("SpendCard", () => {
+  const spending = (id: string, hostname: string, week: number, scope: string, overrides: Partial<HubInstance> = {}): HubInstance =>
+    running(id, "2.4.0", hostname, {
+      agent_type: "claude",
+      summary: {
+        instance: {id, server_id: "s", agent_type: "claude", transport: "native", agentapi_version: "2.4.0"},
+        status: "stable",
+        lifecycle: "ready",
+        attention: "none",
+        title: "",
+        pending_requests: 0,
+        queued_messages: 0,
+        tasks: 0,
+        unread: false,
+        seen_at: "2026-11-01T00:00:00Z",
+        spend: {day_usd: week / 10, week_usd: week, scope, updated_at: "2026-11-03T11:00:00Z"},
+      } as Summary,
+      ...overrides,
+    });
+  const card = (instances: HubInstance[]) => text(renderToStaticMarkup(<SpendCard instances={instances} onOpen={() => {}} />));
+
+  test("the agents that spent the most, each with its machine, and each machine", () => {
+    const shown = card([
+      spending("a", "dev-1", 40, "s1", {name: "home"}),
+      spending("b", "dev-1", 20, "s2", {name: "home", agent_type: "codex"}),
+      spending("c", "dev-2", 50, "s3", {name: "home"}),
+      // Named after its machine: the machine once.
+      spending("d", "dev-3", 5, "s4", {name: "dev-3"}),
+    ]);
+    expect(shown).toContain("Last 24 hours $12 Last 7 days $115");
+    expect(shown).toContain("Spent the most this week 24 hours 7 days home dev-2 $5.00 $50 home dev-1 $4.00 $40 home dev-1 $2.00 $20 dev-3 $0.50 $5.00");
+    expect(shown).toContain("By machine 24 hours 7 days dev-1 $6.00 $60 dev-2 $5.00 $50 dev-3 $0.50 $5.00");
   });
 });

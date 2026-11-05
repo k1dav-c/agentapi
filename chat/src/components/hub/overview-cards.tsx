@@ -13,6 +13,8 @@ import {
   formatUSD,
   formatWork,
   groupSubtotals,
+  machineOf,
+  machineSubtotals,
   parseVersion,
   spendTitle,
   spendTotals,
@@ -25,6 +27,7 @@ import {
   workTotals,
   type GroupSubtotal,
   type HubInstance,
+  type MachineSubtotal,
   type VersionRelation,
 } from "@/lib/hub";
 import {olderUpdates} from "@/lib/hub-update";
@@ -120,17 +123,25 @@ function PeriodRow({cell, day, week, title}: {cell: React.ReactNode; day: string
   );
 }
 
-// InstanceCell names an instance in a PeriodRow, a button that opens it.
+// InstanceCell names an instance in a PeriodRow, a button that opens it,
+// and its machine, which tells apart instances of the same name.
 function InstanceCell({instance, onOpen}: {instance: HubInstance; onOpen: (id: string) => void}) {
+  const name = displayName(instance);
+  const machine = machineOf(instance);
   return (
     <td className="max-w-0 py-2 pr-3">
       <button
         type="button"
         onClick={() => onOpen(instance.id)}
-        className="flex w-full min-w-0 items-center gap-2 rounded text-left outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        className="group/cell flex w-full min-w-0 items-baseline gap-2 rounded text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
       >
-        {instance.agent_type && <AgentMark agentType={instance.agent_type} className="size-3.5 shrink-0" />}
-        <span className="truncate font-medium">{displayName(instance)}</span>
+        {instance.agent_type && <AgentMark agentType={instance.agent_type} className="size-3.5 shrink-0 self-center" />}
+        <span className="max-w-[60%] shrink-0 truncate font-medium group-hover/cell:underline">{name}</span>
+        {machine && machine !== name && (
+          <span className="min-w-0 truncate text-xs text-muted-foreground" title={machine} data-hub-host>
+            {machine}
+          </span>
+        )}
       </button>
     </td>
   );
@@ -166,16 +177,50 @@ function GroupTable({groups}: {groups: GroupRow[]}) {
   );
 }
 
+// A row of the By machine table, its figures formatted.
+interface MachineRow extends GroupRow {
+  others?: number;
+}
+
+function machineRows(machines: MachineSubtotal[], format: (n: number) => string, title: (day: number, week: number) => string): MachineRow[] {
+  return machines.map((machine) => ({...groupRows([machine], format, title)[0], others: machine.others}));
+}
+
+// MachineTable is the By machine table, the most this week first; none
+// while the agents run on one machine.
+function MachineTable({machines}: {machines: MachineRow[]}) {
+  if (machines.length === 0) return null;
+  return (
+    <PeriodTable first="By machine">
+      {machines.map((machine) => (
+        <PeriodRow
+          key={machine.others ? " others" : machine.name}
+          cell={
+            <td className={cn("max-w-0 truncate py-2 pr-3", machine.name ? "font-medium" : "text-muted-foreground")}>
+              {machine.others ? `Other ${machine.others} machines` : machine.name ? <span data-hub-host>{machine.name}</span> : "Not reported"}
+            </td>
+          }
+          day={machine.day}
+          week={machine.week}
+          title={machine.title}
+        />
+      ))}
+    </PeriodTable>
+  );
+}
+
 // SpendCard is what the instances spent in the last 24 hours and 7 days,
-// all of them and the ones that spent the most this week.
+// all of them, the ones that spent the most this week, and each machine.
 export function SpendCard({instances, onOpen}: {instances: HubInstance[]; onOpen: (id: string) => void}) {
   const totals = spendTotals(instances);
   if (totals.week <= 0) return null;
-  // Each scope once, as the totals count them.
-  const top = countedSpends(instances)
+  // Each scope once, as the totals count them; a scope is of one machine.
+  const counted = countedSpends(instances);
+  const top = counted
     .filter(({spend}) => spend.week_usd > 0)
     .sort((a, b) => b.spend.week_usd - a.spend.week_usd)
     .slice(0, 5);
+  const machines = machineSubtotals(counted.map(({instance, spend}) => ({instance, day: spend.day_usd, week: spend.week_usd})));
   return (
     <PeriodCard
       id="hub-spend"
@@ -189,24 +234,27 @@ export function SpendCard({instances, onOpen}: {instances: HubInstance[]; onOpen
         </>
       }
     >
-      <PeriodTable first="Spent the most this week">
-        {top.map(({instance, spend}) => (
-          <PeriodRow
-            key={instance.id}
-            cell={<InstanceCell instance={instance} onOpen={onOpen} />}
-            day={formatUSD(spend.day_usd)}
-            week={formatUSD(spend.week_usd)}
-            title={spendTitle(spend.day_usd, spend.week_usd)}
-          />
-        ))}
-      </PeriodTable>
+      <div className="min-w-0 space-y-5">
+        <PeriodTable first="Spent the most this week">
+          {top.map(({instance, spend}) => (
+            <PeriodRow
+              key={instance.id}
+              cell={<InstanceCell instance={instance} onOpen={onOpen} />}
+              day={formatUSD(spend.day_usd)}
+              week={formatUSD(spend.week_usd)}
+              title={spendTitle(spend.day_usd, spend.week_usd)}
+            />
+          ))}
+        </PeriodTable>
+        <MachineTable machines={machineRows(machines, formatUSD, (day, week) => spendTitle(day, week))} />
+      </div>
     </PeriodCard>
   );
 }
 
 // TokensCard is the tokens the instances used in the last 24 hours and 7
 // days, the calls their spend adds up: all of them by kind, the ones that
-// used the most this week, and each group.
+// used the most this week, each group and each machine.
 export function TokensCard({instances, onOpen}: {instances: HubInstance[]; onOpen: (id: string) => void}) {
   const totals = tokenTotals(instances);
   if (totals.week.total <= 0) return null;
@@ -216,7 +264,9 @@ export function TokensCard({instances, onOpen}: {instances: HubInstance[]; onOpe
     .filter(({week}) => week.total > 0)
     .sort((a, b) => b.week.total - a.week.total)
     .slice(0, 5);
-  const groups = groupSubtotals(counted.map(({instance, day, week}) => ({instance, day: day.total, week: week.total})));
+  const totalsOf = counted.map(({instance, day, week}) => ({instance, day: day.total, week: week.total}));
+  const groups = groupSubtotals(totalsOf);
+  const machines = machineSubtotals(totalsOf);
   return (
     <PeriodCard
       id="hub-tokens"
@@ -254,6 +304,7 @@ export function TokensCard({instances, onOpen}: {instances: HubInstance[]; onOpe
           ))}
         </PeriodTable>
         <GroupTable groups={groupRows(groups, formatTokens, tokensTitle)} />
+        <MachineTable machines={machineRows(machines, formatTokens, tokensTitle)} />
       </div>
     </PeriodCard>
   );
@@ -267,6 +318,7 @@ interface WorkView {
   counted: number;
   top: {id: string; day: string; week: string; title: string}[];
   groups: GroupRow[];
+  machines: MachineRow[];
 }
 
 function workView(instances: HubInstance[], now: number): WorkView | undefined {
@@ -278,14 +330,22 @@ function workView(instances: HubInstance[], now: number): WorkView | undefined {
     .sort((a, b) => b.week - a.week)
     .slice(0, 5)
     .map(({instance, day, week}) => ({id: instance.id, day: formatWork(day), week: formatWork(week), title: workTitle(day, week)}));
-  return {day: formatWork(totals.day), week: formatWork(totals.week), counted: totals.counted, top, groups: groupRows(groupSubtotals(each), formatWork, workTitle)};
+  return {
+    day: formatWork(totals.day),
+    week: formatWork(totals.week),
+    counted: totals.counted,
+    top,
+    groups: groupRows(groupSubtotals(each), formatWork, workTitle),
+    machines: machineRows(machineSubtotals(each), formatWork, workTitle),
+  };
 }
 
 const sameView = (a: WorkView | undefined, b: WorkView | undefined) => JSON.stringify(a) === JSON.stringify(b);
 
 // WorkCard is how long the agents worked in the last 24 hours and 7 days,
-// as the hub saw it: all of them, each group, and the ones that worked the
-// most this week. It reads the hub's clock for the spans going on.
+// as the hub saw it: all of them, the ones that worked the most this week,
+// each group and each machine. It reads the hub's clock for the spans going
+// on.
 export function WorkCard({instances, onOpen}: {instances: HubInstance[]; onOpen: (id: string) => void}) {
   const view = useHubTime((now) => workView(instances, now), sameView);
   if (!view) return null;
@@ -320,6 +380,7 @@ export function WorkCard({instances, onOpen}: {instances: HubInstance[]; onOpen:
           })}
         </PeriodTable>
         <GroupTable groups={view.groups} />
+        <MachineTable machines={view.machines} />
       </div>
     </PeriodCard>
   );
