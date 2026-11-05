@@ -247,6 +247,29 @@ export function machineOf(instance: HubInstance): string {
   return instance.hostname?.trim() ?? "";
 }
 
+// hostPrefix is the start that at least half of the machines' names share
+// (two at least), up to a "-" or ".", which the list dims so the rest tells
+// them apart: "coder-dave-" of coder-dave-api and coder-dave-web. It is ""
+// when they share none, and a name that is the start alone keeps it whole.
+export function hostPrefix(hostnames: Iterable<string>): string {
+  const names = [...new Set(hostnames)].filter(Boolean);
+  if (names.length < 2) return "";
+  const counts = new Map<string, number>();
+  for (const name of names) {
+    for (const {index} of name.matchAll(/[-.]/g)) {
+      // Something must be left after it.
+      if (index === name.length - 1) continue;
+      const start = name.slice(0, index + 1);
+      counts.set(start, (counts.get(start) ?? 0) + 1);
+    }
+  }
+  let best = "";
+  for (const [start, count] of counts) {
+    if (count >= 2 && count * 2 >= names.length && start.length > best.length) best = start;
+  }
+  return best;
+}
+
 // A machine's agents in the list: hostname is "" for an instance that
 // doesn't name its machine, which is one of its own (key tells them apart).
 export interface HubMachine {

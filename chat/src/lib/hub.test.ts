@@ -1,5 +1,5 @@
 import {describe, expect, test} from "bun:test";
-import {activity, agentLabel, agentOf, agentsIn, countAgents, matchesAgents, nothingMatches, parseAgents, shownAgents, toggleAgent, compareVersions, countedSpends, countedTokens, currentSpend, formatTokens, formatUSD, tokenTotals, tokensTitle, instanceVersion, olderThanHub, parseVersion, spendTitle, spendTotals, shortError, applyHubEvent, chatURL, countFilters, formatAgo, formatElapsed, matchesSearch, activeAgent, groupByMachine, groupInstances, sameMachine, tabOrder, groupNames, hubRoot, machineOf, machineSubtotals, sharedVersion, instanceState, needsYou, sortInstances, stateLabel, usagePercent, versionTitle, versionTotals, formatWork, workSeconds, workTitle, workTotals, type HubInstance, type Spend, type Summary} from "./hub";
+import {activity, agentLabel, agentOf, agentsIn, countAgents, matchesAgents, nothingMatches, parseAgents, shownAgents, toggleAgent, compareVersions, countedSpends, countedTokens, currentSpend, formatTokens, formatUSD, tokenTotals, tokensTitle, instanceVersion, olderThanHub, parseVersion, spendTitle, spendTotals, shortError, applyHubEvent, chatURL, countFilters, formatAgo, formatElapsed, matchesSearch, activeAgent, groupByMachine, groupInstances, hostPrefix, sameMachine, tabOrder, groupNames, hubRoot, machineOf, machineSubtotals, sharedVersion, instanceState, needsYou, sortInstances, stateLabel, usagePercent, versionTitle, versionTotals, formatWork, workSeconds, workTitle, workTotals, type HubInstance, type Spend, type Summary} from "./hub";
 
 const summary = (overrides: Partial<Summary> = {}): Summary =>
   ({
@@ -423,6 +423,18 @@ describe("agent filter", () => {
 });
 
 describe("machines", () => {
+  test("the start most machines' names share, up to a - or .", () => {
+    const coder = ["coder-dave-api", "coder-dave-web", "coder-dave-web-2", "gpu-9e61"];
+    expect(hostPrefix(coder)).toBe("coder-dave-");
+    // Shared by fewer than half: none.
+    expect(hostPrefix(["coder-dave-api", "coder-dave-web", "a", "b", "c"])).toBe("");
+    expect(hostPrefix(["dev-1.lan", "dev-2.lan"])).toBe("dev-");
+    expect(hostPrefix(["api", "web"])).toBe("");
+    expect(hostPrefix(["coder-dave-api"])).toBe("");
+    // A name that ends at the start doesn't count it: something must be left.
+    expect(hostPrefix(["coder-", "coder-"])).toBe("");
+  });
+
   test("an instance's machine is its host name; none when it doesn't say", () => {
     expect(machineOf(instance("a", {hostname: "dev-1"}))).toBe("dev-1");
     expect(machineOf(instance("a", {hostname: " dev-1 "}))).toBe("dev-1");
