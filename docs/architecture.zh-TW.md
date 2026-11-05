@@ -78,16 +78,16 @@ flowchart TB
 | `lib/native/procutil` | 子行程：行程群組（process group）與正常關閉流程 |
 | `lib/statedb/` | `--state-db` 的 SQLite 持久保存，以及 `--state-file` 的匯入 |
 | `lib/instanceapi/` | AgentAPI 和同時監看多個 AgentAPI 的客戶端之間的約定：它是誰（`WebhookInstance`，出現在 webhook 事件、摘要和登記檔中，含它的 `AgentType`）、它的摘要、webhook 的外層格式和簽章（`Sign`、`Verify`），以及 hub 對每個實例顯示的狀態（`StateOf`）。`lib/httpapi` 以同樣的名稱保留別名，OpenAPI schema 用的就是這些名稱 |
-| `lib/hub/` | `agentapi hub serve`：實例、頁面上設定的群組和釘選、每個實例這一列顯示的內容最近一次變動的時間，以及 hub 看到它工作的區段（`store.go`、`work.go`，由 `persist.go` 保存在檔案中）、有簽章的 webhook 接收端（`webhook.go`）、每個實例的摘要串流（`watch.go`）、登入、瀏覽器的事件串流，以及到實例的代理（`hub.go`、`proxy.go`），還有機器怎麼加入（`join.go`：`GET /api/join` 和啟動 log 列出的位址）；使用說明見 [hub.zh-TW.md](hub.zh-TW.md) |
+| `lib/hub/` | `agentapi hub serve`：實例、頁面上設定的群組和釘選、每個實例這一列顯示的內容最近一次變動的時間，以及 hub 看到它工作的區段（`store.go`、`work.go`，由 `persist.go` 保存在檔案中）、有簽章的 webhook 接收端（`webhook.go`）、每個實例的摘要串流（`watch.go`）、登入、瀏覽器的事件串流，以及到實例的代理（`hub.go`、`proxy.go`），還有主機怎麼加入（`join.go`：`GET /api/join` 和啟動 log 列出的位址）；使用說明見 [hub.zh-TW.md](hub.zh-TW.md) |
 | `lib/sse/` | 依 HTML 標準讀寫 server-sent events：讀取端（合併多行 data:、略過註解、行尾可為 CR、LF 或 CRLF）和寫入端，hub 用它讀實例的摘要串流、寫給瀏覽器的串流。`lib/httpapi` 則用 huma 的 `sse` 寫它的串流 |
-| `lib/netaddr/` | 這台機器的 IPv4 位址：其他機器連得到的位址（hub 的加入網址），以及連到某台主機時使用的位址（`Resolver`，供 `--public-url` 的 `{ip}` 使用） |
+| `lib/netaddr/` | 這台主機的 IPv4 位址：其他主機連得到的位址（hub 的加入網址），以及連到某台主機時使用的位址（`Resolver`，供 `--public-url` 的 `{ip}` 使用） |
 | `lib/userconfig/` | 使用者的設定檔 `~/.agentapi/config.yaml`：以旗標名稱設定，`agentapi server` 讀取、`agentapi hub` 寫入 |
-| `lib/registry/` | 一台機器上執行中 AgentAPI 的登記檔（`~/.agentapi/instances`）：以原子方式寫入、列出，並刪除行程已不在的登記檔 |
+| `lib/registry/` | 一台主機上執行中 AgentAPI 的登記檔（`~/.agentapi/instances`）：以原子方式寫入、列出，並刪除行程已不在的登記檔 |
 | `lib/atomicfile/` | 一次取代整個檔案，當機後只會留下舊資料或新資料：先寫暫存檔並同步到磁碟，再改名就位，最後同步目錄（設定檔、登記檔、hub 的實例檔） |
 | `lib/selfupdate/` | 把 k1dav-c/agentapi 的最新 release 安裝到程式的位置（`agentapi update`、`POST /update`）：到 GitHub 查詢、挑出這個平台的執行檔、比對 release 的 `checksums.txt` 並確認執行起來是那個版本，再在程式旁的鎖定檔保護下改名取代，檔案與目錄都會寫入磁碟（`Install`）；判斷使用者能否取代程式，並提供一次性的修正方式（`Program.Blocked`）；`selfupdatetest` 為測試提供假的 release |
 | `lib/shellterm/` | 共用的 shell 終端機 |
 | `lib/htmlpreview/` | 為 `GET /files/preview` 將相對路徑引用的資源嵌入為 data: URL，產生可獨立顯示的 HTML 預覽 |
-| `lib/filelock/` | 同一台機器上的 AgentAPI 輪流取得的 flock：取代程式（`selfupdate`），以及重新啟動前 agent CLI 的自我更新 |
+| `lib/filelock/` | 同一台主機上的 AgentAPI 輪流取得的 flock：取代程式（`selfupdate`），以及重新啟動前 agent CLI 的自我更新 |
 | `lib/procenv/` | AgentAPI 啟動的行程的環境變數：agent，以及終端機的 shell |
 | `lib/agenthome/` | 各 agent 保存狀態的目錄（`CLAUDE_CONFIG_DIR`、`CODEX_HOME`、`PI_CODING_AGENT_DIR`） |
 | `lib/handoff/` | 人工回覆 API 的型別 |
@@ -375,7 +375,7 @@ type Factory func(resume Resume) (Adapter, error)
 - 對於會讀取 session log 的 agent，伺服器每分鐘計算一次摘要的 `spend`（`spend.go`）：
   `sessions.Store.Costs` 以增量方式讀取 log，再把總計中結束於最近 24 小時和 7 天內的各小時加總，
   金額和 token 都算（`SessionCost` 的每個小時兩者都記，所以一個呼叫的 token 只算一次，和金額算在
-  同一處）。`EventEmitter.SetSpend` 只在金額或 token 改變時才送出摘要，`updated_at` 記錄改變的時間。`scope` 是機器的
+  同一處）。`EventEmitter.SetSpend` 只在金額或 token 改變時才送出摘要，`updated_at` 記錄改變的時間。`scope` 是主機的
   主機名稱和 ID 加上 `sessions.Store.Scope`（agent、目錄的實際路徑、agent 存放 log 的位置）算出的
   雜湊值，讓 hub 對讀同一批 log 的兩個 AgentAPI 只算一次。
 - emitter 也記錄用戶端上次顯示對話的時間（`POST /tasks/seen`，聊天介面顯示對話時會呼叫）：
@@ -480,7 +480,7 @@ webhook 事件的 delivery ID 也以同樣方式寫入 `instances.deliveries.jso
 - AgentAPI 本身收到 SIGUSR2 時會原地重新啟動（見[啟動與關閉](#啟動與關閉)），改用更新放在原啟動
   路徑上的執行檔。使用 `--state-db` 時會還原對話，agent 也會接續原本的工作階段；沒有時對話會
   重新開始。`agentapi restart [port…|--all]`（`cmd/restart`）讀取登記目錄（呼叫者的；透過 `sudo`
-  執行時是 `SUDO_USER` 的家目錄），挑出這台機器上、行程屬於該使用者、執行的是 `agentapi server`
+  執行時是 `SUDO_USER` 的家目錄），挑出這台主機上、行程屬於該使用者、執行的是 `agentapi server`
   （`/proc/<pid>`，其他系統用 `ps`）且能原地重新啟動的登記檔，逐一送出訊號（自己所在的那個最後），
   並等每個 AgentAPI 以新的 server ID 重新登記、在原連接埠回應 `GET /status`。新執行檔沒通過停止
   前的檢查（`--version`、`--validate`）時，AgentAPI 照原樣繼續執行，指令會在 `--timeout` 到了之後
@@ -562,14 +562,14 @@ Content-Security-Policy。
   別的實例 ID）也不轉送。事件必須寫明是哪一次執行（`server_id`），而且只能搬動 hub 確定網址已失效的
   實例（超過連線寬限仍連不上，或那裡回應的是另一個 AgentAPI），已連上或連線中的實例、手動加入的實例
   一律不動；實例搬走後，hub 不再送出它自己的 token。檔案記下 hub 最後一次讀到各實例摘要的網址，hub
-  重新啟動後先從那裡追蹤。每台加入的機器都有同一個 secret，所以任何一台仍然可以把新的實例 ID，或位址
-  已經不回應的實例 ID，指向自己的位址，拿到 `--instance-token`；每台機器各用一把金鑰才能根除。瀏覽器以 hub token 登入，換取
+  重新啟動後先從那裡追蹤。每台加入的主機都有同一個 secret，所以任何一台仍然可以把新的實例 ID，或位址
+  已經不回應的實例 ID，指向自己的位址，拿到 `--instance-token`；每台主機各用一把金鑰才能根除。瀏覽器以 hub token 登入，換取
   由 token 推導出的 HttpOnly、SameSite=Lax cookie；代理會移除瀏覽器的 cookie 以及 `Authorization`、
   `Origin`、`Referer`、`Sec-Fetch-*` 標頭，也會移除實例的 `Set-Cookie`，雙方的憑證都不會傳到另一邊。
   hub 和 AgentAPI 一樣，拒絕其他來源的網頁送出會造成改動的請求；設定 `--allowed-hosts` 時，只回應
   用這些名稱或 IP 位址連來的瀏覽器。代理在每個回應加上 `Content-Security-Policy: sandbox`，實例送來的
   內容不會以 hub 的網頁身分執行；代理也拒絕修改實例的 webhook，因為 webhook 決定 hub 把 token 送到哪裡。
-  讓機器加入用的 secret，只有設了 token 的 hub 才會交給已登入的瀏覽器（`GET /api/join`）；啟動時的
+  讓主機加入用的 secret，只有設了 token 的 hub 才會交給已登入的瀏覽器（`GET /api/join`）；啟動時的
   log 一律不寫。
 - 上層 agent 工作階段會為它執行的指令設定環境變數（包含機密資訊）；agent 不會繼承這些變數，也不會拿到 AgentAPI 的機密：API token、webhook 與 hub 的 secret 和
   token（`lib/procenv`）。

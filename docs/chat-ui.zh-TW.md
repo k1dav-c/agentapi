@@ -396,7 +396,7 @@ ID（前幾個字元，附複製按鈕）、AgentAPI 版本、agent 正在做什
 分頁在背景時，圖示會以圓點顯示狀態：琥珀色表示 agent 需要你回應，藍色表示工作中，綠色表示
 任務完成。開啟通知時，瀏覽器也會顯示「*agent 名稱* needs you」或「*agent 名稱* finished」。
 
-**Add to an AgentAPI hub…** 列出可以直接複製的步驟：啟動 hub、讓這台機器加入、打開 hub。輸入
+**Add to an AgentAPI hub…** 列出可以直接複製的步驟：啟動 hub、讓這台主機加入、打開 hub。輸入
 hub 的位址後，指令會自動帶入。這個 AgentAPI 已經回報給某個 hub 時，會顯示是哪一個。
 
 ![把這個 AgentAPI 加入 hub：hub 的位址和可以複製的指令](screenshots/join-hub.png)
