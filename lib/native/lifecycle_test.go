@@ -225,7 +225,9 @@ func TestSwitchToAFork(t *testing.T) {
 		call := restart.MustWait(ctx)
 		call.Release()
 		clock.Advance(call.Duration).MustWait(ctx)
-		require.Eventually(t, func() bool { return factory.Last() != last }, 5*time.Second, time.Millisecond)
+		// The factory makes the next agent before the conversation starts it
+		// and hands it its sink.
+		require.Eventually(t, func() bool { return factory.Last() != last && factory.Last().Sink() != nil }, 5*time.Second, time.Millisecond)
 		return factory.Last()
 	}
 
