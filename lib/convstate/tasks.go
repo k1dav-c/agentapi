@@ -374,10 +374,16 @@ func (t *taskTracker) end(i int, now time.Time) {
 	task := &t.tasks[i]
 	ended := now
 	task.EndedAt = &ended
+	retry := t.status.RetryWait
 	switch limit := t.status.LimitStop; {
 	case limit != nil && !limit.StoppedAt.Before(task.StartedAt):
 		task.Status = TaskStatusLimited
 		task.Limit = limit
+	case retry != nil && !retry.StoppedAt.Before(task.StartedAt):
+		// The failure was a warning, as AgentAPI tries again: a task of
+		// its own, which the message that continues the turn starts.
+		task.Status = TaskStatusFailed
+		task.Errors = append(task.Errors, retry.Message)
 	case len(task.Errors) > 0:
 		task.Status = TaskStatusFailed
 	default:

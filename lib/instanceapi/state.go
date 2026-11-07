@@ -51,7 +51,8 @@ func StateOf(connection Connection, summary *SummaryBody, muted string) State {
 	switch {
 	case summary.Attention == AttentionExited:
 		return StateStopped
-	case summary.Status == AgentStatusRunning:
+	case summary.Status == AgentStatusRunning, summary.RetryWait != nil:
+		// A failed turn that waits to be tried again goes on by itself.
 		return StateWorking
 	case summary.Unread:
 		return StateUnread

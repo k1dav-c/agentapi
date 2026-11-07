@@ -1609,6 +1609,48 @@
         },
         "type": "object"
       },
+      "RetryWait": {
+        "additionalProperties": false,
+        "properties": {
+          "api_status": {
+            "description": "The HTTP status the API or gateway answered with, e.g. 502, if the agent says.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "attempt": {
+            "description": "Which retry comes next, from 1.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "attempts": {
+            "description": "How many times in a row AgentAPI tries a failed turn again (--retry-delays). After the last, a failure is an error.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "message": {
+            "description": "What the agent said, e.g. API Error: 502 Bad Gateway.",
+            "type": "string"
+          },
+          "retry_at": {
+            "description": "When AgentAPI sends a message that continues the turn. Queued messages go out after it.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "stopped_at": {
+            "description": "When the turn failed.",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "attempt",
+          "attempts",
+          "message",
+          "retry_at",
+          "stopped_at"
+        ],
+        "type": "object"
+      },
       "RichContentBlock": {
         "additionalProperties": false,
         "properties": {
@@ -2115,6 +2157,10 @@
             "format": "int64",
             "type": "integer"
           },
+          "retry_wait": {
+            "$ref": "#/components/schemas/RetryWait",
+            "description": "Set when the agent's last turn failed on an upstream error that may pass (an HTTP 5xx or 429, an overloaded API) and AgentAPI tries it again at retry_at, until a turn starts or the retry is cancelled (DELETE /retry)."
+          },
           "server_id": {
             "description": "Random identifier of this AgentAPI run: it changes every time AgentAPI starts.",
             "type": "string"
@@ -2207,6 +2253,10 @@
             "description": "Number of requests (approvals, questions, plans) the agent is waiting on; see GET /requests.",
             "format": "int64",
             "type": "integer"
+          },
+          "retry_wait": {
+            "$ref": "#/components/schemas/RetryWait",
+            "description": "Set when the agent's last turn failed on an upstream error that may pass (an HTTP 5xx or 429, an overloaded API) and AgentAPI tries it again at retry_at, until a turn starts or the retry is cancelled (DELETE /retry)."
           },
           "server_id": {
             "description": "Random identifier of this AgentAPI run: it changes every time AgentAPI starts.",
@@ -2412,6 +2462,10 @@
             "$ref": "#/components/schemas/SummaryRequest",
             "description": "The oldest request the agent waits on (see GET /requests); missing when none waits."
           },
+          "retry_wait": {
+            "$ref": "#/components/schemas/RetryWait",
+            "description": "Set while a failed turn waits to be tried again, as in GET /status. The agent needs nothing of the user meanwhile: attention stays none."
+          },
           "seen_at": {
             "description": "When a client last showed the conversation to the user (POST /tasks/seen); when AgentAPI started, before any did.",
             "format": "date-time",
@@ -2615,6 +2669,10 @@
           "request": {
             "$ref": "#/components/schemas/SummaryRequest",
             "description": "The oldest request the agent waits on (see GET /requests); missing when none waits."
+          },
+          "retry_wait": {
+            "$ref": "#/components/schemas/RetryWait",
+            "description": "Set while a failed turn waits to be tried again, as in GET /status. The agent needs nothing of the user meanwhile: attention stays none."
           },
           "seen_at": {
             "description": "When a client last showed the conversation to the user (POST /tasks/seen); when AgentAPI started, before any did.",
@@ -5235,6 +5293,102 @@
         "tags": [
           "Requests"
         ]
+      }
+    },
+    "/retry": {
+      "delete": {
+        "description": "Forgets the turn that failed on an upstream error without trying it again, so the queued messages go out as soon as the agent can take them. Returns 409 when no failed turn waits.",
+        "operationId": "delete-retry",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterruptResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Cancel a retry"
+      },
+      "post": {
+        "description": "Tries the turn that failed on an upstream error (`retry_wait` in GET /status) again now rather than at `retry_at`: AgentAPI sends a message asking the agent to go on, before the queued messages. If it fails the same way, the next retry waits the next delay of --retry-delays. Returns 409 when no failed turn waits.",
+        "operationId": "post-retry",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterruptResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Retry a failed turn now"
       }
     },
     "/rich-messages": {

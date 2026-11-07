@@ -414,3 +414,19 @@ func BenchmarkEmitMessagesLongSession(b *testing.B) {
 		}
 	}
 }
+
+func TestTaskThatWaitsToBeTriedAgainFailed(t *testing.T) {
+	t.Parallel()
+	start := time.Date(2026, 11, 7, 10, 0, 0, 0, time.UTC)
+	tr := newTaskTracker(start)
+	take := feed(tr)
+	tr.statusChanged(StatusChangeBody{Status: AgentStatusStable}, start)
+	take(taskMessages(start, ">Deploy"))
+	tr.statusChanged(StatusChangeBody{Status: AgentStatusRunning}, start)
+	end := start.Add(time.Minute)
+	retry := &native.RetryWait{Message: "API Error: 502 Bad Gateway", StoppedAt: end, Attempt: 1, Attempts: 3, RetryAt: end.Add(30 * time.Second)}
+	tr.statusChanged(StatusChangeBody{Status: AgentStatusStable, RetryWait: retry}, end)
+	require.Len(t, tr.tasks, 1)
+	assert.Equal(t, TaskStatusFailed, tr.tasks[0].Status)
+	assert.Equal(t, []string{"API Error: 502 Bad Gateway"}, tr.tasks[0].Errors)
+}

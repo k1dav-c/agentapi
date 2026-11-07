@@ -86,6 +86,9 @@ const (
 	MetaSessionName = "session_name"
 	// MetaLimitStop holds the turn a usage limit stopped, as JSON.
 	MetaLimitStop = "limit_stop"
+	// MetaRetryWait holds the failed turn that waits to be tried again, as
+	// JSON.
+	MetaRetryWait = "retry_wait"
 	// MetaWebhook holds the webhook settings changed through the API, as
 	// JSON. A reset keeps them.
 	MetaWebhook = "webhook"
@@ -648,36 +651,60 @@ func (s Snapshot) Settings() (native.Settings, error) {
 	return settings, nil
 }
 
-// SetLimitStop stores the turn a usage limit stopped; nil removes it.
 // SetSeenAt stores when a client last showed the conversation.
 func (d *DB) SetSeenAt(at time.Time) {
 	d.SetMeta(MetaSeenAt, at.UTC().Format(time.RFC3339Nano))
 }
 
+// SetLimitStop stores the turn a usage limit stopped; nil removes it.
 func (d *DB) SetLimitStop(ls *native.LimitStop) {
-	value := ""
-	if ls != nil {
-		data, err := json.Marshal(ls)
-		if err != nil {
-			d.logger.Error("Failed to encode the limit stop", "error", err)
-			return
-		}
-		value = string(data)
-	}
-	d.SetMeta(MetaLimitStop, value)
+	d.setMetaJSON(MetaLimitStop, ls, ls == nil, "limit stop")
 }
 
 // LimitStop returns the stored turn a usage limit stopped, or nil.
 func (s Snapshot) LimitStop() (*native.LimitStop, error) {
-	data := s.Meta[MetaLimitStop]
+	return metaJSON[native.LimitStop](s, MetaLimitStop, "limit stop")
+}
+
+// SetRetryWait stores the failed turn that waits to be tried again; nil
+// removes it.
+func (d *DB) SetRetryWait(rw *native.RetryWait) {
+	d.setMetaJSON(MetaRetryWait, rw, rw == nil, "retry wait")
+}
+
+// RetryWait returns the stored failed turn that waits to be tried again,
+// or nil.
+func (s Snapshot) RetryWait() (*native.RetryWait, error) {
+	return metaJSON[native.RetryWait](s, MetaRetryWait, "retry wait")
+}
+
+// setMetaJSON stores v as JSON under key, or removes key when none. what
+// names v in errors.
+func (d *DB) setMetaJSON(key string, v any, none bool, what string) {
+	value := ""
+	if !none {
+		data, err := json.Marshal(v)
+		if err != nil {
+			d.logger.Error("Failed to encode the "+what, "error", err)
+			return
+		}
+		value = string(data)
+	}
+	d.SetMeta(key, value)
+}
+
+// metaJSON decodes the JSON stored under key, or returns nil when there is
+// none. what names it in errors.
+func metaJSON[T any](s Snapshot, key, what string) (*T, error) {
+	data := s.Meta[key]
 	if data == "" {
 		return nil, nil
 	}
-	var ls native.LimitStop
-	if err := json.Unmarshal([]byte(data), &ls); err != nil {
-		return nil, fmt.Errorf("decode the stored limit stop: %w", err)
+	var v T
+	if err := json.Unmarshal([]byte(data), &v); err != nil {
+		return nil, fmt.Errorf("decode the stored %s: %w", what, err)
 	}
-	return &ls, nil
+	return &v, nil
 }
 
 // SetSeq stores the latest change sequence of epoch.

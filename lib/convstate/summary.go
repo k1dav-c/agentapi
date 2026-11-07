@@ -51,7 +51,7 @@ func (e *EventEmitter) summaryLocked() SummaryBody {
 		SessionName: status.SessionName, AgentSessionID: status.AgentSessionID,
 		PendingRequests: status.PendingRequests, QueuedMessages: len(e.queue),
 		Tasks:         len(e.tasks.tasks),
-		LoginRequired: status.LoginRequired, LimitStop: status.LimitStop, Usage: status.Usage,
+		LoginRequired: status.LoginRequired, LimitStop: status.LimitStop, RetryWait: status.RetryWait, Usage: status.Usage,
 	}
 	if e.instance != nil {
 		summary.Instance = e.instance()

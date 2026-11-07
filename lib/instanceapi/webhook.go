@@ -59,6 +59,7 @@ type WebhookInstanceState struct {
 	QueuedMessages  int                   `json:"queued_messages"`
 	LoginRequired   *native.LoginRequired `json:"login_required,omitempty"`
 	LimitStop       *native.LimitStop     `json:"limit_stop,omitempty"`
+	RetryWait       *native.RetryWait     `json:"retry_wait,omitempty"`
 	Usage           *native.AgentUsage    `json:"usage,omitempty"`
 	Settings        *native.Settings      `json:"settings,omitempty"`
 	// HeartbeatSeconds is how often instance.heartbeat is sent; 0 when it

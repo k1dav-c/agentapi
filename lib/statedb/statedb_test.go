@@ -258,6 +258,38 @@ func TestLimitStopRoundTrip(t *testing.T) {
 	assert.Nil(t, ls)
 }
 
+func TestRetryWaitRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	db := open(t, path)
+	stopped := time.Unix(1700000000, 0).UTC()
+	want := native.RetryWait{Message: "API Error: 502 Bad Gateway", APIStatus: 502, StoppedAt: stopped, Attempt: 2, Attempts: 3, RetryAt: stopped.Add(2 * time.Minute)}
+	db.SetMeta(statedb.MetaAgentType, "claude")
+	db.SetRetryWait(&want)
+	require.NoError(t, db.Close())
+
+	db = open(t, path)
+	snap, err := db.Load()
+	require.NoError(t, err)
+	rw, err := snap.RetryWait()
+	require.NoError(t, err)
+	require.NotNil(t, rw)
+	assert.Equal(t, want, *rw)
+
+	db.SetRetryWait(nil)
+	require.NoError(t, db.Close())
+	db = open(t, path)
+	defer func() { _ = db.Close() }()
+	snap, err = db.Load()
+	require.NoError(t, err)
+	rw, err = snap.RetryWait()
+	require.NoError(t, err)
+	assert.Nil(t, rw)
+
+	snap.Meta[statedb.MetaRetryWait] = "{"
+	_, err = snap.RetryWait()
+	assert.ErrorContains(t, err, "decode the stored retry wait")
+}
+
 // A rich message updated again before it was written is stored as it was
 // last, and one that can't be encoded is left out without the rows written
 // with it.

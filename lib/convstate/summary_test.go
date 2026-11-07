@@ -61,6 +61,13 @@ func TestSummary(t *testing.T) {
 	e.EmitRequest(native.RequestState{Request: native.Request{ID: "r1"}, Status: native.RequestStatusResolved})
 	e.SetLimitStop(nil)
 	assert.Equal(t, AttentionNone, e.Summary().Attention)
+	// A failed turn that waits to be tried again needs nothing of the user.
+	retry := &native.RetryWait{Message: "API Error: 502 Bad Gateway", StoppedAt: start, Attempt: 1, Attempts: 3}
+	e.SetRetryWait(retry)
+	assert.Equal(t, AttentionNone, e.Summary().Attention)
+	assert.Equal(t, retry, e.Summary().RetryWait)
+	e.SetRetryWait(nil)
+	assert.Nil(t, e.Summary().RetryWait)
 	e.SetLifecycle(LifecycleExited)
 	assert.Equal(t, AttentionExited, e.Summary().Attention)
 }

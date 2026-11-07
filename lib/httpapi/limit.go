@@ -92,15 +92,20 @@ func (s *Server) dismissLimitStop(_ context.Context, _ *struct{}) (*InterruptRes
 	return okResponse(), limitStopError(s.native.DismissLimitStop())
 }
 
-// continueIfDueLocked sends a scheduled continuation once it is due. Called
-// on the queue's tick, before the queue: the queued messages go after it.
-// Caller holds s.mu.
+// continueIfDueLocked sends a scheduled continuation, or the retry of a
+// failed turn, once it is due. Called on the queue's tick, before the
+// queue: the queued messages go after it. Caller holds s.mu.
 func (s *Server) continueIfDueLocked() {
 	ctx, cancel := s.agentCtx(nativeCallTimeout)
 	defer cancel()
+	retry := s.native.RetryWait() != nil
 	if _, err := s.native.ContinueIfDue(ctx, s.clock.Now()); err != nil && !errors.Is(err, conv.ErrMessageValidationChanging) {
-		s.logger.Error("Failed to continue the turn a usage limit stopped", "error", err)
-		s.emitter.EmitError(fmt.Sprintf("Failed to continue after the usage limit: %v", err), conv.ErrorLevelError)
+		what := "continue after the usage limit"
+		if retry {
+			what = "try the failed turn again"
+		}
+		s.logger.Error("Failed to "+what, "error", err)
+		s.emitter.EmitError(fmt.Sprintf("Failed to %s: %v", what, err), conv.ErrorLevelError)
 	}
 }
 

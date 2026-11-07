@@ -102,6 +102,9 @@ type StatusChangeBody struct {
 	Usage *native.AgentUsage `json:"usage,omitempty" doc:"How full the agent's context window is and the account's rate limits, as the agent last reported them."`
 	// LimitStop is set while a turn a usage limit stopped holds the queue.
 	LimitStop *native.LimitStop `json:"limit_stop,omitempty" doc:"Set when the agent's last turn stopped because the account reached a usage limit, until a turn starts or the stop is dismissed (DELETE /limit)."`
+	// RetryWait is set while a failed turn waits to be tried again, which
+	// holds the queue.
+	RetryWait *native.RetryWait `json:"retry_wait,omitempty" doc:"Set when the agent's last turn failed on an upstream error that may pass (an HTTP 5xx or 429, an overloaded API) and AgentAPI tries it again at retry_at, until a turn starts or the retry is cancelled (DELETE /retry)."`
 	// Terminal says whether GET /terminal has a shell.
 	Terminal bool `json:"terminal,omitempty" doc:"A shell terminal in the agent's working directory is available at GET /terminal."`
 }
@@ -183,6 +186,7 @@ type EventEmitter struct {
 	settings           *native.Settings
 	usage              *native.AgentUsage
 	limitStop          *native.LimitStop
+	retryWait          *native.RetryWait
 	terminal           bool
 	sessionEvents      []transcript.SessionEvent
 	nextSessionEventID int
@@ -250,6 +254,9 @@ type Persister interface {
 	SetSettings(settings native.Settings)
 	// SetLimitStop stores the turn a usage limit stopped; nil removes it.
 	SetLimitStop(ls *native.LimitStop)
+	// SetRetryWait stores the failed turn that waits to be tried again; nil
+	// removes it.
+	SetRetryWait(rw *native.RetryWait)
 	// SetSeenAt stores when a client last showed the conversation.
 	SetSeenAt(at time.Time)
 	// PutTask stores the task the user's message id started, encoded as

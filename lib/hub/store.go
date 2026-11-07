@@ -183,6 +183,7 @@ func (i Instance) activityKey() string {
 		TaskStatus      instanceapi.TaskStatus     `json:"task_status,omitempty"`
 		Login           string                     `json:"login,omitempty"`
 		LimitStop       time.Time                  `json:"limit_stop,omitzero"`
+		RetryWait       time.Time                  `json:"retry_wait,omitzero"`
 		Update          instanceapi.UpdateState    `json:"update,omitempty"`
 		UpdateError     string                     `json:"update_error,omitempty"`
 		Version         string                     `json:"version,omitempty"`
@@ -201,6 +202,9 @@ func (i Instance) activityKey() string {
 	}
 	if s.LimitStop != nil {
 		activity.LimitStop = s.LimitStop.StoppedAt
+	}
+	if s.RetryWait != nil {
+		activity.RetryWait = s.RetryWait.StoppedAt
 	}
 	if s.Update != nil {
 		activity.Update, activity.UpdateError = s.Update.State, s.Update.Error
