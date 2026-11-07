@@ -132,6 +132,13 @@ dictates into the composer in the browser's language.
 The draft and its attachments survive a reload. A message that didn't reach the server stays in the
 chat marked as not sent, even after a reload, with buttons to retry or dismiss it.
 
+In a chat the hub opens, **☆** in the composer inserts one of the hub's [favorites](hub.md#favorites),
+prompts you keep on the hub: into an empty message, or as a paragraph after what you typed. It
+doesn't send it, and Ctrl/⌘+Z takes it back out. **Manage favorites…** in the same menu opens them
+in the hub's settings.
+
+![The ☆ menu of favorites in the composer](screenshots/composer-favorites.png)
+
 ### While the agent works
 
 ![A long turn with two queued tasks and the send menu open: Queue, Steer, and Interrupt & send](screenshots/queue-steer.png)
@@ -466,7 +473,7 @@ closed as if you had closed it.
 
 On a phone the transcript takes the full width and thinking folds into the task. The composer is
 one row: the message box, `⋯` (attach, voice input and the agent's settings) and send, with stop
-while the agent works; it grows as the message wraps. The agent's mode, model, effort and usage take
+while the agent works, and ☆ in a chat the hub opens; it grows as the message wraps. The agent's mode, model, effort and usage take
 a second row when you ask for it from `⋯`, when a slash command such as `/model` opens one of their
 menus, or while the usage nears a limit. While a card asks for you, the card alone says so (the
 status line above it is left to screen readers), and its options leave out the number keys. A
@@ -492,7 +499,8 @@ beside the list (or instead of it on a phone, with a back button), under one bar
 the chat's own buttons in it, and a button for each other agent of its machine, which opens it in
 place. It opens through the hub, which sends the instance's token.
 
-`+` adds an instance by its URL and token. Each row's `⋯` menu pins the instance to the top, puts it in a group of your own (the list
+The gear opens the hub's settings, where you keep favorite prompts that ☆ in this chat's composer
+inserts ([The composer](#the-composer)). `+` adds an instance by its URL and token. Each row's `⋯` menu pins the instance to the top, puts it in a group of your own (the list
 then shows a folding header per group), mutes what it waits for until that changes, or forgets a
 stopped or unreachable one. Rows and group headers show what the agents spent in the last 24 hours
 (hover for 7 days), and rows how long they worked. Each row shows its AgentAPI version, marked when

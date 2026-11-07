@@ -78,7 +78,7 @@ flowchart TB
 | `lib/native/procutil` | 子行程：行程群組（process group）與正常關閉流程 |
 | `lib/statedb/` | `--state-db` 的 SQLite 持久保存，以及 `--state-file` 的匯入 |
 | `lib/instanceapi/` | AgentAPI 和同時監看多個 AgentAPI 的客戶端之間的約定：它是誰（`WebhookInstance`，出現在 webhook 事件、摘要和登記檔中，含它的 `AgentType`）、它的摘要、webhook 的外層格式和簽章（`Sign`、`Verify`），以及 hub 對每個實例顯示的狀態（`StateOf`）。`lib/httpapi` 以同樣的名稱保留別名，OpenAPI schema 用的就是這些名稱 |
-| `lib/hub/` | `agentapi hub serve`：實例、頁面上設定的群組和釘選、每個實例這一列顯示的內容最近一次變動的時間，以及 hub 看到它工作的區段（`store.go`、`work.go`，由 `persist.go` 保存在檔案中）、有簽章的 webhook 接收端（`webhook.go`）、每個實例的摘要串流（`watch.go`）、登入、瀏覽器的事件串流，以及到實例的代理（`hub.go`、`proxy.go`），還有主機怎麼加入（`join.go`：`GET /api/join` 和啟動 log 列出的位址）；使用說明見 [hub.zh-TW.md](hub.zh-TW.md) |
+| `lib/hub/` | `agentapi hub serve`：實例、頁面上設定的群組和釘選、每個實例這一列顯示的內容最近一次變動的時間，以及 hub 看到它工作的區段（`store.go`、`work.go`，由 `persist.go` 保存在檔案中）、我的最愛提示（`favorites.go`，`GET`／`PUT /api/favorites`，保存在同一個檔案）、有簽章的 webhook 接收端（`webhook.go`）、每個實例的摘要串流（`watch.go`）、登入、瀏覽器的事件串流，以及到實例的代理（`hub.go`、`proxy.go`），還有主機怎麼加入（`join.go`：`GET /api/join` 和啟動 log 列出的位址）；使用說明見 [hub.zh-TW.md](hub.zh-TW.md) |
 | `lib/sse/` | 依 HTML 標準讀寫 server-sent events：讀取端（合併多行 data:、略過註解、行尾可為 CR、LF 或 CRLF）和寫入端，hub 用它讀實例的摘要串流、寫給瀏覽器的串流。`lib/httpapi` 則用 huma 的 `sse` 寫它的串流 |
 | `lib/netaddr/` | 這台主機的 IPv4 位址：其他主機連得到的位址（hub 的加入網址），以及連到某台主機時使用的位址（`Resolver`，供 `--public-url` 的 `{ip}` 使用） |
 | `lib/userconfig/` | 使用者的設定檔 `~/.agentapi/config.yaml`：以旗標名稱設定，`agentapi server` 讀取、`agentapi hub` 寫入 |
@@ -459,7 +459,8 @@ hub（`lib/hub`，`persist.go`）把實例保存在 JSON 檔案裡，格式是
 從空的清單開始；版本較新的檔案則讓 hub 停止啟動。舊 hub 會把新格式當成損壞的檔案放到一旁，所以
 改回舊 hub 前要先用 `jq .instances` 轉換（見 [hub.zh-TW.md](hub.zh-TW.md#檔案)）。version 1 裡後來
 加上的欄位，例如每個實例的工作時間（`work`：最近 7 天的區段，只在區段開始或結束時寫入），讀得懂這個
-格式的舊 hub 會略過。hub 處理過的
+格式的舊 hub 會略過。我的最愛（和 `instances` 並列的 `"favorites": [...]`）也一樣：這種 hub 下次寫入時
+會丟掉它，它留下的 `.bak` 則還保有。hub 處理過的
 webhook 事件的 delivery ID 也以同樣方式寫入 `instances.deliveries.json`，保留到各自的簽章失效，所以
 重新啟動後重送的事件同樣會被拒絕。
 
@@ -639,7 +640,12 @@ AgentAPI 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
 結果複製到 `lib/httpapi/chat/`，再由 `embed.go` 以 `go:embed` 嵌入。建置時使用一個佔位的基礎
 路徑，由伺服器改寫成 `--chat-base-path`（預設為 `/chat`）。聊天介面也能以開發伺服器獨立執行
 （`bun run dev`，加上 `?url=<伺服器>`），`/chat/embed` 則是嵌入其他頁面用的版本（`hub=1`：在 hub
-的框架裡，它依 hub 用視窗訊息送來的內容畫出 hub 的實例列，見 `lib/hub-frame.ts`）。`/chat/hub/`
+的框架裡，它依 hub 用視窗訊息送來的內容畫出 hub 的實例列，見 `lib/hub-frame.ts`）。頁面和框架都會檢查
+每則訊息的來源網域、視窗和 `source: "agentapi.hub"`。聊天介面說 `ready` 時，以及內容有變動時，hub 會送出
+`instance` 和 `favorites`（全部的我的最愛，給輸入框的 ☆ 用，見 `components/message-input/favorites-menu.tsx`）；
+聊天介面則送出 `back`、`cancel-update`、`open`（開啟同一台主機的另一個 agent）和 `manage-favorites`
+（開啟 hub 的設定）。雙方都會略過不認得的訊息，所以版本不同的聊天介面和 hub 也能搭配：沒收到
+`favorites` 時，輸入框就不顯示 ☆。`/chat/hub/`
 是 hub 的頁面（`components/hub-view.tsx`，各部分與 hook 在 `components/hub/`，邏輯在 `lib/hub.ts`，
 所做的變更經由 `lib/hub-api.ts`），由 `agentapi hub serve` 以同一份建置提供。
 
