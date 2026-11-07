@@ -89,6 +89,7 @@ func TestHubRefusesCrossOriginRequests(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, send(t, http.MethodPost, message, "", "https://evil.example").StatusCode)
 	assert.Equal(t, http.StatusForbidden, send(t, http.MethodPost, hubSrv.URL+"/api/instances", "cross-site", "https://evil.example").StatusCode)
 	assert.Equal(t, http.StatusForbidden, send(t, http.MethodDelete, hubSrv.URL+"/api/instances/x", "cross-site", "https://evil.example").StatusCode)
+	assert.Equal(t, http.StatusForbidden, send(t, http.MethodPut, hubSrv.URL+"/api/favorites", "cross-site", "https://evil.example").StatusCode)
 
 	assert.Equal(t, http.StatusOK, send(t, http.MethodPost, message, "same-origin", hubSrv.URL).StatusCode)
 	// Through the hub, the hub is the caller: the instance gets none of

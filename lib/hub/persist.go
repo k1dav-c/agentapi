@@ -138,6 +138,10 @@ const stateVersion = 1
 type stateFile struct {
 	Version   int              `json:"version"`
 	Instances []storedInstance `json:"instances"`
+	// Favorites are the prompts kept on the hub. A hub before 3.5 reads
+	// the file and ignores them, and its next write leaves them out; the
+	// .bak it makes as it starts still has them.
+	Favorites []Favorite `json:"favorites,omitempty"`
 }
 
 // errDamaged is a file of instances that doesn't parse.
@@ -156,64 +160,64 @@ func (e newerStateError) Error() string {
 
 // decodeState reads the file of instances: the envelope, or the bare array
 // of a hub before it.
-func decodeState(path string, data []byte) ([]storedInstance, error) {
+func decodeState(path string, data []byte) (stateFile, error) {
 	trimmed := bytes.TrimSpace(data)
 	if bytes.HasPrefix(trimmed, []byte("[")) {
 		var stored []storedInstance
 		if err := json.Unmarshal(trimmed, &stored); err != nil {
-			return nil, fmt.Errorf("%w: %w", errDamaged, err)
+			return stateFile{}, fmt.Errorf("%w: %w", errDamaged, err)
 		}
-		return stored, nil
+		return stateFile{Version: stateVersion, Instances: stored}, nil
 	}
 	var file stateFile
 	if err := json.Unmarshal(trimmed, &file); err != nil {
-		return nil, fmt.Errorf("%w: %w", errDamaged, err)
+		return stateFile{}, fmt.Errorf("%w: %w", errDamaged, err)
 	}
 	switch {
 	case file.Version > stateVersion:
-		return nil, newerStateError{path: path, version: file.Version}
+		return stateFile{}, newerStateError{path: path, version: file.Version}
 	case file.Version < 1:
-		return nil, fmt.Errorf("%w: no file version", errDamaged)
+		return stateFile{}, fmt.Errorf("%w: no file version", errDamaged)
 	}
-	return file.Instances, nil
+	return file, nil
 }
 
-// encodeState is the file of instances.
-func encodeState(stored []storedInstance) ([]byte, error) {
+// encodeState is the file of instances, with the favorites.
+func encodeState(stored []storedInstance, favorites []Favorite) ([]byte, error) {
 	if stored == nil {
 		stored = []storedInstance{}
 	}
-	return json.MarshalIndent(stateFile{Version: stateVersion, Instances: stored}, "", "  ")
+	return json.MarshalIndent(stateFile{Version: stateVersion, Instances: stored, Favorites: favorites}, "", "  ")
 }
 
-// readState returns the instances kept in path, and keeps a copy of the
+// readState returns the file kept in path, and keeps a copy of the
 // file as it was in path.bak. A file that doesn't parse is moved aside and
 // the hub starts empty: a hub that stopped on it would stop again at every
 // restart. One a newer hub wrote is an error: the hub doesn't start rather
 // than lose its instances.
-func readState(path string, logger *slog.Logger) ([]storedInstance, error) {
+func readState(path string, logger *slog.Logger) (stateFile, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
+		return stateFile{}, nil
 	}
 	if err != nil {
-		return nil, err
+		return stateFile{}, err
 	}
 	stored, err := decodeState(path, data)
 	var newer newerStateError
 	switch {
 	case errors.As(err, &newer):
-		return nil, err
+		return stateFile{}, err
 	case err != nil:
 		aside := path + ".corrupt-" + time.Now().UTC().Format("20060102T150405Z")
 		if renameErr := os.Rename(path, aside); renameErr != nil {
-			return nil, fmt.Errorf("read %s: %w; moving it aside failed: %w", path, err, renameErr)
+			return stateFile{}, fmt.Errorf("read %s: %w; moving it aside failed: %w", path, err, renameErr)
 		}
 		logger.Warn("The hub's file of instances doesn't parse; moved it aside and starting empty. "+
-			"Lost: the instances added by hand, with their tokens, and every instance's group, pin and mute; joined instances come back with their next heartbeat. "+
+			"Lost: the instances added by hand, with their tokens, every instance's group, pin and mute, and the favorites; joined instances come back with their next heartbeat. "+
 			"The file as an earlier start of the hub found it is in the .bak next to it",
 			"file", path, "moved_to", aside, "error", err)
-		return nil, nil
+		return stateFile{}, nil
 	}
 	// The last file that parsed, for a change that went wrong (an edit by
 	// hand, an older hub that set it aside).

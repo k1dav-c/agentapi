@@ -208,6 +208,8 @@ func (h *Hub) routes(r chi.Router) {
 		r.Patch("/api/instances/{id}", h.updateInstance)
 		r.Delete("/api/instances/{id}", h.removeInstance)
 		r.Put("/api/pins", h.setPins)
+		r.Get("/api/favorites", h.getFavorites)
+		r.Put("/api/favorites", h.setFavorites)
 		r.Get("/api/events", h.streamEvents)
 		r.Get("/api/join", h.getJoin)
 		r.Handle("/i/{id}", http.HandlerFunc(h.proxy))
@@ -466,15 +468,16 @@ func (h *Hub) removeInstance(w http.ResponseWriter, r *http.Request) {
 const hubHeartbeat = 15 * time.Second
 
 // streamEvents sends the browser the instances and the hub's version
-// (instances), and then each change: instance, with the instance, or
-// removed, with its ID.
+// (instances) and the favorites (favorites), and then each change:
+// instance, with the instance, removed, with its ID, or favorites, with
+// all of them.
 func (h *Hub) streamEvents(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 		return
 	}
-	instances, ch := h.store.subscribe()
+	instances, favorites, ch := h.store.subscribe()
 	defer h.store.unsubscribe(ch)
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -491,6 +494,10 @@ func (h *Hub) streamEvents(w http.ResponseWriter, r *http.Request) {
 		return true
 	}
 	if !send("instances", newInstanceList(instances, h.clock.Now())) {
+		return
+	}
+	// A page before 3.5 doesn't listen for it.
+	if !send("favorites", favoritesBody{Favorites: favorites}) {
 		return
 	}
 	heartbeat := h.clock.NewTicker(hubHeartbeat, "hub", "browser heartbeat")
@@ -512,6 +519,12 @@ func (h *Hub) streamEvents(w http.ResponseWriter, r *http.Request) {
 			}
 			if event.Removed != "" {
 				if !send("removed", map[string]string{"id": event.Removed}) {
+					return
+				}
+				continue
+			}
+			if event.Favorites != nil {
+				if !send("favorites", favoritesBody{Favorites: event.Favorites}) {
 					return
 				}
 				continue

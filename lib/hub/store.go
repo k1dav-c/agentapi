@@ -235,13 +235,18 @@ type store struct {
 
 	mu        sync.Mutex
 	instances map[string]*Instance
+	// favorites are the prompts kept on the hub, in their order; never
+	// nil.
+	favorites []Favorite
 	subs      map[chan storeEvent]struct{}
 }
 
-// storeEvent is a change: the instance, or the ID of one removed.
+// storeEvent is a change: the instance, the ID of one removed, or the
+// favorites.
 type storeEvent struct {
-	Instance *Instance
-	Removed  string
+	Instance  *Instance
+	Removed   string
+	Favorites []Favorite
 }
 
 // storedInstance is an instance in the file.
@@ -273,16 +278,23 @@ func (i Instance) kept() storedInstance {
 // newStore returns the store that keeps the instances in path (empty keeps
 // none), with those it kept, on clock.
 func newStore(path string, logger *slog.Logger, clock quartz.Clock) (*store, error) {
-	s := &store{clock: clock, instances: map[string]*Instance{}, subs: map[chan storeEvent]struct{}{}}
+	s := &store{clock: clock, instances: map[string]*Instance{}, favorites: []Favorite{}, subs: map[chan storeEvent]struct{}{}}
 	if path == "" {
 		return s, nil
 	}
-	stored, err := readState(path, logger)
+	file, err := readState(path, logger)
 	if err != nil {
 		return nil, err
 	}
+	// A file edited by hand may have favorites the API refuses: the hub
+	// keeps those it would take.
+	if favorites, err := normalizeFavorites(file.Favorites); err == nil {
+		s.favorites = favorites
+	} else if len(file.Favorites) > 0 {
+		logger.Warn("The hub's favorites in its file aren't valid; starting without them. The file as it was is in the .bak next to it", "file", path, "error", err)
+	}
 	now := clock.Now()
-	for _, si := range stored {
+	for _, si := range file.Instances {
 		connection := ConnectionConnecting
 		if si.Stopped {
 			connection = ConnectionStopped
@@ -310,8 +322,9 @@ func (s *store) snapshot() ([]byte, error) {
 	for _, i := range s.sortedLocked() {
 		stored = append(stored, i.stored())
 	}
+	favorites := slices.Clone(s.favorites)
 	s.mu.Unlock()
-	return encodeState(stored)
+	return encodeState(stored, favorites)
 }
 
 // changedLocked says the file is behind; it is written soon after. Caller
@@ -553,13 +566,14 @@ func (s *store) refreshWork() {
 	}
 }
 
-// subscribe returns the instances and a channel of the changes after them.
-func (s *store) subscribe() ([]Instance, chan storeEvent) {
+// subscribe returns the instances, the favorites and a channel of the
+// changes after them.
+func (s *store) subscribe() ([]Instance, []Favorite, chan storeEvent) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ch := make(chan storeEvent, 256)
 	s.subs[ch] = struct{}{}
-	return s.listLocked(), ch
+	return s.listLocked(), slices.Clone(s.favorites), ch
 }
 
 func (s *store) unsubscribe(ch chan storeEvent) {

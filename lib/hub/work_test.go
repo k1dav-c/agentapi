@@ -161,7 +161,7 @@ func TestWorkTimeAcrossRestarts(t *testing.T) {
 		Instances *[]storedInstance `json:"instances"`
 	}{&kept}))
 	kept[0].LastSeen = clock.Now().Add(-30 * time.Minute)
-	killed, err := encodeState(kept)
+	killed, err := encodeState(kept, nil)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(path, killed, 0o600))
 	after, err := newStore(path, logger, clock)
@@ -234,7 +234,7 @@ func TestRefreshWork(t *testing.T) {
 	summarize(t, s, "dev:1", idleSummary)
 	_, _ = s.update("dev:2", true, func(i *Instance) { i.URL = "http://dev:2" })
 	summarize(t, s, "dev:2", workingSummary)
-	_, events := s.subscribe()
+	_, _, events := s.subscribe()
 	t.Cleanup(func() { s.unsubscribe(events) })
 
 	clock.Advance(23 * time.Hour)
