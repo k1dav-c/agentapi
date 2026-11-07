@@ -364,7 +364,7 @@ Claude Code or Codex, its subagents' steps follow the agent's own.
 
 The agent's warnings and errors show as notifications that stay until you close them. The server
 resends its recent ones on every connection, so the chat remembers per server which ones you
-closed, and a reload doesn't bring them back.
+closed, and a reload doesn't bring them back. **Clear all**, below two or more, closes them at once.
 
 Long-running browser sessions are protected by SSE heartbeats, automatic reconnection,
 stale-connection detection, and local recovery of messages that failed before reaching the server.
