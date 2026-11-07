@@ -481,8 +481,9 @@ machine's host name alone, wrapped rather than cut; the start most machines' nam
 `coder-<user>-`) is dimmed, so the rest tells them apart.
 
 Below the name, each agent has a tab with its mark and a dot in its state's color: amber when it
-needs you, blue while it works, green when it finished unseen, grey when muted or stopped, red when
-unreachable, none while idle. The picked tab also says the agent's short name (Claude, Codex, Pi);
+needs you, blue while it works, green when it finished unseen, grey when muted, stopped or idle, red
+when unreachable. An idle agent's dot is a grey ring until it has run (a task, or work the hub saw
+this week), so a tab says its state without its label. The picked tab also says the agent's short name (Claude, Codex, Pi);
 hover over the others for theirs. Tabs keep their order, by agent, whatever their states. Beside
 them is what the agents share: their AgentAPI version and what they spent in the last 24 hours. A
 card with one agent shown (the only one, or the only one a filter lets through) has a label instead
