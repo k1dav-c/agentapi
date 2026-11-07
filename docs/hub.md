@@ -557,9 +557,9 @@ version, with the chat's own search, terminal and Explorer buttons. When the mac
 agents the hub watches, the bar has a button for each of them too, in any list order: their marks
 with the same state dots as the [By machine](#by-machine) tabs, the open one marked. A click opens
 another in its place, so you switch between Claude Code and Codex on one machine without the list.
-**New tab** opens the chat on its own, and **×** (or **Esc**) goes back to the overview. Opening an
-agent is a page in the browser's history, so Back returns to the list or the overview; moving from
-one agent to another doesn't add one. The URL keeps the agent (`#<id>`), so a reload or a bookmark
+**New tab** opens the chat on its own, and **×** (or **Esc**) goes back to the overview. Each agent
+you open is a page in the browser's history, so Back returns to the agent before it, and from the
+first to the list or the overview; **×** returns to the list at once, past them all. The URL keeps the agent (`#<id>`), so a reload or a bookmark
 comes back to it. An AgentAPI update under way shows in the bar too, with **Cancel** while it waits
 for the task ([Updating from the hub](#updating-from-the-hub)).
 

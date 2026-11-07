@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- On the hub, Back (a phone's back gesture) returns to the agent you had open before, one at a time,
+  and from the first to the list. Moving to another agent used to replace the page, so Back went
+  straight to the list. **×** and **Esc** still return to the list at once, also from a page opened
+  at an agent's address.
+
 ## v3.5.0
 
 ### Features
