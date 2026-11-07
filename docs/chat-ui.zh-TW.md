@@ -279,7 +279,8 @@ AgentAPI 也會每 5 秒重試一次，期間的訊息會在佇列中等待。�
 ## 檔案
 
 聊天裡的檔名會開啟檢視器，顯示 agent 正在處理的檔案：工具呼叫列上的檔名、agent 回覆中
-inline code 裡的路徑（`lib/foo.go:12` 會開在第 12 行），以及 Explorer 的 Files 分頁。只能
+inline code 裡的路徑（`lib/foo.go:12` 會開在第 12 行）、指向路徑的 Markdown 連結（`[表格](/home/me/notes.csv)`，
+也可以加 `#L12`），以及 Explorer 的 Files 分頁。只能
 開啟 agent 工作目錄裡的檔案。檢視器的標頭可以重新載入檔案；在手機上，檢視器會占滿整個螢幕。
 
 ![檢視器開啟 my-app/docs/notes.md，並註明 docs/notes.md 不在工作目錄裡，這是找到的對應檔案](screenshots/file-find.png)

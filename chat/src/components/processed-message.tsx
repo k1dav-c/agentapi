@@ -8,8 +8,9 @@ import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import {common} from "@/lib/highlight-langs";
 import {copyText} from "@/lib/clipboard";
-import {parseFilePathRef} from "@/lib/file-refs";
+import {fileLinkRef, parseFilePathRef, type FilePathRef} from "@/lib/file-refs";
 import {FilePathCode, inlineCodeClass} from "./file-path";
+import {useFileViewer} from "./file-viewer-context";
 
 type MarkdownNode = {
   type: string;
@@ -235,6 +236,8 @@ function markdownComponents(linkFilePaths: boolean): Components {
     a: (properties) => {
       const {children, ...anchorProps} = properties;
       delete anchorProps.node;
+      const fileRef = linkFilePaths && typeof anchorProps.href === "string" ? fileLinkRef(anchorProps.href) : null;
+      if (fileRef) return <FileLink fileRef={fileRef}>{children}</FileLink>;
       return (
         <a
           {...anchorProps}
@@ -367,6 +370,28 @@ function highlightTerminalText(content: string, query: string) {
 
 // Inline or fenced code. Inline code that names a file opens it, unless it
 // sits in a link.
+// FileLink is a Markdown link to a file (fileLinkRef), which opens it in
+// the file viewer; without one it stays plain text, the target being no
+// page to go to.
+function FileLink({fileRef, children}: {fileRef: FilePathRef; children: React.ReactNode}) {
+  const viewer = useFileViewer();
+  if (!viewer) return <>{children}</>;
+  const open = () => viewer.open(fileRef.line ? {path: fileRef.path, line: fileRef.line, tab: "file"} : {path: fileRef.path});
+  // A button, not a link: opened in a tab of its own, its target would be
+  // the page's address again.
+  return (
+    <button
+      type="button"
+      onClick={open}
+      aria-haspopup="dialog"
+      title={fileRef.line ? `Open ${fileRef.path} at line ${fileRef.line}` : `Open ${fileRef.path}`}
+      className="inline cursor-pointer break-words border-0 bg-transparent p-0 text-left font-[inherit] text-[length:inherit] underline decoration-current/30 decoration-dotted underline-offset-4 transition [overflow-wrap:anywhere] hover:decoration-current hover:decoration-solid focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2"
+    >
+      <InsideLink.Provider value={true}>{children}</InsideLink.Provider>
+    </button>
+  );
+}
+
 function InlineCode({children, className, linkFilePaths}: {children?: React.ReactNode; className?: string; linkFilePaths?: boolean}) {
   const insideLink = React.useContext(InsideLink);
   // Only inline code: a fenced block has a language class or ends in a
