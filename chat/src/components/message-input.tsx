@@ -57,12 +57,14 @@ export default function MessageInput({
   const dispatch = useChatSelector((chat) => chat.dispatch);
   const canStop = useChatSelector((chat) => chat.canStop);
   const limitStop = useChatSelector((chat) => chat.limitStop);
+  const retryWait = useChatSelector((chat) => chat.retryWait);
   const {uploadFiles, stop} = useChatActions();
   const modes = dispatchModes(dispatch);
   const steerable = canSteer(dispatch);
   const active = turnActive(dispatch);
   // Nothing queued runs until the agent has its answer, or its login. After
-  // a usage limit the queue waits too, but a task sent now goes out.
+  // a usage limit, or a failed turn AgentAPI tries again, the queue waits
+  // too, but a task sent now goes out.
   const waitingForLogin = waitingFor === "login";
   const waitingForAnswer = waitingFor === "answer";
   // Shortcut labels: ⌘ on Apple devices, Ctrl elsewhere.
@@ -373,7 +375,7 @@ export default function MessageInput({
                 <QueuedTasks
                   queuedMessages={queuedMessages}
                   steerable={steerable}
-                  held={waitingForLogin ? "login" : waitingForAnswer ? "answer" : limitStop ? "limit" : null}
+                  held={waitingForLogin ? "login" : waitingForAnswer ? "answer" : limitStop ? "limit" : retryWait ? "retry" : null}
                 />
               )}
 

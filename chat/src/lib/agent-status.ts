@@ -1,7 +1,7 @@
 // The agent's status as status_change events report it, kept as one value
 // so that an event that changes nothing renders nothing.
 
-import type {AgentSettings, AgentUsage, LimitStop} from "./chat-api";
+import type {AgentSettings, AgentUsage, LimitStop, RetryWait} from "./chat-api";
 import type {Capabilities} from "./dispatch";
 import type {StatusChangeEvent} from "./events";
 import {parseAgentType, type AgentType} from "./agents";
@@ -21,6 +21,7 @@ export interface AgentStatus {
   settings: AgentSettings | null;
   usage: AgentUsage | null;
   limitStop: LimitStop | null;
+  retryWait: RetryWait | null;
   terminalAvailable: boolean;
   loginRequired: LoginRequired | null;
   lifecycle: string;
@@ -36,6 +37,7 @@ export const initialAgentStatus: AgentStatus = {
   settings: null,
   usage: null,
   limitStop: null,
+  retryWait: null,
   terminalAvailable: false,
   loginRequired: null,
   lifecycle: "",
@@ -56,6 +58,7 @@ export function applyStatusChange(status: AgentStatus, event: StatusChangeEvent)
     settings: event.settings ?? null,
     usage: event.usage ?? null,
     limitStop: event.limit_stop ?? null,
+    retryWait: event.retry_wait ?? null,
     terminalAvailable: event.terminal ?? false,
     loginRequired: parseLoginRequired(event.login_required),
     lifecycle: event.lifecycle ?? "",

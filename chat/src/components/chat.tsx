@@ -13,6 +13,7 @@ import {StateStrip} from "./dock";
 import {RequestCard} from "./request-card";
 import {LoginCard} from "./login-card";
 import {LimitCard} from "./limit-card";
+import {RetryCard} from "./retry-card";
 import {CacheNotice} from "./cache-notice";
 import {Lineage} from "./lineage";
 import {BackgroundAlerts} from "./background-alerts";
@@ -183,6 +184,7 @@ export function Chat() {
                 <LoginCard onRunInTerminal={hasShell ? openShell : undefined} />
                 <RequestCard />
                 <LimitCard />
+                <RetryCard />
                 <CacheNotice />
               </>
             }

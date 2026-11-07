@@ -19,7 +19,7 @@ export function QueuedTasks({
 }: {
   queuedMessages: QueuedMessage[];
   steerable: boolean;
-  held: "answer" | "login" | "limit" | null;
+  held: "answer" | "login" | "limit" | "retry" | null;
 }) {
   const {updateQueuedMessage, deleteQueuedMessage, steerQueuedMessage, reorderQueue} = useChatActions();
   const [editingQueuedID, setEditingQueuedID] = useState<number | null>(null);
@@ -95,7 +95,7 @@ export function QueuedTasks({
           Queued tasks · {queuedMessages.length}
           {held && (
             <span className="text-state-needs">
-              · held until {waitingForLogin ? "the agent is logged in" : waitingForAnswer ? "you answer the agent" : "the usage limit resets"}
+              · held until {waitingForLogin ? "the agent is logged in" : waitingForAnswer ? "you answer the agent" : held === "retry" ? "the failed task is tried again" : "the usage limit resets"}
             </span>
           )}
         </span>

@@ -25,6 +25,7 @@ import {
   type AgentUsage,
   type CostReport,
   type LimitStop,
+  type RetryWait,
 } from "@/lib/chat-api";
 import {features, type Features} from "@/lib/features";
 import type {AgentType} from "@/lib/agents";
@@ -86,6 +87,10 @@ const API_CALLS = [
   "continueAfterLimit",
   "cancelContinue",
   "dismissLimitStop",
+  // Trying a turn that failed on an upstream error again now, or not at
+  // all, which lets the queued tasks go.
+  "retryNow",
+  "cancelRetry",
   // The agent's sessions in the working directory (features.sessionHistory).
   "listSessions",
   // The subagents the agent ran in its session, and what one did
@@ -189,6 +194,9 @@ export interface ChatState {
   // The turn a usage limit stopped, while it holds the queue (native
   // transport); null otherwise.
   limitStop: LimitStop | null;
+  // The turn that failed on an upstream error and waits to be tried again,
+  // while it holds the queue (native transport); null otherwise.
+  retryWait: RetryWait | null;
   // The agent is starting (lifecycle "starting"): there is no turn yet, and
   // while it finds no login AgentAPI starts it again by itself.
   agentStarting: boolean;
@@ -284,6 +292,7 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
     settings: agentSettings,
     usage: agentUsage,
     limitStop,
+    retryWait,
     terminalAvailable,
     loginRequired,
     lifecycle,
@@ -332,7 +341,7 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
   const pendingRequestCount = useMemo(() => pendingRequests(requests).length, [requests]);
   const agentStarting = lifecycle === "starting";
   const needs = {pendingRequestCount, loginRequired: loginRequired !== null, limitStop: limitStop !== null};
-  const agentState = getAgentState({serverStatus, connectionStatus, ...needs});
+  const agentState = getAgentState({serverStatus, connectionStatus, retryWait: retryWait !== null, ...needs});
   const dispatch = useMemo<DispatchContext>(
     () => ({capabilities: agentStarting ? null : capabilities, serverStatus, pendingRequestCount}),
     [agentStarting, capabilities, pendingRequestCount, serverStatus],
@@ -480,6 +489,7 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
     sessionCost,
     terminalAvailable,
     limitStop,
+    retryWait,
     agentStarting,
     agentState,
     waitingFor: waitingFor(agentState, needs),
