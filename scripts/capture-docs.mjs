@@ -988,6 +988,14 @@ try {
     await fetch(`${hubAPI}/api/instances/${encodeURIComponent(instance.id)}`, {method: 'PATCH',
       headers: {Authorization: 'Bearer docs-token', 'Content-Type': 'application/json'}, body: JSON.stringify({pinned: true})});
   }
+  // Favorite prompts kept on the hub, as its settings add them.
+  await fetch(`${hubAPI}/api/favorites`, {method: 'PUT', headers: {Authorization: 'Bearer docs-token', 'Content-Type': 'application/json'},
+    body: JSON.stringify({favorites: [
+      {title: 'Review the diff', text: 'Review the diff on this branch.\nList the risks first, then the nits.'},
+      {title: 'Tests first', text: 'Write a failing test for the bug, then make it pass.'},
+      {text: 'Explain this code step by step, as to a new teammate.'},
+      {title: 'Release notes', text: 'Draft the release notes from the commits since the last tag.'},
+    ]})});
   const stopInstance = async (name, signal) => {
     const server = servers.find(entry => entry.name === name);
     server.child.kill(signal);
@@ -1107,11 +1115,29 @@ try {
       await addDialog.getByLabel('API token').fill('instance-token');
       await elementShot(page, addDialog, 'hub-add.png');
       await page.keyboard.press('Escape');
+      // The hub's settings: the favorites.
+      await addDialog.waitFor({state: 'detached'});
+      await page.getByRole('button', {name: 'Hub settings'}).click();
+      const settingsDialog = page.getByRole('dialog', {name: 'Hub settings'});
+      await settingsDialog.getByRole('list', {name: 'Favorites'}).waitFor();
+      await elementShot(page, settingsDialog, 'hub-settings-favorites.png');
+      await page.keyboard.press('Escape');
+      await settingsDialog.waitFor({state: 'detached'});
       // An instance that waits for an approval, open in the chat.
       await page.getByRole('list', {name: 'Instances'}).getByText('checkout-api').click();
       await page.frameLocator('iframe').getByRole('button', {name: 'Allow'}).first().waitFor();
       await page.waitForTimeout(800);
       await shot(page, 'hub-instance.png');
+      // An idle agent open from the hub, with the composer's menu of favorites.
+      await page.getByRole('list', {name: 'Instances'}).getByText('design-system').click();
+      const favoritesButton = page.frameLocator('iframe').getByRole('button', {name: 'Favorites'});
+      await favoritesButton.waitFor();
+      await page.frameLocator('iframe').getByRole('textbox', {name: 'Task message'}).fill('The button tokens changed in this branch.');
+      await favoritesButton.click();
+      await page.frameLocator('iframe').getByRole('menuitem', {name: /^Review the diff/}).waitFor();
+      await page.waitForTimeout(300);
+      await shot(page, 'composer-favorites.png');
+      await page.keyboard.press('Escape');
     }
     await page.context().close();
   }
