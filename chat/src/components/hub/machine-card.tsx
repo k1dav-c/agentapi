@@ -8,6 +8,7 @@ import {
   displayName,
   formatAgo,
   formatUSD,
+  hasRun,
   groupOf,
   instanceState,
   instanceVersion,
@@ -206,7 +207,7 @@ export function MachineCard({card, machine, prefix, order, hubVersion, root, gro
                   single ? "-ml-0.5 px-1 font-medium text-foreground" : on ? "bg-background font-medium text-foreground shadow-xs ring-1 ring-border dark:bg-accent" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
                   )}
                 >
-                  <AgentTabMark agentType={instance.agent_type} state={instanceState(instance)} />
+                  <AgentTabMark agentType={instance.agent_type} state={instanceState(instance)} ran={hasRun(instance)} />
                   {/* The other tabs are their marks, so the tabs and what the
                     agents share fit one line; the label says them in full. */}
                 {(on || single) && <span className="truncate">{shortAgent(instance.agent_type, agent)}</span>}

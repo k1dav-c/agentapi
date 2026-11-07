@@ -1,31 +1,35 @@
 "use client";
 
 import {AgentMark} from "@/components/agent-mark";
-import {displayName, instanceState, sameMachine, stateLabel, type HubInstance, type InstanceState} from "@/lib/hub";
+import {displayName, hasRun, instanceState, sameMachine, stateLabel, type HubInstance, type InstanceState} from "@/lib/hub";
 import type {MachineAgent} from "@/lib/hub-frame";
 import {cn} from "@/lib/utils";
 import {agentName} from "./instance-row";
 
-// The dot on an agent's tab, in its state's color: none while it is idle
-// or connecting, which leaves the ones to look at standing out.
-const dotTone: Partial<Record<InstanceState, string>> = {
+// The dot on an agent's tab, in its state's color, so a tab says its
+// state without its label. An idle agent's is grey: solid when it has run,
+// a ring when it hasn't yet.
+const dotTone: Record<InstanceState, string> = {
   "needs-you": "bg-state-needs",
   working: "bg-state-working animate-pulse",
   unread: "bg-state-ready",
+  idle: "bg-muted-foreground/70",
   muted: "bg-muted-foreground/50",
+  connecting: "bg-background border border-muted-foreground/70 animate-pulse",
   unreachable: "bg-state-fault",
   stopped: "bg-muted-foreground",
   unknown: "bg-muted-foreground/50",
 };
+const notRunTone = "bg-background border border-muted-foreground/70";
 
 // AgentTabMark is an agent's mark on its tab, with its state's dot at the
-// corner.
-export function AgentTabMark({agentType, state, className}: {agentType?: string; state: InstanceState; className?: string}) {
-  const dot = dotTone[state];
+// corner; ran: it has run (hasRun), which an idle agent's dot shows.
+export function AgentTabMark({agentType, state, ran = true, className}: {agentType?: string; state: InstanceState; ran?: boolean; className?: string}) {
+  const dot = state === "idle" && !ran ? notRunTone : dotTone[state];
   return (
-    <span className={cn("relative inline-flex shrink-0", className)} data-tab-state={state}>
+    <span className={cn("relative inline-flex shrink-0", className)} data-tab-state={state} data-tab-ran={ran || undefined}>
       <AgentMark agentType={agentType || "custom"} className="size-4" />
-      {dot && <span aria-hidden="true" className={cn("absolute -right-1 -bottom-0.5 size-2 rounded-full ring-2 ring-background", dot)} />}
+      <span aria-hidden="true" className={cn("absolute -right-1 -bottom-0.5 size-2 rounded-full ring-2 ring-background", dot)} />
     </span>
   );
 }
@@ -42,6 +46,7 @@ export function machineAgent(instance: HubInstance): MachineAgent {
     name: displayName(instance),
     state: instanceState(instance),
     label: stateLabel(instance),
+    ran: hasRun(instance),
     agentType: instance.agent_type || undefined,
     agent: agentName(instance) || undefined,
   };
@@ -78,7 +83,7 @@ export function MachineSwitch({agents, current, onOpen}: {agents: MachineAgent[]
               open ? "bg-background shadow-xs ring-1 ring-border dark:bg-accent" : "opacity-70 hover:bg-accent/60 hover:opacity-100",
             )}
           >
-            <AgentTabMark agentType={agent.agentType} state={agent.state} />
+            <AgentTabMark agentType={agent.agentType} state={agent.state} ran={agent.ran} />
           </button>
         );
       })}

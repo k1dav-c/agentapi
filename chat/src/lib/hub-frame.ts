@@ -40,6 +40,8 @@ export type MachineAgent = {
   name: string;
   state: InstanceState;
   label: string;
+  // ran: it has run (hasRun); a hub before 3.6 doesn't say.
+  ran?: boolean;
   agentType?: string;
   agent?: string;
 };

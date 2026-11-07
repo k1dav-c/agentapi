@@ -1,5 +1,5 @@
 import {describe, expect, test} from "bun:test";
-import {activity, agentLabel, agentOf, agentsIn, countAgents, matchesAgents, nothingMatches, parseAgents, shownAgents, toggleAgent, compareVersions, countedSpends, countedTokens, currentSpend, formatTokens, formatUSD, tokenTotals, tokensTitle, instanceVersion, olderThanHub, parseVersion, spendTitle, spendTotals, shortError, applyHubEvent, chatURL, countFilters, formatAgo, formatElapsed, matchesSearch, activeAgent, groupByMachine, groupInstances, hostPrefix, sameMachine, tabOrder, groupNames, hubRoot, machineOf, machineSubtotals, sharedVersion, instanceState, needsYou, sortInstances, stateLabel, usagePercent, versionTitle, versionTotals, formatWork, workSeconds, workTitle, workTotals, type HubInstance, type Spend, type Summary} from "./hub";
+import {activity, agentLabel, agentOf, agentsIn, countAgents, matchesAgents, nothingMatches, parseAgents, shownAgents, toggleAgent, compareVersions, countedSpends, countedTokens, currentSpend, formatTokens, formatUSD, tokenTotals, tokensTitle, instanceVersion, olderThanHub, parseVersion, spendTitle, spendTotals, shortError, applyHubEvent, chatURL, countFilters, formatAgo, formatElapsed, matchesSearch, activeAgent, groupByMachine, groupInstances, hasRun, hostPrefix, sameMachine, tabOrder, groupNames, hubRoot, machineOf, machineSubtotals, sharedVersion, instanceState, needsYou, sortInstances, stateLabel, usagePercent, versionTitle, versionTotals, formatWork, workSeconds, workTitle, workTotals, type HubInstance, type Spend, type Summary} from "./hub";
 
 const summary = (overrides: Partial<Summary> = {}): Summary =>
   ({
@@ -425,6 +425,13 @@ describe("agent filter", () => {
 });
 
 describe("machines", () => {
+  test("an instance has run with a task, or work the hub saw this week", () => {
+    expect(hasRun(instance("a"))).toBe(false);
+    expect(hasRun(instance("a", {work: {last_24h_seconds: 0, last_7d_seconds: 0}}))).toBe(false);
+    expect(hasRun(instance("a", {work: {last_24h_seconds: 0, last_7d_seconds: 60}}))).toBe(true);
+    expect(hasRun(instance("a", {work: {last_24h_seconds: 0, last_7d_seconds: 0, working_since: "2026-11-01T09:00:00Z"}}))).toBe(true);
+  });
+
   test("the start most machines' names share, up to a - or .", () => {
     const coder = ["coder-dave-api", "coder-dave-web", "coder-dave-web-2", "gpu-9e61"];
     expect(hostPrefix(coder)).toBe("coder-dave-");
