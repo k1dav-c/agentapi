@@ -100,6 +100,34 @@ export function parseFilePathRef(text: string): FilePathRef | null {
   return {path, ...(line ? {line} : {}), ...(col ? {col} : {})};
 }
 
+// fileLinkRef is the file a Markdown link's target names, or null for a
+// URL: a target without a scheme (http:, mailto:, ...) that isn't an
+// anchor, a query or another host (//), percent-decoded, with a line from
+// #L42 or :42. In the chat such a link would resolve against the page's
+// address, the hub's in its frame, and miss.
+export function fileLinkRef(href: string): FilePathRef | null {
+  if (!href || /^[a-z][a-z0-9+.-]*:/i.test(href) || /^[#?]/.test(href) || href.startsWith("//")) return null;
+  let target = href;
+  let line: number | undefined;
+  const anchor = target.indexOf("#");
+  if (anchor >= 0) {
+    line = Number(/^L(\d{1,7})$/.exec(target.slice(anchor + 1))?.[1]) || undefined;
+    target = target.slice(0, anchor);
+  }
+  try {
+    target = decodeURIComponent(target);
+  } catch {
+    return null;
+  }
+  const suffix = LINE_SUFFIX.exec(target);
+  if (suffix) {
+    target = target.slice(0, suffix.index);
+    line ??= Number(suffix[1]) || undefined;
+  }
+  if (!target || target.length > MAX_PATH_LENGTH || target.endsWith("/") || /[\0\n\r]/.test(target)) return null;
+  return {path: target, ...(line ? {line} : {})};
+}
+
 // The last segment of a path.
 export function fileName(path: string): string {
   return path.replace(/\/+$/, "").split("/").pop() || path;

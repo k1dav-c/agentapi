@@ -1,5 +1,5 @@
 import {describe, expect, test} from "bun:test";
-import {fileName, parseFilePathRef, toolFileTargets, viewerTab, type FileTarget} from "./file-refs";
+import {fileLinkRef, fileName, parseFilePathRef, toolFileTargets, viewerTab, type FileTarget} from "./file-refs";
 
 describe("parseFilePathRef", () => {
   test("paths with a directory or a file name", () => {
@@ -233,5 +233,23 @@ describe("viewerTab", () => {
     expect(viewerTab("delete")).toBe("diff");
     expect(viewerTab("read")).toBe("file");
     expect(viewerTab("image")).toBe("file");
+  });
+});
+
+describe("fileLinkRef", () => {
+  test("a link's target that names a file", () => {
+    expect(fileLinkRef("/home/k1dave6412/vocus-export/research/%E5%88%86%E9%BB%9E%E8%88%87%E8%82%A1%E7%A5%A8%E9%80%90%E7%AF%87%E5%B0%8D%E7%85%A7.csv")).toEqual({
+      path: "/home/k1dave6412/vocus-export/research/分點與股票逐篇對照.csv",
+    });
+    expect(fileLinkRef("docs/hub.md")).toEqual({path: "docs/hub.md"});
+    expect(fileLinkRef("./src/app.ts#L42")).toEqual({path: "./src/app.ts", line: 42});
+    expect(fileLinkRef("lib/a.go:12")).toEqual({path: "lib/a.go", line: 12});
+    expect(fileLinkRef("My%20Notes/plan.md")).toEqual({path: "My Notes/plan.md"});
+  });
+
+  test("a URL, an anchor or a directory is none", () => {
+    for (const href of ["https://example.com/a.md", "mailto:a@b.c", "file:///tmp/a", "#section", "?q=1", "//cdn.example.com/a.js", "docs/", "", "%E5%"]) {
+      expect(fileLinkRef(href)).toBeNull();
+    }
   });
 });

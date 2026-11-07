@@ -150,6 +150,16 @@ describe("ProcessedMessage file paths", () => {
     expect(html).toContain('aria-haspopup="dialog"');
   });
 
+  test("a Markdown link to a file opens it instead of going to the page's address", () => {
+    const html = renderLinked("See [the table](/home/me/research/%E5%B0%8D%E7%85%A7.csv) and [the docs](https://example.com/docs).");
+    expect(html).toContain('title="Open /home/me/research/對照.csv"');
+    expect(html).toContain('aria-haspopup="dialog"');
+    expect(html).not.toContain('href="/home/me/research');
+    expect(html).toContain('href="https://example.com/docs"');
+    // Without the file viewer, the label alone.
+    expect(renderLinked("[the table](/home/me/a.csv)", true, false)).not.toContain("<a");
+  });
+
   test("other inline code and fenced code stay plain", () => {
     const html = renderLinked("Run `go test ./...` with `-v`.\n\n```\nlib/httpapi/files.go\n```\n\n```go\n// main.go\n```");
     expect(html).not.toContain('role="button"');
