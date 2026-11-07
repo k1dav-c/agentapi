@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -241,9 +243,13 @@ func readPipedPrompt(logger *slog.Logger) (string, error) {
 	return string(data), nil
 }
 
+// maxRetries is the most retries --retry-delays may list.
+const maxRetries = 100
+
 // parseRetryDelays reads --retry-delays: durations such as 30s or 2m, given
-// as a list, comma- or space-separated. None, off or 0 turn retries off,
-// which is an empty list rather than nil (the default).
+// as a list, comma- or space-separated, a delay*n repeating one n times.
+// None, off or 0 turn retries off, which is an empty list rather than nil
+// (the default).
 func parseRetryDelays(values []string) ([]time.Duration, error) {
 	delays := []time.Duration{}
 	for _, value := range values {
@@ -251,14 +257,27 @@ func parseRetryDelays(values []string) ([]time.Duration, error) {
 			if field == "off" || field == "0" {
 				return []time.Duration{}, nil
 			}
-			d, err := time.ParseDuration(field)
+			// 5m*12: the delay twelve times.
+			delay, times, repeated := strings.Cut(field, "*")
+			count := 1
+			if repeated {
+				n, err := strconv.Atoi(times)
+				if err != nil || n < 1 {
+					return nil, fmt.Errorf("%s: repeat a delay 1 or more times", field)
+				}
+				count = n
+			}
+			d, err := time.ParseDuration(delay)
 			if err != nil {
 				return nil, err
 			}
 			if d <= 0 {
 				return nil, fmt.Errorf("%s: a delay is longer than 0", field)
 			}
-			delays = append(delays, d)
+			if len(delays)+count > maxRetries {
+				return nil, fmt.Errorf("more than %d retries", maxRetries)
+			}
+			delays = append(delays, slices.Repeat([]time.Duration{d}, count)...)
 		}
 	}
 	return delays, nil
