@@ -15,6 +15,9 @@
 - The hub's API has `GET` and `PUT /api/favorites`, and its event stream sends `favorites`. They
   are kept in the hub's file of instances, still version 1: a hub before 3.5 reads it, and drops the
   favorites when it writes it.
+- `POST /upload` and the chat's attachments take files of up to 100 MB (10 MB before). The server
+  writes an upload to disk as it reads it instead of holding it in memory. An image over 10 MB
+  still reaches the agent as its path rather than as an image.
 
 ## v3.4.0
 
