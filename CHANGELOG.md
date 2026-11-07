@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- A Markdown link in the agent's reply whose target is a path, such as
+  `[the table](/home/me/research/對照.csv)`, opens the file in the file viewer (at its line with
+  `#L12` or `:12`). The browser resolved it against the page's address and missed it, more so in the
+  hub, where the chat sits in a frame on the hub's address.
+
 ## v3.6.0
 
 ### Features

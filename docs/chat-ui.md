@@ -304,8 +304,8 @@ every 5 seconds, and messages wait in the queue meanwhile. (The screenshot shows
 ## Files
 
 File names in the chat open a viewer on the file the agent works on: a file name on a tool call's
-row, a path in inline code in the agent's reply (`lib/foo.go:12` opens at line 12) and the
-Explorer's Files tab. Only files inside the agent's working directory open. The viewer's header
+row, a path in inline code in the agent's reply (`lib/foo.go:12` opens at line 12), a Markdown link
+to a path (`[table](/home/me/notes.csv)`, also with `#L12`) and the Explorer's Files tab. Only files inside the agent's working directory open. The viewer's header
 reloads the file; on a phone the viewer takes the whole screen.
 
 ![The viewer on my-app/docs/notes.md, with a note that docs/notes.md isn't in the working directory and this is the file found for it](screenshots/file-find.png)
