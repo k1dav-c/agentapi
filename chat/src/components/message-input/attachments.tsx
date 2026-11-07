@@ -10,7 +10,7 @@ import {isImageFile, uploadedImageURL} from "@/lib/uploads";
 import {parsePersistedAttachments, removeAttachmentToken} from "@/lib/attachment-state";
 import {usePersisted} from "@/lib/use-persisted";
 
-export const MAX_UPLOAD_SIZE = 10 * 1024 * 1024;
+export const MAX_UPLOAD_SIZE = 100 * 1024 * 1024;
 
 export interface Attachment {
   id: string;
@@ -97,7 +97,7 @@ export function useAttachments({
       file,
       progress: 0,
       status: file.size > MAX_UPLOAD_SIZE ? "failed" : "uploading",
-      error: file.size > MAX_UPLOAD_SIZE ? "File exceeds the 10 MB upload limit." : undefined,
+      error: file.size > MAX_UPLOAD_SIZE ? "File exceeds the 100 MB upload limit." : undefined,
     }));
     setAttachments((previous) => [...previous, ...added]);
     added.filter((attachment) => attachment.status === "uploading").forEach((attachment) => void upload(attachment));
@@ -221,7 +221,7 @@ export function AttachmentList({
         </div>
       ))}
       <p className="px-1 text-[10px] text-muted-foreground">
-        Maximum file size: 10 MB per file.
+        Maximum file size: 100 MB per file.
       </p>
     </div>
   );

@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -61,6 +62,67 @@ func TestUploadStore(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, removed)
 	assert.NoDirExists(t, temp.dir)
+}
+
+func TestUploadStoreSaveFrom(t *testing.T) {
+	t.Parallel()
+	dir := filepath.Join(t.TempDir(), "uploads")
+	store, err := newUploadStore(dir)
+	require.NoError(t, err)
+	// noTemp checks no temporary file is left in the store.
+	noTemp := func() {
+		t.Helper()
+		entries, err := os.ReadDir(dir)
+		require.NoError(t, err)
+		for _, entry := range entries {
+			assert.False(t, strings.HasPrefix(entry.Name(), ".upload-"), entry.Name())
+		}
+	}
+
+	content := bytes.Repeat([]byte("abc"), 1000)
+	path, checksum, err := store.saveFrom("big.bin", bytes.NewReader(content), int64(len(content)))
+	require.NoError(t, err)
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, content, data)
+	noTemp()
+
+	// The same content again is the same file.
+	again, sameChecksum, err := store.saveFrom("big.bin", bytes.NewReader(content), int64(len(content)))
+	require.NoError(t, err)
+	assert.Equal(t, path, again)
+	assert.Equal(t, checksum, sameChecksum)
+	noTemp()
+
+	// One byte over the limit is refused, and nothing stays.
+	_, _, err = store.saveFrom("big.bin", bytes.NewReader(content), int64(len(content))-1)
+	require.ErrorIs(t, err, errUploadTooLarge)
+	noTemp()
+
+	for _, name := range []string{"", ".", "..", "a/b", "../b"} {
+		_, _, err = store.saveFrom(name, bytes.NewReader([]byte("x")), 10)
+		assert.Error(t, err, "name %q", name)
+	}
+	noTemp()
+}
+
+func TestUploadStoreRefusesALinkedDirectory(t *testing.T) {
+	t.Parallel()
+	dir := filepath.Join(t.TempDir(), "uploads")
+	store, err := newUploadStore(dir)
+	require.NoError(t, err)
+	_, checksum, err := store.save("probe.txt", []byte("linked"))
+	require.NoError(t, err)
+	// The content's directory replaced by a link out of the store.
+	outside := t.TempDir()
+	require.NoError(t, os.RemoveAll(filepath.Join(dir, checksum)))
+	require.NoError(t, os.Symlink(outside, filepath.Join(dir, checksum)))
+
+	_, _, err = store.save("probe.txt", []byte("linked"))
+	require.Error(t, err)
+	entries, err := os.ReadDir(outside)
+	require.NoError(t, err)
+	assert.Empty(t, entries, "nothing is written through the link")
 }
 
 func TestUploadName(t *testing.T) {
