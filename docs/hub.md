@@ -481,8 +481,9 @@ machine's host name alone, wrapped rather than cut; the start most machines' nam
 `coder-<user>-`) is dimmed, so the rest tells them apart.
 
 Below the name, each agent has a tab with its mark and a dot in its state's color: amber when it
-needs you, blue while it works, green when it finished unseen, grey when muted or stopped, red when
-unreachable, none while idle. The picked tab also says the agent's short name (Claude, Codex, Pi);
+needs you, blue while it works, green when it finished unseen, grey when muted, stopped or idle, red
+when unreachable. An idle agent's dot is a grey ring until it has run (a task, or work the hub saw
+this week), so a tab says its state without its label. The picked tab also says the agent's short name (Claude, Codex, Pi);
 hover over the others for theirs. Tabs keep their order, by agent, whatever their states. Beside
 them is what the agents share: their AgentAPI version and what they spent in the last 24 hours. A
 card with one agent shown (the only one, or the only one a filter lets through) has a label instead
@@ -557,9 +558,9 @@ version, with the chat's own search, terminal and Explorer buttons. When the mac
 agents the hub watches, the bar has a button for each of them too, in any list order: their marks
 with the same state dots as the [By machine](#by-machine) tabs, the open one marked. A click opens
 another in its place, so you switch between Claude Code and Codex on one machine without the list.
-**New tab** opens the chat on its own, and **×** (or **Esc**) goes back to the overview. Opening an
-agent is a page in the browser's history, so Back returns to the list or the overview; moving from
-one agent to another doesn't add one. The URL keeps the agent (`#<id>`), so a reload or a bookmark
+**New tab** opens the chat on its own, and **×** (or **Esc**) goes back to the overview. Each agent
+you open is a page in the browser's history, so Back returns to the agent before it, and from the
+first to the list or the overview; **×** returns to the list at once, past them all. The URL keeps the agent (`#<id>`), so a reload or a bookmark
 comes back to it. An AgentAPI update under way shows in the bar too, with **Cancel** while it waits
 for the task ([Updating from the hub](#updating-from-the-hub)).
 

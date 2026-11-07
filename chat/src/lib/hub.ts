@@ -58,6 +58,13 @@ export interface HubInstance {
   work?: HubWork;
 }
 
+// hasRun says whether an instance has run: a task in its conversation, or
+// work the hub saw this week.
+export function hasRun(instance: HubInstance): boolean {
+  const work = instance.work;
+  return (instance.summary?.tasks ?? 0) > 0 || !!work?.working_since || (work?.last_7d_seconds ?? 0) > 0;
+}
+
 // HubWork is how long the hub saw an instance working, as of when it sent
 // it: the seconds of the last 24 hours and 7 days from the spans that
 // ended, and since when it works now. The page adds the time since then

@@ -2,7 +2,7 @@ import {describe, expect, test} from "bun:test";
 import {renderToStaticMarkup} from "react-dom/server";
 import type {HubInstance} from "@/lib/hub";
 import {InstanceBar} from "./instance-bar";
-import {machineAgents, MachineSwitch, shortAgent} from "./machine-tabs";
+import {AgentTabMark, machineAgents, MachineSwitch, shortAgent} from "./machine-tabs";
 
 const on = (id: string, hostname: string | undefined, agentType: string, overrides: Partial<HubInstance> = {}): HubInstance => ({
   id,
@@ -37,6 +37,17 @@ describe("machineAgents", () => {
   test("none on a machine of one, or one that doesn't say", () => {
     expect(machineAgents(all, all[3])).toEqual([]);
     expect(machineAgents(all, all[4])).toEqual([]);
+  });
+
+  test("every state has a dot; an idle agent's says whether it has run", () => {
+    const dot = (html: string) => /absolute -right-1[^"]*"/.exec(html)?.[0] ?? "";
+    expect(dot(renderToStaticMarkup(<AgentTabMark agentType="codex" state="idle" ran />))).toContain("bg-muted-foreground/70");
+    const fresh = dot(renderToStaticMarkup(<AgentTabMark agentType="codex" state="idle" ran={false} />));
+    expect(fresh).toContain("border");
+    expect(fresh).toContain("bg-background");
+    for (const state of ["needs-you", "working", "unread", "muted", "connecting", "unreachable", "stopped", "unknown"] as const) {
+      expect(dot(renderToStaticMarkup(<AgentTabMark agentType="codex" state={state} />))).not.toBe("");
+    }
   });
 
   test("a tab names Claude Code short", () => {
