@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- A turn that failed on a transient API error is tried again 15 times by default, about an hour in
+  all: after 30 seconds, 1 and 2 minutes, then every 5 minutes (`--retry-delays 30s,1m,2m,5m*12`;
+  it was `30s,2m,5m`). `--retry-delays` takes `delay*n` for a delay repeated n times, up to 100
+  retries.
+
 ## v3.6.1
 
 ### Fixes

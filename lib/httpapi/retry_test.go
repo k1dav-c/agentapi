@@ -92,7 +92,7 @@ func TestNative_CancelRetry(t *testing.T) {
 	n.send("queued", "")
 	a.Sink().TurnCompleted(badGateway)
 	require.NotNil(t, n.retryWait(), "retries are on by default")
-	assert.Equal(t, 3, n.retryWait().Attempts)
+	assert.Equal(t, 15, n.retryWait().Attempts, "30s, 1m, 2m, then 5m twelve times")
 
 	require.Equal(t, http.StatusOK, n.do(http.MethodDelete, "/retry", nil, nil))
 	assert.Nil(t, n.retryWait())

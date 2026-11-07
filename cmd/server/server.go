@@ -626,7 +626,7 @@ func serverFlagSpecs() []flagSpec {
 		{FlagTransport, "", "native", "Deprecated: native, the only transport, which drives the agent through its own structured protocol. AgentAPI 3 has no pty", "string"},
 		{FlagTerminal, "", true, "Offer a shell in the agent's working directory to the chat (its Terminal button) and at GET /terminal", "bool"},
 		{FlagAutoContinue, "", false, "When a usage limit stops the agent's turn, continue it once the limit resets, if the agent says when", "bool"},
-		{FlagRetryDelays, "", []string{"30s", "2m", "5m"}, "When the agent's turn fails on an upstream error that may pass (an HTTP 5xx or 429, an overloaded API), wait this long and ask the agent to go on: one delay per retry in a row, after which the failure is an error. Comma-separated via flag, space-separated via AGENTAPI_RETRY_DELAYS; off (or 0) turns retries off", "stringSlice"},
+		{FlagRetryDelays, "", []string{"30s", "1m", "2m", "5m*12"}, "When the agent's turn fails on an upstream error that may pass (an HTTP 5xx or 429, an overloaded API), wait this long and ask the agent to go on: one delay per retry in a row (5m*12 is 5m twelve times), after which the failure is an error. Comma-separated via flag, space-separated via AGENTAPI_RETRY_DELAYS; off (or 0) turns retries off", "stringSlice"},
 		{FlagPrices, "", "", "JSON file of model prices per million tokens, which add to or replace the built-in ones for the sessions' API-equivalent cost (GET /sessions, GET /cost)", "string"},
 		{FlagWebhookURL, "", "", "URL the webhook events are POSTed to (by default only run.status_changed; see --webhook-events)", "string"},
 		{FlagWebhookTimeout, "", 10 * time.Second, "Timeout for each webhook delivery attempt", "duration"},

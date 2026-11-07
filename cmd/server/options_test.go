@@ -80,7 +80,7 @@ func TestLoadServerOptions(t *testing.T) {
 		},
 		"retries wait the default delays": {
 			check: func(t *testing.T, opts serverOptions) {
-				assert.Nil(t, opts.retryDelays, "the conversation's default: 30s, 2m, 5m")
+				assert.Nil(t, opts.retryDelays, "the conversation's default: 30s, 1m, 2m, then 5m twelve times")
 			},
 		},
 		"--retry-delays, from a flag, a variable or the config file": {
@@ -88,11 +88,12 @@ func TestLoadServerOptions(t *testing.T) {
 			check: func(t *testing.T, opts serverOptions) {
 				assert.Equal(t, []time.Duration{10 * time.Second, time.Minute}, opts.retryDelays)
 				for value, want := range map[string][]time.Duration{
-					"20s,2m": {20 * time.Second, 2 * time.Minute},
-					"20s 2m": {20 * time.Second, 2 * time.Minute},
-					"off":    {},
-					"0":      {},
-					"":       {},
+					"20s,2m":   {20 * time.Second, 2 * time.Minute},
+					"20s 2m":   {20 * time.Second, 2 * time.Minute},
+					"10s,1m*3": {10 * time.Second, time.Minute, time.Minute, time.Minute},
+					"off":      {},
+					"0":        {},
+					"":         {},
 				} {
 					other, err := loadServerOptions(flagsWith(map[string]any{FlagRetryDelays: value}), []string{"claude"})
 					require.NoError(t, err)
@@ -185,18 +186,20 @@ func TestLoadServerOptionsRefuses(t *testing.T) {
 		values map[string]any
 		err    string
 	}{
-		"an unknown agent type":         {map[string]any{FlagType: "nope"}, "AgentAPI 3 runs Claude Code, Codex and Pi natively, not nope"},
-		"an agent of AgentAPI 2":        {map[string]any{FlagType: "aider"}, "for other agents, use AgentAPI v2.5.1"},
-		"PTY, removed":                  {map[string]any{FlagTransport: "pty"}, "AgentAPI 3 has no PTY transport: it runs Claude Code, Codex and Pi natively; drop --transport pty (or AGENTAPI_TRANSPORT=pty), or use AgentAPI v2.5.1"},
-		"--load-state without a file":   {map[string]any{FlagLoadState: true}, "--load-state requires --state-file to be set"},
-		"--save-state without a file":   {map[string]any{FlagSaveState: true}, "--save-state requires --state-file to be set"},
-		"a retry delay that isn't one":  {map[string]any{FlagRetryDelays: "30s,soon"}, `invalid --retry-delays: time: invalid duration "soon"`},
-		"a retry delay of no time":      {map[string]any{FlagRetryDelays: "-1s"}, "invalid --retry-delays: -1s: a delay is longer than 0"},
-		"an unknown transport":          {map[string]any{FlagTransport: "ssh"}, `unknown --transport "ssh": AgentAPI 3 drives every agent natively`},
-		"ACP, removed":                  {map[string]any{FlagTransport: "acp"}, "the experimental ACP transport was removed"},
-		"--experimental-acp, removed":   {map[string]any{FlagExperimentalACP: true}, "the experimental ACP transport was removed"},
-		"a bind address with a port":    {map[string]any{FlagBind: "127.0.0.1:3284"}, "invalid --bind: '127.0.0.1:3284' must not include a port; use --port"},
-		"a bind address that isn't one": {map[string]any{FlagBind: "not a host"}, "invalid --bind"},
+		"an unknown agent type":          {map[string]any{FlagType: "nope"}, "AgentAPI 3 runs Claude Code, Codex and Pi natively, not nope"},
+		"an agent of AgentAPI 2":         {map[string]any{FlagType: "aider"}, "for other agents, use AgentAPI v2.5.1"},
+		"PTY, removed":                   {map[string]any{FlagTransport: "pty"}, "AgentAPI 3 has no PTY transport: it runs Claude Code, Codex and Pi natively; drop --transport pty (or AGENTAPI_TRANSPORT=pty), or use AgentAPI v2.5.1"},
+		"--load-state without a file":    {map[string]any{FlagLoadState: true}, "--load-state requires --state-file to be set"},
+		"--save-state without a file":    {map[string]any{FlagSaveState: true}, "--save-state requires --state-file to be set"},
+		"a retry delay that isn't one":   {map[string]any{FlagRetryDelays: "30s,soon"}, `invalid --retry-delays: time: invalid duration "soon"`},
+		"a retry delay of no time":       {map[string]any{FlagRetryDelays: "-1s"}, "invalid --retry-delays: -1s: a delay is longer than 0"},
+		"a retry delay repeated no time": {map[string]any{FlagRetryDelays: "5m*0"}, "invalid --retry-delays: 5m*0: repeat a delay 1 or more times"},
+		"too many retries":               {map[string]any{FlagRetryDelays: "30s,5m*100"}, "invalid --retry-delays: more than 100 retries"},
+		"an unknown transport":           {map[string]any{FlagTransport: "ssh"}, `unknown --transport "ssh": AgentAPI 3 drives every agent natively`},
+		"ACP, removed":                   {map[string]any{FlagTransport: "acp"}, "the experimental ACP transport was removed"},
+		"--experimental-acp, removed":    {map[string]any{FlagExperimentalACP: true}, "the experimental ACP transport was removed"},
+		"a bind address with a port":     {map[string]any{FlagBind: "127.0.0.1:3284"}, "invalid --bind: '127.0.0.1:3284' must not include a port; use --port"},
+		"a bind address that isn't one":  {map[string]any{FlagBind: "not a host"}, "invalid --bind"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()

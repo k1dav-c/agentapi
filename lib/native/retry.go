@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	conv "github.com/coder/agentapi/lib/conversation"
@@ -12,8 +13,9 @@ import (
 // ErrNoRetryWait is returned when no failed turn waits to be tried again.
 var ErrNoRetryWait = errors.New("no failed turn waits to be tried again")
 
-// defaultRetryDelays are Config.RetryDelays' default.
-var defaultRetryDelays = []time.Duration{30 * time.Second, 2 * time.Minute, 5 * time.Minute}
+// defaultRetryDelays are Config.RetryDelays' default (--retry-delays
+// 30s,1m,2m,5m*12): 15 retries, about an hour in all.
+var defaultRetryDelays = append([]time.Duration{30 * time.Second, time.Minute, 2 * time.Minute}, slices.Repeat([]time.Duration{5 * time.Minute}, 12)...)
 
 // RetryWait is a turn that failed on a transient upstream error (an HTTP
 // 5xx or 429, an overloaded API) after the agent's own retries. It holds

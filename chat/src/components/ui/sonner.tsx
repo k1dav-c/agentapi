@@ -23,6 +23,7 @@ function ClearAll({ toasts }: { toasts: ToastT[] }) {
   return (
     <button
       type="button"
+      data-toasts-clear
       onClick={() => clearToasts(toasts)}
       className="fixed right-4 bottom-4 left-4 z-[1000000000] h-9 rounded-lg border bg-popover text-sm font-medium text-popover-foreground shadow-md transition-colors outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 min-[601px]:left-auto min-[601px]:right-6 min-[601px]:bottom-6 min-[601px]:w-[356px]"
     >

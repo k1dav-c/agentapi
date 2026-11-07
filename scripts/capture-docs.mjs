@@ -295,8 +295,9 @@ const client = base => {
   return {base, request, status, idle, send, pending};
 };
 
-// Screenshots hide the Next.js dev overlay and toasts, which only cover parts of the views.
-const screenshotStyle = 'nextjs-portal, [data-sonner-toaster] { visibility: hidden !important; }';
+// Screenshots hide the Next.js dev overlay and toasts (with their Clear all), which only cover parts
+// of the views.
+const screenshotStyle = 'nextjs-portal, [data-sonner-toaster], [data-toasts-clear] { visibility: hidden !important; }';
 const save = async (target, name, options = {}) => {
   await target.screenshot({path: path.join(output, name), animations: 'disabled', style: screenshotStyle, ...options});
   images.push(name);

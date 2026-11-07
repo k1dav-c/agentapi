@@ -87,8 +87,8 @@ has the complete commit history.
 - When a [usage limit](#usage-limits) stops a turn, the queue waits until the
   limit resets, and the turn can continue by itself then.
 - A turn that fails on a [transient API error](#transient-api-errors) (a 502
-  from a gateway, an overloaded API) is tried again after 30 seconds, 2 and 5
-  minutes, before the queue goes on.
+  from a gateway, an overloaded API) is tried again after 30 seconds, 1 and 2
+  minutes, then every 5 minutes, 15 times, before the queue goes on.
 - AgentAPI reports a missing or expired [login](#logging-in) with the command
   to run, and starts the agent by itself once it is logged in.
 - A shared [terminal](#terminal) in the agent's working directory, for logins
@@ -718,7 +718,7 @@ A usage limit (see [Usage limits](#usage-limits)) and a missing login come first
 
 `GET /status` and `status_change` report `retry_wait`: the agent's `message`, the `api_status`
 when known, when the turn failed, which retry comes next (`attempt` of `attempts`) and `retry_at`.
-The failure shows as a warning ("… AgentAPI tries again in 30s (1 of 3)."), and the queued messages
+The failure shows as a warning ("… AgentAPI tries again in 30s (1 of 15)."), and the queued messages
 wait. At `retry_at` AgentAPI sends "Continue from where you left off.", so the agent goes on without
 your message twice. A retry that fails the same way waits the next delay; after the last, the
 failure is an error and the queue goes on. A turn that works, or a message you send yourself,
@@ -726,14 +726,15 @@ starts the count again.
 
 - `POST /retry` tries again now.
 - `DELETE /retry` cancels the retry, so the queued messages go out.
-- `--retry-delays` sets the waits, one per retry: `30s,2m,5m` by default; `off` turns retries off.
+- `--retry-delays` sets the waits, one per retry, `5m*12` for 5 minutes twelve times: `30s,1m,2m,5m*12`
+  by default, 15 retries in about an hour; `off` turns retries off.
 
 The wait is kept with `--state-db`, so the retry still goes out after AgentAPI restarts. The failed
 turn's [task](#tasks) ends `failed`; the retry is a task of its own. The summary's `attention` stays
 `none`, and a hub shows the agent as working. In the chat, a card above the composer counts down to
 the retry, with **Retry now** and **Cancel**.
 
-![A task the API's gateway failed with a 502: the card counting down to the first of three retries, and a task held in the queue](docs/screenshots/retry-card.png)
+![A task the API's gateway failed with a 502: the card counting down to the first of 15 retries, and a task held in the queue](docs/screenshots/retry-card.png)
 
 ### Terminal
 
@@ -1836,7 +1837,7 @@ state-db: ~/.agentapi/state/{port}.db
 | `--state-db` | | SQLite file that keeps the conversation and resumes the agent's session; `{port}` and `{hostname}` are filled in; see [Persistent sessions](#persistent-sessions) |
 | `--terminal` | `true` | Shell in the agent's working directory for the chat; see [Terminal](#terminal) |
 | `--auto-continue` | `false` | Continue a turn stopped by a usage limit once the limit resets; see [Usage limits](#usage-limits) |
-| `--retry-delays` | `30s,2m,5m` | Waits before a turn that failed on a transient API error is tried again, one per retry; `off` turns retries off; see [Transient API errors](#transient-api-errors) |
+| `--retry-delays` | `30s,1m,2m,5m*12` | Waits before a turn that failed on a transient API error is tried again, one per retry (`5m*12`: twelve times); `off` turns retries off; see [Transient API errors](#transient-api-errors) |
 | `--prices` | | JSON file of model prices per million tokens, which add to or replace the built-in ones; see [Session costs](#session-costs) |
 | `-s`, `--state-file` | | Deprecated: the PTY transport's former persistence, imported once into a state database next to it (`--state-db` names another) |
 | `--load-state`, `--save-state` | | Deprecated: `--load-state=false` skips the import; `--save-state` has no effect |
