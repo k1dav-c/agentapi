@@ -36,6 +36,7 @@ func (o *observer) Usage(u native.AgentUsage) {
 
 func (o *observer) Started(native.Capabilities) {}
 func (o *observer) LimitStop(*native.LimitStop) {}
+func (o *observer) RetryWait(*native.RetryWait) {}
 func (o *observer) AgentExited(exit native.AgentExit) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -353,6 +354,17 @@ func TestLimitStopsTheTurn(t *testing.T) {
 	assert.Contains(t, ls.Message, "5-hour limit")
 	require.NotNil(t, ls.ResetsAt, "taken from the reached limit")
 	assert.Equal(t, "rejected", c.Usage().RateLimits[0].Status)
+}
+
+func TestBadGatewayIsTriedAgain(t *testing.T) {
+	c, _ := start(t, nil)
+	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "the gateway fails"}))
+	require.Eventually(t, c.Idle, 5*time.Second, time.Millisecond)
+	rw := c.RetryWait()
+	require.NotNil(t, rw)
+	assert.Equal(t, 502, rw.APIStatus)
+	assert.Contains(t, rw.Message, "502 Bad Gateway")
+	assert.Equal(t, 1, rw.Attempt)
 }
 
 func TestColdCache(t *testing.T) {

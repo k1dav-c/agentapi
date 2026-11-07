@@ -79,6 +79,9 @@ func (o *nativeObserver) LimitStop(ls *native.LimitStop) {
 	}
 }
 
+// RetryWait is reported once the server keeps it.
+func (o *nativeObserver) RetryWait(*native.RetryWait) {}
+
 // SettingsChosen is stored so that the agent gets the settings again after
 // AgentAPI restarts.
 func (o *nativeObserver) SettingsChosen(settings native.Settings) {

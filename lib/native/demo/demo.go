@@ -20,6 +20,9 @@
 //   - "limit": the account reaches its 5-hour limit, which stops the turn
 //     (native.StopReasonLimited) until it resets in three hours, after the
 //     requests the message opens
+//   - "gateway": the API's gateway answers 502 Bad Gateway after the
+//     requests the message opens, which fails the turn
+//     (native.StopReasonTransient): AgentAPI tries it again later
 //   - "cold": the turn leaves a large context whose prompt cache already
 //     expired, as after an hour away
 //   - "delegate": the agent hands a task to a subagent with Claude Code's
@@ -466,6 +469,12 @@ var errInterrupted = errors.New("interrupted")
 // errLimited ends a turn the 5-hour limit stopped.
 var errLimited = errors.New("usage limit reached")
 
+// errBadGateway ends a turn the API's gateway failed.
+var errBadGateway = errors.New("bad gateway")
+
+// badGateway is how Claude Code words a 502 from an inference gateway.
+const badGateway = "API Error: 502 Bad Gateway. This is a server-side issue, usually temporary — try again in a moment. If it persists, check your inference gateway (simulated)."
+
 // errCrashed ends a turn whose agent crashed: no turn end follows.
 var errCrashed = errors.New("crashed")
 
@@ -488,6 +497,10 @@ func (a *Adapter) run(t *turn, n int, input native.Input) {
 		}
 		if errors.Is(err, errLimited) {
 			a.finish(t, native.TurnResult{StopReason: native.StopReasonLimited, Error: "You've hit your 5-hour limit · resets in 3 hours (simulated)"})
+			return
+		}
+		if errors.Is(err, errBadGateway) {
+			a.finish(t, native.TurnResult{StopReason: native.StopReasonTransient, Error: "Native demo: the turn failed, API status 502: " + badGateway, APIStatus: 502})
 			return
 		}
 		a.finish(t, native.TurnResult{StopReason: native.StopReasonInterrupted})
@@ -557,6 +570,9 @@ func (s *script) play() error {
 	if words["limit"] {
 		s.a.limited.Store(true)
 		return errLimited
+	}
+	if words["gateway"] {
+		return errBadGateway
 	}
 	return s.reply(words["long"])
 }

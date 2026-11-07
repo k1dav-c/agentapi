@@ -40,6 +40,10 @@ type Observer interface {
 	// LimitStop reports the turn a usage limit stopped when that changes,
 	// or with nil that a turn started since or the stop was dismissed.
 	LimitStop(*LimitStop)
+	// RetryWait reports the failed turn that waits to be tried again when
+	// that changes, or with nil that a turn started since or the retry was
+	// cancelled.
+	RetryWait(*RetryWait)
 	// AgentExited reports that the agent exited on its own or failed to
 	// start, and whether the conversation starts it again. An agent that
 	// lost its login before it exited waits for the login instead
@@ -60,6 +64,7 @@ func (nopObserver) Settings(Settings)                       {}
 func (nopObserver) SettingsChosen(Settings)                 {}
 func (nopObserver) Usage(AgentUsage)                        {}
 func (nopObserver) LimitStop(*LimitStop)                    {}
+func (nopObserver) RetryWait(*RetryWait)                    {}
 func (nopObserver) AgentExited(AgentExit)                   {}
 
 // Config configures a Conversation.
@@ -93,6 +98,14 @@ type Config struct {
 	AutoContinue bool
 	// LimitStop is a turn a usage limit stopped before AgentAPI restarted.
 	LimitStop *LimitStop
+	// RetryDelays are the waits before a turn that failed on a transient
+	// upstream error (StopReasonTransient) is tried again: one per retry in
+	// a row, after which the failure is an error. Nil means 30 seconds, 2
+	// and 5 minutes; empty means none.
+	RetryDelays []time.Duration
+	// RetryWait is a failed turn that waited to be tried again before
+	// AgentAPI restarted. Without RetryDelays it is dropped.
+	RetryWait *RetryWait
 	// PrepareRichMessage, if set, changes every rich message an adapter
 	// reports before the conversation takes it, without the conversation's
 	// lock: work that can be slow (storing the images of a tool result)
@@ -193,6 +206,12 @@ type Conversation struct {
 	// continueAgain: the turn running is a scheduled continuation, so if
 	// the limit stops it again, it is scheduled again.
 	continueAgain bool
+	// retryWait is the failed turn that waits to be tried again, until a
+	// turn starts.
+	retryWait *RetryWait
+	// retrying is the retry (from 1) the turn running is, 0 for a turn that
+	// isn't one: if it fails again the next retry is scheduled.
+	retrying int
 }
 
 // NewConversation creates a conversation. Nothing runs until Start.
@@ -218,6 +237,12 @@ func NewConversation(cfg Config) *Conversation {
 	if cfg.RestartDelays == nil {
 		cfg.RestartDelays = defaultRestartDelays
 	}
+	if cfg.RetryDelays == nil {
+		cfg.RetryDelays = defaultRetryDelays
+	}
+	if len(cfg.RetryDelays) == 0 {
+		cfg.RetryWait = nil
+	}
 	return &Conversation{
 		cfg:        cfg,
 		ctx:        context.Background(),
@@ -227,6 +252,7 @@ func NewConversation(cfg Config) *Conversation {
 		promptSent: len(cfg.InitialMessages) > 0,
 		chosen:     cfg.Settings,
 		limitStop:  cfg.LimitStop.clone(),
+		retryWait:  cfg.RetryWait.clone(),
 	}
 }
 
@@ -496,6 +522,7 @@ func (c *Conversation) beginTurnLocked(input Input) (pendingTurn, error) {
 	c.turnActive = true
 	c.unconfirmedTurn = false
 	c.setLimitStopLocked(nil)
+	c.setRetryWaitLocked(nil)
 	turn := pendingTurn{
 		adapter: c.adapter,
 		gen:     c.generation,

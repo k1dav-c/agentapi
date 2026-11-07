@@ -164,6 +164,7 @@ func (*settingsObserver) RequestUpdated(native.RequestState)      {}
 func (*settingsObserver) SettingsChosen(native.Settings)          {}
 func (*settingsObserver) Usage(native.AgentUsage)                 {}
 func (*settingsObserver) LimitStop(*native.LimitStop)             {}
+func (*settingsObserver) RetryWait(*native.RetryWait)             {}
 func (*settingsObserver) AgentExited(native.AgentExit)            {}
 
 func TestModelSwitchReportsNoMixedSettings(t *testing.T) {

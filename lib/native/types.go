@@ -258,6 +258,11 @@ const (
 	// StopReasonLimited: the account reached a usage limit; TurnResult.Error
 	// is what the agent said.
 	StopReasonLimited = "limited"
+	// StopReasonTransient: the turn failed on an upstream error that may
+	// pass (an HTTP 5xx or 429, an overloaded API, a dropped connection)
+	// after the agent's own retries; TurnResult.Error is what the agent
+	// said. The conversation tries the turn again later (Config.RetryDelays).
+	StopReasonTransient = "transient"
 )
 
 // RedactedAnswer replaces the answers to secret questions everywhere but
@@ -274,6 +279,9 @@ type TurnResult struct {
 	// the agent says. Without it the conversation takes the reset of the
 	// limits the agent reported as reached.
 	ResetsAt *time.Time
+	// APIStatus is the HTTP status of the upstream error that failed a
+	// transient turn, if the agent says; 0 otherwise.
+	APIStatus int
 }
 
 // Sink receives an adapter's events. Its methods may be called from any

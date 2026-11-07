@@ -52,6 +52,9 @@ type loopState struct {
 	// The outcome of the turn so far.
 	stopReason string
 	errMessage string
+	// retriesFailed: Pi gave up retrying an error it took as transient
+	// (auto_retry_end without success).
+	retriesFailed bool
 	// ran: a run started during the turn. A turn without one (an
 	// extension command and its dialogs) ends as handled.
 	ran bool
@@ -238,6 +241,8 @@ func (a *Adapter) handleLine(line []byte) {
 	case "auto_retry_end":
 		if ev, ok := decodeRecord[autoRetryEnd](a, line, env.Type); ok && !ev.Success && ev.FinalError != "" {
 			a.loop.stopReason, a.loop.errMessage = "error", ev.FinalError
+			// What ends a retry the user aborted isn't the error's.
+			a.loop.retriesFailed = ev.FinalError != retryCancelled
 		}
 	case "compaction_end":
 		if ev, ok := decodeRecord[compactionEnd](a, line, env.Type); ok && ev.ErrorMessage != "" && !ev.Aborted {
@@ -445,6 +450,7 @@ func (a *Adapter) beginTurn() {
 	a.mu.Unlock()
 	a.loop.stopReason = ""
 	a.loop.errMessage = ""
+	a.loop.retriesFailed = false
 	a.loop.ran = false
 	a.loop.turnDialogs = nil
 	a.loop.loginReported = false
@@ -483,13 +489,22 @@ func (a *Adapter) endTurn() {
 	case !a.loop.ran:
 		result.StopReason = native.StopReasonHandled
 	}
+	retriesFailed := a.loop.retriesFailed
 	a.loop.stopReason = ""
 	a.loop.errMessage = ""
-	if result.Error != "" && isAuthError(result.Error) {
+	a.loop.retriesFailed = false
+	authFailed := result.Error != "" && isAuthError(result.Error)
+	if authFailed {
 		a.reportLogin()
 	}
-	if result.StopReason == native.StopReasonError && native.IsLimitError(result.Error) {
+	switch {
+	case result.StopReason != native.StopReasonError:
+	case native.IsLimitError(result.Error):
 		result.StopReason = native.StopReasonLimited
+	case !authFailed && (retriesFailed || native.IsTransientError(result.Error)):
+		// Pi retried it already; AgentAPI tries again later.
+		result.StopReason = native.StopReasonTransient
+		result.APIStatus = native.TransientStatus(result.Error)
 	}
 	a.loop.sink.TurnCompleted(result)
 }

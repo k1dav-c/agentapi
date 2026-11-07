@@ -261,7 +261,8 @@ func TestTurnErrors(t *testing.T) {
 	proc.send(t, []byte(`{"type":"system","subtype":"session_state_changed","state":"idle"}`))
 	proc.barrier(t)
 	require.Len(t, sink.State().Results, 1)
-	assert.Equal(t, "error", sink.State().Results[0].StopReason)
+	assert.Equal(t, native.StopReasonTransient, sink.State().Results[0].StopReason, "an overloaded API is tried again")
+	assert.Equal(t, 529, sink.State().Results[0].APIStatus)
 	assert.Equal(t, "Claude Code: the turn failed (error_during_execution), API status 529: Overloaded", sink.State().Results[0].Error)
 
 	// Requests the adapter doesn't offer are refused, not left waiting.
@@ -361,6 +362,49 @@ func TestEarlierFailureIsShown(t *testing.T) {
 	require.NoError(t, a.Close())
 }
 
+func TestTransientFailures(t *testing.T) {
+	t.Parallel()
+	const gateway = "API Error: 502 Bad Gateway. This is a server-side issue, usually temporary — try again in a moment. If it persists, check your inference gateway (litellm-proxy.example.com)."
+	for _, tc := range []struct {
+		name, result string
+		want         native.TurnResult
+	}{
+		{
+			"502 from a gateway",
+			`{"type":"result","subtype":"success","is_error":true,"api_error_status":502,"num_turns":1,"result":"` + gateway + `","terminal_reason":"api_error"}`,
+			native.TurnResult{StopReason: native.StopReasonTransient, APIStatus: 502, Error: "Claude Code: the turn failed (api_error), API status 502: " + gateway},
+		},
+		{
+			"the text without a status",
+			`{"type":"result","subtype":"success","is_error":true,"api_error_status":null,"num_turns":1,"result":"` + gateway + `","terminal_reason":"api_error"}`,
+			native.TurnResult{StopReason: native.StopReasonTransient, Error: "Claude Code: the turn failed (api_error): " + gateway},
+		},
+		{
+			"a bad request is not",
+			`{"type":"result","subtype":"success","is_error":true,"api_error_status":400,"num_turns":1,"result":"API Error: 400 timed out waiting for input","terminal_reason":"api_error"}`,
+			native.TurnResult{StopReason: native.StopReasonError, Error: "Claude Code: the turn failed (api_error), API status 400: API Error: 400 timed out waiting for input"},
+		},
+		{
+			"a 429 that is a usage limit is a limit",
+			`{"type":"result","subtype":"success","is_error":true,"api_error_status":429,"num_turns":1,"result":"You've hit your limit · resets 3pm (UTC)","terminal_reason":"api_error"}`,
+			native.TurnResult{StopReason: native.StopReasonLimited, Error: "You've hit your limit · resets 3pm (UTC)"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			proc := newFakeProcess("")
+			a, sink := started(t, Config{}, proc)
+			require.NoError(t, a.StartTurn(context.Background(), native.Input{Text: "hi"}))
+			proc.send(t, []byte(`{"type":"system","subtype":"init","session_id":"s1"}`))
+			proc.send(t, []byte(tc.result))
+			require.Eventually(t, func() bool { return len(sink.State().Results) == 1 }, 5*time.Second, time.Millisecond)
+			assert.Equal(t, tc.want, sink.State().Results[0])
+			assert.Empty(t, sink.State().Logins)
+			require.NoError(t, a.Close())
+		})
+	}
+}
+
 func TestNewSession(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -447,7 +491,7 @@ func TestFieldsOfUnexpectedType(t *testing.T) {
 	proc.send(t, []byte(`{"type":"result","subtype":"error_during_execution","is_error":true,"errors":[{"code":529},"Overloaded"]}`))
 	proc.send(t, []byte(`{"type":"system","subtype":"session_state_changed","state":"idle"}`))
 	proc.barrier(t)
-	assert.Equal(t, []string{"turn_started", "turn_completed:error"}, sink.TurnLog())
+	assert.Equal(t, []string{"turn_started", "turn_completed:transient"}, sink.TurnLog())
 	assert.Equal(t, "Claude Code: the turn failed (error_during_execution): Overloaded", sink.State().Results[0].Error)
 	require.NoError(t, a.Close())
 }

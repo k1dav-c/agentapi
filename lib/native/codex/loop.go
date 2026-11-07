@@ -418,6 +418,8 @@ func (s *loopState) errorReported(n errorNotification) {
 		s.warn(text)
 	case s.turn != nil && (n.TurnID == "" || n.TurnID == s.turn.id):
 		s.turn.lastError = text
+		info := n.Error
+		s.turn.lastErrorInfo = &info
 		if isAuthError(&n.Error) {
 			s.reportLogin(s.turn)
 		}
@@ -755,8 +757,17 @@ func (s *loopState) turnResult(t *turnState, tr turn, status string) native.Turn
 		if result.Error == "" {
 			result.Error = "The Codex turn failed"
 		}
-		if isLimitError(tr.Error) || (tr.Error == nil && native.IsLimitError(result.Error)) {
+		cause := tr.Error
+		if cause == nil {
+			cause = t.lastErrorInfo
+		}
+		switch {
+		case isLimitError(tr.Error) || (tr.Error == nil && native.IsLimitError(result.Error)):
 			result.StopReason = native.StopReasonLimited
+		case cause != nil && !isAuthError(cause):
+			if status, ok := transientError(cause); ok {
+				result.StopReason, result.APIStatus = native.StopReasonTransient, status
+			}
 		}
 	}
 	return result

@@ -68,3 +68,61 @@ func TestIsLimitError(t *testing.T) {
 		assert.False(t, native.IsLimitError(text), text)
 	}
 }
+
+// claude502 is what Claude Code ended a turn with when an inference
+// gateway in front of the API failed.
+const claude502 = "API Error: 502 Bad Gateway. This is a server-side issue, usually temporary — try again in a moment. If it persists, check your inference gateway (litellm-proxy.example.com)."
+
+func TestIsTransientError(t *testing.T) {
+	t.Parallel()
+	for _, text := range []string{
+		// Claude Code
+		claude502,
+		`API Error: 529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}`,
+		`API Error: 500 {"type":"error","error":{"type":"api_error","message":"Internal server error"}}`,
+		`API Error: 429 {"type":"error","error":{"type":"rate_limit_error","message":"Number of requests has exceeded your rate limit"}}`,
+		"API Error: Request timed out.",
+		"API Error: Connection error.",
+		// Codex
+		"unexpected status 503 Service Unavailable: upstream connect error",
+		"stream disconnected before completion: error sending request for url",
+		"exceeded retry limit, last status: 502 Bad Gateway",
+		// Pi and providers
+		"503 Service Unavailable",
+		"Overloaded",
+		"fetch failed",
+		"rate limit exceeded (429)",
+	} {
+		assert.True(t, native.IsTransientError(text), text)
+	}
+	for _, text := range []string{
+		"",
+		"Not logged in · Please run /login",
+		"prompt is too long: 250000 tokens > 200000 maximum",
+		"API Error: 400 invalid_request_error",
+		"context window exceeded: 5020 tokens",
+		"The operation was aborted",
+		"Pi stopped with an error",
+	} {
+		assert.False(t, native.IsTransientError(text), text)
+	}
+}
+
+func TestTransientStatus(t *testing.T) {
+	t.Parallel()
+	for text, status := range map[string]int{
+		claude502: 502,
+		"unexpected status 503 Service Unavailable": 503,
+		"529 overloaded":                      0,
+		"504 Gateway Timeout":                 504,
+		"API Error: 429 rate_limit_error":     429,
+		"Overloaded":                          0,
+		"context window exceeded: 502 tokens": 0,
+	} {
+		assert.Equal(t, status, native.TransientStatus(text), text)
+	}
+	assert.True(t, native.IsTransientStatus(502))
+	assert.True(t, native.IsTransientStatus(429))
+	assert.False(t, native.IsTransientStatus(401))
+	assert.False(t, native.IsTransientStatus(400))
+}

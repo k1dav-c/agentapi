@@ -196,6 +196,9 @@ type autoRetryEnd struct {
 	FinalError string `json:"finalError"`
 }
 
+// retryCancelled is the finalError of a retry the user aborted.
+const retryCancelled = "Retry cancelled"
+
 // compactionEnd is compaction_end.
 type compactionEnd struct {
 	Aborted      bool   `json:"aborted"`
