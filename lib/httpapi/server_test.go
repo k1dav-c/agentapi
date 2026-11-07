@@ -858,7 +858,6 @@ func TestServer_UploadFiles(t *testing.T) {
 	}
 }
 
-
 // uploadLimit is the largest file POST /upload takes.
 const uploadLimit = 100 << 20
 
