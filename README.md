@@ -1184,7 +1184,7 @@ The [HTTP API reference](#http-api-reference) lists all the endpoints.
   status until the agent is back.
 - `GET /tasks` returns the conversation's [tasks](#tasks).
 - `GET /title` returns the session's human-readable title.
-- `POST /upload` stores a file (up to 10 MB; a body over 11 MiB is refused
+- `POST /upload` stores a file (up to 100 MB; a body over 101 MiB is refused
   before it is read) and returns its path, which a message references as
   `@"<path>"`. The file keeps the base name it was sent with, without control
   characters and cut to 255 bytes; a name of `.` or `..` gets 400. A file
@@ -1747,7 +1747,7 @@ other than browsers (curl, SDKs, the hub) aren't affected.
 - Read the conversations, subagent steps and costs of the agent's earlier
   sessions in its working directory from the agent's own logs (`~/.claude`,
   `~/.codex`, `~/.pi`), and open any of those sessions.
-- Upload files of up to 10 MB; only images are served back.
+- Upload files of up to 100 MB; only images are served back.
 - Change the webhook and restart the agent. The webhook can send the
   conversation (`message.created`, `tool.completed`) to any URL; `GET /webhook` never returns its
   secret.
@@ -2041,7 +2041,7 @@ default.
 
 | Endpoint | Description |
 | --- | --- |
-| `POST /upload` | Store a file (up to 10 MB) and return its path, for `@"<path>"` in a message |
+| `POST /upload` | Store a file (up to 100 MB) and return its path, for `@"<path>"` in a message |
 | `GET /uploads/{checksum}/{name}` | An uploaded image (PNG, JPEG, GIF, WebP or BMP, judged by content), for the chat |
 
 ### Integration endpoints

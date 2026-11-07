@@ -118,8 +118,9 @@ task shows, and tool calls with a match open.
 
 ### The composer
 
-Enter sends; Shift+Enter starts a new line. The paperclip attaches files of up to 10 MB each, and
-pasting an image attaches it too (pasted text stays text). Attachments show in the composer, images
+Enter sends; Shift+Enter starts a new line. The paperclip attaches files of up to 100 MB each, and
+pasting an image attaches it too (pasted text stays text); an image over 10 MB reaches the agent as
+its path rather than as an image. Attachments show in the composer, images
 as thumbnails that open in full size, and can be removed before you send.
 
 ![The composer with an image attached](screenshots/attachments.png)

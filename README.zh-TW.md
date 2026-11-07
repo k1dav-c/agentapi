@@ -989,7 +989,7 @@ AgentAPI 會以 RPC 模式執行 Pi（`pi --mode rpc`，經由 stdin 與 stdout 
   `failed` 在 agent 回來之前不會隨 agent 的狀態改變。
 - `GET /tasks` 回傳對話的[任務](#任務)。
 - `GET /title` 回傳工作階段的可讀標題。
-- `POST /upload` 儲存檔案（最大 10 MB；超過 11 MiB 的內容會在讀取前就被拒絕）並回傳路徑，
+- `POST /upload` 儲存檔案（最大 100 MB；超過 101 MiB 的內容會在讀取前就被拒絕）並回傳路徑，
   訊息以 `@"<路徑>"` 引用它。檔案沿用上傳時的檔名（不含路徑），去掉控制字元並截到 255 bytes；
   檔名是 `.` 或 `..` 時回傳 400。對話沒有引用的檔案會在 7 天後刪除。
 
@@ -1482,7 +1482,7 @@ AGENTAPI_ALLOWED_ORIGINS='https://example.com http://localhost:3000' agentapi se
   API。`GET /files/find` 會列出工作目錄底下路徑結尾相符的檔案路徑。
 - 從 agent 自己的紀錄（`~/.claude`、`~/.codex`、`~/.pi`）讀取它在工作目錄中先前工作階段的對話，
   它執行過的 sub agent 的步驟，以及它們的花費，並開啟其中任何一個工作階段。
-- 上傳最大 10 MB 的檔案；只有圖片會被回傳。
+- 上傳最大 100 MB 的檔案；只有圖片會被回傳。
 - 修改 webhook，以及重新啟動 agent。webhook 可以把對話（`message.created`、
   `tool.completed`）送到任何網址；`GET /webhook` 不會回傳它的 secret。
 - 開啟 `--allow-update` 時，把 AgentAPI [更新](#透過-api-更新)到最新正式發行版並重新啟動。用戶端
@@ -1755,7 +1755,7 @@ agentapi hub leave
 
 | 端點 | 說明 |
 | --- | --- |
-| `POST /upload` | 儲存檔案（最大 10 MB）並回傳路徑，供訊息以 `@"<路徑>"` 引用 |
+| `POST /upload` | 儲存檔案（最大 100 MB）並回傳路徑，供訊息以 `@"<路徑>"` 引用 |
 | `GET /uploads/{checksum}/{name}` | 上傳的圖片（依內容判斷 PNG、JPEG、GIF、WebP 或 BMP），供聊天介面顯示 |
 
 ### 整合端點

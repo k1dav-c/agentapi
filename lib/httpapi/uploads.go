@@ -18,7 +18,10 @@ import (
 )
 
 // maxUploadSize is the largest file POST /upload takes.
-const maxUploadSize = 10 << 20 // 10MB
+const maxUploadSize = 100 << 20 // 100MB
+
+// uploadTooLarge is the error for a larger file.
+var uploadTooLarge = fmt.Sprintf("file size exceeds %dMB limit", maxUploadSize>>20)
 
 // serveUpload handles GET /uploads/{checksum}/{name}: an image uploaded
 // with POST /upload, or one from a tool result, so the chat can show it.
@@ -83,7 +86,7 @@ func (u *uploadAPI) serveUploadRequest(ctx huma.Context, _ func(huma.Context)) {
 	if err := r.ParseMultipartForm(humachi.MultipartMaxMemory); err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
-			_ = huma.WriteErr(u.api, ctx, http.StatusBadRequest, "file size exceeds 10MB limit")
+			_ = huma.WriteErr(u.api, ctx, http.StatusBadRequest, uploadTooLarge)
 			return
 		}
 		u.uploadInvalid(ctx, "body", "cannot read multipart form: "+err.Error())
@@ -154,14 +157,10 @@ func (u *uploadAPI) saveUpload(sent string, file io.Reader) (*UploadResponse, er
 	if !ok {
 		return nil, huma.Error400BadRequest("the file has no name")
 	}
-	buf, err := io.ReadAll(io.LimitReader(file, maxUploadSize+1))
-	if err != nil {
-		return nil, fmt.Errorf("failed to upload file: %w", err)
+	outPath, _, err := u.uploads.saveFrom(name, file, maxUploadSize)
+	if errors.Is(err, errUploadTooLarge) {
+		return nil, huma.Error400BadRequest(uploadTooLarge)
 	}
-	if len(buf) > maxUploadSize {
-		return nil, huma.Error400BadRequest("file size exceeds 10MB limit")
-	}
-	outPath, _, err := u.uploads.save(name, buf)
 	if err != nil {
 		return nil, fmt.Errorf("failed to write file: %w", err)
 	}

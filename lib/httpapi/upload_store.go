@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"bytes"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -109,12 +111,40 @@ func newUploadStore(dir string) (*uploadStore, error) {
 	return &uploadStore{dir: dir}, nil
 }
 
+// errUploadTooLarge is a file saveFrom refused for its size.
+var errUploadTooLarge = errors.New("the file is too large")
+
 // save stores data as name in the directory of its checksum, and returns
-// its path on disk and its checksum. A file of the same size already there
-// is this content (a tool result's image comes again with every snapshot
-// of its message).
+// its path on disk and its checksum (saveFrom).
 func (u *uploadStore) save(name string, data []byte) (string, string, error) {
-	hash := sha256.Sum256(data)
+	return u.saveFrom(name, bytes.NewReader(data), int64(len(data)))
+}
+
+// saveFrom stores what r reads as name in the directory of its checksum,
+// and returns its path on disk and its checksum; more than limit bytes is
+// errUploadTooLarge. The content goes to a temporary file in the
+// directory as it is read, never all in memory, and is renamed into
+// place. A file of the same size already there is this content (a tool
+// result's image comes again with every snapshot of its message).
+func (u *uploadStore) saveFrom(name string, r io.Reader, limit int64) (string, string, error) {
+	// The rename below goes by path: a name is one file in the directory.
+	if name == "" || name == "." || name == ".." || strings.Contains(name, "/") || name != filepath.Base(name) {
+		return "", "", fmt.Errorf("invalid file name %q", name)
+	}
+	root, err := os.OpenRoot(u.dir)
+	if err != nil {
+		return "", "", err
+	}
+	defer func() { _ = root.Close() }()
+	temp, size, hash, err := writeRootTemp(root, io.LimitReader(r, limit+1))
+	if err != nil {
+		return "", "", err
+	}
+	// Until it is renamed into place.
+	defer func() { _ = root.Remove(temp) }()
+	if size > limit {
+		return "", "", errUploadTooLarge
+	}
 	checksum := hex.EncodeToString(hash[:8])
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -122,34 +152,48 @@ func (u *uploadStore) save(name string, data []byte) (string, string, error) {
 		u.saved = make(map[string]time.Time)
 	}
 	u.saved[checksum] = time.Now()
-	root, err := os.OpenRoot(u.dir)
-	if err != nil {
-		return "", "", err
-	}
-	defer func() { _ = root.Close() }()
 	if err := root.Mkdir(checksum, 0o755); err != nil && !errors.Is(err, fs.ErrExist) {
 		return "", "", err
 	}
+	// os.Root has no Rename before Go 1.25: the rename goes by path, so
+	// the directory must be one, not a link out of the store.
+	if info, err := root.Lstat(checksum); err != nil || !info.IsDir() {
+		return "", "", fmt.Errorf("%s in %s is not a directory", checksum, u.dir)
+	}
 	file := path.Join(checksum, name)
-	if info, err := root.Stat(file); err != nil || !info.Mode().IsRegular() || info.Size() != int64(len(data)) {
-		if err := writeRootFile(root, file, data); err != nil {
-			return "", "", err
-		}
+	if info, err := root.Lstat(file); err == nil && info.Mode().IsRegular() && info.Size() == size {
+		return filepath.Join(u.dir, checksum, name), checksum, nil
+	}
+	if err := os.Rename(filepath.Join(u.dir, temp), filepath.Join(u.dir, checksum, name)); err != nil {
+		return "", "", err
 	}
 	return filepath.Join(u.dir, checksum, name), checksum, nil
 }
 
-// writeRootFile writes data to the file at name in root.
-func writeRootFile(root *os.Root, name string, data []byte) error {
-	f, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+// writeRootTemp copies r to a new temporary file in root, and returns its
+// name, size and SHA-256.
+func writeRootTemp(root *os.Root, r io.Reader) (string, int64, [sha256.Size]byte, error) {
+	var sum [sha256.Size]byte
+	var suffix [8]byte
+	if _, err := rand.Read(suffix[:]); err != nil {
+		return "", 0, sum, err
+	}
+	name := ".upload-" + hex.EncodeToString(suffix[:])
+	f, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
-		return err
+		return "", 0, sum, err
 	}
-	if _, err := f.Write(data); err != nil {
-		_ = f.Close()
-		return err
+	hash := sha256.New()
+	size, err := io.Copy(io.MultiWriter(f, hash), r)
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
 	}
-	return f.Close()
+	if err != nil {
+		_ = root.Remove(name)
+		return "", 0, sum, err
+	}
+	copy(sum[:], hash.Sum(nil))
+	return name, size, sum, nil
 }
 
 // saveImage stores a previewable image and returns the path GET /uploads
