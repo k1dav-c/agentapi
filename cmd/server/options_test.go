@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -75,6 +76,28 @@ func TestLoadServerOptions(t *testing.T) {
 				named, err := loadServerOptions(flagsWith(map[string]any{FlagStateFile: "/tmp/s.json", FlagStateDB: "/tmp/agent.db"}), []string{"claude"})
 				require.NoError(t, err)
 				assert.Equal(t, "/tmp/agent.db", named.stateDB)
+			},
+		},
+		"retries wait the default delays": {
+			check: func(t *testing.T, opts serverOptions) {
+				assert.Nil(t, opts.retryDelays, "the conversation's default: 30s, 2m, 5m")
+			},
+		},
+		"--retry-delays, from a flag, a variable or the config file": {
+			values: map[string]any{FlagRetryDelays: []string{"10s", "1m"}},
+			check: func(t *testing.T, opts serverOptions) {
+				assert.Equal(t, []time.Duration{10 * time.Second, time.Minute}, opts.retryDelays)
+				for value, want := range map[string][]time.Duration{
+					"20s,2m": {20 * time.Second, 2 * time.Minute},
+					"20s 2m": {20 * time.Second, 2 * time.Minute},
+					"off":    {},
+					"0":      {},
+					"":       {},
+				} {
+					other, err := loadServerOptions(flagsWith(map[string]any{FlagRetryDelays: value}), []string{"claude"})
+					require.NoError(t, err)
+					assert.Equal(t, want, other.retryDelays, value)
+				}
 			},
 		},
 		"native with a state DB": {
@@ -167,6 +190,8 @@ func TestLoadServerOptionsRefuses(t *testing.T) {
 		"PTY, removed":                  {map[string]any{FlagTransport: "pty"}, "AgentAPI 3 has no PTY transport: it runs Claude Code, Codex and Pi natively; drop --transport pty (or AGENTAPI_TRANSPORT=pty), or use AgentAPI v2.5.1"},
 		"--load-state without a file":   {map[string]any{FlagLoadState: true}, "--load-state requires --state-file to be set"},
 		"--save-state without a file":   {map[string]any{FlagSaveState: true}, "--save-state requires --state-file to be set"},
+		"a retry delay that isn't one":  {map[string]any{FlagRetryDelays: "30s,soon"}, `invalid --retry-delays: time: invalid duration "soon"`},
+		"a retry delay of no time":      {map[string]any{FlagRetryDelays: "-1s"}, "invalid --retry-delays: -1s: a delay is longer than 0"},
 		"an unknown transport":          {map[string]any{FlagTransport: "ssh"}, `unknown --transport "ssh": AgentAPI 3 drives every agent natively`},
 		"ACP, removed":                  {map[string]any{FlagTransport: "acp"}, "the experimental ACP transport was removed"},
 		"--experimental-acp, removed":   {map[string]any{FlagExperimentalACP: true}, "the experimental ACP transport was removed"},
