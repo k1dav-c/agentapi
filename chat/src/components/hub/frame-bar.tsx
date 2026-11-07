@@ -5,8 +5,9 @@ import {ArrowLeft, ExternalLink, X} from "lucide-react";
 import {AgentMark} from "@/components/agent-mark";
 import {Button} from "@/components/ui/button";
 import {HEADER_ACTIONS_ID} from "@/app/header";
-import {fromFrame, instanceFromHub, openFromFrame, type FrameInstance} from "@/lib/hub-frame";
+import {favoritesFromHub, fromFrame, instanceFromHub, openFromFrame, type FrameInstance} from "@/lib/hub-frame";
 import {cn} from "@/lib/utils";
+import {setFrameFavorites} from "./frame-favorites";
 import {MachineSwitch} from "./machine-tabs";
 import {StatusGlyph, stateTone} from "./status-glyph";
 import {UpdateStatus} from "./update-chip";
@@ -15,13 +16,16 @@ import {VersionTag} from "./version-tag";
 // FrameBar heads a chat the hub opens: back to the hub's list or overview,
 // what the instance is and does (the hub tells it), the other agents of its
 // machine, which the hub opens in its place, and the chat's own actions in
-// the same bar, so a phone keeps its height for the conversation.
+// the same bar, so a phone keeps its height for the conversation. It takes
+// the favorites the hub sends for the composer too (useFrameFavorites).
 export function FrameBar() {
   const [instance, setInstance] = useState<FrameInstance>();
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       const told = instanceFromHub(event, window.parent);
       if (told) setInstance(told);
+      const favorites = favoritesFromHub(event, window.parent);
+      if (favorites) setFrameFavorites(favorites);
     };
     window.addEventListener("message", onMessage);
     // On every load of the chat, a reload too: the hub answers each.

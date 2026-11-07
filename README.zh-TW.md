@@ -101,7 +101,8 @@ AgentAPI 可以用來：
 **維運與整合**
 
 - [hub](#執行-hub)（`agentapi hub serve`）監看多台主機上的 AgentAPI，需要你處理的排最前面，並能在
-  聊天介面中開啟任何一個，桌面和手機都能用；[`agentapi hub join`](#加入-hub) 把一台主機上的
+  聊天介面中開啟任何一個，桌面和手機都能用，它開啟的每個聊天介面都能插入保存在 hub 上的我的最愛；
+  [`agentapi hub join`](#加入-hub) 把一台主機上的
   AgentAPI 接到 hub，重新啟動後也一樣。
 - [Webhook](#webhook) 把任務、請求、訊息和心跳推送到監看多個 agent 的中控平台，並以 HMAC
   簽章。連到多個 AgentAPI 的用戶端，每個只要開一條[摘要串流](#監看多個實例)。搭配
@@ -988,7 +989,7 @@ AgentAPI 會以 RPC 模式執行 Pi（`pi --mode rpc`，經由 stdin 與 stdout 
   `failed` 在 agent 回來之前不會隨 agent 的狀態改變。
 - `GET /tasks` 回傳對話的[任務](#任務)。
 - `GET /title` 回傳工作階段的可讀標題。
-- `POST /upload` 儲存檔案（最大 10 MB；超過 11 MiB 的內容會在讀取前就被拒絕）並回傳路徑，
+- `POST /upload` 儲存檔案（最大 100 MB；超過 101 MiB 的內容會在讀取前就被拒絕）並回傳路徑，
   訊息以 `@"<路徑>"` 引用它。檔案沿用上傳時的檔名（不含路徑），去掉控制字元並截到 255 bytes；
   檔名是 `.` 或 `..` 時回傳 400。對話沒有引用的檔案會在 7 天後刪除。
 
@@ -1122,6 +1123,8 @@ agentapi hub serve --token "$HUB_TOKEN" --secret "$HUB_SECRET" --instance-token 
   和 secret，另附給那台主機上 agent 的提示；也可以在那裡輸入網址（和 token）手動加入。每一列的 `⋯`
   選單可以把實例釘選在最上方、放進自己建立的群組、把它正在等的事
   靜音到改變為止（例如不打算處理的登入），或移除已停止、連不到的實例。
+- 齒輪按鈕會開啟 hub 的設定，可以在那裡保存[我的最愛](docs/hub.zh-TW.md#我的最愛)提示；在 hub 開啟的
+  聊天介面裡，輸入框的 ☆ 會把它插入訊息。
 - hub 透過自己開啟實例（`/i/<id>/...`），以實例的 API token（`--instance-token`，或加入時給的）
   取代你的憑證。瀏覽器不會拿到實例的 token，也不會直接連到實例，所以實例不必為它設定 CORS。
 - 只接受以 `--secret` 簽章、不超過 10 分鐘而且帶有 delivery ID 的事件，已處理過的傳送會被忽略：
@@ -1129,7 +1132,8 @@ agentapi hub serve --token "$HUB_TOKEN" --secret "$HUB_SECRET" --instance-token 
   它們的網址；事件能做什麼，見 [hub 指南](docs/hub.zh-TW.md#token-與安全性)。
 - hub 連不到、又錯過三次 heartbeat（預設 3 分鐘）的實例，例如 workspace 被強制關掉的，視為已停止；
   它下一次送 heartbeat 時就會回來。
-- 實例會保存在 `~/.agentapi/hub/instances.json`（`--state`，只有擁有者能讀取），重新啟動後仍記得。
+- 實例和我的最愛會保存在 `~/.agentapi/hub/instances.json`（`--state`，只有擁有者能讀取），重新啟動後
+  仍記得。
 - `--port`（預設 3290）和 `--bind`（例如 VPN 位址）設定監聽位置。請用 HTTPS 提供，或只開在私有
   網路上：登入時會送出 token。若 VPN 用戶端以 userspace 模式執行，把 `ALL_PROXY` 設成它的 SOCKS5
   proxy，hub 才連得到實例。
@@ -1478,7 +1482,7 @@ AGENTAPI_ALLOWED_ORIGINS='https://example.com http://localhost:3000' agentapi se
   API。`GET /files/find` 會列出工作目錄底下路徑結尾相符的檔案路徑。
 - 從 agent 自己的紀錄（`~/.claude`、`~/.codex`、`~/.pi`）讀取它在工作目錄中先前工作階段的對話，
   它執行過的 sub agent 的步驟，以及它們的花費，並開啟其中任何一個工作階段。
-- 上傳最大 10 MB 的檔案；只有圖片會被回傳。
+- 上傳最大 100 MB 的檔案；只有圖片會被回傳。
 - 修改 webhook，以及重新啟動 agent。webhook 可以把對話（`message.created`、
   `tool.completed`）送到任何網址；`GET /webhook` 不會回傳它的 secret。
 - 開啟 `--allow-update` 時，把 AgentAPI [更新](#透過-api-更新)到最新正式發行版並重新啟動。用戶端
@@ -1751,7 +1755,7 @@ agentapi hub leave
 
 | 端點 | 說明 |
 | --- | --- |
-| `POST /upload` | 儲存檔案（最大 10 MB）並回傳路徑，供訊息以 `@"<路徑>"` 引用 |
+| `POST /upload` | 儲存檔案（最大 100 MB）並回傳路徑，供訊息以 `@"<路徑>"` 引用 |
 | `GET /uploads/{checksum}/{name}` | 上傳的圖片（依內容判斷 PNG、JPEG、GIF、WebP 或 BMP），供聊天介面顯示 |
 
 ### 整合端點

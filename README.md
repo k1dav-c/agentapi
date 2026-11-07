@@ -125,8 +125,9 @@ has the complete commit history.
 
 - [A hub](#running-a-hub) (`agentapi hub serve`) watches the AgentAPIs of many
   machines, lists what needs you first, and opens any of them in the chat on a
-  desktop or a phone. [`agentapi hub join`](#joining-a-hub) connects a
-  machine's AgentAPIs to it, and they stay connected after a restart.
+  desktop or a phone, with favorite prompts it keeps for every chat it opens.
+  [`agentapi hub join`](#joining-a-hub) connects a machine's AgentAPIs to it,
+  and they stay connected after a restart.
 - [Webhooks](#webhooks) push HMAC-signed tasks, requests, messages and
   heartbeats to a dashboard that watches many agents. A client that connects
   to many follows each through one [summary stream](#watching-many-instances).
@@ -1183,7 +1184,7 @@ The [HTTP API reference](#http-api-reference) lists all the endpoints.
   status until the agent is back.
 - `GET /tasks` returns the conversation's [tasks](#tasks).
 - `GET /title` returns the session's human-readable title.
-- `POST /upload` stores a file (up to 10 MB; a body over 11 MiB is refused
+- `POST /upload` stores a file (up to 100 MB; a body over 101 MiB is refused
   before it is read) and returns its path, which a message references as
   `@"<path>"`. The file keeps the base name it was sent with, without control
   characters and cut to 255 bytes; a name of `.` or `..` gets 400. A file
@@ -1341,6 +1342,8 @@ one to open it in the chat. On a phone the list and the chat take turns.
   and a prompt for an agent there; it also adds an instance by its URL (and token). Each row's `⋯`
   menu pins the instance to the top, puts it in a group of your own, mutes what it waits for until
   that changes (a login you won't do), or forgets a stopped or unreachable one.
+- The gear opens the hub's settings. There you keep [favorite prompts](docs/hub.md#favorites),
+  which ☆ in the composer of a chat the hub opens inserts in the message.
 - The hub opens an instance through itself (`/i/<id>/...`), sending the instance's API token
   (`--instance-token`, or the one given when it was added) in place of your credentials. The
   browser never holds the instances' tokens or reaches them itself, so no instance needs CORS for
@@ -1351,8 +1354,8 @@ one to open it in the chat. On a phone the list and the chat take turns.
   [hub guide](docs/hub.md#tokens-and-security) for what one can do.
 - An instance the hub can't reach that also missed three heartbeats (3 minutes by default), such
   as one whose workspace was killed, counts as stopped; its next heartbeat brings it back.
-- It keeps the instances in `~/.agentapi/hub/instances.json` (`--state`, readable by its owner
-  only), so it knows them after a restart.
+- It keeps the instances and the favorites in `~/.agentapi/hub/instances.json` (`--state`,
+  readable by its owner only), so it knows them after a restart.
 - `--port` (default 3290) and `--bind` (such as the VPN address) set where it listens. Serve it
   over HTTPS, or only on the private network: signing in sends the token. To reach the instances
   through a VPN client running in userspace, set `ALL_PROXY` to its SOCKS5 proxy.
@@ -1744,7 +1747,7 @@ other than browsers (curl, SDKs, the hub) aren't affected.
 - Read the conversations, subagent steps and costs of the agent's earlier
   sessions in its working directory from the agent's own logs (`~/.claude`,
   `~/.codex`, `~/.pi`), and open any of those sessions.
-- Upload files of up to 10 MB; only images are served back.
+- Upload files of up to 100 MB; only images are served back.
 - Change the webhook and restart the agent. The webhook can send the
   conversation (`message.created`, `tool.completed`) to any URL; `GET /webhook` never returns its
   secret.
@@ -2038,7 +2041,7 @@ default.
 
 | Endpoint | Description |
 | --- | --- |
-| `POST /upload` | Store a file (up to 10 MB) and return its path, for `@"<path>"` in a message |
+| `POST /upload` | Store a file (up to 100 MB) and return its path, for `@"<path>"` in a message |
 | `GET /uploads/{checksum}/{name}` | An uploaded image (PNG, JPEG, GIF, WebP or BMP, judged by content), for the chat |
 
 ### Integration endpoints

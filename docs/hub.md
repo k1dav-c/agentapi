@@ -563,6 +563,27 @@ one agent to another doesn't add one. The URL keeps the agent (`#<id>`), so a re
 comes back to it. An AgentAPI update under way shows in the bar too, with **Cancel** while it waits
 for the task ([Updating from the hub](#updating-from-the-hub)).
 
+### Favorites
+
+![Hub settings: the favorites, each with its buttons](screenshots/hub-settings-favorites.png)
+
+Favorites are prompts you send often, kept on the hub. The gear in the header opens **Hub
+settings**; its **Favorites** section lists them, and adds, edits, deletes and moves them up and
+down. Each has a prompt of up to 20,000 characters and an optional title of up to 100; without a
+title, its first line names it. The hub keeps up to 100. A change is saved at once, and every page
+signed in to the hub shows it, so your phone and desktop have the same favorites. **Undo** brings
+back the last one deleted. In the editor, ⌘/Ctrl+Enter saves and **Esc** cancels.
+
+![The ☆ menu in the composer of an agent opened from the hub](screenshots/composer-favorites.png)
+
+In the chat of an agent you open here, **☆** in the composer lists the favorites, each with its
+text on one line. Picking one inserts it in the message without sending it: an empty message
+becomes the favorite, and otherwise the favorite is a paragraph of its own at the end, with the
+cursor after it. Ctrl/⌘+Z takes it back out. Past seven favorites, a search box filters the list,
+and typing in the list types in it. **Manage favorites…** opens the hub's settings at the
+favorites. The menu shows even before the first favorite, with that link. A chat opened on its own,
+in a new tab or at its AgentAPI's URL, has no ☆.
+
 ### Keys and notifications
 
 | Key | Does |
@@ -590,7 +611,8 @@ the hub's tab is in the background, and a screen reader hears the same as it hap
 
 On a narrow screen the list and the chat take turns; the back arrow at the top, or the phone's
 back gesture, goes back to the list. The chat keeps the screen for the conversation: one bar above
-it, with only the marks of the machine's other agents, and the composer one row. Answering an approval from the phone:
+it, with only the marks of the machine's other agents, and the composer one row, with ☆ for the
+[favorites](#favorites) beside ⋯. Answering an approval from the phone:
 
 ![Answering an approval from the hub on a phone](screenshots/demo-hub.gif)
 
@@ -816,7 +838,9 @@ running AgentAPIs, which then no longer follow their conversation for the webhoo
 | `PATCH /api/instances/{id}` | `{"group": …}` puts an instance in a group, `""` in none; `{"muted": true}` mutes what it waits for now, until that changes (409 when it waits for nothing), `false` ends the mute; `{"pinned": true}` pins it below the pinned ones, `false` unpins it |
 | `DELETE /api/instances/{id}` | Forgets an instance, and its pin |
 | `PUT /api/pins` | `{"ids": […]}` orders the pinned instances, from the top. It lists each pinned instance once and no other; 409, with the pinned ones in their order (`ids`), when it doesn't, such as after one was pinned, unpinned or forgotten; 404 for an instance the hub doesn't have |
-| `GET /api/events` | Server-sent events: `instances` (all of them and `hub_version`, as `GET /api/instances` has them), then `instance` (one changed what the page shows, or its work time moved by a minute; when it was last heard of counts only while it is offline), `removed` (`{"id"}`) and a `heartbeat` every 15 s |
+| `GET /api/favorites` | The [favorites](#favorites), in their order: `{"favorites": [{"id", "title", "text"}, …]}`; a favorite without a title has none |
+| `PUT /api/favorites` | `{"favorites": […]}` replaces them, in that order. At most 100; a title has at most 100 characters, on one line; a text isn't blank and has at most 20,000; an ID has 1 to 64 letters, digits, `-` or `_`, once. A favorite sent without an ID gets one; the answer is the list as the hub keeps it. 400, changing nothing, for a list it refuses |
+| `GET /api/events` | Server-sent events: `instances` (all of them and `hub_version`, as `GET /api/instances` has them) and `favorites` (as `GET /api/favorites` has them), then `instance` (one changed what the page shows, or its work time moved by a minute; when it was last heard of counts only while it is offline), `removed` (`{"id"}`), `favorites` (all of them, after a change) and a `heartbeat` every 15 s |
 | `GET /api/join` | Where machines join the hub: `urls`, each a webhook URL (`url`) with the interface of its address (`interface`; none for `--bind`'s), in the order the startup log has them; and the secret (`secret`, with `secret_shown: true`) only on a hub with a token |
 | `/i/{id}/…` | The instance's own API and chat, through the hub; the page updates an instance with `POST /i/{id}/update` and cancels with `DELETE` |
 
@@ -829,7 +853,7 @@ Every endpoint but `/hooks` and `/api/session` needs the session cookie or
 | --- | --- | --- |
 | `~/.agentapi/config.yaml` | `agentapi hub join` | The hub's webhook and `allow-update`, read by every `agentapi server` |
 | `~/.agentapi/instances/` | `agentapi server` | The AgentAPIs running on this machine, for `join` and `agentapi list` |
-| `~/.agentapi/hub/instances.json` | `agentapi hub serve` | The instances the hub knows, their groups and pins, when each last changed, when each worked in the last 7 days, the URL where the hub last read each one's summary, and tokens of the ones added by hand |
+| `~/.agentapi/hub/instances.json` | `agentapi hub serve` | The instances the hub knows, their groups and pins, when each last changed, when each worked in the last 7 days, the URL where the hub last read each one's summary, and tokens of the ones added by hand; and the [favorites](#favorites) |
 | `~/.agentapi/hub/instances.json.bak` | `agentapi hub serve` | The file of instances as the hub found it when it last started |
 | `~/.agentapi/hub/instances.deliveries.json` | `agentapi hub serve` | The delivery IDs of the events the hub took whose signature still holds, to refuse copies |
 
@@ -843,7 +867,9 @@ cd ~/.agentapi/hub && jq .instances instances.json > instances.json.new && mv in
 
 Each instance's work time is an extra field (`work`) inside the same version 1. A hub of 2.3 or 2.4
 ignores it, and drops it the next time it writes the file. So does a hub before 3.0.1 with
-`confirmed_url`, the URL where the hub last read the instance's summary.
+`confirmed_url`, the URL where the hub last read the instance's summary, and a hub before 3.5 with
+the favorites (`"favorites": [...]` next to `instances`). After going back to such a hub, the
+`.bak` it made as it started still has them.
 
 ## Limits
 
@@ -851,7 +877,8 @@ ignores it, and drops it the next time it writes the file. So does a hub before 
   the hub and the instances; [Versions](#versions) shows the ones that differ. The hub doesn't
   show an AgentAPI 2's PTY agent waiting on a dialog in its terminal: the row shows it idle or
   working. Answer the dialog in that AgentAPI's own chat, at its URL.
-- One hub token for everyone: there are no per-user accounts or permissions.
+- One hub token for everyone: there are no per-user accounts or permissions, and everyone signed
+  in shares the [favorites](#favorites).
 - [Work time](#work-time) is what the hub saw: not before it had the feature, nor while it was down
   or couldn't reach an agent. One hub doesn't know what another counted.
 - The hub watches and opens AgentAPIs, and updates those whose machine allows it; it doesn't start

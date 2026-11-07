@@ -112,9 +112,9 @@ func TestDecodeState(t *testing.T) {
 		_, err := decodeState("f", []byte(content))
 		assert.ErrorIs(t, err, errDamaged, name)
 	}
-	stored, err := decodeState("f", []byte(" \n[]"))
+	file, err := decodeState("f", []byte(" \n[]"))
 	require.NoError(t, err)
-	assert.Empty(t, stored)
+	assert.Empty(t, file.Instances)
 }
 
 // The file keeps where the hub last read an instance's summary; a hub
@@ -161,4 +161,46 @@ func TestStateKeepsTheConfirmedURL(t *testing.T) {
 	assert.Equal(t, ConnectionConnecting, instance.Connection)
 	instance, _ = again.get("dev:9")
 	assert.Equal(t, "http://dev:9", instance.URL, "one kept by an earlier hub stays where it was")
+}
+
+// The file keeps the favorites next to the instances. One edited by hand
+// with favorites the API refuses starts without them, and with its
+// instances; one without favorites (a hub before 3.5) starts with none.
+func TestStateKeepsTheFavorites(t *testing.T) {
+	logger := slog.New(slog.DiscardHandler)
+	path := filepath.Join(t.TempDir(), "instances.json")
+	s, err := newStore(path, logger, quartz.NewMock(t))
+	require.NoError(t, err)
+	assert.Equal(t, []Favorite{}, s.getFavorites(), "none in a new file")
+	s.setFavorites([]Favorite{{ID: "a", Title: "Review", Text: "Review the diff."}})
+	require.NoError(t, s.close())
+
+	again, err := newStore(path, logger, quartz.NewMock(t))
+	require.NoError(t, err)
+	assert.Equal(t, []Favorite{{ID: "a", Title: "Review", Text: "Review the diff."}}, again.getFavorites())
+	require.NoError(t, again.close())
+
+	for name, content := range map[string]string{
+		"refused": `{"version": 1, "instances": [{"id": "dev:1", "url": "http://dev:1"}], "favorites": [{"id": "a", "text": ""}]}`,
+		"older":   `{"version": 1, "instances": [{"id": "dev:1", "url": "http://dev:1"}]}`,
+	} {
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+		s, err := newStore(path, logger, quartz.NewMock(t))
+		require.NoError(t, err, name)
+		assert.Equal(t, []Favorite{}, s.getFavorites(), name)
+		_, ok := s.get("dev:1")
+		assert.True(t, ok, "%s: its instances", name)
+		require.NoError(t, s.close())
+	}
+}
+
+func TestNormalizeFavorites(t *testing.T) {
+	list, err := normalizeFavorites([]Favorite{{Text: "  indented\n  code  \n"}, {ID: "x_Y-9", Title: "\tA\n b ", Text: "y"}})
+	require.NoError(t, err)
+	assert.Len(t, list[0].ID, 16, "a new ID")
+	assert.Equal(t, "  indented\n  code", list[0].Text, "the indent of its first line stays")
+	assert.Equal(t, Favorite{ID: "x_Y-9", Title: "A b", Text: "y"}, list[1])
+	list, err = normalizeFavorites(nil)
+	require.NoError(t, err)
+	assert.Equal(t, []Favorite{}, list)
 }

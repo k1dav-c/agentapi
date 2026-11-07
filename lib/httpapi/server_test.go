@@ -858,6 +858,10 @@ func TestServer_UploadFiles(t *testing.T) {
 	}
 }
 
+
+// uploadLimit is the largest file POST /upload takes.
+const uploadLimit = 100 << 20
+
 func TestServer_UploadFiles_Errors(t *testing.T) {
 	t.Parallel()
 	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(os.Stdout, nil)))
@@ -914,12 +918,11 @@ func TestServer_UploadFiles_Errors(t *testing.T) {
 		require.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
 	})
 
-	t.Run("file size exactly 10MB", func(t *testing.T) {
+	t.Run("file size exactly at the limit", func(t *testing.T) {
 		t.Parallel()
 
-		// Create exactly 10MB of data
-		const tenMB = 10 << 20
-		fileContent := make([]byte, tenMB)
+		// Exactly the largest file it takes
+		fileContent := make([]byte, uploadLimit)
 		for i := range fileContent {
 			fileContent[i] = byte(i % 256)
 		}
@@ -963,12 +966,11 @@ func TestServer_UploadFiles_Errors(t *testing.T) {
 		})
 	})
 
-	t.Run("file size exceeds 10MB limit", func(t *testing.T) {
+	t.Run("file size exceeds the limit", func(t *testing.T) {
 		t.Parallel()
 
-		// Create slightly more than 10MB of data
-		const tenMBPlusOne = (10 << 20) + 1
-		fileContent := make([]byte, tenMBPlusOne)
+		// One byte more than it takes
+		fileContent := make([]byte, uploadLimit+1)
 		for i := range fileContent {
 			fileContent[i] = byte(i % 256)
 		}
@@ -998,7 +1000,7 @@ func TestServer_UploadFiles_Errors(t *testing.T) {
 		// Verify error message
 		body, err := io.ReadAll(resp.Body)
 		require.NoError(t, err)
-		require.Contains(t, string(body), "file size exceeds 10MB limit")
+		require.Contains(t, string(body), "file size exceeds 100MB limit")
 	})
 }
 
@@ -1098,7 +1100,7 @@ func TestServer_UploadTooLarge(t *testing.T) {
 	require.NoError(t, err)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
-	assert.Equal(t, http.StatusBadRequest, uploadFile(t, ts.URL, make([]byte, 12<<20)))
+	assert.Equal(t, http.StatusBadRequest, uploadFile(t, ts.URL, make([]byte, uploadLimit+2<<20)))
 }
 
 func TestServer_Stop_Idempotency(t *testing.T) {

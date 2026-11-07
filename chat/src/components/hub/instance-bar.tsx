@@ -5,7 +5,8 @@ import {ArrowLeft, ExternalLink, X} from "lucide-react";
 import {AgentMark} from "@/components/agent-mark";
 import {Button} from "@/components/ui/button";
 import {chatURL, displayName, instanceState, instanceVersion, stateLabel, type HubInstance} from "@/lib/hub";
-import {frameInstance, toFrame, type MachineAgent} from "@/lib/hub-frame";
+import type {Favorite} from "@/lib/hub-favorites";
+import {favoritesToFrame, frameInstance, toFrame, type MachineAgent} from "@/lib/hub-frame";
 import {shownUpdate} from "@/lib/hub-update";
 import {cn} from "@/lib/utils";
 import {agentName} from "./instance-row";
@@ -37,6 +38,16 @@ export function FrameInfo({
   root: string;
 }) {
   const info = JSON.stringify(toFrame(frameInstance(instance, {hubVersion, agent: agentName(instance), tab: chatURL(basePath, root, instance.id), machine})));
+  useEffect(() => {
+    frame.current?.contentWindow?.postMessage(JSON.parse(info), window.location.origin);
+  }, [frame, info, ready]);
+  return null;
+}
+
+// FrameFavorites tells the open instance's chat the favorites for its
+// composer, whenever they change and whenever the chat says it is ready.
+export function FrameFavorites({frame, ready, favorites}: {frame: React.RefObject<HTMLIFrameElement | null>; ready: number; favorites: Favorite[]}) {
+  const info = JSON.stringify(favoritesToFrame(favorites));
   useEffect(() => {
     frame.current?.contentWindow?.postMessage(JSON.parse(info), window.location.origin);
   }, [frame, info, ready]);

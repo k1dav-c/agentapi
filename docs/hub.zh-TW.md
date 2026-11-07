@@ -487,6 +487,24 @@ Explorer 按鈕。這台主機上還有 hub 監看的其他 agent 時，不論�
 瀏覽紀錄新增一頁，所以「上一頁」會回到清單或總覽；從一個 agent 換到另一個則不會再新增。網址會記住目前的 agent（`#<id>`），重新整理或從書籤開啟都會回到同一個。
 AgentAPI 正在更新時，上方那一列也會顯示進度，還在等任務結束時附有 **Cancel**（見[從 hub 更新](#從-hub-更新)）。
 
+### 我的最愛
+
+![Hub settings：我的最愛，每一項都有自己的按鈕](screenshots/hub-settings-favorites.png)
+
+我的最愛是你常送出的提示，保存在 hub 上。標題列的齒輪按鈕會開啟 **Hub settings**，其中的
+**Favorites** 區列出所有項目，可以新增、編輯、刪除和上下移動。每一項有一段最多 20,000 字的提示，
+以及最多 100 字、可省略的標題；沒有標題時，以提示的第一行當名稱。hub 最多保存 100 項。每次修改都
+會立即儲存，登入這個 hub 的每個頁面也會跟著更新，所以手機和桌機看到的我的最愛都一樣。**Undo** 可以
+救回最後刪除的那一項。在編輯區裡，⌘/Ctrl+Enter 儲存，**Esc** 取消。
+
+![從 hub 開啟的 agent，輸入框的 ☆ 選單](screenshots/composer-favorites.png)
+
+在 hub 開啟的 agent 聊天介面裡，輸入框的 **☆** 會列出我的最愛，每一項附上一行提示內容。選一項就會
+把它插入訊息，但不會送出：訊息是空的，就直接換成這一項；訊息已有內容，就接在最後成為獨立的一段，
+游標停在它後面。按 Ctrl/⌘+Z 可以把它拿掉。超過七項時會出現搜尋框，在清單上直接打字也會輸入到搜尋框。
+**Manage favorites…** 會開啟 hub 設定的我的最愛區。還沒有任何一項時選單照樣出現，裡面只有這個連結。
+單獨開啟的聊天介面（新分頁，或 AgentAPI 自己的網址）沒有 ☆。
+
 ### 快捷鍵與通知
 
 | 按鍵 | 作用 |
@@ -512,7 +530,7 @@ AgentAPI 正在更新時，上方那一列也會顯示進度，還在等任務�
 | ![手機上的 hub 清單](screenshots/hub-phone.png) | ![在手機上開啟的實例](screenshots/hub-phone-chat.png) |
 
 在窄螢幕上，清單和聊天介面輪流顯示；上方的返回箭頭或手機的「上一頁」手勢都會回到清單。聊天介面
-把螢幕留給對話：上方只有一列，同一台主機的其他 agent 只顯示圖示，輸入框也只占一行。在手機上回覆核准：
+把螢幕留給對話：上方只有一列，同一台主機的其他 agent 只顯示圖示，輸入框也只占一行，[我的最愛](#我的最愛)的 ☆ 就在 ⋯ 旁邊。在手機上回覆核准：
 
 ![在手機上透過 hub 回覆核准](screenshots/demo-hub.gif)
 
@@ -716,7 +734,9 @@ hub 透過環境變數中的 proxy（`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`�
 | `PATCH /api/instances/{id}` | `{"group": …}` 把實例放進群組，`""` 為不分組；`{"muted": true}` 把它目前在等的事靜音到改變為止（沒有在等時回 409），`false` 結束靜音；`{"pinned": true}` 把它釘選在已釘選的實例後面，`false` 取消釘選 |
 | `DELETE /api/instances/{id}` | 移除實例，釘選也一併刪除 |
 | `PUT /api/pins` | `{"ids": […]}` 由上而下排定釘選實例的順序。必須列出每個釘選的實例各一次，不能有其他實例；不符合時回 409，並在 `ids` 附上目前釘選實例的順序，例如這段期間有人釘選、取消釘選或移除了實例；hub 沒有的實例回 404 |
-| `GET /api/events` | Server-sent events：先送 `instances`（全部實例和 `hub_version`，格式同 `GET /api/instances`），再送 `instance`（某個實例有頁面看得到的變動，或工作時間變動滿一分鐘；最後聯絡時間只在它離線時才算）、`removed`（`{"id"}`），以及每 15 秒一次的 `heartbeat` |
+| `GET /api/favorites` | [我的最愛](#我的最愛)，依排列順序：`{"favorites": [{"id", "title", "text"}, …]}`；沒有標題的項目沒有 `title` |
+| `PUT /api/favorites` | `{"favorites": […]}` 依這個順序整份取代。最多 100 項；標題最多 100 字、只能一行；內容不能空白，最多 20,000 字；ID 為 1 到 64 個英文字母、數字、`-` 或 `_`，不能重複。沒有 ID 的項目由 hub 指定一個；回應是 hub 保存後的清單。hub 不接受的清單回 400，什麼都不改 |
+| `GET /api/events` | Server-sent events：先送 `instances`（全部實例和 `hub_version`，格式同 `GET /api/instances`）和 `favorites`（格式同 `GET /api/favorites`），再送 `instance`（某個實例有頁面看得到的變動，或工作時間變動滿一分鐘；最後聯絡時間只在它離線時才算）、`removed`（`{"id"}`）、`favorites`（有變動時送出全部），以及每 15 秒一次的 `heartbeat` |
 | `GET /api/join` | 主機加入 hub 用的資訊：`urls` 的每一項是一個 webhook 網址（`url`）和這個位址所在的網路介面（`interface`；`--bind` 的位址沒有），順序和啟動時的 log 相同；只有設了 token 的 hub 才會附上 secret（`secret`，並帶 `secret_shown: true`） |
 | `/i/{id}/…` | 透過 hub 存取實例自己的 API 和聊天介面；頁面用 `POST /i/{id}/update` 更新實例，用 `DELETE` 取消 |
 
@@ -729,7 +749,7 @@ hub 透過環境變數中的 proxy（`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`�
 | --- | --- | --- |
 | `~/.agentapi/config.yaml` | `agentapi hub join` | hub 的 webhook 和 `allow-update`，每個 `agentapi server` 都會讀取 |
 | `~/.agentapi/instances/` | `agentapi server` | 這台主機上執行中的 AgentAPI，供 `join` 和 `agentapi list` 使用 |
-| `~/.agentapi/hub/instances.json` | `agentapi hub serve` | hub 記得的實例、它們的群組和釘選、各自最近一次變動的時間、最近 7 天各自工作的區段、hub 最後一次讀到各自摘要的網址，以及手動加入的實例的 token |
+| `~/.agentapi/hub/instances.json` | `agentapi hub serve` | hub 記得的實例、它們的群組和釘選、各自最近一次變動的時間、最近 7 天各自工作的區段、hub 最後一次讀到各自摘要的網址，以及手動加入的實例的 token；還有[我的最愛](#我的最愛) |
 | `~/.agentapi/hub/instances.json.bak` | `agentapi hub serve` | hub 上次啟動時看到的實例檔案 |
 | `~/.agentapi/hub/instances.deliveries.json` | `agentapi hub serve` | hub 處理過、簽章仍有效的事件的 delivery ID，用來拒絕重送的事件 |
 
@@ -742,14 +762,16 @@ cd ~/.agentapi/hub && jq .instances instances.json > instances.json.new && mv in
 ```
 
 每個實例的工作時間是同一個 version 1 裡多出來的欄位（`work`）。2.3 和 2.4 的 hub 會略過它，下次寫入
-檔案時就把它丟掉。3.0.1 以前的 hub 對 `confirmed_url`（hub 最後一次讀到實例摘要的網址）也一樣。
+檔案時就把它丟掉。3.0.1 以前的 hub 對 `confirmed_url`（hub 最後一次讀到實例摘要的網址）也一樣，
+3.5 以前的 hub 對我的最愛（和 `instances` 並列的 `"favorites": [...]`）也一樣。改回這種 hub 之後，
+它啟動時留下的 `.bak` 仍保有我的最愛。
 
 ## 限制
 
 - hub 對所有實例都提供它自己版本的聊天介面。hub 和各實例請使用相同的 AgentAPI 版本；哪些不同，
   見[版本](#版本)。AgentAPI 2 的 PTY agent 在終端機裡等你回覆對話框時，hub 不會標示出來，那一列
   只顯示閒置或工作中。請到那個 AgentAPI 自己的聊天介面（它的網址）回覆。
-- 所有人共用一個 hub token：沒有個別帳號或權限。
+- 所有人共用一個 hub token：沒有個別帳號或權限，登入的人也共用同一份[我的最愛](#我的最愛)。
 - [工作時間](#工作時間)只有 hub 看到的部分：hub 還沒有這項功能之前、hub 停機或連不到 agent 的期間都
   不算。一個 hub 也不知道另一個 hub 算了多少。
 - hub 監看和開啟 AgentAPI，也能更新主機允許更新的 AgentAPI，但不會啟動或停止它們。

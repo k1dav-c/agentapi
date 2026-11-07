@@ -126,7 +126,7 @@ func TestStoreTellsWhatBrowsersSee(t *testing.T) {
 		i.Summary = &instanceapi.SummaryBody{Status: instanceapi.AgentStatusStable, Attention: instanceapi.AttentionNone}
 		i.LastSeen = now
 	})
-	_, events := s.subscribe()
+	_, _, events := s.subscribe()
 	heard := func() bool {
 		select {
 		case <-events:
@@ -157,7 +157,7 @@ func TestSummaryThatEndsAMuteIsOneEvent(t *testing.T) {
 		i.Summary = &login
 		i.Muted = instanceapi.AttentionKey(&login)
 	})
-	_, events := h.store.subscribe()
+	_, _, events := h.store.subscribe()
 	require.True(t, h.applySummary(t.Context(), "dev:1", "http://dev:1", instanceapi.SummaryBody{Attention: instanceapi.AttentionNone}))
 	require.Len(t, events, 1)
 	event := <-events

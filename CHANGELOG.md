@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- The hub keeps your favorite prompts. The gear in the hub page's header opens **Hub settings**,
+  whose **Favorites** section adds, edits, deletes (with **Undo**) and reorders them: a prompt of up
+  to 20,000 characters and an optional title, up to 100 of them. They are saved on the hub, so every
+  browser signed in to it has the same, and an open page shows a change at once.
+- In the chat of an agent opened from the hub, **☆** in the composer lists the favorites (with a
+  search box past seven) and inserts the one you pick in the message, without sending it: as the
+  message, or as a paragraph after what you typed. Ctrl/⌘+Z takes it back out. **Manage
+  favorites…** opens them in the hub's settings. A chat opened on its own has no ☆.
+- The hub's API has `GET` and `PUT /api/favorites`, and its event stream sends `favorites`. They
+  are kept in the hub's file of instances, still version 1: a hub before 3.5 reads it, and drops the
+  favorites when it writes it.
+- `POST /upload` and the chat's attachments take files of up to 100 MB (10 MB before). The server
+  writes an upload to disk as it reads it instead of holding it in memory. An image over 10 MB
+  still reaches the agent as its path rather than as an image.
+
 ## v3.4.0
 
 ### Features

@@ -19,11 +19,13 @@ import {usePersisted} from "@/lib/use-persisted";
 import {DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger} from "./ui/dropdown-menu";
 import {canSteer, dispatchModeForKey, dispatchModes, sendNotice, turnActive, type DispatchMode} from "@/lib/dispatch";
 import {AttachmentList, useAttachments} from "./message-input/attachments";
+import {FavoritesMenu} from "./message-input/favorites-menu";
 import {QueuedTasks} from "./message-input/queued-tasks";
 import {SendButtonGroup} from "./message-input/send-button";
 import {useSpeechInput} from "./message-input/speech";
 import {cn} from "@/lib/utils";
 import {useMediaQuery} from "@/lib/use-media-query";
+import {favoriteInsertion} from "@/lib/hub-favorites";
 
 interface MessageInputProps {
   onSendMessage: (message: string, mode?: DispatchMode) => Promise<SendResult>;
@@ -113,6 +115,34 @@ export default function MessageInput({
   const completeSlashCommand = (text: string) => {
     setMessage(text);
     textareaRef.current?.focus();
+  };
+
+  // A favorite from the hub (☆) joins the draft: the draft, or a paragraph
+  // after it, with the caret at its end. Typed in as an edit (insertText),
+  // so the browser's undo takes it back; set as the message where that
+  // fails, or while the composer is disabled (the draft is kept).
+  const insertFavorite = (text: string) => {
+    const {from, insert} = favoriteInsertion(message, text);
+    const next = message.slice(0, from) + insert;
+    const textarea = textareaRef.current;
+    if (!textarea || textarea.disabled) {
+      setMessage(next);
+      return;
+    }
+    textarea.focus({preventScroll: true});
+    textarea.setSelectionRange(from, textarea.value.length);
+    let typed = false;
+    try {
+      typed = document.execCommand("insertText", false, insert);
+    } catch {
+      // Not supported.
+    }
+    if (!typed || textarea.value !== next) setMessage(next);
+    requestAnimationFrame(() => {
+      const end = textarea.value.length;
+      textarea.setSelectionRange(end, end);
+      textarea.scrollTop = textarea.scrollHeight;
+    });
   };
 
   // On a phone the composer is one row: the message, ⋯ (attach, voice, the
@@ -296,6 +326,7 @@ export default function MessageInput({
                   />
                 {phone && (
                   <div className="flex shrink-0 items-center gap-1 py-1 pr-1">
+                    <FavoritesMenu onInsert={insertFavorite} />
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button
@@ -396,6 +427,7 @@ export default function MessageInput({
 
                 {!phone && (
                 <div className="flex min-w-0 flex-row items-center gap-2">
+                    <FavoritesMenu onInsert={insertFavorite} />
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Button

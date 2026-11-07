@@ -1,7 +1,7 @@
 "use client";
 
 import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from "react";
-import {Bell, BellOff, Plus, Search, X} from "lucide-react";
+import {Bell, BellOff, Plus, Search, Settings, X} from "lucide-react";
 import {ModeToggle} from "@/components/mode-toggle";
 import {Button} from "@/components/ui/button";
 import {
@@ -32,13 +32,14 @@ import {HubMark} from "./hub/brand";
 import {AddInstance, GroupName, type Naming} from "./hub/dialogs";
 import {AgentChips, StatusChips} from "./hub/filter-chips";
 import {HubClock} from "./hub/clock";
-import {basePath, FrameInfo, InstanceBar} from "./hub/instance-bar";
+import {basePath, FrameFavorites, FrameInfo, InstanceBar} from "./hub/instance-bar";
 import {GroupHeader, InstanceRow, type RowActions} from "./hub/instance-row";
 import {ListEdge, useListWidth} from "./hub/list-edge";
 import {MachineCard} from "./hub/machine-card";
 import {machineAgents} from "./hub/machine-tabs";
 import {ByMachineToggle, ListOrderSwitch, useListView} from "./hub/list-order";
 import {Onboarding, Overview} from "./hub/overview";
+import {HubSettings, type SettingsSection} from "./hub/settings";
 import {SignIn} from "./hub/sign-in";
 import {readStorage, writeStorage} from "./hub/storage";
 import {useHubTab} from "./hub/tab-icon";
@@ -60,7 +61,7 @@ const agentsKey = "agentapi.hub.agents";
 // the one picked. On a narrow screen the list and the chat take turns.
 export function HubView() {
   const root = useMemo(() => (typeof window === "undefined" ? "" : hubRoot(basePath, window.location.origin)), []);
-  const {session, signedIn, retrySession, instances, hubVersion, unreachable, status} = useHubStream(root);
+  const {session, signedIn, retrySession, instances, hubVersion, favorites, setFavorites, unreachable, status} = useHubStream(root);
   const [selected, setSelected] = useState<string | undefined>(() =>
     typeof window === "undefined" ? undefined : decodeURIComponent(window.location.hash.slice(1)) || undefined,
   );
@@ -69,6 +70,7 @@ export function HubView() {
   const [query, setQuery] = useState("");
   const [adding, setAdding] = useState(false);
   const [naming, setNaming] = useState<Naming | null>(null);
+  const [settings, setSettings] = useState<SettingsSection | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set(readStorage<string[]>(collapsedKey, [])));
   const [notify, setNotify] = useState<boolean>(() => readStorage(notifyKey, false));
   const search = useRef<HTMLInputElement>(null);
@@ -134,6 +136,8 @@ export function HubView() {
     onOpen: (id) => {
       if (instances.has(id)) select(id);
     },
+    // From the chat's menu of favorites.
+    onManageFavorites: () => setSettings("favorites"),
   });
   // The agents of the open one's machine, for the bar's switch.
   const open = selected ? instances.get(selected) : undefined;
@@ -296,6 +300,16 @@ export function HubView() {
                 {notify ? <Bell className="size-4 text-foreground" /> : <BellOff className="size-4" />}
               </Button>
               <ModeToggle />
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-9 rounded-full text-muted-foreground"
+                aria-label="Hub settings"
+                title="Hub settings"
+                onClick={() => setSettings("favorites")}
+              >
+                <Settings className="size-4" />
+              </Button>
               <Button variant="outline" size="icon" className="size-9 rounded-full" aria-label="Add agents" title="Add agents" onClick={() => setAdding(true)}>
                 <Plus className="size-4" />
               </Button>
@@ -469,7 +483,10 @@ export function HubView() {
           {current ? (
             <>
               {framed?.instance === current.id ? (
-                <FrameInfo frame={frame} ready={framed.ready} instance={current} machine={machine} hubVersion={hubVersion} root={root} />
+                <>
+                  <FrameInfo frame={frame} ready={framed.ready} instance={current} machine={machine} hubVersion={hubVersion} root={root} />
+                  {favorites && <FrameFavorites frame={frame} ready={framed.ready} favorites={favorites} />}
+                </>
               ) : (
                 <InstanceBar instance={current} machine={machine} hubVersion={hubVersion} root={root} onBack={() => select(undefined)} onOpen={select} />
               )}
@@ -500,6 +517,7 @@ export function HubView() {
           {announcement}
         </div>
         <AddInstance root={root} open={adding} onOpenChange={setAdding} onAdded={(id) => select(id)} />
+        <HubSettings root={root} section={settings} onClose={() => setSettings(null)} favorites={favorites} onFavoritesSaved={setFavorites} />
         <GroupName
           naming={naming}
           onClose={() => setNaming(null)}

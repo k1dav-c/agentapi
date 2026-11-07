@@ -2,7 +2,8 @@
 
 The [chat UI guide](../chat-ui.md) and [README](../../README.md) use these screenshots and GIFs.
 Chromium captured them from AgentAPI 3.1.0, built from the source with `make build`, serving the
-production chat UI and API; `retry-card.png` came later, from a 3.3.0 build.
+production chat UI and API; `retry-card.png` came later, from a 3.3.0 build, and the views of the
+hub's page (with its settings button) and of the favorites from a 3.5.0 build.
 
 [scripts/capture-docs.mjs](../../scripts/capture-docs.mjs) starts its own servers on a small sample
 project, `my-app` (a page with a stylesheet, a script and release notes, two commits and
@@ -76,10 +77,12 @@ device scale factor of 1.
 | [hub-desktop.png](hub-desktop.png) | The hub's overview: how many need you, a tile per state, a card per request, what runs and what finished |
 | [hub-desktop-dark.png](hub-desktop-dark.png) | The same overview in the dark theme |
 | [hub-instance.png](hub-instance.png) | An agent open beside the list, its approval ready to answer, with its machine's agents in the bar |
+| [composer-favorites.png](composer-favorites.png) | An idle agent open from the hub, the composer's ☆ menu of favorites over a draft |
 | [hub-empty.png](hub-empty.png) | The guide an empty hub shows: the hub's address, the join command and a prompt for an agent on the machine, the secret masked |
 | [hub-sign-in.png](hub-sign-in.png) | Signing in to the hub, beside its picture of agents in their states |
 | [hub-list.png](hub-list.png) | The hub's list: two pinned agents, then two groups and Ungrouped, with every state's glyph: approval, question, login, usage limit, working, finished, idle, unreachable, stopped; and each agent's AgentAPI version, one older than the hub |
 | [hub-add.png](hub-add.png) | The Add dialog: joining a machine (the hub's address, updates from the hub, the command and a prompt for an agent, the secret masked), or adding an instance by its URL and token |
+| [hub-settings-favorites.png](hub-settings-favorites.png) | Hub settings: the favorites, each with its buttons to move, edit and delete it |
 | [hub-recent.png](hub-recent.png) | The hub's list by the agents' latest changes: the pinned agents, then one list without group headers, the most recent first, and each row's group where it has room |
 | [hub-machines.png](hub-machines.png) | The hub's list By machine in the groups: the pinned agents, then each group with a card per machine: the machine with its version and spend once, a tab per agent with its state's dot, and the picked agent below, one older than the hub |
 | [hub-machines-recent.png](hub-machines-recent.png) | The hub's list By machine in the recent order: the pinned agents, then a card per machine without group headers, the machine of the latest change first, each with the age of that change and the agent that changed last |
