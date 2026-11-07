@@ -102,9 +102,51 @@ func TestFailedTurn(t *testing.T) {
 	h.completeTurn("turn-1", "failed", `,"error":null`)
 	s := snapshot(h.rec)
 	assert.Equal(t, []string{"warning: Reconnecting... 1/5"}, s.errors)
-	assert.Equal(t, []native.TurnResult{{StopReason: "error", Error: "stream disconnected\nHTTP 502"}}, s.completions)
+	// A 502 after app-server's retries is tried again later.
+	assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonTransient, Error: "stream disconnected\nHTTP 502", APIStatus: 502}}, s.completions)
 	sys := s.eventsOf("system")
 	assert.Equal(t, "turn failed: stream disconnected\nHTTP 502", *sys[len(sys)-1].Content)
+}
+
+func TestTransientTurnFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name, err string
+		want      native.TurnResult
+	}{
+		{
+			"bad gateway",
+			`{"message":"unexpected status 502 Bad Gateway: upstream connect error","codexErrorInfo":{"responseTooManyFailedAttempts":{"httpStatusCode":502}}}`,
+			native.TurnResult{StopReason: native.StopReasonTransient, Error: "unexpected status 502 Bad Gateway: upstream connect error", APIStatus: 502},
+		},
+		{
+			"a dropped connection",
+			`{"message":"stream closed before response.completed","codexErrorInfo":{"responseStreamDisconnected":{"httpStatusCode":null}}}`,
+			native.TurnResult{StopReason: native.StopReasonTransient, Error: "stream closed before response.completed"},
+		},
+		{
+			"overloaded",
+			`{"message":"The server is overloaded","codexErrorInfo":"serverOverloaded"}`,
+			native.TurnResult{StopReason: native.StopReasonTransient, Error: "The server is overloaded"},
+		},
+		{
+			"a bad request is not",
+			`{"message":"unexpected status 400 Bad Request","codexErrorInfo":{"httpConnectionFailed":{"httpStatusCode":400}}}`,
+			native.TurnResult{StopReason: native.StopReasonError, Error: "unexpected status 400 Bad Request"},
+		},
+		{
+			"a full context is not",
+			`{"message":"Codex ran out of room in the model's context window; timed out","codexErrorInfo":"contextWindowExceeded"}`,
+			native.TurnResult{StopReason: native.StopReasonError, Error: "Codex ran out of room in the model's context window; timed out"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, "", nil)
+			h.boot()
+			h.beginTurn("turn-1")
+			h.completeTurn("turn-1", "failed", `,"error":`+tc.err)
+			assert.Equal(t, []native.TurnResult{tc.want}, snapshot(h.rec).completions)
+		})
+	}
 }
 
 func TestTurnStoppedByAUsageLimit(t *testing.T) {

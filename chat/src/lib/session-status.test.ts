@@ -27,6 +27,11 @@ describe("getAgentState", () => {
     expect(getAgentState({...connected, serverStatus: "stable", limitStop: false})).toBe("ready");
   });
 
+  test("a failed turn that waits to be tried again is work, not a wait for the user", () => {
+    expect(getAgentState({...connected, serverStatus: "stable", retryWait: true})).toBe("working");
+    expect(getAgentState({...connected, serverStatus: "stable", retryWait: true, pendingRequestCount: 1})).toBe("needs-you");
+  });
+
   test("the connection still comes first", () => {
     expect(getAgentState({serverStatus: "running", connectionStatus: "reconnecting", loginRequired: true})).toBe("reconnecting");
     expect(getAgentState({serverStatus: "running", connectionStatus: "offline", pendingRequestCount: 1})).toBe("offline");

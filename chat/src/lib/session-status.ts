@@ -148,21 +148,26 @@ export interface AgentStateInput {
   // A usage limit stopped the agent's turn, and holds the queue (native
   // transport).
   limitStop?: boolean;
+  // A turn that failed on an upstream error waits to be tried again: the
+  // agent goes on by itself (native transport).
+  retryWait?: boolean;
 }
 
 // The agent needs you while it waits on requests, while it waits for someone to log it in, and after a usage
-// limit stopped it, as the server's summary says (attention).
+// limit stopped it, as the server's summary says (attention). A failed turn that waits to be tried again is
+// work, as a hub shows it.
 export function getAgentState({
   serverStatus,
   connectionStatus,
   pendingRequestCount = 0,
   loginRequired = false,
   limitStop = false,
+  retryWait = false,
 }: AgentStateInput): AgentStateKind {
   if (connectionStatus === "offline" || serverStatus === "offline") return "offline";
   if (connectionStatus === "reconnecting") return "reconnecting";
   if (pendingRequestCount > 0 || loginRequired || limitStop) return "needs-you";
-  if (serverStatus === "running") return "working";
+  if (serverStatus === "running" || (retryWait && serverStatus === "stable")) return "working";
   if (serverStatus === "stable") return "ready";
   return "connecting";
 }
@@ -174,7 +179,7 @@ export type WaitingFor = "login" | "answer" | "limit" | null;
 
 export function waitingFor(
   kind: AgentStateKind,
-  {pendingRequestCount = 0, loginRequired = false, limitStop = false}: Omit<AgentStateInput, "serverStatus" | "connectionStatus">,
+  {pendingRequestCount = 0, loginRequired = false, limitStop = false}: Omit<AgentStateInput, "serverStatus" | "connectionStatus" | "retryWait">,
 ): WaitingFor {
   if (kind !== "needs-you") return null;
   if (loginRequired) return "login";

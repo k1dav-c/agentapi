@@ -68,6 +68,7 @@ func (s *Server) registerRoutes() {
 	s.registerAuthRoutes()
 	s.registerNativeRoutes()
 	s.registerLimitRoutes()
+	s.registerRetryRoutes()
 	s.registerSessionRoutes()
 	s.registerSubagentRoutes()
 	s.registerFileRoutes()

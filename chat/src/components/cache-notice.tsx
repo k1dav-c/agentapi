@@ -19,6 +19,7 @@ export function CacheNotice() {
   const serverStatus = useChatSelector((chat) => chat.serverStatus);
   const pendingRequestCount = useChatSelector((chat) => chat.pendingRequestCount);
   const limitStop = useChatSelector((chat) => chat.limitStop);
+  const retryWait = useChatSelector((chat) => chat.retryWait);
   const loginRequired = useChatSelector((chat) => chat.loginRequired);
   const capabilities = useChatSelector((chat) => chat.capabilities);
   const agentType = useChatSelector((chat) => chat.agentType);
@@ -51,7 +52,7 @@ export function CacheNotice() {
   // Claude Code compacts with the /compact message; other agents on request.
   const canCompact = Boolean(capabilities?.compact) || agentType === "claude";
   const cold = coldCache(agentUsage, now);
-  const idle = serverStatus === "stable" && pendingRequestCount === 0 && !limitStop && !loginRequired;
+  const idle = serverStatus === "stable" && pendingRequestCount === 0 && !limitStop && !retryWait && !loginRequired;
   if (!cold || !idle || !canCompact || dismissed === expiresAt) return null;
 
   const runCompact = async () => {

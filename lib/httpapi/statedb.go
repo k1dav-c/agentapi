@@ -26,6 +26,8 @@ type restoredState struct {
 	settings native.Settings
 	// limitStop is the turn a usage limit stopped.
 	limitStop *native.LimitStop
+	// retryWait is the failed turn that waits to be tried again.
+	retryWait *native.RetryWait
 }
 
 // restoreState connects the state database to emitter, which stores its
@@ -92,8 +94,18 @@ func restoreState(config ServerConfig, db *statedb.DB, emitter *EventEmitter, lo
 		logger.Warn("Ignoring the stored limit stop", "error", err)
 	}
 	emitter.SetLimitStop(limitStop)
+	retryWait, err := snap.RetryWait()
+	if err != nil {
+		logger.Warn("Ignoring the stored retry wait", "error", err)
+	}
+	if len(config.Native.RetryDelays) == 0 && config.Native.RetryDelays != nil {
+		// Retries were turned off since: the queue doesn't wait.
+		retryWait = nil
+		db.SetRetryWait(nil)
+	}
+	emitter.SetRetryWait(retryWait)
 	logger.Info("Restored conversation from the state database", "messages", len(state.Messages), "resume", resumeRef != "")
-	return restoredState{snapshot: snap, messages: state.Messages, resumeRef: resumeRef, settings: settings, limitStop: limitStop}, nil
+	return restoredState{snapshot: snap, messages: state.Messages, resumeRef: resumeRef, settings: settings, limitStop: limitStop, retryWait: retryWait}, nil
 }
 
 // transportPTY is the transport AgentAPI 2 kept in the state database of a

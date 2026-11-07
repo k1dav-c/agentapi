@@ -231,6 +231,19 @@ tasks** lets the queue go at once. A task you send yourself goes out right away.
 the agent needs you, as with a request: the header, the tab title and its icon say so, and a background
 tab with notifications on shows one.
 
+### A failed API request
+
+![A task the API's gateway failed with a 502: the card counting down to the first of three retries, with Retry now and Cancel, and a task held in the queue](screenshots/retry-card.png)
+
+When a turn fails on an API error that may pass, such as a 502 from a gateway or an overloaded API,
+AgentAPI tries it again by itself (see [Transient API errors](../README.md#transient-api-errors)).
+A card above the composer says what the API returned, with the agent's message, and counts down
+to the retry: *Retrying in 0:28 (1 of 3)*. The queued tasks wait, marked *held until the failed task
+is tried again*. **Retry now** tries at once, and **Cancel** gives up on the task and lets the queue
+go. A task you send yourself goes out right away. The agent counts as working meanwhile, and the
+status strip says it waits to try the failed task again. The failed task itself shows Failed; the
+retry is the next task.
+
 ## Requests and decision cards
 
 What the agent asks you appears above the composer as a card, and the agent waits. The status line

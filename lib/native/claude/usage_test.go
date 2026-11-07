@@ -88,11 +88,11 @@ func TestTurnStoppedByALimitMessage(t *testing.T) {
 	require.Eventually(t, func() bool { return len(sink.State().Results) == 1 }, 5*time.Second, time.Millisecond)
 	assert.Equal(t, native.StopReasonLimited, sink.State().Results[0].StopReason)
 
-	// Another failure is not a limit.
+	// An overloaded API is not a limit: it is tried again.
 	require.NoError(t, a.StartTurn(context.Background(), native.Input{Text: "again"}))
 	proc.send(t, []byte(`{"type":"result","subtype":"error_during_execution","is_error":true,"errors":["API Error: 529 overloaded_error"]}`))
 	require.Eventually(t, func() bool { return len(sink.State().Results) == 2 }, 5*time.Second, time.Millisecond)
-	assert.Equal(t, native.StopReasonError, sink.State().Results[1].StopReason)
+	assert.Equal(t, native.StopReasonTransient, sink.State().Results[1].StopReason)
 }
 
 func TestPromptCacheAfterATurn(t *testing.T) {

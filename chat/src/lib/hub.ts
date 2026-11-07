@@ -533,6 +533,12 @@ export function activity(instance: HubInstance): Activity {
       // What it waits for, out of the way.
       return {...waitsFor(summary), label: "Muted", tone: "muted"};
     case "working":
+      if (summary?.retry_wait) {
+        // A failed turn AgentAPI tries again by itself.
+        const wait = summary.retry_wait;
+        const failed = wait.api_status ? `The API returned ${wait.api_status}` : "The API request failed";
+        return {label: "Retrying", text: `${failed} · try ${wait.attempt} of ${wait.attempts}`, tone: "working", since: wait.stopped_at};
+      }
       return {label: "Working", text: task?.prompt || summary?.title || "On a task", tone: "working", since: task?.started_at};
     case "unread":
       return {label: "Finished", text: summary?.title || task?.prompt || "A task", tone: "ready", since: task?.ended_at};

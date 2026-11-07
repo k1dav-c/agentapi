@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- A turn that fails on an API error that may pass is tried again instead of letting the queue move
+  on: a 502 from a gateway ("API Error: 502 Bad Gateway. This is a server-side issue"), another 5xx
+  or 429, an overloaded API, a dropped connection. AgentAPI waits 30 seconds, then 2 and 5 minutes
+  between retries (`--retry-delays`, `off` to turn them off), and each retry sends "Continue from
+  where you left off." so your message doesn't go twice. The failure is a warning while retries
+  remain, and an error after the last. `GET /status`, `status_change`, the summary and the
+  `instance.*` webhook data report `retry_wait` (the agent's message, the API status, which try,
+  `retry_at`); `POST /retry` tries now and `DELETE /retry` gives up and lets the queue go. The wait
+  survives a restart with `--state-db`. Usage limits and login problems are told apart first.
+- The chat shows the wait as a card above the composer, counting down to the retry ("Retrying in
+  0:28 (1 of 3)") with **Retry now** and **Cancel**, and queued tasks say they wait for it. The
+  agent counts as working meanwhile, in the chat and on a hub, whose row reads **Retrying**.
+- The demo agent fails a turn with a 502 on the word `gateway`.
+
 ## v3.2.2
 
 ### Fixes

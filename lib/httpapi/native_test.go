@@ -36,7 +36,14 @@ type nativeServer struct {
 
 func newNativeServer(t *testing.T, configure func(*nativetest.Adapter)) *nativeServer {
 	t.Helper()
-	n := startNativeServer(t, configure)
+	return newNativeServerConfig(t, configure, nil)
+}
+
+// newNativeServerConfig is newNativeServer with change applied to the
+// server's config.
+func newNativeServerConfig(t *testing.T, configure func(*nativetest.Adapter), change func(*httpapi.ServerConfig)) *nativeServer {
+	t.Helper()
+	n := startNativeServerConfig(t, configure, change)
 	require.Eventually(t, func() bool {
 		var status httpapi.StatusChangeBody
 		n.do(http.MethodGet, "/status", nil, &status)
@@ -49,15 +56,24 @@ func newNativeServer(t *testing.T, configure func(*nativetest.Adapter)) *nativeS
 // start.
 func startNativeServer(t *testing.T, configure func(*nativetest.Adapter)) *nativeServer {
 	t.Helper()
+	return startNativeServerConfig(t, configure, nil)
+}
+
+func startNativeServerConfig(t *testing.T, configure func(*nativetest.Adapter), change func(*httpapi.ServerConfig)) *nativeServer {
+	t.Helper()
 	ctx, cancel := context.WithCancel(logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil))))
 	factory := &nativetest.Factory{Configure: configure}
-	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
+	config := httpapi.ServerConfig{
 		AgentType:      instanceapi.AgentTypeClaude,
 		Native:         httpapi.NativeConfig{Factory: factory.New},
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},
 		AllowedOrigins: []string{"*"},
-	})
+	}
+	if change != nil {
+		change(&config)
+	}
+	srv, err := httpapi.NewServer(ctx, config)
 	require.NoError(t, err)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(func() {

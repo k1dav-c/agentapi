@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/viper"
@@ -52,6 +53,9 @@ type serverOptions struct {
 	terminal bool
 	// autoContinue continues a turn a usage limit stopped once it resets.
 	autoContinue bool
+	// retryDelays are the waits before a turn that failed on a transient
+	// upstream error is tried again; empty (not nil) tries none again.
+	retryDelays []time.Duration
 	// prices is a JSON file of model prices that adds to the built-in ones.
 	prices  string
 	webhook httpapi.WebhookConfig
@@ -143,6 +147,12 @@ func loadServerOptions(flags flagSource, args []string) (serverOptions, error) {
 	if err := checkTransport(flags); err != nil {
 		return serverOptions{}, err
 	}
+	// Unset, the conversation's default (the flag's) applies.
+	if flags.IsSet(FlagRetryDelays) {
+		if opts.retryDelays, err = parseRetryDelays(flags.GetStringSlice(FlagRetryDelays)); err != nil {
+			return serverOptions{}, fmt.Errorf("invalid --%s: %w", FlagRetryDelays, err)
+		}
+	}
 	if opts.bind, err = httpapi.ParseBindAddress(flags.GetString(FlagBind)); err != nil {
 		return serverOptions{}, fmt.Errorf("invalid --%s: %w", FlagBind, err)
 	}
@@ -229,6 +239,29 @@ func readPipedPrompt(logger *slog.Logger) (string, error) {
 		logger.Info("Read initial prompt from stdin", "bytes", len(data))
 	}
 	return string(data), nil
+}
+
+// parseRetryDelays reads --retry-delays: durations such as 30s or 2m, given
+// as a list, comma- or space-separated. None, off or 0 turn retries off,
+// which is an empty list rather than nil (the default).
+func parseRetryDelays(values []string) ([]time.Duration, error) {
+	delays := []time.Duration{}
+	for _, value := range values {
+		for _, field := range strings.FieldsFunc(value, func(r rune) bool { return r == ',' || unicode.IsSpace(r) }) {
+			if field == "off" || field == "0" {
+				return []time.Duration{}, nil
+			}
+			d, err := time.ParseDuration(field)
+			if err != nil {
+				return nil, err
+			}
+			if d <= 0 {
+				return nil, fmt.Errorf("%s: a delay is longer than 0", field)
+			}
+			delays = append(delays, d)
+		}
+	}
+	return delays, nil
 }
 
 // heartbeatOption is the webhook heartbeat interval of

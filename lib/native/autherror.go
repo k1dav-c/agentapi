@@ -2,6 +2,7 @@ package native
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -26,7 +27,7 @@ func IsAuthError(text string) bool {
 // a usage limit or ran out of credits, as agents and model providers word
 // them: Claude Code's "You've hit your limit" family, Codex's "usage limit",
 // and providers' quota errors. A transient rate limit (too many requests)
-// is not one: the agent retries those.
+// is not one: it is a transient error (IsTransientError).
 var limitErrorPattern = regexp.MustCompile(`you've (?:hit|reached) your|you're out of (?:extra )?usage|` +
 	`out of usage|usage limit|usage allocation|usage credits|` +
 	`exceeded your current quota|insufficient_quota|quota exceeded|resource_exhausted`)
@@ -36,4 +37,45 @@ var limitErrorPattern = regexp.MustCompile(`you've (?:hit|reached) your|you're o
 // (error codes, rate limit events) as well.
 func IsLimitError(text string) bool {
 	return limitErrorPattern.MatchString(strings.ToLower(text))
+}
+
+// transientErrorPattern matches (lower-case) errors of an upstream failure
+// that may pass by itself, as agents, model providers and gateways word
+// them: an HTTP 5xx or 429 with its status, an overloaded or unavailable
+// API, Claude Code's "server-side issue", a rate limit, a timeout and a
+// dropped connection.
+var transientErrorPattern = regexp.MustCompile(`api error:? (?:429|5\d\d)\b|` +
+	`(?:status|code|http|error)[: ]+(?:429|5\d\d)\b|\b(?:429|5\d\d) (?:too many requests|internal server error|bad gateway|service unavailable|gateway time-?out)|` +
+	`bad gateway|service (?:is )?(?:temporarily )?unavailable|gateway time-?out|internal server error|server[- ]side issue|` +
+	`overloaded|server_busy|at capacity|rate[ _-]?limit|too many requests|` +
+	`request timed out|timed out|connection (?:error|reset|refused|closed|lost)|` +
+	`econnreset|etimedout|socket hang up|fetch failed|network error|stream (?:disconnected|ended|closed)`)
+
+// IsTransientError reports whether an agent's error text says that an
+// upstream request failed in a way that may pass: worth trying again in a
+// while. A usage limit and a login problem say so too ("rate limit", a
+// 429); callers check IsLimitError and IsAuthError first.
+func IsTransientError(text string) bool {
+	return transientErrorPattern.MatchString(strings.ToLower(text))
+}
+
+// IsTransientStatus reports whether an upstream HTTP status is one that may
+// pass: a 5xx, or 429 (too many requests).
+func IsTransientStatus(status int) bool {
+	return status == 429 || (status >= 500 && status <= 599)
+}
+
+// statusInTextPattern finds the HTTP status of a transient error in its
+// text, e.g. "API Error: 502 Bad Gateway" or "unexpected status 503".
+var statusInTextPattern = regexp.MustCompile(`(?:api error|status|code|http|error)[: ]+(429|5\d\d)\b|\b(429|5\d\d) (?:too many requests|internal server error|bad gateway|service unavailable|gateway time-?out)`)
+
+// TransientStatus returns the HTTP status a transient error's text names,
+// or 0.
+func TransientStatus(text string) int {
+	m := statusInTextPattern.FindStringSubmatch(strings.ToLower(text))
+	if m == nil {
+		return 0
+	}
+	status, _ := strconv.Atoi(m[1] + m[2])
+	return status
 }

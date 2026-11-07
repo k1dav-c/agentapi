@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -858,6 +860,11 @@ func (a *Adapter) handleResult(f *frame) {
 	started := a.started
 	byResult := !a.sessionStates
 	authFailed := a.turn.authFailed
+	if result.StopReason == native.StopReasonError && !authFailed && !authFailure(f) {
+		if status, ok := transientFailure(f); ok {
+			result.StopReason, result.APIStatus = native.StopReasonTransient, status
+		}
+	}
 	var replaced *native.TurnResult
 	if inTurn {
 		replaced, a.turn.result = a.turn.result, &result
@@ -926,6 +933,26 @@ func turnResult(f *frame, interrupted bool) native.TurnResult {
 		msg += ": " + strings.Join(details, "; ")
 	}
 	return native.TurnResult{StopReason: native.StopReasonError, Error: msg}
+}
+
+// transientFailure reports whether a failed result is an upstream error
+// that may pass, which AgentAPI tries again (Claude Code retried it
+// already): an HTTP 5xx or 429, or an error worded as one (Claude Code's
+// "API Error: 502 … server-side issue", overloaded, a timeout). status is
+// the API's, 0 when the result doesn't say.
+func transientFailure(f *frame) (status int, ok bool) {
+	status, _ = strconv.Atoi(strings.TrimSpace(string(f.APIErrorStatus)))
+	switch {
+	case native.IsTransientStatus(status):
+		return status, true
+	case status != 0:
+		// A 400, say: the same request fails again.
+		return status, false
+	}
+	if text := stringField(f.Result); native.IsTransientError(text) {
+		return status, true
+	}
+	return status, slices.ContainsFunc(f.Errors, native.IsTransientError)
 }
 
 // endTurn reports the end of the current turn, if one was sent or started.

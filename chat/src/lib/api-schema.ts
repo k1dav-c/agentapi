@@ -463,6 +463,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry a failed turn now
+         * @description Tries the turn that failed on an upstream error (`retry_wait` in GET /status) again now rather than at `retry_at`: AgentAPI sends a message asking the agent to go on, before the queued messages. If it fails the same way, the next retry waits the next delay of --retry-delays. Returns 409 when no failed turn waits.
+         */
+        post: operations["post-retry"];
+        /**
+         * Cancel a retry
+         * @description Forgets the turn that failed on an upstream error without trying it again, so the queued messages go out as soon as the agent can take them. Returns 409 when no failed turn waits.
+         */
+        delete: operations["delete-retry"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/rich-messages": {
         parameters: {
             query?: never;
@@ -1668,6 +1692,35 @@ export interface components {
             /** @description Open a copy of the session, under a new id, and leave the session itself as it is. */
             fork?: boolean;
         };
+        RetryWait: {
+            /**
+             * Format: int64
+             * @description The HTTP status the API or gateway answered with, e.g. 502, if the agent says.
+             */
+            api_status?: number;
+            /**
+             * Format: int64
+             * @description Which retry comes next, from 1.
+             */
+            attempt: number;
+            /**
+             * Format: int64
+             * @description How many times in a row AgentAPI tries a failed turn again (--retry-delays). After the last, a failure is an error.
+             */
+            attempts: number;
+            /** @description What the agent said, e.g. API Error: 502 Bad Gateway. */
+            message: string;
+            /**
+             * Format: date-time
+             * @description When AgentAPI sends a message that continues the turn. Queued messages go out after it.
+             */
+            retry_at: string;
+            /**
+             * Format: date-time
+             * @description When the turn failed.
+             */
+            stopped_at: string;
+        };
         RichContentBlock: {
             /** @description Images in a tool result (for example an image file the agent read) */
             images?: components["schemas"]["RichImage"][] | null;
@@ -1909,6 +1962,8 @@ export interface components {
              * @description Number of requests (approvals, questions, plans) the agent is waiting on; see GET /requests.
              */
             pending_requests?: number;
+            /** @description Set when the agent's last turn failed on an upstream error that may pass (an HTTP 5xx or 429, an overloaded API) and AgentAPI tries it again at retry_at, until a turn starts or the retry is cancelled (DELETE /retry). */
+            retry_wait?: components["schemas"]["RetryWait"];
             /** @description Random identifier of this AgentAPI run: it changes every time AgentAPI starts. */
             server_id: string;
             /** @description Name the agent gave the session: Claude Code's title (or its /rename), Codex's thread name or Pi's /name. Empty until the agent names it. */
@@ -1957,6 +2012,8 @@ export interface components {
              * @description Number of requests (approvals, questions, plans) the agent is waiting on; see GET /requests.
              */
             pending_requests?: number;
+            /** @description Set when the agent's last turn failed on an upstream error that may pass (an HTTP 5xx or 429, an overloaded API) and AgentAPI tries it again at retry_at, until a turn starts or the retry is cancelled (DELETE /retry). */
+            retry_wait?: components["schemas"]["RetryWait"];
             /** @description Random identifier of this AgentAPI run: it changes every time AgentAPI starts. */
             server_id: string;
             /** @description Name the agent gave the session: Claude Code's title (or its /rename), Codex's thread name or Pi's /name. Empty until the agent names it. */
@@ -2060,6 +2117,8 @@ export interface components {
             queued_messages: number;
             /** @description The oldest request the agent waits on (see GET /requests); missing when none waits. */
             request?: components["schemas"]["SummaryRequest"];
+            /** @description Set while a failed turn waits to be tried again, as in GET /status. The agent needs nothing of the user meanwhile: attention stays none. */
+            retry_wait?: components["schemas"]["RetryWait"];
             /**
              * Format: date-time
              * @description When a client last showed the conversation to the user (POST /tasks/seen); when AgentAPI started, before any did.
@@ -2175,6 +2234,8 @@ export interface components {
             queued_messages: number;
             /** @description The oldest request the agent waits on (see GET /requests); missing when none waits. */
             request?: components["schemas"]["SummaryRequest"];
+            /** @description Set while a failed turn waits to be tried again, as in GET /status. The agent needs nothing of the user meanwhile: attention stays none. */
+            retry_wait?: components["schemas"]["RetryWait"];
             /**
              * Format: date-time
              * @description When a client last showed the conversation to the user (POST /tasks/seen); when AgentAPI started, before any did.
@@ -3963,6 +4024,100 @@ export interface operations {
             };
             /** @description Unprocessable Entity */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "post-retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InterruptResponseBody"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "delete-retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InterruptResponseBody"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

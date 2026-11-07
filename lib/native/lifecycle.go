@@ -449,6 +449,8 @@ func (c *Conversation) BeginRestart(reset func()) *Replacement {
 	c.promptSent = false
 	c.messages.reset()
 	c.setLimitStopLocked(nil)
+	c.setRetryWaitLocked(nil)
+	c.retrying = 0
 	c.clearSessionUsageLocked()
 	c.cfg.Emitter.EmitMessages(nil)
 	return r
@@ -485,6 +487,8 @@ func (c *Conversation) BeginSwitch(resume Resume, messages []conv.Message, reset
 	c.promptSent = true
 	c.messages = newMessageLog(c.cfg.Clock, messages)
 	c.setLimitStopLocked(nil)
+	c.setRetryWaitLocked(nil)
+	c.retrying = 0
 	// The agent reports the session's usage once it ran a turn.
 	c.clearSessionUsageLocked()
 	// Until the agent reports a fork's own ref, AgentAPI would resume the

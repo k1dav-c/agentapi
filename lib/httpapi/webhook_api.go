@@ -69,7 +69,7 @@ func (s *Server) webhookInstanceState() instanceapi.WebhookInstanceState {
 	return instanceapi.WebhookInstanceState{
 		Status: status.Status, Lifecycle: status.Lifecycle, AgentSessionID: status.AgentSessionID,
 		SessionName: status.SessionName, PendingRequests: status.PendingRequests,
-		LoginRequired: status.LoginRequired, LimitStop: status.LimitStop, Usage: status.Usage, Settings: status.Settings,
+		LoginRequired: status.LoginRequired, LimitStop: status.LimitStop, RetryWait: status.RetryWait, Usage: status.Usage, Settings: status.Settings,
 		// The queue has a lock of its own. s.mu would hold up Stop, whose
 		// instance.stopped carries the queue's length, until a call into
 		// the agent it is about to cancel ended by itself.

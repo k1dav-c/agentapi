@@ -125,6 +125,8 @@ describe("hub", () => {
     expect(activity(instance("b", {state: "needs-you", summary: summary({attention: "login"})}))).toMatchObject({label: "Login", text: "Log in to continue"});
     const working = instance("c", {state: "working", summary: summary({status: "running", task: {id: 1, status: "running", prompt: "Migrate invoices", started_at: "2026-10-26T10:00:00Z", errors: [], steered: []}})});
     expect(activity(working)).toEqual({label: "Working", text: "Migrate invoices", tone: "working", since: "2026-10-26T10:00:00Z"});
+    const retrying = instance("f", {state: "working", summary: summary({retry_wait: {message: "API Error: 502 Bad Gateway", api_status: 502, stopped_at: "2026-10-26T10:00:00Z", attempt: 1, attempts: 3, retry_at: "2026-10-26T10:00:30Z"}})});
+    expect(activity(retrying)).toEqual({label: "Retrying", text: "The API returned 502 · try 1 of 3", tone: "working", since: "2026-10-26T10:00:00Z"});
     expect(activity(instance("d", {state: "unreachable", connection: "unreachable", error: "connection refused"})).tone).toBe("fault");
     expect(activity(instance("e")).text).toBe("No task yet");
   });

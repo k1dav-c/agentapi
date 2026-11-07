@@ -86,6 +86,9 @@ has the complete commit history.
   suggests it once Claude Code's prompt cache has expired.
 - When a [usage limit](#usage-limits) stops a turn, the queue waits until the
   limit resets, and the turn can continue by itself then.
+- A turn that fails on a [transient API error](#transient-api-errors) (a 502
+  from a gateway, an overloaded API) is tried again after 30 seconds, 2 and 5
+  minutes, before the queue goes on.
 - AgentAPI reports a missing or expired [login](#logging-in) with the command
   to run, and starts the agent by itself once it is logged in.
 - A shared [terminal](#terminal) in the agent's working directory, for logins
@@ -243,7 +246,9 @@ notes.
 The server's [task](#tasks) determines the displayed state (Working, Done, Failed, Limit reached)
 and which tool calls and thinking belong to it. A strip above the composer shows the agent's
 current activity. While the agent waits for an answer or a login, or a usage limit stopped it, the
-header, tab title and status strip show "Needs you", and queued tasks are marked as held. A message
+header, tab title and status strip show "Needs you", and queued tasks are marked as held; while a
+failed turn waits to be [tried again](#transient-api-errors), the agent shows as working and they are
+held too. A message
 steered into a task shows inside it, so the chat numbers tasks as the server does. Long tasks show
 their latest 40 steps first.
 
@@ -690,6 +695,44 @@ reset**, **Continue now**, and **Send queued tasks**, the queue says it waits fo
 header and tab title say "Needs you".
 
 ![A task stopped on the 5-hour limit, marked Limit reached: the card with the reset time, and a task held in the queue](docs/screenshots/limit-card.png)
+
+### Transient API errors
+
+The agents retry a failed API request a few times themselves. When they give up on an error that
+may pass, the turn fails: Claude Code says "API Error: 502 Bad Gateway. This is a server-side
+issue, usually temporary", Codex reports `serverOverloaded` or a failed connection, Pi ends its
+retries without success. AgentAPI then waits and tries the turn again instead of moving on to the
+next queued message. It counts as transient:
+
+- an HTTP status of 500 to 599 or 429 (`api_error_status` from Claude Code, `httpStatusCode` from
+  Codex, or the status in the error's text);
+- Codex's `serverOverloaded`, `internalServerError` and `rateLimitExceeded`, and a connection or
+  stream that failed without a status;
+- Pi's retries that ended without success;
+- an error worded as one: bad gateway, service unavailable, overloaded, rate limit, timed out,
+  connection error, and the like.
+
+A usage limit (see [Usage limits](#usage-limits)) and a missing login come first: a 429 that says
+"You've hit your limit" is a limit stop. A 400 or another client error isn't tried again.
+
+`GET /status` and `status_change` report `retry_wait`: the agent's `message`, the `api_status`
+when known, when the turn failed, which retry comes next (`attempt` of `attempts`) and `retry_at`.
+The failure shows as a warning ("… AgentAPI tries again in 30s (1 of 3)."), and the queued messages
+wait. At `retry_at` AgentAPI sends "Continue from where you left off.", so the agent goes on without
+your message twice. A retry that fails the same way waits the next delay; after the last, the
+failure is an error and the queue goes on. A turn that works, or a message you send yourself,
+starts the count again.
+
+- `POST /retry` tries again now.
+- `DELETE /retry` cancels the retry, so the queued messages go out.
+- `--retry-delays` sets the waits, one per retry: `30s,2m,5m` by default; `off` turns retries off.
+
+The wait is kept with `--state-db`, so the retry still goes out after AgentAPI restarts. The failed
+turn's [task](#tasks) ends `failed`; the retry is a task of its own. The summary's `attention` stays
+`none`, and a hub shows the agent as working. In the chat, a card above the composer counts down to
+the retry, with **Retry now** and **Cancel**.
+
+![A task the API's gateway failed with a 502: the card counting down to the first of three retries, and a task held in the queue](docs/screenshots/retry-card.png)
 
 ### Terminal
 
@@ -1171,8 +1214,9 @@ seconds before ending the task, since the agent usually continues working.
 
 - `id`: the ID of the message that started it, as in `GET /messages`;
 - `status`: `running`, `completed`, `failed` (the agent reported an error or
-  exited; `errors` says what) or `limited` (a [usage limit](#usage-limits)
-  stopped it; `limit` has the stop);
+  exited; `errors` says what, also when AgentAPI tries a
+  [transient error](#transient-api-errors) again) or `limited` (a
+  [usage limit](#usage-limits) stopped it; `limit` has the stop);
 - `prompt` (the start of the message), `started_at` and `ended_at`;
 - `reply_id`: the agent's last message of the task;
 - `steered`: the IDs of the messages added while it ran.
@@ -1231,7 +1275,7 @@ instance:
   `server_id`, host, port, directory, agent and `url`), `status`, `lifecycle` and a `title` from the
   session name or the start of the latest prompt. It also includes the latest [task](#tasks), task
   count, `pending_requests`, the oldest pending `request` (its kind, title and when the agent
-  asked), `queued_messages`, `login_required`, `limit_stop`, `usage` (context window and account
+  asked), `queued_messages`, `login_required`, `limit_stop`, `retry_wait`, `usage` (context window and account
   limits) and, for Claude Code, Codex and Pi, `spend`: the API-equivalent cost of the agent's
   sessions in the working directory over the last 24 hours (`day_usd`) and 7 days (`week_usd`),
   worked out from its logs once a minute, the tokens of the same calls (`day_tokens` and
@@ -1403,7 +1447,7 @@ It sends only `run.status_changed` by default. Select events with `--webhook-eve
 | Event | Sent when | `data` |
 | --- | --- | --- |
 | `run.status_changed` | The agent changes between `running` and `stable` | `status`, `previous_status`, `server_id`, `agent_type`, `transport` |
-| `instance.started`, `instance.heartbeat`, `instance.stopped` | AgentAPI starts, every `--webhook-heartbeat` (60s) and when `PUT /webhook` points the webhook at a new URL, and shuts down | What the agent does: `status`, `lifecycle`, `session_name`, `pending_requests`, `queued_messages`, and `agent_session_id`, `login_required`, `limit_stop`, `usage`, `settings` when set; `heartbeat_seconds`, how often the heartbeat comes (missing when it is off) |
+| `instance.started`, `instance.heartbeat`, `instance.stopped` | AgentAPI starts, every `--webhook-heartbeat` (60s) and when `PUT /webhook` points the webhook at a new URL, and shuts down | What the agent does: `status`, `lifecycle`, `session_name`, `pending_requests`, `queued_messages`, and `agent_session_id`, `login_required`, `limit_stop`, `retry_wait`, `usage`, `settings` when set; `heartbeat_seconds`, how often the heartbeat comes (missing when it is off) |
 | `task.started` | A [task](#tasks) starts: a message of yours reaches the agent | The task as `GET /tasks` has it: `id` (the message's), `status`, `prompt`, `started_at` |
 | `task.completed`, `task.failed` | The [task](#tasks) ends: `completed`, or `failed` and `limited` (`task.failed`) | The task with `status`, `ended_at`, `duration_seconds`, the agent's last message (`reply`, `reply_id`), `steered`, `errors`, `limit`, `session_name`, and for Claude Code, Codex and Pi its API-equivalent `cost` (see [Session costs](#session-costs)) |
 | `request.opened`, `request.closed` | An approval, question or plan (the request as `GET /requests` has it) opens or closes | The request |
@@ -1789,6 +1833,7 @@ state-db: ~/.agentapi/state/{port}.db
 | `--state-db` | | SQLite file that keeps the conversation and resumes the agent's session; `{port}` and `{hostname}` are filled in; see [Persistent sessions](#persistent-sessions) |
 | `--terminal` | `true` | Shell in the agent's working directory for the chat; see [Terminal](#terminal) |
 | `--auto-continue` | `false` | Continue a turn stopped by a usage limit once the limit resets; see [Usage limits](#usage-limits) |
+| `--retry-delays` | `30s,2m,5m` | Waits before a turn that failed on a transient API error is tried again, one per retry; `off` turns retries off; see [Transient API errors](#transient-api-errors) |
 | `--prices` | | JSON file of model prices per million tokens, which add to or replace the built-in ones; see [Session costs](#session-costs) |
 | `-s`, `--state-file` | | Deprecated: the PTY transport's former persistence, imported once into a state database next to it (`--state-db` names another) |
 | `--load-state`, `--save-state` | | Deprecated: `--load-state=false` skips the import; `--save-state` has no effect |
@@ -1942,7 +1987,7 @@ default.
 | `DELETE /messages` | Clear the conversation and the queue, and restart the agent in a new session |
 | `GET /rich-messages` | The structured conversation: thinking, tool calls with results, usage |
 | `GET /timeline` | Normalized session events, for export or another UI; `?subagents=true` adds the subagents' |
-| `GET /status` | Status, lifecycle, server ID, turn, epoch, session name, version, the agent's session ID, capabilities, pending requests, settings, usage, usage limit stop, terminal, login |
+| `GET /status` | Status, lifecycle, server ID, turn, epoch, session name, version, the agent's session ID, capabilities, pending requests, settings, usage, usage limit stop, retry wait, terminal, login |
 | `GET /title` | The session's human-readable title |
 | `GET /events` | Server-sent events; `?sync=1` for incremental replay on reconnect, and task and queue updates; `?only=summary` for the summary alone |
 | `GET /summary` | What a client that watches many AgentAPIs shows of this one: instance, status, attention, title, latest task, requests, queue, usage; see [Watching many instances](#watching-many-instances) |
@@ -1971,6 +2016,7 @@ default.
 | `POST /login/retry` | Check the agent's login again now, while `login_required` is reported (409 when no login is needed) |
 | `POST /limit/continue`, `DELETE /limit/continue` | Continue a turn stopped by a usage limit, now or at the reset; cancel a scheduled continuation |
 | `DELETE /limit` | Forget a usage limit stop, so the queued messages go out |
+| `POST /retry`, `DELETE /retry` | Try a turn that failed on a transient API error again now; cancel the retry, so the queued messages go out |
 | `GET /sessions` | The agent's sessions in its working directory (Claude Code, Codex, Pi), with what each cost and the total |
 | `GET /cost` | What the open session cost, and its model calls (Claude Code, Codex, Pi) |
 | `GET /subagents`, `GET /subagents/{id}` | The subagents the agent ran in its session, and one's task and messages (Claude Code, Codex) |

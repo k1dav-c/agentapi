@@ -110,8 +110,8 @@ func (e *EventEmitter) statusChangeBody() StatusChangeBody {
 		AgentSessionID: e.agentSessionID, AgentType: e.agentType, Transport: instanceapi.TransportNative, Version: version.Version,
 		SessionName: e.sessionName, PendingRequests: pending, Capabilities: e.capabilities,
 		LoginRequired: e.loginRequired, Settings: e.settings, Usage: e.usage,
-		LimitStop: e.limitStop,
-		Terminal:  e.terminal,
+		LimitStop: e.limitStop, RetryWait: e.retryWait,
+		Terminal: e.terminal,
 	}
 }
 
@@ -168,6 +168,18 @@ func (e *EventEmitter) SetLimitStop(ls *native.LimitStop) {
 		return
 	}
 	e.limitStop = ls
+	e.notifyStatusLocked()
+}
+
+// SetRetryWait records the failed turn that waits to be tried again (nil:
+// none).
+func (e *EventEmitter) SetRetryWait(rw *native.RetryWait) {
+	e.mu.Lock()
+	defer e.unlock()
+	if reflect.DeepEqual(e.retryWait, rw) {
+		return
+	}
+	e.retryWait = rw
 	e.notifyStatusLocked()
 }
 

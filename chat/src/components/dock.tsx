@@ -17,6 +17,8 @@ export function StateStrip() {
   const loginRequired = useChatSelector((chat) => chat.loginRequired);
   const waitingFor = useChatSelector((chat) => chat.waitingFor);
   const queuedCount = useChatSelector((chat) => chat.queuedMessages.length);
+  // A failed turn that waits to be tried again: no turn runs meanwhile.
+  const retrying = useChatSelector((chat) => chat.retryWait !== null && chat.serverStatus === "stable");
   // What the agent does in its task and the tokens it took, worked out from
   // the task's latest steps (useTranscript): the strip renders again when
   // they change, not whenever a message streams.
@@ -43,10 +45,12 @@ export function StateStrip() {
                     ? "A usage limit stopped the agent"
                     : `The agent is waiting for your answer${pendingRequestCount > 1 ? ` · ${pendingRequestCount} requests` : ""}`
               }${queuedCount ? ` · ${queuedCount} queued ${queuedCount === 1 ? "task waits" : "tasks wait"}` : ""}`
-            : activity || "Working on the task"}
+            : retrying
+              ? "Waiting to try the failed task again"
+              : activity || "Working on the task"}
         </span>
         {!needs && elapsed && <span className="shrink-0">{elapsed}</span>}
-        {!needs && tokens.total > 0 && (
+        {!needs && !retrying && tokens.total > 0 && (
           <span className="hidden shrink-0 sm:inline" title="Tokens used by this task">
             ↑{formatTokenCount(tokens.input + tokens.cacheRead)} ↓{formatTokenCount(tokens.output)}
           </span>

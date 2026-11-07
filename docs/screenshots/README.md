@@ -2,7 +2,7 @@
 
 The [chat UI guide](../chat-ui.md) and [README](../../README.md) use these screenshots and GIFs.
 Chromium captured them from AgentAPI 3.1.0, built from the source with `make build`, serving the
-production chat UI and API.
+production chat UI and API; `retry-card.png` came later, from a 3.3.0 build.
 
 [scripts/capture-docs.mjs](../../scripts/capture-docs.mjs) starts its own servers on a small sample
 project, `my-app` (a page with a stylesheet, a script and release notes, two commits and
@@ -65,6 +65,7 @@ device scale factor of 1.
 | [native-plan.png](native-plan.png) | A plan card |
 | [queue-steer.png](queue-steer.png) | Queued tasks during a long turn, and the send menu |
 | [limit-card.png](limit-card.png) | A task stopped on a usage limit (Limit reached), with a task held in the queue |
+| [retry-card.png](retry-card.png) | A task the API's gateway failed with a 502, the card counting down to the first of three retries, with a task held in the queue |
 | [cold-cache.png](cold-cache.png) | The note that the prompt cache expired, with Compact |
 | [explorer-webhook.png](explorer-webhook.png) | The Explorer's Webhook tab, filled in: the receiver URL, event groups, signing secret, instance ID, heartbeat and public URL |
 | [explorer-sessions.png](explorer-sessions.png) | The Explorer's Session tab with what the sessions cost and Claude Code's earlier sessions |

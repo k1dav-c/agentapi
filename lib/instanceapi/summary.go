@@ -143,6 +143,7 @@ type SummaryBody struct {
 	SeenAt        time.Time             `json:"seen_at" doc:"When a client last showed the conversation to the user (POST /tasks/seen); when AgentAPI started, before any did."`
 	LoginRequired *native.LoginRequired `json:"login_required,omitempty" doc:"Set while the agent waits for the user to log in, as in GET /status."`
 	LimitStop     *native.LimitStop     `json:"limit_stop,omitempty" doc:"Set while a usage limit holds the agent, as in GET /status."`
+	RetryWait     *native.RetryWait     `json:"retry_wait,omitempty" doc:"Set while a failed turn waits to be tried again, as in GET /status. The agent needs nothing of the user meanwhile: attention stays none."`
 	Usage         *native.AgentUsage    `json:"usage,omitempty" doc:"The context window and the account's usage limits, as in GET /status."`
 	// Request is the oldest pending request, what a client shows of what
 	// the agent waits for without opening it.

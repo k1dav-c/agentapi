@@ -36,6 +36,7 @@ type recorded struct {
 	chosen       []native.Settings
 	usage        []native.AgentUsage
 	limitStops   []*native.LimitStop
+	retryWaits   []*native.RetryWait
 	exits        []native.AgentExit
 }
 
@@ -127,6 +128,12 @@ func (r *recorder) LimitStop(ls *native.LimitStop) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.limitStops = append(r.limitStops, ls)
+}
+
+func (r *recorder) RetryWait(rw *native.RetryWait) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.retryWaits = append(r.retryWaits, rw)
 }
 
 func (r *recorder) AgentExited(exit native.AgentExit) {

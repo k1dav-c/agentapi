@@ -79,6 +79,15 @@ func (o *nativeObserver) LimitStop(ls *native.LimitStop) {
 	}
 }
 
+// RetryWait is stored so that the queue still waits for the retry, which
+// still goes out, after AgentAPI restarts.
+func (o *nativeObserver) RetryWait(rw *native.RetryWait) {
+	o.emitter.SetRetryWait(rw)
+	if o.persister != nil {
+		o.persister.SetRetryWait(rw)
+	}
+}
+
 // SettingsChosen is stored so that the agent gets the settings again after
 // AgentAPI restarts.
 func (o *nativeObserver) SettingsChosen(settings native.Settings) {

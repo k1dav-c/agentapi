@@ -57,6 +57,41 @@ func isLimitError(e *turnError) bool {
 	return native.IsLimitError(turnErrorText(e))
 }
 
+// transientError reports whether a turn error is an upstream failure that
+// may pass, which AgentAPI tries again (app-server retried it already): the
+// serverOverloaded, internalServerError and rateLimitExceeded codes, a
+// connection or stream failure with no HTTP status or a 5xx or 429, or an
+// error worded as one. status is the upstream HTTP status, 0 when the error
+// doesn't say. Callers check isLimitError and isAuthError first.
+func transientError(e *turnError) (status int, ok bool) {
+	text := turnErrorText(e)
+	if code, isCode := errorCode(e); isCode {
+		switch code {
+		case "serverOverloaded", "internalServerError", "rateLimitExceeded":
+			return native.TransientStatus(text), true
+		case "other", "":
+			return native.TransientStatus(text), native.IsTransientError(text)
+		}
+		return 0, false
+	}
+	var kinds map[string]struct {
+		HTTPStatusCode *int `json:"httpStatusCode"`
+	}
+	if json.Unmarshal(e.CodexErrorInfo, &kinds) == nil {
+		for name, kind := range kinds {
+			switch name {
+			case "httpConnectionFailed", "responseStreamConnectionFailed", "responseStreamDisconnected", "responseTooManyFailedAttempts":
+				if kind.HTTPStatusCode == nil {
+					// The connection failed or dropped.
+					return 0, true
+				}
+				return *kind.HTTPStatusCode, native.IsTransientStatus(*kind.HTTPStatusCode)
+			}
+		}
+	}
+	return native.TransientStatus(text), native.IsTransientError(text)
+}
+
 // isAuthError reports whether a turn error is a login problem: the
 // unauthorized error code, an HTTP 401 on any of the error kinds, or a
 // login message.

@@ -53,6 +53,10 @@ export type PromptCache = Schemas["PromptCache"];
 // transport): the queue waits until the limit resets.
 export type LimitStop = Schemas["LimitStop"];
 export type ContinueAt = Schemas["ContinueAt"];
+// A turn that failed on an upstream error that may pass (an HTTP 5xx, an
+// overloaded API): AgentAPI tries it again at retry_at, and the queue
+// waits until then.
+export type RetryWait = Schemas["RetryWait"];
 // One of the agent's sessions in the working directory (GET /sessions).
 export type SessionSummary = Schemas["SessionInfo"];
 export type SessionList = Body<Schemas["SessionsResponseBody"]>;
@@ -168,6 +172,17 @@ export function createChatAPI(baseURL: string) {
     // Forgets the limit stop, so the queued tasks go out.
     async dismissLimitStop(): Promise<void> {
       await jsonRequest("/limit", {method: "DELETE", fallback: "Failed to dismiss the usage limit"});
+    },
+
+    // Tries the failed turn again now rather than at its retry_at.
+    async retryNow(): Promise<void> {
+      await jsonRequest("/retry", {method: "POST", fallback: "Failed to retry the task"});
+    },
+
+    // Forgets the failed turn without trying it again, so the queued tasks
+    // go out.
+    async cancelRetry(): Promise<void> {
+      await jsonRequest("/retry", {method: "DELETE", fallback: "Failed to cancel the retry"});
     },
 
     async listSubagents(): Promise<Subagent[]> {

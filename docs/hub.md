@@ -393,6 +393,7 @@ shape of its own, so it reads without its color:
 | Amber ! | Login | The agent can't work until you log in on its machine |
 | Amber ! | Usage limit | A usage limit stopped its turn; queued messages wait for the reset |
 | Turning blue arc | Working | The agent works on the task shown |
+| Turning blue arc | Retrying | Its turn failed on an API error (a 502, say), and AgentAPI tries it again by itself; the line shows the status and which try |
 | Green check | Finished | A task ended since anyone last looked at this agent |
 | Grey ring | (its title) | Idle |
 | Struck-through bell, grey | Muted | It needs you, and you muted that until it changes ([Muting](#muting)) |

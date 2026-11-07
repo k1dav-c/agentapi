@@ -94,6 +94,9 @@ type turnState struct {
 	// lastError is the last error app-server reported for the turn without
 	// retrying: the turn's error if it fails, shown when it ends otherwise.
 	lastError string
+	// lastErrorInfo is that error's, for telling an upstream failure that
+	// may pass (transientError).
+	lastErrorInfo *turnError
 	// loginReported: the turn failed for want of a login, and the sink
 	// was told.
 	loginReported bool

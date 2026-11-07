@@ -124,14 +124,17 @@ func (c *Conversation) DismissLimitStop() error {
 	return nil
 }
 
-// HoldsQueue reports whether queued messages wait because of a usage limit:
-// until it resets, or until a scheduled continuation went out. Without a
-// reset time they wait until a turn starts or the stop is dismissed.
+// HoldsQueue reports whether queued messages wait: for a usage limit,
+// until it resets or until a scheduled continuation went out (without a
+// reset time until a turn starts or the stop is dismissed), and for a failed
+// turn until it was tried again (RetryWait).
 func (c *Conversation) HoldsQueue(now time.Time) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	ls := c.limitStop
 	switch {
+	case c.retryWait != nil:
+		return true
 	case ls == nil:
 		return false
 	case ls.ContinueAt != nil, ls.ResetsAt == nil:
@@ -140,17 +143,23 @@ func (c *Conversation) HoldsQueue(now time.Time) bool {
 	return now.Before(*ls.ResetsAt)
 }
 
-// ContinueIfDue sends the continuation once it is due and the agent is
-// idle. It reports whether it sent one; an error is the agent's refusal.
+// ContinueIfDue sends the continuation of a turn a usage limit stopped, or
+// the retry of a failed turn, once it is due and the agent is idle. It
+// reports whether it sent one; an error is the agent's refusal.
 func (c *Conversation) ContinueIfDue(ctx context.Context, now time.Time) (bool, error) {
 	c.mu.Lock()
-	ls := c.limitStop.clone()
-	due := ls != nil && ls.ContinueAt != nil && !now.Before(*ls.ContinueAt) && c.started && !c.turnActive && !c.compacting
-	if due {
+	ready := c.started && !c.turnActive && !c.compacting
+	ls, rw := c.limitStop.clone(), c.retryWait.clone()
+	limitDue := ready && ls != nil && ls.ContinueAt != nil && !now.Before(*ls.ContinueAt)
+	retryDue := ready && rw != nil && !now.Before(rw.RetryAt)
+	if limitDue {
 		c.continueAgain = true
 	}
+	if retryDue {
+		c.retrying = rw.Attempt
+	}
 	c.mu.Unlock()
-	if !due {
+	if !limitDue && !retryDue {
 		return false, nil
 	}
 	err := c.StartTurn(ctx, InputFromText(ContinuePrompt))
@@ -159,11 +168,16 @@ func (c *Conversation) ContinueIfDue(ctx context.Context, now time.Time) (bool, 
 	}
 	// The stop stays, and the continuation is tried again in a while.
 	c.mu.Lock()
-	c.continueAgain = false
-	if c.limitStop == nil && !c.turnActive {
-		retry := now.Add(continueMargin)
-		ls.ContinueAt = &retry
+	c.continueAgain, c.retrying = false, 0
+	later := now.Add(continueMargin)
+	switch {
+	case c.turnActive:
+	case limitDue && c.limitStop == nil:
+		ls.ContinueAt = &later
 		c.setLimitStopLocked(ls)
+	case retryDue && c.retryWait == nil:
+		rw.RetryAt = later
+		c.setRetryWaitLocked(rw)
 	}
 	c.mu.Unlock()
 	return false, err

@@ -150,6 +150,10 @@ type NativeConfig struct {
 	// RestartDelays are native.Config.RestartDelays: the waits before an
 	// agent that exited is started again. Nil is the default.
 	RestartDelays []time.Duration
+	// RetryDelays are native.Config.RetryDelays: the waits before a turn
+	// that failed on a transient upstream error is tried again. Nil is the
+	// default; empty tries none again.
+	RetryDelays []time.Duration
 }
 
 // CheckConfig returns an error NewServer would return for config before it
@@ -390,6 +394,8 @@ func newNativeConversation(config ServerConfig, restored restoredState, emitter 
 		ResumeRef:         restored.resumeRef,
 		Settings:          restored.settings,
 		LimitStop:         restored.limitStop,
+		RetryWait:         restored.retryWait,
+		RetryDelays:       config.Native.RetryDelays,
 		AutoContinue:      config.Native.AutoContinue,
 		InitialMessages:   restored.messages,
 		InitialPrompt:     config.InitialPrompt,

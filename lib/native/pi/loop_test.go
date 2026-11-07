@@ -258,7 +258,45 @@ func TestRecords(t *testing.T) {
 		h.write(`{"type":"auto_retry_end","success":false,"attempt":3,"finalError":"529 overloaded after 3 attempts"}`)
 		h.write(`{"type":"agent_settled"}`)
 		h.settle()
-		assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonError, Error: "529 overloaded after 3 attempts"}}, h.sink.State().Results)
+		// AgentAPI tries it again later.
+		assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonTransient, Error: "529 overloaded after 3 attempts"}}, h.sink.State().Results)
+	})
+
+	t.Run("retries that fail on an error worded otherwise", func(t *testing.T) {
+		t.Parallel()
+		h := startedHarness(t)
+		cmd := h.prompt("p", "hi")
+		h.answer(cmd, `{"disposition":"started"}`)
+		h.write(`{"type":"agent_start"}`)
+		h.write(`{"type":"auto_retry_start","attempt":1,"maxAttempts":3,"delayMs":2000,"errorMessage":"Provider hiccup"}`)
+		h.write(`{"type":"auto_retry_end","success":false,"attempt":3,"finalError":"Provider hiccup"}`)
+		h.write(`{"type":"agent_settled"}`)
+		h.settle()
+		assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonTransient, Error: "Provider hiccup"}}, h.sink.State().Results)
+	})
+
+	t.Run("a cancelled retry is an error", func(t *testing.T) {
+		t.Parallel()
+		h := startedHarness(t)
+		cmd := h.prompt("p", "hi")
+		h.answer(cmd, `{"disposition":"started"}`)
+		h.write(`{"type":"agent_start"}`)
+		h.write(`{"type":"auto_retry_end","success":false,"attempt":1,"finalError":"Retry cancelled"}`)
+		h.write(`{"type":"agent_settled"}`)
+		h.settle()
+		assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonError, Error: "Retry cancelled"}}, h.sink.State().Results)
+	})
+
+	t.Run("a gateway error without retries", func(t *testing.T) {
+		t.Parallel()
+		h := startedHarness(t)
+		cmd := h.prompt("p", "hi")
+		h.answer(cmd, `{"disposition":"started"}`)
+		h.write(`{"type":"agent_start"}`)
+		h.write(`{"type":"message_end","message":{"role":"assistant","content":[],"model":"m","stopReason":"error","errorMessage":"502 Bad Gateway","timestamp":1}}`)
+		h.write(`{"type":"agent_settled"}`)
+		h.settle()
+		assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonTransient, Error: "502 Bad Gateway", APIStatus: 502}}, h.sink.State().Results)
 	})
 
 	t.Run("a retry that works", func(t *testing.T) {

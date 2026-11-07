@@ -210,7 +210,7 @@ The handlers are grouped by file:
 | `tasks_api.go` | `GET /tasks`: the tasks the emitter derives (`lib/convstate`) |
 | `summary_api.go`, `spend.go`, `registry.go` | `GET /summary` and `POST /tasks/seen`, the summary the emitter keeps for clients that watch many AgentAPIs; the spend worked out once a minute; the server's registry entry (`instanceRegistry`) |
 | `native.go` | Delivering a message, requests, settings, interrupt, compaction, login retry; the observer (`nativeObserver`) |
-| `limit.go`, `sessions.go`, `subagents.go` | A turn a usage limit stopped (`/limit`); the agent's earlier sessions and what they cost (`/sessions`, `/cost`); its subagents (`/subagents`) |
+| `limit.go`, `retry.go`, `sessions.go`, `subagents.go` | A turn a usage limit stopped (`/limit`); a failed turn that waits to be tried again (`/retry`); the agent's earlier sessions and what they cost (`/sessions`, `/cost`); its subagents (`/subagents`) |
 | `terminal.go`, `files_api.go` | The shell terminal (`terminalAPI`); the file viewer and the search for a file the agent named relative to a repository (`fileAPI`, over `lib/workspacefs`) |
 | `webhook_api.go`, `handoff.go` | The webhook's configuration (`GET`/`PUT /webhook`, `POST /webhook/test`), the instance it describes and its start (`lib/webhook` delivers); the human-reply API |
 | `auth.go` | Token auth and the chat's sign-in (`authAPI`) |
@@ -381,6 +381,19 @@ type Factory func(resume Resume) (Adapter, error)
   (`HoldsQueue`), and a continuation scheduled for the reset
   (`ScheduleContinue`, `--auto-continue`) goes out on the queue's tick before
   the queued messages.
+- **Transient errors.** A turn that fails on an upstream error that may pass,
+  after the agent's own retries, ends with the `transient` stop reason: an
+  HTTP 5xx or 429 (Claude Code's `api_error_status`, the `httpStatusCode` of
+  Codex's `codexErrorInfo`), Codex's `serverOverloaded`, a connection that
+  failed, Pi's `auto_retry_end` without success, or text `IsTransientError`
+  matches. Usage limits and login problems are classified first. The
+  conversation keeps a `RetryWait` with the next retry's time
+  (`Config.RetryDelays`, `--retry-delays`), warns instead of reporting an
+  error, and holds the queue (`HoldsQueue`). `ContinueIfDue` sends
+  `ContinuePrompt` on the queue's tick once it is due; if that turn fails the
+  same way, the next delay follows (`retrying` counts them), and after the
+  last the failure is an error. A turn that starts ends the wait; `RetryNow`
+  and `CancelRetry` back `POST` and `DELETE /retry`.
 - **Turns.** A message starts a turn only while the agent is idle; otherwise
   `StartTurn` returns `ErrMessageValidationChanging` and the server queues the
   message. Turns wait the same way while the agent compacts its context. A
@@ -433,7 +446,7 @@ The adapters:
 The `EventEmitter` (`lib/convstate`) stores the state clients read: the messages, rich
 messages, the timeline, requests, the tasks, the queue, the status snapshot (status, lifecycle,
 server ID, turn, the agent's session ID, capabilities, settings, usage with the prompt cache, a
-usage limit stop, login).
+usage limit stop, a retry wait, login).
 
 - Every change to a message, a rich message, a request, a task or the queue
   gets the next sequence number (`seq`); the status and errors
@@ -521,7 +534,8 @@ Messages sent while the agent is busy wait in `s.queue`, and so does a human rep
 last message (`POST /handoff/reply`), which goes out the same way. The queue has its
 own lock so reads don't wait on the server lock; mutations also hold `s.mu`. Every 500 ms, a loop
 checks whether the first message can be delivered: the agent must be idle without a usage limit
-holding the queue, and not restarting.
+or a failed turn that waits to be tried again holding the queue, and not restarting. A continuation
+or retry that is due goes out first (`beforeQueue`).
 
 Rejected messages get up to 5 attempts. Messages that might be delivered twice are dropped
 immediately: a write without confirmation (`native.ErrUnconfirmed`, caused by timeout,
@@ -542,7 +556,7 @@ The queue is persisted with the conversation, on every change (`storeQueue`, fro
   `queue`, `tasks` (each as the server encoded it, by the ID of the message
   that started it), and `meta`, which holds the agent type, transport and working
   directory, the epoch and seq, the session reference and name, the
-  settings chosen for the session, a usage limit stop, the webhook settings
+  settings chosen for the session, a usage limit stop, a retry wait, the webhook settings
   changed through the API (with a fingerprint of the startup flags, which win
   when they change) and when a
   client last showed the conversation (`seen_at`), and which AgentAPI may
@@ -882,7 +896,7 @@ the same build.
   types generated from the OpenAPI schema.
 - `components/chat.tsx` lays out the page: the message list (tasks, tool rows,
   thinking), the dock above the composer (the status strip, the login card, request cards, the usage limit card,
-  the cold prompt cache note), the composer (`message-input.tsx`, with slash
+  the retry card, the cold prompt cache note), the composer (`message-input.tsx`, with slash
   commands, the session settings and the usage meter), the Explorer (with the
   earlier sessions and what they cost, `session-history.tsx`, and the webhook,
   `webhook-settings.tsx`), the Lineage panel of the
