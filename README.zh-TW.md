@@ -77,7 +77,7 @@ AgentAPI 可以用來：
 - 回合因為[達到用量限制](#達到用量限制時)而停下時，佇列會等到限制重置，也可以在重置後自動
   繼續。
 - 回合因[暫時性的 API 錯誤](#暫時性的-api-錯誤)失敗時（例如 gateway 回 502、API 過載），
-  AgentAPI 會在 30 秒、2 分鐘和 5 分鐘後再試，之後才輪到佇列。
+  AgentAPI 會在 30 秒、1 分鐘、2 分鐘後再試，之後每 5 分鐘再試，共 15 次，之後才輪到佇列。
 - 缺少或過期的[登入](#登入)會附上要執行的指令回報，登入之後 agent 會自己啟動。
 - agent 工作目錄中共用的[終端機](#終端機)，方便登入和執行簡單的指令。
 - [持久保存的工作階段](#持久保存的工作階段)：使用 `--state-db` 時，對話在 AgentAPI 重新啟動後
@@ -612,20 +612,21 @@ AgentAPI 會先判斷是不是用量限制（見[達到用量限制時](#達到�
 
 `GET /status` 和 `status_change` 會回報 `retry_wait`：agent 的 `message`、已知時的 `api_status`、
 回合失敗的時間、下一次是第幾次重試（`attempt`／`attempts`），以及 `retry_at`。這次失敗會以警告
-顯示（「… AgentAPI tries again in 30s (1 of 3).」），排隊中的訊息會等著。到了 `retry_at`，AgentAPI
+顯示（「… AgentAPI tries again in 30s (1 of 15).」），排隊中的訊息會等著。到了 `retry_at`，AgentAPI
 送出「Continue from where you left off.」，agent 就會接著做，你的訊息不會重送一次。重試又以同樣
 方式失敗時，改等下一個間隔；最後一次也失敗的話，就當成錯誤，佇列繼續送出。回合成功，或你自己
 送出訊息，都會重新計算次數。
 
 - `POST /retry` 立刻再試。
 - `DELETE /retry` 取消重試，讓排隊中的訊息送出。
-- `--retry-delays` 設定每次重試前等多久：預設 `30s,2m,5m`；`off` 關閉重試。
+- `--retry-delays` 設定每次重試前等多久，`5m*12` 表示 5 分鐘重複 12 次：預設 `30s,1m,2m,5m*12`，
+  約一小時內重試 15 次；`off` 關閉重試。
 
 使用 `--state-db` 時等待狀態會保留，所以 AgentAPI 重新啟動後仍會重試。失敗那個回合的[任務](#任務)
 以 `failed` 結束；重試是另一個任務。摘要的 `attention` 維持 `none`，hub 會把 agent 顯示為工作中。
 在聊天介面中，輸入框上方的卡片會倒數到下一次重試，並提供 **Retry now** 和 **Cancel**。
 
-![API 的 gateway 回 502 而失敗的任務：卡片倒數到三次重試中的第一次，佇列中有一個被暫停的任務](docs/screenshots/retry-card.png)
+![API 的 gateway 回 502 而失敗的任務：卡片倒數到15 次重試中的第一次，佇列中有一個被暫停的任務](docs/screenshots/retry-card.png)
 
 ### 終端機
 
@@ -1564,7 +1565,7 @@ state-db: ~/.agentapi/state/{port}.db
 | `--state-db` | | 保存對話、並接續 agent 工作階段的 SQLite 檔案；`{port}` 和 `{hostname}` 會被填入；見[持久保存的工作階段](#持久保存的工作階段) |
 | `--terminal` | `true` | 給聊天介面使用、位於 agent 工作目錄的 shell；見[終端機](#終端機) |
 | `--auto-continue` | `false` | 回合因用量限制停下時，在限制重置後繼續；見[達到用量限制時](#達到用量限制時) |
-| `--retry-delays` | `30s,2m,5m` | 回合因暫時性的 API 錯誤失敗後，每次重試前等多久；`off` 關閉重試；見[暫時性的 API 錯誤](#暫時性的-api-錯誤) |
+| `--retry-delays` | `30s,1m,2m,5m*12` | 回合因暫時性的 API 錯誤失敗後，每次重試前等多久（`5m*12`：重複 12 次）；`off` 關閉重試；見[暫時性的 API 錯誤](#暫時性的-api-錯誤) |
 | `--prices` | | 每百萬 tokens 模型價格的 JSON 檔，新增或取代內建價格；見[工作階段花費](#工作階段花費) |
 | `-s`, `--state-file` | | 已棄用：PTY transport 過去的保存方式，第一次啟動時匯入旁邊的狀態資料庫（可用 `--state-db` 指定其他檔案） |
 | `--load-state`, `--save-state` | | 已棄用：`--load-state=false` 會略過匯入；`--save-state` 沒有作用 |
