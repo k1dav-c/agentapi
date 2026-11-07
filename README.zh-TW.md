@@ -76,6 +76,8 @@ AgentAPI 可以用來：
   Claude Code 的 prompt cache 過期後，聊天介面會建議先壓縮。
 - 回合因為[達到用量限制](#達到用量限制時)而停下時，佇列會等到限制重置，也可以在重置後自動
   繼續。
+- 回合因[暫時性的 API 錯誤](#暫時性的-api-錯誤)失敗時（例如 gateway 回 502、API 過載），
+  AgentAPI 會在 30 秒、2 分鐘和 5 分鐘後再試，之後才輪到佇列。
 - 缺少或過期的[登入](#登入)會附上要執行的指令回報，登入之後 agent 會自己啟動。
 - agent 工作目錄中共用的[終端機](#終端機)，方便登入和執行簡單的指令。
 - [持久保存的工作階段](#持久保存的工作階段)：使用 `--state-db` 時，對話在 AgentAPI 重新啟動後
@@ -209,6 +211,7 @@ Aider、Goose、Gemini CLI、Amp、Cursor CLI、Auggie、Amazon Q、Opencode、C
 顯示的狀態（Working、Done、Failed、Limit reached）和工具呼叫、思考內容的歸屬，都由伺服器的
 [任務](#任務)資料決定。輸入框上方的狀態列顯示 agent 目前的活動。等待回答時，標頭、分頁標題和
 狀態列會顯示「Needs you」，佇列中的任務會標示為暫緩（held）；等待登入，或用量限制讓它停下時也一樣。
+失敗的回合等待[再試](#暫時性的-api-錯誤)期間，agent 顯示為工作中，佇列中的任務同樣暫緩。
 steer 進任務的訊息會顯示在該任務裡，所以聊天介面的任務編號和伺服器一致。較長的任務先顯示最近的
 40 個步驟。
 
@@ -587,6 +590,41 @@ Claude Code 也會回報 `prompt_cache`：`ttl_seconds` 是模型供應商在最
 **Send queued tasks**，佇列也會標示它在等用量限制，標頭和分頁標題則顯示「Needs you」。
 
 ![因 5 小時限制而停下、標示為 Limit reached 的任務：卡片顯示重置時間，佇列中有一個被暫停的任務](docs/screenshots/limit-card.png)
+
+### 暫時性的 API 錯誤
+
+API 請求失敗時，agent 自己會先重試幾次。放棄後如果錯誤可能自行恢復，回合就會失敗：Claude Code
+會說「API Error: 502 Bad Gateway. This is a server-side issue, usually temporary」，Codex 回報
+`serverOverloaded` 或連線失敗，Pi 則是重試沒有成功就結束。這時 AgentAPI 不會直接處理佇列中的下一則
+訊息，而是等一段時間再試這個回合。以下情況算是暫時性錯誤：
+
+- HTTP 狀態碼 500 到 599 或 429（Claude Code 的 `api_error_status`、Codex 的 `httpStatusCode`，
+  或錯誤訊息中的狀態碼）；
+- Codex 的 `serverOverloaded`、`internalServerError` 和 `rateLimitExceeded`，以及沒有狀態碼就失敗
+  的連線或串流；
+- Pi 重試後仍沒有成功；
+- 措辭像這類錯誤的訊息：bad gateway、service unavailable、overloaded、rate limit、timed out、
+  connection error 等。
+
+AgentAPI 會先判斷是不是用量限制（見[達到用量限制時](#達到用量限制時)）或缺少登入：寫著
+「You've hit your limit」的 429 算是用量限制造成的停止。400 等用戶端錯誤不會再試。
+
+`GET /status` 和 `status_change` 會回報 `retry_wait`：agent 的 `message`、已知時的 `api_status`、
+回合失敗的時間、下一次是第幾次重試（`attempt`／`attempts`），以及 `retry_at`。這次失敗會以警告
+顯示（「… AgentAPI tries again in 30s (1 of 3).」），排隊中的訊息會等著。到了 `retry_at`，AgentAPI
+送出「Continue from where you left off.」，agent 就會接著做，你的訊息不會重送一次。重試又以同樣
+方式失敗時，改等下一個間隔；最後一次也失敗的話，就當成錯誤，佇列繼續送出。回合成功，或你自己
+送出訊息，都會重新計算次數。
+
+- `POST /retry` 立刻再試。
+- `DELETE /retry` 取消重試，讓排隊中的訊息送出。
+- `--retry-delays` 設定每次重試前等多久：預設 `30s,2m,5m`；`off` 關閉重試。
+
+使用 `--state-db` 時等待狀態會保留，所以 AgentAPI 重新啟動後仍會重試。失敗那個回合的[任務](#任務)
+以 `failed` 結束；重試是另一個任務。摘要的 `attention` 維持 `none`，hub 會把 agent 顯示為工作中。
+在聊天介面中，輸入框上方的卡片會倒數到下一次重試，並提供 **Retry now** 和 **Cancel**。
+
+![API 的 gateway 回 502 而失敗的任務：卡片倒數到三次重試中的第一次，佇列中有一個被暫停的任務](docs/screenshots/retry-card.png)
 
 ### 終端機
 
@@ -974,7 +1012,8 @@ AgentAPI 把對話分成一個個任務：一個任務是你的一則訊息，�
 `GET /tasks` 由舊到新列出任務，每個都有：
 
 - `id`：開始這個任務的訊息 ID，同 `GET /messages`；
-- `status`：`running`、`completed`、`failed`（agent 回報錯誤或結束；`errors` 說明原因）或
+- `status`：`running`、`completed`、`failed`（agent 回報錯誤或結束；`errors` 說明原因；AgentAPI
+  會再試的[暫時性錯誤](#暫時性的-api-錯誤)也是）或
   `limited`（[用量限制](#達到用量限制時)讓它停下；`limit` 是那次停止）；
 - `prompt`（訊息的開頭）、`started_at` 和 `ended_at`；
 - `reply_id`：agent 在這個任務的最後一則訊息；
@@ -1026,7 +1065,7 @@ AgentAPI，用[人工回覆 API](#人工回覆-api)讓機器人代為回覆 agen
   `server_id`、主機、port、目錄、agent 與 `url`）、`status`、`lifecycle`，以及取自工作階段名稱
   或最新提示開頭的 `title`。另外包含最新[任務](#任務)、任務數、`pending_requests`、最早的待處理
   `request`（類型、標題和 agent 提出的時間）、`queued_messages`、
-  `login_required`、`limit_stop`、`usage`（context window 與帳號用量限制），以及
+  `login_required`、`limit_stop`、`retry_wait`、`usage`（context window 與帳號用量限制），以及
   Claude Code、Codex 和 Pi 才有的 `spend`：agent 在工作目錄裡所有工作階段最近 24 小時（`day_usd`）
   和 7 天（`week_usd`）換算成 API 價格的金額，每分鐘從紀錄檔重新計算一次，並附上同一批呼叫的 token
   （`day_tokens` 和 `week_tokens`：`input`、`output`、`cache_write`、`cache_read` 和合計 `total`）、
@@ -1172,7 +1211,7 @@ AgentAPI 會把 JSON 事件 POST 到 `--webhook-url`，例如同時監看多個 
 | 事件 | 何時送出 | `data` |
 | --- | --- | --- |
 | `run.status_changed` | agent 在 `running` 與 `stable` 之間切換 | `status`、`previous_status`、`server_id`、`agent_type`、`transport` |
-| `instance.started`、`instance.heartbeat`、`instance.stopped` | AgentAPI 啟動時、每隔 `--webhook-heartbeat`（60 秒）、`PUT /webhook` 把 webhook 指向新網址時，以及關閉時 | agent 的狀況：`status`、`lifecycle`、`session_name`、`pending_requests`、`queued_messages`，以及有值時的 `agent_session_id`、`login_required`、`limit_stop`、`usage`、`settings`；`heartbeat_seconds` 是 heartbeat 的間隔（關閉時沒有這個欄位） |
+| `instance.started`、`instance.heartbeat`、`instance.stopped` | AgentAPI 啟動時、每隔 `--webhook-heartbeat`（60 秒）、`PUT /webhook` 把 webhook 指向新網址時，以及關閉時 | agent 的狀況：`status`、`lifecycle`、`session_name`、`pending_requests`、`queued_messages`，以及有值時的 `agent_session_id`、`login_required`、`limit_stop`、`retry_wait`、`usage`、`settings`；`heartbeat_seconds` 是 heartbeat 的間隔（關閉時沒有這個欄位） |
 | `task.started` | [任務](#任務)開始：你的一則訊息送到 agent | 任務，同 `GET /tasks`：`id`（那則訊息的 ID）、`status`、`prompt`、`started_at` |
 | `task.completed`、`task.failed` | [任務](#任務)結束：`completed`，或 `failed` 與 `limited`（`task.failed`） | 任務加上 `status`、`ended_at`、`duration_seconds`、agent 最後一則訊息（`reply`、`reply_id`）、`steered`、`errors`、`limit`、`session_name`，以及 Claude Code、Codex 和 Pi 的 API 等價花費 `cost`（見[工作階段花費](#工作階段花費)） |
 | `request.opened`、`request.closed` | 核准、提問或計畫（請求內容同 `GET /requests`）開啟或關閉 | 請求 |
@@ -1521,6 +1560,7 @@ state-db: ~/.agentapi/state/{port}.db
 | `--state-db` | | 保存對話、並接續 agent 工作階段的 SQLite 檔案；`{port}` 和 `{hostname}` 會被填入；見[持久保存的工作階段](#持久保存的工作階段) |
 | `--terminal` | `true` | 給聊天介面使用、位於 agent 工作目錄的 shell；見[終端機](#終端機) |
 | `--auto-continue` | `false` | 回合因用量限制停下時，在限制重置後繼續；見[達到用量限制時](#達到用量限制時) |
+| `--retry-delays` | `30s,2m,5m` | 回合因暫時性的 API 錯誤失敗後，每次重試前等多久；`off` 關閉重試；見[暫時性的 API 錯誤](#暫時性的-api-錯誤) |
 | `--prices` | | 每百萬 tokens 模型價格的 JSON 檔，新增或取代內建價格；見[工作階段花費](#工作階段花費) |
 | `-s`, `--state-file` | | 已棄用：PTY transport 過去的保存方式，第一次啟動時匯入旁邊的狀態資料庫（可用 `--state-db` 指定其他檔案） |
 | `--load-state`, `--save-state` | | 已棄用：`--load-state=false` 會略過匯入；`--save-state` 沒有作用 |
@@ -1660,7 +1700,7 @@ agentapi hub leave
 | `DELETE /messages` | 清除對話和佇列，並重新啟動 agent，開始新的工作階段 |
 | `GET /rich-messages` | 結構化的對話：思考內容、工具呼叫與結果、用量 |
 | `GET /timeline` | 正規化的工作階段事件，可用於匯出或其他介面；`?subagents=true` 會加上 sub agent 的事件 |
-| `GET /status` | 狀態、生命週期、server ID、回合數、epoch、工作階段名稱、版本、agent 的工作階段 ID、能力、待處理請求、設定、用量、用量限制停止、終端機、登入 |
+| `GET /status` | 狀態、生命週期、server ID、回合數、epoch、工作階段名稱、版本、agent 的工作階段 ID、能力、待處理請求、設定、用量、用量限制停止、等待重試、終端機、登入 |
 | `GET /title` | 工作階段的可讀標題 |
 | `GET /events` | Server-sent events；`?sync=1` 會在重新連線時增量重播，並送出任務與佇列的更新；`?only=summary` 只送摘要 |
 | `GET /summary` | 監看多個 AgentAPI 的用戶端要顯示的內容：instance、狀態、attention、標題、最新任務、請求、佇列、用量；見[監看多個實例](#監看多個實例) |
@@ -1689,6 +1729,7 @@ agentapi hub leave
 | `POST /login/retry` | 回報 `login_required` 期間，立刻再檢查一次 agent 的登入（不需要登入時回傳 409） |
 | `POST /limit/continue`、`DELETE /limit/continue` | 現在或在重置時繼續因用量限制停下的回合；取消排定的繼續 |
 | `DELETE /limit` | 忽略用量限制造成的停止，讓排隊中的訊息送出 |
+| `POST /retry`、`DELETE /retry` | 立刻再試因暫時性 API 錯誤失敗的回合；取消重試，讓排隊中的訊息送出 |
 | `GET /sessions` | agent 在工作目錄中的工作階段（Claude Code、Codex、Pi），以及各自的花費和總額 |
 | `GET /cost` | 目前開啟的工作階段的花費和它的模型呼叫（Claude Code、Codex、Pi） |
 | `GET /subagents`、`GET /subagents/{id}` | agent 在工作階段中執行過的 sub agent，以及其中一個的任務和訊息（Claude Code、Codex） |

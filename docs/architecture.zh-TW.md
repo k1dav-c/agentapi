@@ -172,7 +172,7 @@ flowchart TB
 | `tasks_api.go` | `GET /tasks`：emitter 推導出的任務（`lib/convstate`） |
 | `summary_api.go`、`spend.go`、`registry.go` | `GET /summary` 與 `POST /tasks/seen`，也就是 emitter 為監看多個 AgentAPI 的用戶端保存的摘要；每分鐘計算的花費；伺服器的登記檔（`instanceRegistry`） |
 | `native.go` | 送出訊息、請求、設定、中斷、壓縮、重試登入；observer（`nativeObserver`） |
-| `limit.go`、`sessions.go`、`subagents.go` | 因用量限制停下的回合（`/limit`）；agent 先前的工作階段和它們的花費（`/sessions`、`/cost`）；它的 sub agent（`/subagents`） |
+| `limit.go`、`retry.go`、`sessions.go`、`subagents.go` | 因用量限制停下的回合（`/limit`）；等待重試的失敗回合（`/retry`）；agent 先前的工作階段和它們的花費（`/sessions`、`/cost`）；它的 sub agent（`/subagents`） |
 | `terminal.go`、`files_api.go` | Shell 終端機（`terminalAPI`）；檔案檢視器與搜尋 agent 用 repo 相對路徑提到的檔案（`fileAPI`，底層是 `lib/workspacefs`） |
 | `webhook_api.go`、`handoff.go` | Webhook 設定（`GET`／`PUT /webhook`、`POST /webhook/test`）、它描述的實例與啟動（由 `lib/webhook` 傳送）；人工回覆 API |
 | `auth.go` | Token 驗證與聊天介面登入（`authAPI`） |
@@ -305,6 +305,14 @@ type Factory func(resume Resume) (Adapter, error)
   額度錯誤）。對話會把它記成帶有重置時間的 `LimitStop`，直到下一個回合開始：期間伺服器的佇列
   會等待（`HoldsQueue`），而排定在重置時的繼續（`ScheduleContinue`、`--auto-continue`）會在佇列
   的派送迴圈中、排隊的訊息之前送出。
+- **暫時性錯誤。** agent 自己重試後，回合仍因可能自行恢復的上游錯誤失敗時，會以 `transient`
+  停止原因結束：HTTP 5xx 或 429（Claude Code 的 `api_error_status`、Codex `codexErrorInfo` 的
+  `httpStatusCode`）、Codex 的 `serverOverloaded`、連線失敗、Pi 沒有成功的 `auto_retry_end`，或
+  `IsTransientError` 比對到的文字。用量限制和登入問題會先判斷。對話會記下一個 `RetryWait`，含下次
+  重試的時間（`Config.RetryDelays`、`--retry-delays`），以警告而不是錯誤回報，並讓佇列等待
+  （`HoldsQueue`）。時間到了，`ContinueIfDue` 會在佇列的派送迴圈中送出 `ContinuePrompt`；這個回合又
+  以同樣方式失敗時，改等下一個間隔（由 `retrying` 計數），最後一次也失敗就當成錯誤。新回合開始時
+  等待結束；`RetryNow` 和 `CancelRetry` 對應 `POST` 和 `DELETE /retry`。
 - **回合。** 只有 agent 閒置時訊息才會開始新的回合；否則 `StartTurn` 會回傳
   `ErrMessageValidationChanging`，由伺服器把訊息排入佇列。agent 壓縮 context 期間，回合也會
   以同樣的方式等待。寫出後 agent 沒有確認的訊息（`ErrUnconfirmed`：逾時、取消或 agent 結束）
@@ -343,7 +351,7 @@ type Factory func(resume Resume) (Adapter, error)
 
 `EventEmitter`（`lib/convstate`）保存用戶端讀取的內容：訊息、結構化訊息、時間軸、
 請求、任務、佇列、狀態快照（狀態、生命週期、server ID、回合數、agent 的工作階段 ID、能力、設定、
-含 prompt cache 的用量、用量限制造成的停止、登入）。
+含 prompt cache 的用量、用量限制造成的停止、等待重試的失敗回合、登入）。
 
 - 訊息、結構化訊息、請求、任務或佇列的每次變更都會取得下一個序號（`seq`）；狀態和錯誤
   則整份重播，時間軸由 `GET /timeline` 讀取。對話以 `epoch` 識別，歷史被改寫時（收回訊息、
@@ -397,8 +405,8 @@ type Factory func(resume Resume) (Adapter, error)
 
 agent 忙碌時，訊息會在 `s.queue` 等待；對 agent 最後一則訊息的人工回覆（`POST /handoff/reply`）
 也以同樣的方式送出，同樣會在這裡等待。佇列有獨立的鎖，讀取不必等待伺服器的鎖；變更時也會
-持有 `s.mu`。派送迴圈每 500 毫秒檢查第一則訊息：agent 必須閒置、沒有用量限制暫停佇列，
-也不在重新啟動中。
+持有 `s.mu`。派送迴圈每 500 毫秒檢查第一則訊息：agent 必須閒置、沒有用量限制或等待重試的失敗回合暫停佇列，
+也不在重新啟動中。到期的繼續或重試會先送出（`beforeQueue`）。
 
 被拒絕的訊息最多嘗試 5 次。可能重複送達的訊息會立即丟棄：已寫出但未確認的訊息
 （`native.ErrUnconfirmed`，原因可能是逾時、取消或 agent 結束）。寫入 stdin 的動作會隨呼叫的
@@ -416,7 +424,7 @@ context 結束，避免不再讀取的 agent 佔住 `s.mu`。
 - 資料表有 `messages`、`rich_messages`、`session_events`、`requests`、`queue`、`tasks`（每個
   任務以伺服器編碼後的形式、依開始它的訊息 ID 保存），以及
   `meta`：保存 agent 類型、transport 和工作目錄、epoch 與 seq、工作階段參照與名稱、為
-  工作階段選擇的設定、用量限制造成的停止、透過 API 修改的 webhook 設定（附啟動參數的指紋，
+  工作階段選擇的設定、用量限制造成的停止、等待重試的失敗回合、透過 API 修改的 webhook 設定（附啟動參數的指紋，
   參數改變時以參數為準）、用戶端上次顯示對話的時間
   （`seen_at`），以及哪些 AgentAPI 可以寫入這個檔案、最後由哪個寫入（見下文）。
 - 寫入會先排隊，每 200 毫秒在一個交易中寫入，所以串流不必等待磁碟。正常關閉時會將檔案標示為
@@ -661,7 +669,7 @@ AgentAPI 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
   render 出錯時會顯示 `chat-error-boundary.tsx`，可以清除快取的對話後重新載入。
 - `lib/chat-api.ts` 是型別化的 HTTP 用戶端，`lib/api-schema.ts` 保存由 OpenAPI schema 產生的型別。
 - `components/chat.tsx` 負責頁面版面：訊息清單（任務、工具呼叫列、思考）、輸入框上方的停靠區
-  （狀態列、登入卡片、請求卡片、用量限制卡片、prompt cache 過期提醒）、
+  （狀態列、登入卡片、請求卡片、用量限制卡片、重試卡片、prompt cache 過期提醒）、
   輸入框（`message-input.tsx`，含斜線指令、工作階段設定和用量指示）、Explorer（含先前的工作階段和
   它們的花費，`session-history.tsx`，以及 webhook 設定，`webhook-settings.tsx`）、sub agent 的
   Lineage 面板（`lineage.tsx`）、檔案檢視器以及 shell

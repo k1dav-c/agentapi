@@ -65,6 +65,9 @@ to try specific interactions:
   (about 5 seconds later, or Check again) works
 - `limit`: the account reaches its 5-hour limit after the message's requests,
   so the usage limit card docks above the composer and queued tasks wait
+- `gateway`: the API's gateway answers 502 after the message's requests, so
+  the retry card docks above the composer and counts down to the retry; the
+  retry (Continue from where you left off.) works
 - `cold`: the turn leaves a large context whose prompt cache already expired,
   for the note that suggests compacting
 - `delegate`: the agent hands a task to a subagent with an Agent tool call

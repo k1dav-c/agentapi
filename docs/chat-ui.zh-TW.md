@@ -213,6 +213,17 @@ context 滿了時，agent 會自動壓縮；`/compact` 則會立刻壓縮。
 立刻送出，**Send queued tasks** 會讓佇列馬上放行。你自己送的任務會直接送出。重置之前，agent
 和有請求時一樣需要你：標頭、分頁標題和分頁圖示都會顯示，開啟通知的背景分頁也會跳出通知。
 
+### API 請求失敗
+
+![API 的 gateway 回 502 而失敗的任務：卡片倒數到三次重試中的第一次，附 Retry now 和 Cancel，佇列中有一個被暫停的任務](screenshots/retry-card.png)
+
+回合因可能自行恢復的 API 錯誤失敗時（例如 gateway 回 502，或 API 過載），AgentAPI 會自己再試
+（見[暫時性的 API 錯誤](../README.zh-TW.md#暫時性的-api-錯誤)）。輸入框上方的卡片會說明 API 回了
+什麼，附上 agent 的訊息，並倒數到下一次重試：*Retrying in 0:28 (1 of 3)*。排隊中的任務會等著，
+標示 *held until the failed task is tried again*。**Retry now** 立刻再試，**Cancel** 放棄這個任務、
+讓佇列放行。你自己送的任務會直接送出。這段期間 agent 算是工作中，狀態列會顯示它在等著再試失敗的
+任務。失敗的那個任務本身顯示 Failed；重試是下一個任務。
+
 ## 請求與決策卡片
 
 agent 需要你回應時，會在輸入框上方顯示卡片並等待。卡片上方的狀態列（手機上改由卡片自己說明）、

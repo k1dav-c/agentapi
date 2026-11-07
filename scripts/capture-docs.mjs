@@ -676,6 +676,23 @@ try {
   await demo.request('/messages', 'DELETE');
   await demo.idle();
 
+  // A turn the API's gateway failed with a 502, which AgentAPI tries again, with a task held in the
+  // queue until then. As with the limit, the demo fails after the approval it asks for.
+  await demo.send('Review `README.md` and the page in `index.html`.');
+  await demo.idle();
+  await demo.send('Deploy the release; I will approve the command. The gateway has been flaky today.');
+  await demo.pending('approval');
+  await box.fill('Then add the release to `docs/notes.md`.');
+  await box.press('Enter');
+  await page.getByText('Queued tasks', {exact: false}).waitFor();
+  const deploy = (await demo.request('/requests')).requests.find(r => r.status === 'pending');
+  await demo.request(`/requests/${deploy.id}/respond`, 'POST', {option_id: deploy.options.find(o => o.kind === 'allow').id});
+  await page.locator('[data-retry-wait]').waitFor();
+  await page.getByText('held until the failed task is tried again', {exact: false}).waitFor();
+  await shot(page, 'retry-card.png');
+  await demo.request('/messages', 'DELETE');
+  await demo.idle();
+
   // An expired prompt cache over a large context, while the agent is idle.
   await demo.send('Review `README.md` and the page in `index.html`.');
   await demo.idle();
