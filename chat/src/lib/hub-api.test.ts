@@ -44,4 +44,15 @@ describe("the hub's API", () => {
     const api = createHubAPI("", fetcher(new TypeError("Failed to fetch")));
     await expect(api.changeInstance("x", {muted: true})).rejects.toMatchObject({message: "The hub didn't answer.", status: 0});
   });
+
+  test("the favorites go to /api/favorites, and come back as the hub keeps them", async () => {
+    const answers = fetcher(json(200, {favorites: [{id: "f1", text: "Review the diff."}, {id: 7, text: "not one"}]}));
+    const api = createHubAPI("/hub", answers);
+    expect(await api.setFavorites([{text: "Review the diff."}])).toEqual([{id: "f1", text: "Review the diff."}]);
+    expect(answers.calls.map(({url, init}) => [init.method, url, init.body])).toEqual([["PUT", "/hub/api/favorites", '{"favorites":[{"text":"Review the diff."}]}']]);
+    await expect(createHubAPI("", fetcher(json(400, {error: "favorite 1: the text is empty"}))).setFavorites([{text: ""}])).rejects.toMatchObject({
+      message: "favorite 1: the text is empty",
+      status: 400,
+    });
+  });
 });

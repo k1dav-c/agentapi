@@ -1,11 +1,14 @@
 import {displayName, instanceState, instanceVersion, stateLabel, type HubInstance, type InstanceState, type InstanceUpdate} from "./hub";
+import {parseFavorites, type Favorite} from "./hub-favorites";
 import {shownUpdate} from "./hub-update";
 
 // The hub's page and the chat of the instance it opens in a frame talk with
 // window messages. The chat draws the bar above itself (one bar, with its
 // own actions in it, instead of the hub's bar and a row of the chat's), the
-// hub tells it what to show there, and the chat asks the hub to go back, to
-// cancel the instance's update, or to open another agent of its machine.
+// hub tells it what to show there and the favorites for its composer, and
+// the chat asks the hub to go back, to cancel the instance's update, to
+// open another agent of its machine, or to open the favorites in the hub's
+// settings.
 
 // What the hub tells the chat about the instance.
 export type FrameInstance = {
@@ -41,16 +44,26 @@ export type MachineAgent = {
   agent?: string;
 };
 
-export type ToFrame = {source: "agentapi.hub"; type: "instance"; instance: FrameInstance};
-export type FromFrame = {source: "agentapi.hub"; type: "ready" | "back" | "cancel-update"} | {source: "agentapi.hub"; type: "open"; id: string};
+// favorites: all of them, on every ready and every change; a chat before
+// 3.5 ignores it, and a hub before it never sends it.
+type InstanceToFrame = {source: "agentapi.hub"; type: "instance"; instance: FrameInstance};
+type FavoritesToFrame = {source: "agentapi.hub"; type: "favorites"; favorites: Favorite[]};
+export type ToFrame = InstanceToFrame | FavoritesToFrame;
+export type FrameAsk = "ready" | "back" | "cancel-update" | "manage-favorites";
+export type FromFrame = {source: "agentapi.hub"; type: FrameAsk} | {source: "agentapi.hub"; type: "open"; id: string};
 
 const SOURCE = "agentapi.hub";
 
-export function toFrame(instance: FrameInstance): ToFrame {
+export function toFrame(instance: FrameInstance): InstanceToFrame {
   return {source: SOURCE, type: "instance", instance};
 }
 
-export function fromFrame(type: "ready" | "back" | "cancel-update"): FromFrame {
+// favoritesToFrame tells the chat the favorites for its composer.
+export function favoritesToFrame(favorites: Favorite[]): FavoritesToFrame {
+  return {source: SOURCE, type: "favorites", favorites};
+}
+
+export function fromFrame(type: FrameAsk): FromFrame {
   return {source: SOURCE, type};
 }
 
@@ -101,11 +114,11 @@ export function onFrameMessage(
   framed: Framed | undefined,
   message: FromFrame,
   instance: string,
-): {framed: Framed | undefined; ask?: "back" | "cancel-update"; open?: string} {
+): {framed: Framed | undefined; ask?: "back" | "cancel-update" | "manage-favorites"; open?: string} {
   if (message.type === "ready") {
     return {framed: {instance, ready: framed?.instance === instance ? framed.ready + 1 : 1}};
   }
-  if (message.type === "back" || message.type === "cancel-update") return {framed, ask: message.type};
+  if (message.type === "back" || message.type === "cancel-update" || message.type === "manage-favorites") return {framed, ask: message.type};
   if (message.type === "open" && typeof message.id === "string" && message.id) return {framed, open: message.id};
   return {framed};
 }
@@ -116,4 +129,13 @@ export function instanceFromHub(event: Pick<MessageEvent, "origin" | "data" | "s
   if (event.source !== parent) return undefined;
   const message = frameMessage<ToFrame>(event, origin);
   return message?.type === "instance" ? message.instance : undefined;
+}
+
+// favoritesFromHub is the favorites a message to the chat in the frame
+// tells of, checked like instanceFromHub; entries that aren't favorites are
+// left out.
+export function favoritesFromHub(event: Pick<MessageEvent, "origin" | "data" | "source">, parent: unknown, origin = window.location.origin): Favorite[] | undefined {
+  if (event.source !== parent) return undefined;
+  const message = frameMessage<ToFrame>(event, origin);
+  return message?.type === "favorites" ? parseFavorites((message as {favorites?: unknown}).favorites) : undefined;
 }

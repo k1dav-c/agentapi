@@ -2,6 +2,7 @@
 
 import {useEffect, useState} from "react";
 import {applyHubEvent, type HubEvent, type HubInstance} from "@/lib/hub";
+import {parseFavorites, type Favorite} from "@/lib/hub-favorites";
 import {checkHubSession, type HubSession} from "@/lib/hub-session";
 import {getReconnectDelay} from "@/lib/reconnect";
 import {useEventSource} from "../use-event-source";
@@ -11,12 +12,14 @@ const STALE_STREAM_MS = 45_000;
 
 // useHubStream keeps the hub page signed in and in step with the hub:
 // whether this browser is signed in (undefined until the hub says), the
-// instances and their changes from one stream kept open, and the hub's own
-// version, which the older instances are marked against.
+// instances and their changes from one stream kept open, the hub's own
+// version, which the older instances are marked against, and the
+// favorites (undefined until the hub sends them).
 export function useHubStream(root: string) {
   const [session, setSession] = useState<HubSession | undefined>(undefined);
   const [instances, setInstances] = useState<Map<string, HubInstance>>(new Map());
   const [hubVersion, setHubVersion] = useState("");
+  const [favorites, setFavorites] = useState<Favorite[] | undefined>(undefined);
   // The last session check after the stream failed found the hub
   // unreachable.
   const [unreachable, setUnreachable] = useState(false);
@@ -61,7 +64,11 @@ export function useHubStream(root: string) {
         if (event.type === "instances") setHubVersion(event.hubVersion ?? "");
         setInstances((previous) => applyHubEvent(previous, event));
       };
-      return {instances: on("instances"), instance: on("instance"), removed: on("removed")};
+      const onFavorites = (message: MessageEvent<string>) => {
+        const list = parseFavorites((JSON.parse(message.data) as {favorites?: unknown}).favorites);
+        if (list) setFavorites(list);
+      };
+      return {instances: on("instances"), instance: on("instance"), removed: on("removed"), favorites: onFavorites};
     },
     onOpen: () => setUnreachable(false),
     // EventSource hides the status: a session that expired comes back as a
@@ -81,6 +88,10 @@ export function useHubStream(root: string) {
     retrySession: () => setSessionAttempt((n) => n + 1),
     instances,
     hubVersion,
+    favorites,
+    // The favorites as the hub answered a change, before its stream tells
+    // of it.
+    setFavorites,
     unreachable,
     status: stream.status,
   };

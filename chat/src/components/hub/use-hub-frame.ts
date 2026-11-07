@@ -9,13 +9,24 @@ import {frameMessage, onFrameMessage, type Framed, type FromFrame} from "@/lib/h
 // A chat that loads again in the frame says it is ready again, and is told
 // the instance again (Framed.ready). The frame's element carries the
 // instance in data-instance. The bar's switch asks to open another agent of
-// the machine (onOpen).
-export function useHubFrame({onBack, onCancelUpdate, onOpen}: {onBack: () => void; onCancelUpdate: (id: string) => void; onOpen: (id: string) => void}) {
+// the machine (onOpen), and the composer's menu of favorites to manage them
+// (onManageFavorites).
+export function useHubFrame({
+  onBack,
+  onCancelUpdate,
+  onOpen,
+  onManageFavorites,
+}: {
+  onBack: () => void;
+  onCancelUpdate: (id: string) => void;
+  onOpen: (id: string) => void;
+  onManageFavorites: () => void;
+}) {
   const frame = useRef<HTMLIFrameElement>(null);
   const [framed, setFramed] = useState<Framed>();
-  const latest = useRef({onBack, onCancelUpdate, onOpen});
+  const latest = useRef({onBack, onCancelUpdate, onOpen, onManageFavorites});
   useEffect(() => {
-    latest.current = {onBack, onCancelUpdate, onOpen};
+    latest.current = {onBack, onCancelUpdate, onOpen, onManageFavorites};
   });
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
@@ -31,6 +42,7 @@ export function useHubFrame({onBack, onCancelUpdate, onOpen}: {onBack: () => voi
       const {ask, open} = onFrameMessage(undefined, message, instance);
       if (ask === "back") latest.current.onBack();
       else if (ask === "cancel-update") latest.current.onCancelUpdate(instance);
+      else if (ask === "manage-favorites") latest.current.onManageFavorites();
       else if (open) latest.current.onOpen(open);
     };
     window.addEventListener("message", onMessage);

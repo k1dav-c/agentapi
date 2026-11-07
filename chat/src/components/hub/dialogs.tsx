@@ -6,9 +6,9 @@ import {Button} from "@/components/ui/button";
 import {Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle} from "@/components/ui/dialog";
 import {JoinMachine} from "./join-machine";
 
-const fieldClass =
+export const fieldClass =
   "h-11 w-full rounded-lg border bg-card px-3.5 text-sm shadow-xs outline-none transition-shadow placeholder:text-muted-foreground/70 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/40";
-const sectionClass = "text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase";
+export const sectionClass = "text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase";
 
 // The longest group name the hub takes.
 export const maxGroupName = 40;

@@ -1,6 +1,6 @@
 import {describe, expect, test} from "bun:test";
 import type {HubInstance} from "./hub";
-import {frameInstance, frameMessage, fromFrame, instanceFromHub, onFrameMessage, openFromFrame, toFrame, type FromFrame} from "./hub-frame";
+import {favoritesFromHub, favoritesToFrame, frameInstance, frameMessage, fromFrame, instanceFromHub, onFrameMessage, openFromFrame, toFrame, type FromFrame} from "./hub-frame";
 
 const ORIGIN = "http://hub.test";
 
@@ -105,5 +105,33 @@ describe("the chat's side (FrameBar)", () => {
     expect(instanceFromHub({origin: ORIGIN, data: told, source: {} as MessageEventSource}, parent, ORIGIN)).toBeUndefined();
     expect(instanceFromHub({origin: "http://evil.test", data: told, source: parent as MessageEventSource}, parent, ORIGIN)).toBeUndefined();
     expect(instanceFromHub({origin: ORIGIN, data: fromFrame("ready"), source: parent as MessageEventSource}, parent, ORIGIN)).toBeUndefined();
+  });
+});
+
+describe("favorites", () => {
+  const parent = {};
+  const from = (data: unknown, source: unknown = parent, origin = ORIGIN) => favoritesFromHub({origin, data, source: source as MessageEventSource}, parent, ORIGIN);
+
+  test("the chat takes them from the page that frames it, leaving out what isn't one", () => {
+    const told = favoritesToFrame([
+      {id: "a", title: "Review", text: "Review the diff."},
+      {id: "b", text: "Write the tests first."},
+    ]);
+    expect(from(told)).toEqual(told.favorites);
+    expect(from({source: "agentapi.hub", type: "favorites", favorites: [{id: "a", text: "x"}, {id: 2, text: "y"}, {id: "c"}, null, {id: "a", text: "twice"}]})).toEqual([{id: "a", text: "x"}]);
+    expect(from({source: "agentapi.hub", type: "favorites", favorites: []})).toEqual([]);
+  });
+
+  test("ignores another window, another origin, other messages and a list that isn't one", () => {
+    const told = favoritesToFrame([{id: "a", text: "x"}]);
+    expect(from(told, {})).toBeUndefined();
+    expect(from(told, parent, "http://evil.test")).toBeUndefined();
+    expect(from(toFrame({id: "a", name: "a", state: "idle", label: "Idle", tab: "t"}))).toBeUndefined();
+    expect(from({source: "agentapi.hub", type: "favorites", favorites: "x"})).toBeUndefined();
+  });
+
+  test("manage-favorites is an ask of the chat", () => {
+    const framed = {instance: "a", ready: 1};
+    expect(onFrameMessage(framed, fromFrame("manage-favorites"), "a")).toEqual({framed, ask: "manage-favorites"});
   });
 });
