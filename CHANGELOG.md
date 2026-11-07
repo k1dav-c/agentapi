@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- While two or more notifications show, **Clear all** below them closes them at once. Each counts as
+  closed, so a reload doesn't bring it back.
+
 ## v3.3.0
 
 ### Features

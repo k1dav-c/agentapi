@@ -457,7 +457,8 @@ list` and other tabs stop showing the task as unread (see the README's
 The agent's warnings and errors (a turn that failed, a setting it ignores) show as notifications in
 the corner that stay until you close them. A closed one stays closed after a reload, although the
 server sends its recent ones again on every connection; a warning the agent repeats on every start
-shows once per page.
+shows once per page. While two or more show, **Clear all** below them closes them all, each as
+closed as if you had closed it.
 
 ## Phones
 
