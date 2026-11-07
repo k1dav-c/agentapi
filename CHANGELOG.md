@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- A Markdown link whose label has Chinese punctuation, such as `[mITXPC：Dynatron A26](https://…)`,
+  opens its URL again. The chat cut its label at the punctuation and took the rest of the label as
+  the URL, a relative one. Only a bare URL that runs on into the punctuation after it is cut now,
+  and a bare `www.` address cut so keeps its `http://`.
+
 ## v3.2.1
 
 ### Fixes

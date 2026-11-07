@@ -25,6 +25,12 @@ const linkify = new LinkifyIt();
 // link.
 const InsideLink = React.createContext(false);
 
+// isAutolink says whether a link is a bare URL GFM linked: its text is its
+// URL, "http://" before a www. address or "mailto:" before an email.
+function isAutolink(url: string | undefined, text: string): boolean {
+  return url === text || url === `http://${text}` || url === `mailto:${text}`;
+}
+
 function remarkLinkify() {
   return (tree: MarkdownNode) => {
     const visit = (node: MarkdownNode) => {
@@ -40,13 +46,18 @@ function remarkLinkify() {
           child.children[0].value
         ) {
           const text = child.children[0].value;
+          // Only a bare URL GFM linked runs on into the Chinese punctuation
+          // after it; a [label](url) link keeps its label and its URL.
+          if (!isAutolink(child.url, text)) return child;
           const punctuationIndex = text.search(/[，。！？；：]/u);
           if (punctuationIndex !== -1) {
             const linkText = text.slice(0, punctuationIndex);
             return [
               {
                 ...child,
-                url: linkify.match(linkText)?.[0]?.url ?? linkText,
+                // The URL less what ran on, as GFM wrote it (with http://
+                // before www.).
+                url: child.url!.slice(0, child.url!.length - (text.length - linkText.length)),
                 children: [{type: "text", value: linkText}],
               },
               {type: "text", value: text.slice(punctuationIndex)},

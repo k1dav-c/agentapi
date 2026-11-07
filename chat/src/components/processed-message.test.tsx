@@ -29,6 +29,21 @@ describe("ProcessedMessage links", () => {
     expect(html).toContain(">OpenAI</a>");
   });
 
+  test("a Markdown link's label with Chinese punctuation keeps its URL", () => {
+    const html = render("[mITXPC：Dynatron A26（180 W、65 mm）](https://mitxpc.com/products/a26)", true);
+    expect(html).toContain('href="https://mitxpc.com/products/a26"');
+    expect(html).toContain(">mITXPC：Dynatron A26（180 W、65 mm）</a>");
+  });
+
+  test.each([
+    ["URL", "見 https://example.com/path，下一段", "https://example.com/path"],
+    ["www. address", "見 www.example.com/path，下一段", "http://www.example.com/path"],
+  ])("a bare %s in Markdown stops at Chinese punctuation", (_name, content, expectedHref) => {
+    const html = render(content, true);
+    expect(html).toContain(`href="${expectedHref}"`);
+    expect(html).toContain("</a>，下一段");
+  });
+
   test("adds wrapping styles to long links", () => {
     const html = render("https://example.com/a-very-long-path", true);
     expect(html).toContain("break-words");
