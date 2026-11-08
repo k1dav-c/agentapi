@@ -590,6 +590,32 @@ func TestPIDFileOperations(t *testing.T) {
 		assert.Equal(t, fmt.Sprintf("%d\n", os.Getpid()), string(data))
 	})
 
+	t.Run("writePIDFile keeps the file of another agentapi", func(t *testing.T) {
+		if runtime.GOOS != "linux" {
+			t.Skip("executable ownership check uses Linux procfs")
+		}
+		// Another install of agentapi, or one built from source: its
+		// server runs, and its PID file isn't stale.
+		other := filepath.Join(t.TempDir(), "agentapi-other")
+		data, err := os.ReadFile(os.Args[0])
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(other, data, 0o755))
+		helper := exec.Command(other, "-test.run=^TestPIDFileHelperProcess$")
+		helper.Env = append(os.Environ(), "PID_FILE_HELPER=1")
+		require.NoError(t, helper.Start())
+		t.Cleanup(func() {
+			_ = helper.Process.Kill()
+			_ = helper.Wait()
+		})
+		pidFile := t.TempDir() + "/test.pid"
+		require.NoError(t, os.WriteFile(pidFile, []byte(fmt.Sprintf("%d\n", helper.Process.Pid)), 0o600))
+		err = writePIDFile(pidFile, discardLogger)
+		require.ErrorContains(t, err, "another instance is already running")
+		kept, err := os.ReadFile(pidFile)
+		require.NoError(t, err)
+		assert.Equal(t, fmt.Sprintf("%d\n", helper.Process.Pid), string(kept))
+	})
+
 	t.Run("writePIDFile replaces PID reused by another executable", func(t *testing.T) {
 		if runtime.GOOS != "linux" {
 			t.Skip("executable ownership check uses Linux procfs")
