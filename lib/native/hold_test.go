@@ -34,7 +34,7 @@ func TestFailedDeliveryKeepsTheLimitStop(t *testing.T) {
 
 func TestFailedDeliveryKeepsTheRetryWait(t *testing.T) {
 	clock := quartz.NewMock(t)
-	c, factory, rec := start(t, nil, native.Config{Clock: clock, RetryDelays: retryDelays})
+	c, factory, rec := start(t, nil, native.Config{Clock: clock, Policy: native.Policy{RetryDelays: retryDelays}})
 	a := factory.Last()
 	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "work"}))
 	a.Sink().TurnCompleted(transientResult())
@@ -81,7 +81,7 @@ func TestRestartForgetsTheContinuation(t *testing.T) {
 func TestAgentExitForgetsTheRetry(t *testing.T) {
 	ctx := waitCtx(t)
 	clock, restart := restartClock(t)
-	c, factory, _ := start(t, nil, native.Config{Clock: clock, RetryDelays: retryDelays})
+	c, factory, _ := start(t, nil, native.Config{Clock: clock, Policy: native.Policy{RetryDelays: retryDelays}})
 	first := factory.Last()
 	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "work"}))
 	first.Sink().TurnCompleted(transientResult())
@@ -127,7 +127,7 @@ func TestAgentExitForgetsTheContinuation(t *testing.T) {
 // stop stays meanwhile.
 func TestFailedContinuationIsTriedAgain(t *testing.T) {
 	clock := quartz.NewMock(t)
-	c, factory, _ := start(t, nil, native.Config{Clock: clock, AutoContinue: true})
+	c, factory, _ := start(t, nil, native.Config{Clock: clock, Policy: native.Policy{AutoContinue: true}})
 	a := factory.Last()
 	resets := clock.Now().Add(time.Hour)
 	limitTurn(t, c, a.Sink(), native.TurnResult{Error: "limit", ResetsAt: &resets})

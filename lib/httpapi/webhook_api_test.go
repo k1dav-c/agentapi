@@ -18,7 +18,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	conv "github.com/coder/agentapi/lib/conversation"
-	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/logctx"
 	"github.com/coder/agentapi/lib/native/nativetest"
@@ -26,7 +25,7 @@ import (
 	"github.com/coder/agentapi/lib/webhook"
 )
 
-func testDispatcher(t *testing.T, config WebhookConfig, clock quartz.Clock) *webhook.Dispatcher {
+func testDispatcher(t *testing.T, config webhook.Config, clock quartz.Clock) *webhook.Dispatcher {
 	t.Helper()
 	if config.URL == "" {
 		config.URL = "https://example.com/hook"
@@ -73,7 +72,7 @@ func TestWebhookConfigCanBeUpdatedAtRuntime(t *testing.T) {
 	t.Parallel()
 
 	dispatcher, err := webhook.New(
-		WebhookConfig{
+		webhook.Config{
 			URL:         "https://initial.example.com/hook",
 			Timeout:     5 * time.Second,
 			MaxAttempts: 2,
@@ -130,9 +129,9 @@ func TestWebhookConfigCanBeUpdatedAtRuntime(t *testing.T) {
 func TestWebhookAPIPublicURLTemplate(t *testing.T) {
 	t.Parallel()
 	clock := quartz.NewMock(t)
-	d := testDispatcher(t, WebhookConfig{}, clock)
+	d := testDispatcher(t, webhook.Config{}, clock)
 	d.SetResolver((&fakeRoute{source: "10.0.0.5"}).resolver(clock))
-	d.SetInstance(WebhookInstance{ID: "dev-1:3285", Port: 3285})
+	d.SetInstance(instanceapi.WebhookInstance{ID: "dev-1:3285", Port: 3285})
 	api := &webhookAPI{webhook: d}
 
 	put := func(publicURL string) (*WebhookConfigResponse, error) {
@@ -170,7 +169,7 @@ func TestPublicIPIsAnAllowedHost(t *testing.T) {
 		AllowedHosts:   []string{"localhost"},
 		AllowedOrigins: []string{"*"},
 		Clock:          clock,
-		Webhook:        WebhookConfig{URL: "http://192.168.9.210:3290/hooks", PublicURL: "http://{ip}:3285"},
+		Webhook:        webhook.Config{URL: "http://192.168.9.210:3290/hooks", PublicURL: "http://{ip}:3285"},
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = srv.Stop(context.Background()) })
@@ -206,7 +205,7 @@ func TestSlowPublicIPLookupBlocksNoEvent(t *testing.T) {
 		AllowedHosts:   []string{"*"},
 		AllowedOrigins: []string{"*"},
 		Clock:          clock,
-		Webhook:        WebhookConfig{URL: "http://192.0.2.10:3290/hooks", PublicURL: "http://{ip}:3285", Events: []string{"run.status_changed"}},
+		Webhook:        webhook.Config{URL: "http://192.0.2.10:3290/hooks", PublicURL: "http://{ip}:3285", Events: []string{"run.status_changed"}},
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = srv.Stop(context.Background()) })
@@ -232,7 +231,7 @@ func TestSlowPublicIPLookupBlocksNoEvent(t *testing.T) {
 	go srv.webhook.RefreshIP(t.Context())
 	<-dialing
 
-	done := make(chan convstate.SummaryBody)
+	done := make(chan instanceapi.SummaryBody)
 	go func() {
 		srv.emitter.EmitStatus(conv.StatusChanging)
 		srv.emitter.EmitStatus(conv.StatusStable)
@@ -258,7 +257,7 @@ func TestWebhookTestEvent(t *testing.T) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
 	defer server.Close()
-	d := testDispatcher(t, WebhookConfig{URL: server.URL, Events: []string{"task.*"}}, quartz.NewReal())
+	d := testDispatcher(t, webhook.Config{URL: server.URL, Events: []string{"task.*"}}, quartz.NewReal())
 	s := &webhookAPI{webhook: d}
 	response, err := s.testWebhook(t.Context(), nil)
 	require.NoError(t, err)
@@ -268,7 +267,7 @@ func TestWebhookTestEvent(t *testing.T) {
 	assert.EqualValues(t, 1, calls.Load(), "not retried")
 	assert.Equal(t, instanceapi.EventWebhookTest, event)
 
-	require.NoError(t, d.UpdateConfig(WebhookConfig{}))
+	require.NoError(t, d.UpdateConfig(webhook.Config{}))
 	response, err = s.testWebhook(t.Context(), nil)
 	require.NoError(t, err)
 	assert.Equal(t, "no webhook URL is set", response.Body.Error)
@@ -327,8 +326,8 @@ func TestWebhookObserverRunsForItsEvents(t *testing.T) {
 // it back, and none of them may write over another's.
 func TestWebhookConcurrentUpdatesKeepEveryField(t *testing.T) {
 	t.Parallel()
-	d := testDispatcher(t, WebhookConfig{}, quartz.NewReal())
-	d.SetInstance(WebhookInstance{ID: "dev-1:3285", Port: 3285})
+	d := testDispatcher(t, webhook.Config{}, quartz.NewReal())
+	d.SetInstance(instanceapi.WebhookInstance{ID: "dev-1:3285", Port: 3285})
 	api := &webhookAPI{webhook: d}
 
 	base := func() *WebhookConfigRequest {

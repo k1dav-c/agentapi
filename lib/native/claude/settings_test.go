@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/nativetest"
 	"github.com/coder/agentapi/lib/native/procutil"
@@ -56,11 +57,11 @@ func TestSettingsAtStart(t *testing.T) {
 	assert.True(t, a.Capabilities().Settings)
 	// Both default and opus run Opus 5.5; default is what the user didn't
 	// choose.
-	assert.Equal(t, native.Settings{PermissionMode: native.PermissionModeBypass, Model: "default", Effort: "high"}, a.Settings())
+	assert.Equal(t, agentstate.Settings{PermissionMode: agentstate.PermissionModeBypass, Model: "default", Effort: "high"}, a.Settings())
 
 	options, err := a.SettingOptions(context.Background())
 	require.NoError(t, err)
-	assert.Equal(t, []native.PermissionMode{native.PermissionModeBypass, native.PermissionModeAuto, native.PermissionModeAsk, native.PermissionModePlan}, options.PermissionModes)
+	assert.Equal(t, []agentstate.PermissionMode{agentstate.PermissionModeBypass, agentstate.PermissionModeAuto, agentstate.PermissionModeAsk, agentstate.PermissionModePlan}, options.PermissionModes)
 	require.Len(t, options.Models, 4)
 	assert.Equal(t, native.ModelOption{ID: "sonnet", Name: "Sonnet", Description: "Sonnet 5.5", Efforts: []string{"low", "medium", "high", "xhigh", "max"}}, options.Models[2])
 	assert.Empty(t, options.Models[3].Efforts, "a model without efforts")
@@ -68,17 +69,17 @@ func TestSettingsAtStart(t *testing.T) {
 	// The model the user chose on the command line.
 	init := strings.Replace(testInitialize, `"current_permission_mode":"bypassPermissions"`, `"current_permission_mode":"default"`, 1)
 	a, _, _ = startedWith(t, Config{Args: []string{"--model", "opus", "--permission-mode", "default"}}, init, `{"model":"claude-opus-5-5","effort":"medium"}`)
-	assert.Equal(t, native.Settings{PermissionMode: native.PermissionModeAsk, Model: "opus", Effort: "medium"}, a.Settings())
+	assert.Equal(t, agentstate.Settings{PermissionMode: agentstate.PermissionModeAsk, Model: "opus", Effort: "medium"}, a.Settings())
 	// A model that isn't one of the options is reported by its name.
 	a, _, _ = startedWith(t, Config{}, testInitialize, `{"model":"claude-opus-4-1","effort":"medium"}`)
 	assert.Equal(t, "claude-opus-4-1", a.Settings().Model)
 	// An older version without models or get_settings: the mode, and the
 	// model once a turn runs on it.
 	a, sink, proc := startedWith(t, Config{}, `{"current_permission_mode":"acceptEdits"}`, "")
-	assert.Equal(t, native.Settings{}, a.Settings())
+	assert.Equal(t, agentstate.Settings{}, a.Settings())
 	proc.send(t, []byte(`{"type":"system","subtype":"init","session_id":"s1","model":"claude-opus-4-1"}`))
 	proc.barrier(t)
-	assert.Equal(t, native.Settings{Model: "claude-opus-4-1"}, a.Settings())
+	assert.Equal(t, agentstate.Settings{Model: "claude-opus-4-1"}, a.Settings())
 	assert.Len(t, sink.State().Settings, 1)
 }
 
@@ -95,8 +96,8 @@ func TestSettingOptionsWithoutBypass(t *testing.T) {
 	require.NoError(t, err)
 	// Root outside a sandbox can't bypass permissions, and Haiku has no
 	// auto mode.
-	assert.Equal(t, []native.PermissionMode{native.PermissionModeAsk, native.PermissionModePlan}, options.PermissionModes)
-	assert.ErrorIs(t, a.ApplySettings(context.Background(), native.Settings{PermissionMode: native.PermissionModeBypass}), native.ErrInvalidSetting)
+	assert.Equal(t, []agentstate.PermissionMode{agentstate.PermissionModeAsk, agentstate.PermissionModePlan}, options.PermissionModes)
+	assert.ErrorIs(t, a.ApplySettings(context.Background(), agentstate.Settings{PermissionMode: agentstate.PermissionModeBypass}), native.ErrInvalidSetting)
 }
 
 func TestApplySettings(t *testing.T) {
@@ -106,7 +107,7 @@ func TestApplySettings(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- a.ApplySettings(ctx, native.Settings{Model: "sonnet", Effort: "low", PermissionMode: native.PermissionModeAsk})
+		done <- a.ApplySettings(ctx, agentstate.Settings{Model: "sonnet", Effort: "low", PermissionMode: agentstate.PermissionModeAsk})
 	}()
 	model, i := proc.waitRequest(t, 1, "set_model")
 	assert.Equal(t, "sonnet", model["request"].(map[string]any)["model"])
@@ -118,17 +119,19 @@ func TestApplySettings(t *testing.T) {
 	assert.Equal(t, "default", mode["request"].(map[string]any)["mode"])
 	proc.answer(t, mode, `{"mode":"default"}`)
 	require.NoError(t, <-done)
-	assert.Equal(t, native.Settings{PermissionMode: native.PermissionModeAsk, Model: "sonnet", Effort: "low"}, a.Settings())
+	assert.Equal(t, agentstate.Settings{PermissionMode: agentstate.PermissionModeAsk, Model: "sonnet", Effort: "low"}, a.Settings())
 
 	// A refused mode is answered without it.
-	go func() { done <- a.ApplySettings(ctx, native.Settings{PermissionMode: native.PermissionModeAuto}) }()
+	go func() {
+		done <- a.ApplySettings(ctx, agentstate.Settings{PermissionMode: agentstate.PermissionModeAuto})
+	}()
 	mode, _ = proc.waitRequest(t, 1, "set_permission_mode")
 	mode, _ = proc.waitRequest(t, 1+indexOf(proc, mode), "set_permission_mode")
 	proc.answer(t, mode, `{}`)
 	require.ErrorContains(t, <-done, "refused the auto permission mode")
-	assert.Equal(t, native.PermissionModeAsk, a.Settings().PermissionMode)
+	assert.Equal(t, agentstate.PermissionModeAsk, a.Settings().PermissionMode)
 
-	assert.ErrorIs(t, a.ApplySettings(ctx, native.Settings{Model: "gpt"}), native.ErrInvalidSetting)
+	assert.ErrorIs(t, a.ApplySettings(ctx, agentstate.Settings{Model: "gpt"}), native.ErrInvalidSetting)
 	assert.Empty(t, sink.State().Settings, "changes made through ApplySettings aren't reported back")
 }
 
@@ -153,9 +156,9 @@ func TestClaudeChangesItsSettings(t *testing.T) {
 	// The same model under its full name changes nothing.
 	proc.send(t, []byte(`{"type":"system","subtype":"init","session_id":"s1","permissionMode":"acceptEdits","model":"claude-sonnet-5-5"}`))
 	proc.barrier(t)
-	assert.Equal(t, []native.Settings{
+	assert.Equal(t, []agentstate.Settings{
 		{Model: "default", Effort: "high"},
 		{Model: "sonnet", Effort: "high"},
 	}, sink.State().Settings)
-	assert.Equal(t, native.Settings{Model: "sonnet", Effort: "high"}, a.Settings())
+	assert.Equal(t, agentstate.Settings{Model: "sonnet", Effort: "high"}, a.Settings())
 }

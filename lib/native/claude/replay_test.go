@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/transcript"
 )
@@ -83,20 +84,20 @@ func TestReplayToolApproval(t *testing.T) {
 
 		require.Len(t, r.sink.State().Requests, 1)
 		req := r.sink.State().Requests[0]
-		assert.Equal(t, native.RequestKindApproval, req.Kind)
+		assert.Equal(t, agentstate.RequestKindApproval, req.Kind)
 		assert.Equal(t, "Bash: touch approved.txt", req.Title)
 		assert.Equal(t, "Bash", req.ToolName)
 		assert.Equal(t, "toolu_01As4N927s3iq8TxUjpaKWye", req.ToolUseID)
 		assert.True(t, req.Feedback)
 		assert.JSONEq(t, `{"command":"touch approved.txt","description":"Create empty file approved.txt in working directory"}`, string(req.Input))
 		var ids []string
-		var kinds []native.OptionKind
+		var kinds []agentstate.OptionKind
 		for _, o := range req.Options {
 			ids = append(ids, o.ID)
 			kinds = append(kinds, o.Kind)
 		}
 		assert.Equal(t, []string{"allow", "allow_always", "deny"}, ids)
-		assert.Equal(t, []native.OptionKind{native.OptionKindAllow, native.OptionKindAllowAlways, native.OptionKindDeny}, kinds)
+		assert.Equal(t, []agentstate.OptionKind{agentstate.OptionKindAllow, agentstate.OptionKindAllowAlways, agentstate.OptionKindDeny}, kinds)
 		assert.Contains(t, req.Options[1].Description, "Bash(touch approved.txt)")
 
 		final := r.sink.Final()
@@ -134,26 +135,26 @@ func TestReplayQuestion(t *testing.T) {
 	runs := loadRuns(t, "ask_user_question")
 	r := newReplay(t, Config{}, "", "")
 	r.run(runs[0], replayHooks{
-		respond: func(t *testing.T, req native.Request, _ map[string]any) native.Response {
-			require.Equal(t, native.RequestKindQuestion, req.Kind)
+		respond: func(t *testing.T, req agentstate.Request, _ map[string]any) agentstate.Response {
+			require.Equal(t, agentstate.RequestKindQuestion, req.Kind)
 			assert.Equal(t, "Which color do you prefer?", req.Title)
 			assert.Empty(t, req.Options)
-			assert.Equal(t, []native.Question{{
+			assert.Equal(t, []agentstate.Question{{
 				ID: "q1", Header: "Color", Question: "Which color do you prefer?", FreeText: true,
-				Options: []native.QuestionOption{{Label: "Red", Description: "Choose red"}, {Label: "Blue", Description: "Choose blue"}},
+				Options: []agentstate.QuestionOption{{Label: "Red", Description: "Choose red"}, {Label: "Blue", Description: "Choose blue"}},
 			}}, req.Questions)
 			// Unanswerable responses are refused.
-			err := r.a.Respond(context.Background(), req.ID, native.Response{OptionID: "allow"})
+			err := r.a.Respond(context.Background(), req.ID, agentstate.Response{OptionID: "allow"})
 			require.ErrorIs(t, err, native.ErrInvalidResponse)
-			err = r.a.Respond(context.Background(), req.ID, native.Response{Answers: map[string][]string{"q2": {"x"}}})
+			err = r.a.Respond(context.Background(), req.ID, agentstate.Response{Answers: map[string][]string{"q2": {"x"}}})
 			require.ErrorIs(t, err, native.ErrInvalidResponse)
-			return native.Response{Answers: map[string][]string{"q1": {"blue"}}}
+			return agentstate.Response{Answers: map[string][]string{"q1": {"blue"}}}
 		},
 	})
 	require.NoError(t, r.finish(nil))
 	final := r.sink.Final()
 	assert.Equal(t, "You chose blue.", final[len(final)-1].Content[0].Text)
-	err := r.a.Respond(context.Background(), r.sink.State().Requests[0].ID, native.Response{Answers: map[string][]string{"q1": {"red"}}})
+	err := r.a.Respond(context.Background(), r.sink.State().Requests[0].ID, agentstate.Response{Answers: map[string][]string{"q1": {"red"}}})
 	require.ErrorIs(t, err, native.ErrRequestNotFound)
 }
 
@@ -169,9 +170,9 @@ func TestReplayPlan(t *testing.T) {
 		require.NoError(t, r.finish(nil))
 
 		assert.NotContains(t, r.cmd.Args, "default", "the user's permission mode is kept")
-		var plans []native.Request
+		var plans []agentstate.Request
 		for _, req := range r.sink.State().Requests {
-			if req.Kind == native.RequestKindPlan {
+			if req.Kind == agentstate.RequestKindPlan {
 				plans = append(plans, req)
 			}
 		}
@@ -419,7 +420,7 @@ func TestReplayPendingApproval(t *testing.T) {
 		// The request closed before the turn ended.
 		log := strings.Join(r.sink.State().Log, " ")
 		assert.Less(t, strings.Index(log, "request_closed"), strings.Index(log, "turn_completed"))
-		require.ErrorIs(t, r.a.Respond(context.Background(), id, native.Response{OptionID: "allow"}), native.ErrRequestNotFound)
+		require.ErrorIs(t, r.a.Respond(context.Background(), id, agentstate.Response{OptionID: "allow"}), native.ErrRequestNotFound)
 	})
 
 	t.Run("process exits while a request is pending", func(t *testing.T) {
@@ -431,7 +432,7 @@ func TestReplayPendingApproval(t *testing.T) {
 		require.ErrorIs(t, err, errSignalKilled)
 		// The conversation expires the request when Wait returns; the
 		// adapter can't answer it anymore.
-		require.Error(t, r.a.Respond(context.Background(), r.sink.State().Requests[0].ID, native.Response{OptionID: "allow"}))
+		require.Error(t, r.a.Respond(context.Background(), r.sink.State().Requests[0].ID, agentstate.Response{OptionID: "allow"}))
 		assert.Equal(t, []string{"turn_started"}, r.sink.TurnLog())
 	})
 

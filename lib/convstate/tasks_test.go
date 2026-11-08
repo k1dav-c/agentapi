@@ -12,8 +12,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
-	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/instanceapi"
 )
 
 func taskMessages(start time.Time, entries ...string) []conv.Message {
@@ -50,8 +51,8 @@ func TestTaskTracker(t *testing.T) {
 	start := time.Date(2026, 10, 23, 10, 0, 0, 0, time.UTC)
 	tr := newTaskTracker(start)
 	take := feed(tr)
-	stable := StatusChangeBody{Status: AgentStatusStable, Lifecycle: LifecycleReady}
-	running := StatusChangeBody{Status: AgentStatusRunning, Lifecycle: LifecycleRunning}
+	stable := StatusChangeBody{Status: instanceapi.AgentStatusStable, Lifecycle: instanceapi.LifecycleReady}
+	running := StatusChangeBody{Status: instanceapi.AgentStatusRunning, Lifecycle: instanceapi.LifecycleRunning}
 	status := func(next StatusChangeBody, at time.Time) []int {
 		changed, _ := tr.statusChanged(next, at)
 		return changed
@@ -62,7 +63,7 @@ func TestTaskTracker(t *testing.T) {
 	msgs := taskMessages(start, "", ">Fix the bug")
 	assert.Equal(t, []int{0}, take(msgs))
 	require.Len(t, tr.tasks, 1)
-	assert.Equal(t, Task{ID: 1, Status: TaskStatusRunning, Prompt: "Fix the bug", StartedAt: msgs[1].Time}, tr.tasks[0])
+	assert.Equal(t, instanceapi.Task{ID: 1, Status: instanceapi.TaskStatusRunning, Prompt: "Fix the bug", StartedAt: msgs[1].Time}, tr.tasks[0])
 	assert.Empty(t, status(stable, start), "it hasn't run yet")
 	assert.Empty(t, status(running, start))
 
@@ -74,12 +75,12 @@ func TestTaskTracker(t *testing.T) {
 	assert.Equal(t, 4, *tr.tasks[0].ReplyID)
 
 	// Waiting for an approval isn't the end.
-	assert.Empty(t, status(StatusChangeBody{Status: AgentStatusStable, PendingRequests: 1}, start))
+	assert.Empty(t, status(StatusChangeBody{Status: instanceapi.AgentStatusStable, PendingRequests: 1}, start))
 	assert.Empty(t, status(running, start))
 	assert.Empty(t, tr.agentError(ErrorBody{Message: "warned", Level: conv.ErrorLevelWarning}))
 	end := start.Add(time.Minute)
 	assert.Equal(t, []int{0}, status(stable, end))
-	assert.Equal(t, TaskStatusCompleted, tr.tasks[0].Status)
+	assert.Equal(t, instanceapi.TaskStatusCompleted, tr.tasks[0].Status)
 	assert.Equal(t, end, *tr.tasks[0].EndedAt)
 	assert.Equal(t, 1, *tr.taskAt(start.Add(30 * time.Second)))
 
@@ -90,23 +91,23 @@ func TestTaskTracker(t *testing.T) {
 	assert.Equal(t, []int{1}, tr.agentError(ErrorBody{Message: "boom", Level: conv.ErrorLevelError}))
 	assert.Equal(t, 5, *tr.taskAt(start), "a rich message goes to the running task")
 	status(stable, end)
-	assert.Equal(t, TaskStatusFailed, tr.tasks[1].Status)
+	assert.Equal(t, instanceapi.TaskStatusFailed, tr.tasks[1].Status)
 	assert.Equal(t, []string{"boom"}, tr.tasks[1].Errors)
 
 	msgs = append(msgs, conv.Message{Id: 6, Role: conv.RoleUser, Message: "Go on", Time: end})
 	take(msgs)
 	status(running, end)
-	limit := &native.LimitStop{Message: "limit", StoppedAt: end.Add(time.Second)}
-	status(StatusChangeBody{Status: AgentStatusStable, LimitStop: limit}, end.Add(time.Second))
-	assert.Equal(t, TaskStatusLimited, tr.tasks[2].Status)
+	limit := &agentstate.LimitStop{Message: "limit", StoppedAt: end.Add(time.Second)}
+	status(StatusChangeBody{Status: instanceapi.AgentStatusStable, LimitStop: limit}, end.Add(time.Second))
+	assert.Equal(t, instanceapi.TaskStatusLimited, tr.tasks[2].Status)
 	assert.Equal(t, limit, tr.tasks[2].Limit)
 
 	// The agent exiting fails the running task.
 	msgs = append(msgs, conv.Message{Id: 7, Role: conv.RoleUser, Message: "Again", Time: end.Add(time.Minute)})
 	take(msgs)
 	status(running, end)
-	status(StatusChangeBody{Status: AgentStatusStable, Lifecycle: LifecycleExited}, end)
-	assert.Equal(t, TaskStatusFailed, tr.tasks[3].Status)
+	status(StatusChangeBody{Status: instanceapi.AgentStatusStable, Lifecycle: instanceapi.LifecycleExited}, end)
+	assert.Equal(t, instanceapi.TaskStatusFailed, tr.tasks[3].Status)
 	assert.Equal(t, []string{"the agent exited"}, tr.tasks[3].Errors)
 
 	// A message taken back takes its task along.
@@ -125,7 +126,7 @@ func TestTaskTrackerHistory(t *testing.T) {
 	assert.Equal(t, []int{0, 1}, tr.messages(history, 0))
 	require.Len(t, tr.tasks, 2)
 	for i, want := range []struct{ id, reply int }{{1, 2}, {3, 4}} {
-		assert.Equal(t, TaskStatusCompleted, tr.tasks[i].Status)
+		assert.Equal(t, instanceapi.TaskStatusCompleted, tr.tasks[i].Status)
 		assert.Equal(t, want.id, tr.tasks[i].ID)
 		assert.Equal(t, want.reply, *tr.tasks[i].ReplyID)
 		assert.Equal(t, history[want.reply].Time, *tr.tasks[i].EndedAt, "ends with its reply")
@@ -134,9 +135,9 @@ func TestTaskTrackerHistory(t *testing.T) {
 	assert.Nil(t, tr.taskAt(now.Add(-2*time.Hour)))
 
 	// A task that was running when AgentAPI stopped is over after a restart.
-	restored := []Task{{ID: 1, Status: TaskStatusRunning, StartedAt: history[1].Time}}
+	restored := []instanceapi.Task{{ID: 1, Status: instanceapi.TaskStatusRunning, StartedAt: history[1].Time}}
 	assert.Equal(t, []int{0}, tr.restore(restored, history, now.Add(time.Minute)))
-	assert.Equal(t, TaskStatusCompleted, tr.tasks[0].Status)
+	assert.Equal(t, instanceapi.TaskStatusCompleted, tr.tasks[0].Status)
 }
 
 // A restored task whose message is gone, or is another one now, goes: an
@@ -148,14 +149,14 @@ func TestTaskTrackerRestoreChecksMessages(t *testing.T) {
 	tr := newTaskTracker(now)
 	msgs := taskMessages(now.Add(-time.Hour), ">One", "Done one", ">Two")
 	reply := 1
-	restored := []Task{
-		{ID: 0, Status: TaskStatusCompleted, Prompt: "One", StartedAt: msgs[0].Time, ReplyID: &reply},
+	restored := []instanceapi.Task{
+		{ID: 0, Status: instanceapi.TaskStatusCompleted, Prompt: "One", StartedAt: msgs[0].Time, ReplyID: &reply},
 		// The agent's message now.
-		{ID: 1, Status: TaskStatusCompleted, Prompt: "Old", StartedAt: msgs[1].Time},
+		{ID: 1, Status: instanceapi.TaskStatusCompleted, Prompt: "Old", StartedAt: msgs[1].Time},
 		// Another user message with its ID, sent after a reset.
-		{ID: 2, Status: TaskStatusRunning, Prompt: "Old", StartedAt: now.Add(-2 * time.Hour)},
+		{ID: 2, Status: instanceapi.TaskStatusRunning, Prompt: "Old", StartedAt: now.Add(-2 * time.Hour)},
 		// Taken back.
-		{ID: 3, Status: TaskStatusRunning, Prompt: "Gone", StartedAt: now.Add(-time.Hour)},
+		{ID: 3, Status: instanceapi.TaskStatusRunning, Prompt: "Gone", StartedAt: now.Add(-time.Hour)},
 	}
 	assert.Empty(t, tr.restore(restored, msgs, now))
 	require.Len(t, tr.tasks, 1)
@@ -165,7 +166,7 @@ func TestTaskTrackerRestoreChecksMessages(t *testing.T) {
 	// The message the stale task pointed at gets its own task.
 	assert.Equal(t, []int{1}, tr.messages(msgs, len(msgs)))
 	require.Len(t, tr.tasks, 2)
-	assert.Equal(t, Task{ID: 2, Status: TaskStatusCompleted, Prompt: "Two", StartedAt: msgs[2].Time, EndedAt: &msgs[2].Time}, tr.tasks[1])
+	assert.Equal(t, instanceapi.Task{ID: 2, Status: instanceapi.TaskStatusCompleted, Prompt: "Two", StartedAt: msgs[2].Time, EndedAt: &msgs[2].Time}, tr.tasks[1])
 }
 
 // An answer to a request leaves the agent idle for a moment before it works
@@ -175,32 +176,32 @@ func TestTaskTrackerWaitsAfterAnAnswer(t *testing.T) {
 	start := time.Date(2026, 10, 23, 10, 0, 0, 0, time.UTC)
 	tr := newTaskTracker(start)
 	take := feed(tr)
-	tr.statusChanged(StatusChangeBody{Status: AgentStatusStable}, start)
+	tr.statusChanged(StatusChangeBody{Status: instanceapi.AgentStatusStable}, start)
 	take(taskMessages(start, ">Deploy"))
-	tr.statusChanged(StatusChangeBody{Status: AgentStatusRunning}, start)
+	tr.statusChanged(StatusChangeBody{Status: instanceapi.AgentStatusRunning}, start)
 	// Waiting on an approval.
-	changed, confirm := tr.statusChanged(StatusChangeBody{Status: AgentStatusStable, PendingRequests: 1}, start)
+	changed, confirm := tr.statusChanged(StatusChangeBody{Status: instanceapi.AgentStatusStable, PendingRequests: 1}, start)
 	assert.Empty(t, changed)
 	assert.False(t, confirm)
 	// Answered: idle, but likely to work again.
-	changed, confirm = tr.statusChanged(StatusChangeBody{Status: AgentStatusStable}, start)
+	changed, confirm = tr.statusChanged(StatusChangeBody{Status: instanceapi.AgentStatusStable}, start)
 	assert.Empty(t, changed)
 	assert.True(t, confirm)
 	// It works again: the grace period ends nothing.
-	tr.statusChanged(StatusChangeBody{Status: AgentStatusRunning}, start)
+	tr.statusChanged(StatusChangeBody{Status: instanceapi.AgentStatusRunning}, start)
 	assert.Empty(t, tr.endIfIdle(start))
-	changed, _ = tr.statusChanged(StatusChangeBody{Status: AgentStatusStable}, start.Add(time.Minute))
+	changed, _ = tr.statusChanged(StatusChangeBody{Status: instanceapi.AgentStatusStable}, start.Add(time.Minute))
 	assert.Equal(t, []int{0}, changed)
 
 	// An answer after which the turn was over: the task ends once the
 	// grace period passed.
 	take(taskMessages(start, ">Deploy", "Done", ">Again"))
-	tr.statusChanged(StatusChangeBody{Status: AgentStatusRunning}, start)
-	tr.statusChanged(StatusChangeBody{Status: AgentStatusStable, PendingRequests: 1}, start)
-	_, confirm = tr.statusChanged(StatusChangeBody{Status: AgentStatusStable}, start)
+	tr.statusChanged(StatusChangeBody{Status: instanceapi.AgentStatusRunning}, start)
+	tr.statusChanged(StatusChangeBody{Status: instanceapi.AgentStatusStable, PendingRequests: 1}, start)
+	_, confirm = tr.statusChanged(StatusChangeBody{Status: instanceapi.AgentStatusStable}, start)
 	require.True(t, confirm)
 	assert.Equal(t, []int{1}, tr.endIfIdle(start.Add(taskEndGrace)))
-	assert.Equal(t, TaskStatusCompleted, tr.tasks[1].Status)
+	assert.Equal(t, instanceapi.TaskStatusCompleted, tr.tasks[1].Status)
 }
 
 // A message sent in the grace period after an answer or an interrupt, with
@@ -211,26 +212,26 @@ func TestTaskTrackerMessageInGracePeriod(t *testing.T) {
 	start := time.Date(2026, 10, 23, 10, 0, 0, 0, time.UTC)
 	tr := newTaskTracker(start)
 	take := feed(tr)
-	tr.statusChanged(StatusChangeBody{Status: AgentStatusStable}, start)
+	tr.statusChanged(StatusChangeBody{Status: instanceapi.AgentStatusStable}, start)
 	take(taskMessages(start, ">Rebuild the release"))
-	tr.statusChanged(StatusChangeBody{Status: AgentStatusRunning}, start)
-	tr.statusChanged(StatusChangeBody{Status: AgentStatusStable, PendingRequests: 1}, start)
+	tr.statusChanged(StatusChangeBody{Status: instanceapi.AgentStatusRunning}, start)
+	tr.statusChanged(StatusChangeBody{Status: instanceapi.AgentStatusStable, PendingRequests: 1}, start)
 	// Interrupted: the request is gone and the agent idle.
-	_, confirm := tr.statusChanged(StatusChangeBody{Status: AgentStatusStable}, start)
+	_, confirm := tr.statusChanged(StatusChangeBody{Status: instanceapi.AgentStatusStable}, start)
 	require.True(t, confirm)
 
 	changed := take(taskMessages(start, ">Rebuild the release", "Interrupted", ">Ask me which checks to run"))
 	assert.Equal(t, []int{0, 1}, changed)
 	require.Len(t, tr.tasks, 2)
-	assert.Equal(t, TaskStatusCompleted, tr.tasks[0].Status)
+	assert.Equal(t, instanceapi.TaskStatusCompleted, tr.tasks[0].Status)
 	assert.Empty(t, tr.tasks[0].Steered)
-	assert.Equal(t, TaskStatusRunning, tr.tasks[1].Status)
+	assert.Equal(t, instanceapi.TaskStatusRunning, tr.tasks[1].Status)
 	assert.Equal(t, 2, tr.tasks[1].ID)
 	// The grace period's end doesn't end the new task.
 	assert.Empty(t, tr.endIfIdle(start.Add(taskEndGrace)))
 
 	// While the agent works on it, a message steers it.
-	tr.statusChanged(StatusChangeBody{Status: AgentStatusRunning}, start.Add(4*time.Second))
+	tr.statusChanged(StatusChangeBody{Status: instanceapi.AgentStatusRunning}, start.Add(4*time.Second))
 	take(taskMessages(start, ">Rebuild the release", "Interrupted", ">Ask me which checks to run", ">Only the fast ones"))
 	require.Len(t, tr.tasks, 2)
 	assert.Equal(t, []int{3}, tr.tasks[1].Steered)
@@ -266,22 +267,22 @@ func TestEventEmitterMessageInGracePeriod(t *testing.T) {
 			e.EmitStatus(conv.StatusChanging)
 			// The agent waits on an approval and is interrupted: the
 			// request is withdrawn, and the agent idle.
-			approval := native.RequestState{Request: native.Request{ID: "perm-1", Kind: native.RequestKindApproval}, Status: native.RequestStatusPending}
+			approval := agentstate.RequestState{Request: agentstate.Request{ID: "perm-1", Kind: agentstate.RequestKindApproval}, Status: agentstate.RequestStatusPending}
 			e.EmitRequest(approval)
 			e.EmitStatus(conv.StatusStable)
-			approval.Status = native.RequestStatusWithdrawn
+			approval.Status = agentstate.RequestStatusWithdrawn
 			e.EmitRequest(approval)
 
 			tc.send(e, taskMessages(start, ">Rebuild the release", "Interrupted", ">Ask me which checks to run"))
 			tasks := e.Tasks()
 			require.Len(t, tasks, 2)
-			assert.Equal(t, TaskStatusCompleted, tasks[0].Status)
+			assert.Equal(t, instanceapi.TaskStatusCompleted, tasks[0].Status)
 			assert.Empty(t, tasks[0].Steered)
 			assert.Equal(t, 2, tasks[1].ID)
-			assert.Equal(t, TaskStatusRunning, tasks[1].Status)
+			assert.Equal(t, instanceapi.TaskStatusRunning, tasks[1].Status)
 			// The grace period's end doesn't end the new task.
 			clock.Advance(taskEndGrace).MustWait(t.Context())
-			assert.Equal(t, TaskStatusRunning, e.Tasks()[1].Status)
+			assert.Equal(t, instanceapi.TaskStatusRunning, e.Tasks()[1].Status)
 
 			// While the agent works on it, nothing ends, and a message
 			// steers it.
@@ -289,7 +290,7 @@ func TestEventEmitterMessageInGracePeriod(t *testing.T) {
 			e.EmitMessages(taskMessages(start, ">Rebuild the release", "Interrupted", ">Ask me which checks to run", ">Only the fast ones"))
 			tasks = e.Tasks()
 			require.Len(t, tasks, 2)
-			assert.Equal(t, TaskStatusRunning, tasks[1].Status)
+			assert.Equal(t, instanceapi.TaskStatusRunning, tasks[1].Status)
 			assert.Equal(t, []int{3}, tasks[1].Steered)
 		})
 	}
@@ -301,10 +302,10 @@ func TestTaskTrackerIncremental(t *testing.T) {
 	t.Parallel()
 	start := time.Date(2026, 10, 23, 10, 0, 0, 0, time.UTC)
 	statuses := []StatusChangeBody{
-		{Status: AgentStatusRunning, Lifecycle: LifecycleRunning},
-		{Status: AgentStatusStable, Lifecycle: LifecycleReady},
-		{Status: AgentStatusStable, Lifecycle: LifecycleReady, PendingRequests: 1},
-		{Status: AgentStatusStable, Lifecycle: LifecycleExited},
+		{Status: instanceapi.AgentStatusRunning, Lifecycle: instanceapi.LifecycleRunning},
+		{Status: instanceapi.AgentStatusStable, Lifecycle: instanceapi.LifecycleReady},
+		{Status: instanceapi.AgentStatusStable, Lifecycle: instanceapi.LifecycleReady, PendingRequests: 1},
+		{Status: instanceapi.AgentStatusStable, Lifecycle: instanceapi.LifecycleExited},
 	}
 	for seed := range uint64(200) {
 		rng := rand.New(rand.NewPCG(seed, 0))
@@ -420,13 +421,13 @@ func TestTaskThatWaitsToBeTriedAgainFailed(t *testing.T) {
 	start := time.Date(2026, 11, 7, 10, 0, 0, 0, time.UTC)
 	tr := newTaskTracker(start)
 	take := feed(tr)
-	tr.statusChanged(StatusChangeBody{Status: AgentStatusStable}, start)
+	tr.statusChanged(StatusChangeBody{Status: instanceapi.AgentStatusStable}, start)
 	take(taskMessages(start, ">Deploy"))
-	tr.statusChanged(StatusChangeBody{Status: AgentStatusRunning}, start)
+	tr.statusChanged(StatusChangeBody{Status: instanceapi.AgentStatusRunning}, start)
 	end := start.Add(time.Minute)
-	retry := &native.RetryWait{Message: "API Error: 502 Bad Gateway", StoppedAt: end, Attempt: 1, Attempts: 3, RetryAt: end.Add(30 * time.Second)}
-	tr.statusChanged(StatusChangeBody{Status: AgentStatusStable, RetryWait: retry}, end)
+	retry := &agentstate.RetryWait{Message: "API Error: 502 Bad Gateway", StoppedAt: end, Attempt: 1, Attempts: 3, RetryAt: end.Add(30 * time.Second)}
+	tr.statusChanged(StatusChangeBody{Status: instanceapi.AgentStatusStable, RetryWait: retry}, end)
 	require.Len(t, tr.tasks, 1)
-	assert.Equal(t, TaskStatusFailed, tr.tasks[0].Status)
+	assert.Equal(t, instanceapi.TaskStatusFailed, tr.tasks[0].Status)
 	assert.Equal(t, []string{"API Error: 502 Bad Gateway"}, tr.tasks[0].Errors)
 }

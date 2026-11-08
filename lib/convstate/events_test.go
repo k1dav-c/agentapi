@@ -14,9 +14,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/agentapi/internal/version"
+	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/instanceapi"
-	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -123,7 +123,7 @@ func TestEventEmitter(t *testing.T) {
 			},
 			{
 				Type:    EventTypeStatusChange,
-				Payload: StatusChangeBody{Status: AgentStatusRunning, Lifecycle: LifecycleStarting, Transport: instanceapi.TransportNative, Version: version.Version},
+				Payload: StatusChangeBody{Status: instanceapi.AgentStatusRunning, Lifecycle: instanceapi.LifecycleStarting, Transport: instanceapi.TransportNative, Version: version.Version},
 			},
 		}, stateEvents)
 
@@ -137,7 +137,7 @@ func TestEventEmitter(t *testing.T) {
 			Payload: MessageUpdateBody{Id: 1, Message: "Hello, world!", Role: conv.RoleUser, Time: now, Seq: 1},
 		}, newEvent)
 		// The user's message starts a task.
-		task := Task{ID: 1, Status: TaskStatusRunning, Prompt: "Hello, world!", StartedAt: now}
+		task := instanceapi.Task{ID: 1, Status: instanceapi.TaskStatusRunning, Prompt: "Hello, world!", StartedAt: now}
 		assert.Equal(t, Event{Type: EventTypeTaskUpdate, Payload: TaskUpdateBody{Task: task, Seq: 2}}, <-ch)
 
 		emitter.EmitMessages([]conv.Message{
@@ -164,7 +164,7 @@ func TestEventEmitter(t *testing.T) {
 		newEvent = <-ch
 		assert.Equal(t, Event{
 			Type:    EventTypeStatusChange,
-			Payload: StatusChangeBody{Status: AgentStatusStable, Lifecycle: LifecycleReady, AgentType: "", Transport: instanceapi.TransportNative, Version: version.Version},
+			Payload: StatusChangeBody{Status: instanceapi.AgentStatusStable, Lifecycle: instanceapi.LifecycleReady, AgentType: "", Transport: instanceapi.TransportNative, Version: version.Version},
 		}, newEvent)
 	})
 
@@ -386,7 +386,7 @@ func TestEventEmitterIncrementalReplay(t *testing.T) {
 type recordingPersister struct {
 	tasks     map[int]string
 	messages  map[int]conv.Message
-	requests  map[string]native.RequestState
+	requests  map[string]agentstate.RequestState
 	truncated []int
 	deleted   []string
 	epoch     string
@@ -394,7 +394,7 @@ type recordingPersister struct {
 }
 
 func newRecordingPersister() *recordingPersister {
-	return &recordingPersister{messages: map[int]conv.Message{}, requests: map[string]native.RequestState{}}
+	return &recordingPersister{messages: map[int]conv.Message{}, requests: map[string]agentstate.RequestState{}}
 }
 
 func (p *recordingPersister) PutMessage(msg conv.Message, _ uint64) {
@@ -412,7 +412,7 @@ func (p *recordingPersister) TruncateMessages(fromID int) {
 
 func (p *recordingPersister) PutRichMessage(int, transcript.RichMessage, uint64) {}
 func (p *recordingPersister) AppendSessionEvents([]transcript.SessionEvent)      {}
-func (p *recordingPersister) PutRequest(state native.RequestState, _ uint64) {
+func (p *recordingPersister) PutRequest(state agentstate.RequestState, _ uint64) {
 	p.requests[state.ID] = state
 }
 
@@ -421,13 +421,13 @@ func (p *recordingPersister) DeleteRequest(id string) {
 	delete(p.requests, id)
 }
 
-func (p *recordingPersister) SetSeq(epoch string, seq uint64) { p.epoch, p.seq = epoch, seq }
-func (p *recordingPersister) SetSessionName(string)           {}
-func (p *recordingPersister) SetSessionRef(string)            {}
-func (p *recordingPersister) SetSettings(native.Settings)     {}
-func (p *recordingPersister) SetLimitStop(*native.LimitStop)  {}
-func (p *recordingPersister) SetRetryWait(*native.RetryWait)  {}
-func (p *recordingPersister) SetSeenAt(time.Time)             {}
+func (p *recordingPersister) SetSeq(epoch string, seq uint64)    { p.epoch, p.seq = epoch, seq }
+func (p *recordingPersister) SetSessionName(string)              {}
+func (p *recordingPersister) SetSessionRef(string)               {}
+func (p *recordingPersister) SetSettings(agentstate.Settings)    {}
+func (p *recordingPersister) SetLimitStop(*agentstate.LimitStop) {}
+func (p *recordingPersister) SetRetryWait(*agentstate.RetryWait) {}
+func (p *recordingPersister) SetSeenAt(time.Time)                {}
 func (p *recordingPersister) PutTask(id int, data []byte, _ uint64) {
 	if p.tasks == nil {
 		p.tasks = map[int]string{}
@@ -501,7 +501,7 @@ func TestEventEmitterRemovedMessageResyncs(t *testing.T) {
 	}
 	emitter.EmitMessages(msgs)
 	emitter.EmitRichMessage(transcript.RichMessage{MessageID: "m1", Role: "assistant"})
-	emitter.EmitRequest(native.RequestState{Request: native.Request{ID: "r1"}, Status: native.RequestStatusPending})
+	emitter.EmitRequest(agentstate.RequestState{Request: agentstate.Request{ID: "r1"}, Status: agentstate.RequestStatusPending})
 	_, _, state := emitter.Subscribe()
 	cached := state[0].Payload.(SessionSyncBody)
 	_, ch, _ := emitter.Subscribe()
@@ -659,35 +659,35 @@ func BenchmarkEmitRichMessageSnapshot(b *testing.B) {
 func TestEventEmitterRequests(t *testing.T) {
 	persister := newRecordingPersister()
 	emitter := NewEventEmitter(WithPersister(persister))
-	request := func(id string, status native.RequestStatus) native.RequestState {
-		return native.RequestState{Request: native.Request{ID: id, Kind: native.RequestKindApproval}, Status: status}
+	request := func(id string, status agentstate.RequestStatus) agentstate.RequestState {
+		return agentstate.RequestState{Request: agentstate.Request{ID: id, Kind: agentstate.RequestKindApproval}, Status: status}
 	}
-	emitter.EmitRequest(request("waiting", native.RequestStatusPending))
-	for i := range native.MaxClosedRequests + 2 {
+	emitter.EmitRequest(request("waiting", agentstate.RequestStatusPending))
+	for i := range agentstate.MaxClosedRequests + 2 {
 		id := fmt.Sprintf("r%d", i)
-		emitter.EmitRequest(request(id, native.RequestStatusPending))
-		emitter.EmitRequest(request(id, native.RequestStatusResolved))
+		emitter.EmitRequest(request(id, agentstate.RequestStatusPending))
+		emitter.EmitRequest(request(id, agentstate.RequestStatusResolved))
 	}
 	assert.Equal(t, 1, emitter.StatusSnapshot().PendingRequests)
 
 	// The oldest closed requests are dropped; pending ones are kept.
 	requests := emitter.Requests()
-	require.Len(t, requests, native.MaxClosedRequests+1)
+	require.Len(t, requests, agentstate.MaxClosedRequests+1)
 	assert.Equal(t, "waiting", requests[0].ID)
 	assert.Equal(t, "r2", requests[1].ID)
 	assert.Equal(t, []string{"r0", "r1"}, persister.deleted)
-	assert.Len(t, persister.requests, native.MaxClosedRequests+1)
+	assert.Len(t, persister.requests, agentstate.MaxClosedRequests+1)
 	_, ok := emitter.Request("r1")
 	assert.False(t, ok)
 	got, ok := emitter.Request("r2")
 	require.True(t, ok)
-	assert.Equal(t, native.RequestStatusResolved, got.Status)
+	assert.Equal(t, agentstate.RequestStatusResolved, got.Status)
 
 	// A request closed after a reset belongs to the conversation that was
 	// cleared; it doesn't come back.
 	emitter.Reset()
 	seq := emitter.seq
-	emitter.EmitRequest(request("waiting", native.RequestStatusExpired))
+	emitter.EmitRequest(request("waiting", agentstate.RequestStatusExpired))
 	assert.Empty(t, emitter.Requests())
 	assert.Equal(t, seq, emitter.seq)
 	assert.NotContains(t, persister.requests, "waiting")
@@ -704,7 +704,7 @@ func TestEventEmitterRestore(t *testing.T) {
 		RichMessages:  []transcript.RichMessage{{MessageID: "m1", Role: "assistant"}},
 		RichSeqs:      []uint64{5},
 		SessionEvents: []transcript.SessionEvent{{EventID: 1}, {EventID: 7}},
-		Requests:      []native.RequestState{{Request: native.Request{ID: "r1"}, Status: native.RequestStatusPending}},
+		Requests:      []agentstate.RequestState{{Request: agentstate.Request{ID: "r1"}, Status: agentstate.RequestStatusPending}},
 		RequestSeqs:   []uint64{6},
 		SessionName:   "Greeting",
 	})
@@ -736,8 +736,8 @@ func TestEventEmitterRestore(t *testing.T) {
 	assert.Equal(t, []string{"message 2", "task 0", "task 2"}, replayed(events), "the restored messages are not sent again; the restored one's task is done")
 	assert.Equal(t, MessageUpdateBody{Id: 2, Role: conv.RoleUser, Message: "three", Time: later, Seq: 7}, events[0].Payload)
 	tasks := emitter.Tasks()
-	assert.Equal(t, TaskStatusCompleted, tasks[0].Status)
-	assert.Equal(t, TaskStatusRunning, tasks[1].Status)
+	assert.Equal(t, instanceapi.TaskStatusCompleted, tasks[0].Status)
+	assert.Equal(t, instanceapi.TaskStatusRunning, tasks[1].Status)
 }
 
 // The emitter keeps the most recently closed requests, as the conversation
@@ -748,19 +748,19 @@ func TestEventEmitterKeepsTheMostRecentlyClosedRequests(t *testing.T) {
 		v := time.Date(2026, 10, 18, 9, 0, second, 0, time.UTC)
 		return &v
 	}
-	state := func(id string, status native.RequestStatus, closedAt *time.Time) native.RequestState {
-		return native.RequestState{Request: native.Request{ID: id, Kind: native.RequestKindApproval}, Status: status, ClosedAt: closedAt}
+	state := func(id string, status agentstate.RequestStatus, closedAt *time.Time) agentstate.RequestState {
+		return agentstate.RequestState{Request: agentstate.Request{ID: id, Kind: agentstate.RequestKindApproval}, Status: status, ClosedAt: closedAt}
 	}
-	emitter.EmitRequest(state("long", native.RequestStatusPending, nil))
-	for i := range native.MaxClosedRequests {
+	emitter.EmitRequest(state("long", agentstate.RequestStatusPending, nil))
+	for i := range agentstate.MaxClosedRequests {
 		id := fmt.Sprintf("r%d", i)
-		emitter.EmitRequest(state(id, native.RequestStatusPending, nil))
-		emitter.EmitRequest(state(id, native.RequestStatusResolved, at(i)))
+		emitter.EmitRequest(state(id, agentstate.RequestStatusPending, nil))
+		emitter.EmitRequest(state(id, agentstate.RequestStatusResolved, at(i)))
 	}
-	emitter.EmitRequest(state("long", native.RequestStatusExpired, at(59)))
+	emitter.EmitRequest(state("long", agentstate.RequestStatusExpired, at(59)))
 
 	requests := emitter.Requests()
-	require.Len(t, requests, native.MaxClosedRequests)
+	require.Len(t, requests, agentstate.MaxClosedRequests)
 	assert.Equal(t, "long", requests[0].ID)
 	_, ok := emitter.Request("r0")
 	assert.False(t, ok, "the first to close is dropped")
@@ -790,22 +790,22 @@ func TestEmitter_RichMessageContentIsNeverNull(t *testing.T) {
 func TestEventEmitterHoldsServerLifecycle(t *testing.T) {
 	emitter := NewEventEmitter()
 	emitter.EmitStatus(conv.StatusStable)
-	require.Equal(t, LifecycleReady, emitter.StatusSnapshot().Lifecycle)
+	require.Equal(t, instanceapi.LifecycleReady, emitter.StatusSnapshot().Lifecycle)
 
-	emitter.SetLifecycle(LifecycleRestarting)
+	emitter.SetLifecycle(instanceapi.LifecycleRestarting)
 	emitter.EmitStatus(conv.StatusChanging)
 	status := emitter.StatusSnapshot()
-	assert.Equal(t, LifecycleRestarting, status.Lifecycle, "held")
-	assert.Equal(t, AgentStatusRunning, status.Status, "the agent status still follows")
+	assert.Equal(t, instanceapi.LifecycleRestarting, status.Lifecycle, "held")
+	assert.Equal(t, instanceapi.AgentStatusRunning, status.Status, "the agent status still follows")
 	emitter.EmitStatus(conv.StatusStable)
-	assert.Equal(t, LifecycleRestarting, emitter.StatusSnapshot().Lifecycle)
+	assert.Equal(t, instanceapi.LifecycleRestarting, emitter.StatusSnapshot().Lifecycle)
 
 	emitter.ReleaseLifecycle()
-	assert.Equal(t, LifecycleReady, emitter.StatusSnapshot().Lifecycle, "the conversation's again")
+	assert.Equal(t, instanceapi.LifecycleReady, emitter.StatusSnapshot().Lifecycle, "the conversation's again")
 	emitter.EmitStatus(conv.StatusChanging)
-	assert.Equal(t, LifecycleRunning, emitter.StatusSnapshot().Lifecycle)
+	assert.Equal(t, instanceapi.LifecycleRunning, emitter.StatusSnapshot().Lifecycle)
 
-	for _, lifecycle := range []LifecycleState{LifecycleExited, LifecycleFailed} {
+	for _, lifecycle := range []instanceapi.LifecycleState{instanceapi.LifecycleExited, instanceapi.LifecycleFailed} {
 		emitter.SetLifecycle(lifecycle)
 		emitter.EmitStatus(conv.StatusStable)
 		emitter.EmitStatus(conv.StatusChanging)
@@ -813,7 +813,7 @@ func TestEventEmitterHoldsServerLifecycle(t *testing.T) {
 	}
 
 	// Another lifecycle the server sets ends the hold.
-	emitter.SetLifecycle(LifecycleStarting)
+	emitter.SetLifecycle(instanceapi.LifecycleStarting)
 	emitter.EmitStatus(conv.StatusStable)
-	assert.Equal(t, LifecycleReady, emitter.StatusSnapshot().Lifecycle)
+	assert.Equal(t, instanceapi.LifecycleReady, emitter.StatusSnapshot().Lifecycle)
 }

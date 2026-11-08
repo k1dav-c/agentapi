@@ -12,6 +12,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	conv "github.com/coder/agentapi/lib/conversation"
+	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/native"
 )
 
@@ -26,7 +27,7 @@ import (
 // last, and nothing is called with it held.
 type messageQueue struct {
 	mu       sync.Mutex
-	messages []QueuedMessage
+	messages []convstate.QueuedMessage
 	lastID   int
 	// failures counts the failed sends in a row of the message failedID.
 	failedID int
@@ -34,14 +35,14 @@ type messageQueue struct {
 	// version counts the changes; onChange, if set, gets the queue and
 	// the last ID after each, without q.mu held.
 	version  uint64
-	onChange func(queue []QueuedMessage, lastID int, version uint64)
+	onChange func(queue []convstate.QueuedMessage, lastID int, version uint64)
 }
 
 // changed tells onChange about a change made with q.mu held, which it
 // releases.
 func (q *messageQueue) changed() {
 	q.version++
-	queue, lastID, version, onChange := append([]QueuedMessage{}, q.messages...), q.lastID, q.version, q.onChange
+	queue, lastID, version, onChange := append([]convstate.QueuedMessage{}, q.messages...), q.lastID, q.version, q.onChange
 	q.mu.Unlock()
 	if onChange != nil {
 		onChange(queue, lastID, version)
@@ -49,10 +50,10 @@ func (q *messageQueue) changed() {
 }
 
 // state returns the queue, the last ID and the version as of one moment.
-func (q *messageQueue) state() ([]QueuedMessage, int, uint64) {
+func (q *messageQueue) state() ([]convstate.QueuedMessage, int, uint64) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	return append([]QueuedMessage{}, q.messages...), q.lastID, q.version
+	return append([]convstate.QueuedMessage{}, q.messages...), q.lastID, q.version
 }
 
 // Len is how many messages wait.
@@ -63,24 +64,17 @@ func (q *messageQueue) Len() int {
 }
 
 // Messages returns the queue, in order. It is never nil.
-func (q *messageQueue) Messages() []QueuedMessage {
+func (q *messageQueue) Messages() []convstate.QueuedMessage {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	return append([]QueuedMessage{}, q.messages...)
-}
-
-// LastID is the ID of the last message queued.
-func (q *messageQueue) LastID() int {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	return q.lastID
+	return append([]convstate.QueuedMessage{}, q.messages...)
 }
 
 // Push queues content, queued at at: last, or first with front.
-func (q *messageQueue) Push(content string, at time.Time, front bool) QueuedMessage {
+func (q *messageQueue) Push(content string, at time.Time, front bool) convstate.QueuedMessage {
 	q.mu.Lock()
 	q.lastID++
-	m := QueuedMessage{ID: q.lastID, Content: content, Time: at}
+	m := convstate.QueuedMessage{ID: q.lastID, Content: content, Time: at}
 	if front {
 		q.messages = slices.Insert(q.messages, 0, m)
 	} else {
@@ -91,22 +85,22 @@ func (q *messageQueue) Push(content string, at time.Time, front bool) QueuedMess
 }
 
 // Head returns the message that goes out next.
-func (q *messageQueue) Head() (QueuedMessage, bool) {
+func (q *messageQueue) Head() (convstate.QueuedMessage, bool) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if len(q.messages) == 0 {
-		return QueuedMessage{}, false
+		return convstate.QueuedMessage{}, false
 	}
 	return q.messages[0], true
 }
 
 // Get returns the queued message id.
-func (q *messageQueue) Get(id int) (QueuedMessage, bool) {
+func (q *messageQueue) Get(id int) (convstate.QueuedMessage, bool) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	i := q.index(id)
 	if i < 0 {
-		return QueuedMessage{}, false
+		return convstate.QueuedMessage{}, false
 	}
 	return q.messages[i], true
 }
@@ -147,11 +141,11 @@ func (q *messageQueue) Reorder(ids []int) bool {
 		q.mu.Unlock()
 		return false
 	}
-	byID := make(map[int]QueuedMessage, len(q.messages))
+	byID := make(map[int]convstate.QueuedMessage, len(q.messages))
 	for _, m := range q.messages {
 		byID[m.ID] = m
 	}
-	reordered := make([]QueuedMessage, 0, len(ids))
+	reordered := make([]convstate.QueuedMessage, 0, len(ids))
 	for _, id := range ids {
 		m, ok := byID[id]
 		if !ok {
@@ -189,7 +183,7 @@ func (q *messageQueue) Clear() {
 }
 
 // Restore puts back a queue stored before, whose last ID was lastID.
-func (q *messageQueue) Restore(messages []QueuedMessage, lastID int) {
+func (q *messageQueue) Restore(messages []convstate.QueuedMessage, lastID int) {
 	q.mu.Lock()
 	q.messages = slices.Clone(messages)
 	q.lastID = lastID
@@ -201,7 +195,7 @@ func (q *messageQueue) Restore(messages []QueuedMessage, lastID int) {
 
 // index returns the position of the message id, or -1. Caller holds q.mu.
 func (q *messageQueue) index(id int) int {
-	return slices.IndexFunc(q.messages, func(m QueuedMessage) bool { return m.ID == id })
+	return slices.IndexFunc(q.messages, func(m convstate.QueuedMessage) bool { return m.ID == id })
 }
 
 const (

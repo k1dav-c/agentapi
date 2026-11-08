@@ -28,18 +28,18 @@ func TestSpendOf(t *testing.T) {
 		hour(0, 0.25, pricing.Tokens{Input: 7, CacheRead: 1000, Output: 3}), // the hour under way
 		hour(time.Hour, 0, pricing.Tokens{Output: 40}),                      // a model without a price
 	}, now)
-	assert.Equal(t, SummarySpend{
+	assert.Equal(t, instanceapi.SummarySpend{
 		DayUSD: 1.75, WeekUSD: 26.75,
 		DayTokens:  &instanceapi.SummaryTokens{Input: 7, Output: 43, CacheWrite: 500, CacheRead: 1000, Total: 1550},
 		WeekTokens: &instanceapi.SummaryTokens{Input: 107, Output: 93, CacheWrite: 500, CacheRead: 10000, Total: 10700},
 	}, spend)
 	zero := &instanceapi.SummaryTokens{}
-	assert.Equal(t, SummarySpend{DayTokens: zero, WeekTokens: zero}, spendOf(nil, now), "none: zero, not missing")
+	assert.Equal(t, instanceapi.SummarySpend{DayTokens: zero, WeekTokens: zero}, spendOf(nil, now), "none: zero, not missing")
 }
 
 // The summary's spend as JSON: the tokens of each window next to its cost.
 func TestSpendJSON(t *testing.T) {
-	spend := SummarySpend{
+	spend := instanceapi.SummarySpend{
 		DayUSD: 1.5, WeekUSD: 9, Scope: "s1", UpdatedAt: time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC),
 		DayTokens:  &instanceapi.SummaryTokens{Input: 1, Output: 2, CacheWrite: 3, CacheRead: 4, Total: 10},
 		WeekTokens: &instanceapi.SummaryTokens{Input: 10, Output: 20, CacheWrite: 30, CacheRead: 40, Total: 100},
@@ -57,7 +57,7 @@ func TestSpendJSON(t *testing.T) {
 	}, body.Spend)
 
 	// An earlier release's spend has no tokens.
-	old, err := json.Marshal(SummarySpend{DayUSD: 1})
+	old, err := json.Marshal(instanceapi.SummarySpend{DayUSD: 1})
 	require.NoError(t, err)
 	assert.NotContains(t, string(old), "tokens")
 }
@@ -67,14 +67,14 @@ func TestSpendJSON(t *testing.T) {
 func TestSummarySpend(t *testing.T) {
 	e := convstate.NewEventEmitter()
 	assert.Nil(t, e.Summary().Spend, "not worked out yet")
-	e.SetSpend(SummarySpend{DayUSD: 1.5, WeekUSD: 9})
+	e.SetSpend(instanceapi.SummarySpend{DayUSD: 1.5, WeekUSD: 9})
 	spend := e.Summary().Spend
 	require.NotNil(t, spend)
-	assert.Equal(t, SummarySpend{DayUSD: 1.5, WeekUSD: 9}, *spend)
+	assert.Equal(t, instanceapi.SummarySpend{DayUSD: 1.5, WeekUSD: 9}, *spend)
 	spend.DayUSD = 99
 	assert.Equal(t, 1.5, e.Summary().Spend.DayUSD, "a copy")
 
-	e.SetSpend(SummarySpend{DayUSD: 1.5, WeekUSD: 9, DayTokens: &instanceapi.SummaryTokens{Input: 5, Total: 5}})
+	e.SetSpend(instanceapi.SummarySpend{DayUSD: 1.5, WeekUSD: 9, DayTokens: &instanceapi.SummaryTokens{Input: 5, Total: 5}})
 	spend = e.Summary().Spend
 	require.NotNil(t, spend.DayTokens)
 	assert.Equal(t, 5, spend.DayTokens.Total)
@@ -104,17 +104,17 @@ func TestSpendScope(t *testing.T) {
 // same amounts, it is the same, and the summary doesn't change.
 func TestNextSpend(t *testing.T) {
 	at := time.Date(2026, 10, 27, 12, 0, 0, 500, time.UTC)
-	first := nextSpend(SummarySpend{}, SummarySpend{DayUSD: 1, WeekUSD: 2}, "s1", at)
-	assert.Equal(t, SummarySpend{DayUSD: 1, WeekUSD: 2, Scope: "s1", UpdatedAt: at.Truncate(time.Second)}, first)
-	same := nextSpend(first, SummarySpend{DayUSD: 1, WeekUSD: 2}, "s1", at.Add(time.Minute))
+	first := nextSpend(instanceapi.SummarySpend{}, instanceapi.SummarySpend{DayUSD: 1, WeekUSD: 2}, "s1", at)
+	assert.Equal(t, instanceapi.SummarySpend{DayUSD: 1, WeekUSD: 2, Scope: "s1", UpdatedAt: at.Truncate(time.Second)}, first)
+	same := nextSpend(first, instanceapi.SummarySpend{DayUSD: 1, WeekUSD: 2}, "s1", at.Add(time.Minute))
 	assert.Equal(t, first, same)
-	more := nextSpend(same, SummarySpend{DayUSD: 1.5, WeekUSD: 2}, "s1", at.Add(2*time.Minute))
+	more := nextSpend(same, instanceapi.SummarySpend{DayUSD: 1.5, WeekUSD: 2}, "s1", at.Add(2*time.Minute))
 	assert.Equal(t, at.Add(2*time.Minute).Truncate(time.Second), more.UpdatedAt)
 
 	// The tokens alone change too: calls to a model without a price.
-	tokens := nextSpend(more, SummarySpend{DayUSD: 1.5, WeekUSD: 2, DayTokens: &instanceapi.SummaryTokens{Output: 40, Total: 40}}, "s1", at.Add(3*time.Minute))
+	tokens := nextSpend(more, instanceapi.SummarySpend{DayUSD: 1.5, WeekUSD: 2, DayTokens: &instanceapi.SummaryTokens{Output: 40, Total: 40}}, "s1", at.Add(3*time.Minute))
 	assert.Equal(t, at.Add(3*time.Minute).Truncate(time.Second), tokens.UpdatedAt)
-	again := nextSpend(tokens, SummarySpend{DayUSD: 1.5, WeekUSD: 2, DayTokens: &instanceapi.SummaryTokens{Output: 40, Total: 40}}, "s1", at.Add(4*time.Minute))
+	again := nextSpend(tokens, instanceapi.SummarySpend{DayUSD: 1.5, WeekUSD: 2, DayTokens: &instanceapi.SummaryTokens{Output: 40, Total: 40}}, "s1", at.Add(4*time.Minute))
 	assert.Equal(t, tokens.UpdatedAt, again.UpdatedAt)
 
 	e := convstate.NewEventEmitter()

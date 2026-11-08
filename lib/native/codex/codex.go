@@ -16,6 +16,7 @@ import (
 	"github.com/coder/quartz"
 
 	"github.com/coder/agentapi/internal/version"
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/agentio"
 	"github.com/coder/agentapi/lib/native/procutil"
@@ -118,8 +119,8 @@ type Adapter struct {
 	// settings are the thread's settings, with the changes in pending,
 	// which the next turn/start carries; models are app-server's models,
 	// nil until listed. See settings.go.
-	settings native.Settings
-	pending  native.Settings
+	settings agentstate.Settings
+	pending  agentstate.Settings
 	models   []native.ModelOption
 	// plan: the thread plans (the plan collaboration mode), or will from
 	// the next turn. collab is the collaboration mode the thread has, ""
@@ -199,8 +200,8 @@ func newAdapter(cfg Config, opts launchOptions, resumeRef string) *Adapter {
 }
 
 // Capabilities implements native.Adapter.
-func (a *Adapter) Capabilities() native.Capabilities {
-	return native.Capabilities{Steer: true, Interrupt: true, Resume: true, Images: true, Settings: true, Compact: true}
+func (a *Adapter) Capabilities() agentstate.Capabilities {
+	return agentstate.Capabilities{Steer: true, Interrupt: true, Resume: true, Images: true, Settings: true, Compact: true}
 }
 
 // command returns the app-server command line.
@@ -355,7 +356,7 @@ func (a *Adapter) StartTurn(ctx context.Context, input native.Input) error {
 
 // startTurn sends input as a new turn. A turn with implement set carries
 // out the plan the thread made, in that permission mode (see answerPlan).
-func (a *Adapter) startTurn(ctx context.Context, input native.Input, implement native.PermissionMode) error {
+func (a *Adapter) startTurn(ctx context.Context, input native.Input, implement agentstate.PermissionMode) error {
 	threadID, turnID, err := a.session()
 	if err != nil {
 		return err

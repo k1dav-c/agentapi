@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/coder/agentapi/lib/agentlog/pilog"
+	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/agentio"
@@ -22,7 +23,7 @@ type loopState struct {
 	sink native.Sink
 	cwd  string
 	// usage is the context usage reported last.
-	usage native.AgentUsage
+	usage agentstate.AgentUsage
 
 	sessionName string
 	events      *pilog.EventParser
@@ -497,15 +498,13 @@ func (a *Adapter) endTurn() {
 	if authFailed {
 		a.reportLogin()
 	}
-	switch {
-	case result.StopReason != native.StopReasonError:
-	case native.IsLimitError(result.Error):
-		result.StopReason = native.StopReasonLimited
-	case !authFailed && (retriesFailed || native.IsTransientError(result.Error)):
-		// Pi retried it already; AgentAPI tries again later.
-		result.StopReason = native.StopReasonTransient
-		result.APIStatus = native.TransientStatus(result.Error)
-	}
+	// A transient failure Pi retried already; AgentAPI tries again later.
+	native.ClassifyFailure(&result, native.FailureHints{
+		Limit:     native.IsLimitError(result.Error),
+		Auth:      authFailed,
+		Transient: retriesFailed || native.IsTransientError(result.Error),
+		APIStatus: native.TransientStatus(result.Error),
+	})
 	a.loop.sink.TurnCompleted(result)
 }
 

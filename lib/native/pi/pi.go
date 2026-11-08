@@ -16,6 +16,7 @@ import (
 
 	"github.com/coder/quartz"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/agentio"
 	"github.com/coder/agentapi/lib/native/procutil"
@@ -165,10 +166,10 @@ type Adapter struct {
 	turnSeq int
 	// interrupted is set by Interrupt and cleared when the turn ends.
 	interrupted bool
-	caps        native.Capabilities
+	caps        agentstate.Capabilities
 	// settings are Pi's model and thinking level; models are its models,
 	// nil until listed. See settings.go.
-	settings native.Settings
+	settings agentstate.Settings
 	models   []native.ModelOption
 	// applying counts the ApplySettings calls under way; the conversation
 	// reads the settings when they return, so the loop doesn't report the
@@ -212,7 +213,7 @@ func newAdapter(cfg Config, args []string, resumeRef string) *Adapter {
 		clock:            cfg.Clock,
 		cmds:             make(map[string]*sentCmd),
 		dialogs:          make(map[string]*dialog),
-		caps:             native.Capabilities{Steer: true, Interrupt: true, Resume: true, Images: true, Settings: true, Compact: true},
+		caps:             agentstate.Capabilities{Steer: true, Interrupt: true, Resume: true, Images: true, Settings: true, Compact: true},
 	}
 	a.host = agentio.NewHost(agentio.HostConfig{
 		Name:   "Pi",
@@ -452,7 +453,7 @@ func (a *Adapter) Interrupt(ctx context.Context) error {
 }
 
 // Respond answers an extension dialog.
-func (a *Adapter) Respond(ctx context.Context, requestID string, response native.Response) error {
+func (a *Adapter) Respond(ctx context.Context, requestID string, response agentstate.Response) error {
 	a.mu.Lock()
 	d := a.dialogs[requestID]
 	if a.exited || d == nil || d.answering {
@@ -489,7 +490,7 @@ func (a *Adapter) Respond(ctx context.Context, requestID string, response native
 // Capabilities reports steer, interrupt, resume, images, settings and
 // compaction. Images are left out when Pi says its model doesn't take
 // them.
-func (a *Adapter) Capabilities() native.Capabilities {
+func (a *Adapter) Capabilities() agentstate.Capabilities {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.caps

@@ -19,6 +19,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/nativetest"
 	"github.com/coder/agentapi/lib/native/procutil"
@@ -288,7 +289,7 @@ func loadRuns(t *testing.T, name string) [][]record {
 type replayHooks struct {
 	// respond answers a request the way the capture did; nil derives the
 	// answer from the captured response.
-	respond func(t *testing.T, req native.Request, captured map[string]any) native.Response
+	respond func(t *testing.T, req agentstate.Request, captured map[string]any) agentstate.Response
 	// steer reports whether a user message is sent with Steer.
 	steer func(n int, busy bool) bool
 }
@@ -429,7 +430,7 @@ func (r *replay) run(recs []record, hooks replayHooks) {
 				captured, _ := response["response"].(map[string]any)
 				req, ok := r.sink.Request(id)
 				require.True(t, ok, "request %s was not opened", id)
-				var answer native.Response
+				var answer agentstate.Response
 				if hooks.respond != nil {
 					answer = hooks.respond(t, req, captured)
 				} else {
@@ -555,33 +556,33 @@ func inputFromCapture(t *testing.T, msg map[string]any) native.Input {
 }
 
 // responseFromCapture derives the native response the capture gave.
-func responseFromCapture(req native.Request, captured map[string]any) native.Response {
+func responseFromCapture(req agentstate.Request, captured map[string]any) agentstate.Response {
 	message, _ := captured["message"].(string)
 	switch req.Kind {
-	case native.RequestKindQuestion:
+	case agentstate.RequestKindQuestion:
 		input, _ := captured["updatedInput"].(map[string]any)
 		answers, _ := input["answers"].(map[string]any)
-		out := native.Response{Answers: map[string][]string{}}
+		out := agentstate.Response{Answers: map[string][]string{}}
 		for _, q := range req.Questions {
 			if a, ok := answers[q.Question].(string); ok {
 				out.Answers[q.ID] = strings.Split(a, ", ")
 			}
 		}
 		return out
-	case native.RequestKindPlan:
+	case agentstate.RequestKindPlan:
 		if captured["behavior"] == "deny" {
-			return native.Response{OptionID: optionDeny, Text: message}
+			return agentstate.Response{OptionID: optionDeny, Text: message}
 		}
-		return native.Response{OptionID: optionAcceptEdits}
-	case native.RequestKindApproval:
+		return agentstate.Response{OptionID: optionAcceptEdits}
+	case agentstate.RequestKindApproval:
 	}
 	if captured["behavior"] == "deny" {
-		return native.Response{OptionID: optionDeny, Text: message}
+		return agentstate.Response{OptionID: optionDeny, Text: message}
 	}
 	if _, ok := captured["updatedPermissions"]; ok {
-		return native.Response{OptionID: optionAllowAlways}
+		return agentstate.Response{OptionID: optionAllowAlways}
 	}
-	return native.Response{OptionID: optionAllow}
+	return agentstate.Response{OptionID: optionAllow}
 }
 
 func requireJSONEqual(t *testing.T, want, got any) {

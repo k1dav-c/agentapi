@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/nativetest"
@@ -24,7 +25,7 @@ func TestConversationCallsTheAdapterUnlocked(t *testing.T) {
 	var mu sync.Mutex
 	called := map[string]bool{}
 	factory := &nativetest.Factory{Configure: func(a *nativetest.Adapter) {
-		configurable(native.Settings{Model: "fast"})(a)
+		configurable(agentstate.Settings{Model: "fast"})(a)
 		a.Caps.Compact = true
 		a.OnCall = func(method string) {
 			mu.Lock()
@@ -45,13 +46,13 @@ func TestConversationCallsTheAdapterUnlocked(t *testing.T) {
 	require.NoError(t, c.StartTurn(ctx, native.Input{Text: "one"}))
 	require.NoError(t, c.Steer(ctx, native.Input{Text: "two"}))
 	factory.Last().Sink().RequestOpened(approval("r1"))
-	_, err := c.Respond(ctx, "r1", native.Response{OptionID: "allow"})
+	_, err := c.Respond(ctx, "r1", agentstate.Response{OptionID: "allow"})
 	require.NoError(t, err)
 	require.NoError(t, c.Interrupt(ctx))
 	factory.Last().Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonInterrupted})
 	_, err = c.SettingOptions(ctx)
 	require.NoError(t, err)
-	require.NoError(t, c.ApplySettings(ctx, native.Settings{Effort: "high"}))
+	require.NoError(t, c.ApplySettings(ctx, agentstate.Settings{Effort: "high"}))
 	require.NoError(t, c.Compact(ctx))
 	require.NoError(t, c.Restart(ctx))
 	require.NoError(t, c.Close())

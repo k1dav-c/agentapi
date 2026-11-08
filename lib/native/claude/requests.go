@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/native"
 )
 
@@ -41,7 +42,7 @@ const (
 
 // pendingRequest is a can_use_tool request waiting for the user.
 type pendingRequest struct {
-	req native.Request
+	req agentstate.Request
 	raw canUseTool
 	// questions maps question IDs to the question text Claude Code keys
 	// answers by.
@@ -63,7 +64,7 @@ type askQuestion struct {
 // newPendingRequest describes a can_use_tool request. bypass says the
 // session can switch to bypassPermissions, so approving a plan can too.
 func newPendingRequest(id string, r canUseTool, bypass bool) *pendingRequest {
-	p := &pendingRequest{raw: r, req: native.Request{
+	p := &pendingRequest{raw: r, req: agentstate.Request{
 		ID:        id,
 		ToolName:  r.ToolName,
 		ToolUseID: r.ToolUseID,
@@ -88,7 +89,7 @@ func (p *pendingRequest) approval() {
 	if name == "" {
 		name = r.ToolName
 	}
-	p.req.Kind = native.RequestKindApproval
+	p.req.Kind = agentstate.RequestKindApproval
 	p.req.Title = r.Title
 	if p.req.Title == "" {
 		p.req.Title = name
@@ -111,14 +112,14 @@ func (p *pendingRequest) approval() {
 	}
 	p.req.Detail = strings.Join(detail, "\n")
 	p.req.Feedback = true
-	p.req.Options = []native.RequestOption{{ID: optionAllow, Label: "Allow", Kind: native.OptionKindAllow}}
+	p.req.Options = []agentstate.RequestOption{{ID: optionAllow, Label: "Allow", Kind: agentstate.OptionKindAllow}}
 	if len(p.raw.PermissionSuggestions) > 0 {
-		p.req.Options = append(p.req.Options, native.RequestOption{
+		p.req.Options = append(p.req.Options, agentstate.RequestOption{
 			ID: optionAllowAlways, Label: "Allow always (this session)",
-			Description: suggestionSummary(p.sessionPermissions()), Kind: native.OptionKindAllowAlways,
+			Description: suggestionSummary(p.sessionPermissions()), Kind: agentstate.OptionKindAllowAlways,
 		})
 	}
-	p.req.Options = append(p.req.Options, native.RequestOption{ID: optionDeny, Label: "Deny", Kind: native.OptionKindDeny})
+	p.req.Options = append(p.req.Options, agentstate.RequestOption{ID: optionDeny, Label: "Deny", Kind: agentstate.OptionKindDeny})
 }
 
 // question maps AskUserQuestion. It reports false if the input holds no
@@ -130,18 +131,18 @@ func (p *pendingRequest) question() bool {
 	if json.Unmarshal(p.raw.Input, &input) != nil || len(input.Questions) == 0 {
 		return false
 	}
-	p.req.Kind = native.RequestKindQuestion
+	p.req.Kind = agentstate.RequestKindQuestion
 	p.questions = make(map[string]string, len(input.Questions))
 	for i, q := range input.Questions {
 		id := fmt.Sprintf("q%d", i+1)
 		p.questions[id] = q.Question
-		question := native.Question{
+		question := agentstate.Question{
 			ID: id, Header: q.Header, Question: q.Question, MultiSelect: q.MultiSelect,
 			// Claude Code always lets the user type another answer.
 			FreeText: true,
 		}
 		for _, o := range q.Options {
-			question.Options = append(question.Options, native.QuestionOption{Label: o.Label, Description: o.Description})
+			question.Options = append(question.Options, agentstate.QuestionOption{Label: o.Label, Description: o.Description})
 		}
 		p.req.Questions = append(p.req.Questions, question)
 	}
@@ -157,35 +158,35 @@ func (p *pendingRequest) plan(bypass bool) {
 		Plan string `json:"plan"`
 	}
 	_ = json.Unmarshal(p.raw.Input, &input)
-	p.req.Kind = native.RequestKindPlan
+	p.req.Kind = agentstate.RequestKindPlan
 	p.req.Title = "Approve the plan?"
 	p.req.Detail = input.Plan
 	p.req.Feedback = true
 	p.req.Options = nil
 	if bypass {
-		p.req.Options = append(p.req.Options, native.RequestOption{ID: optionBypass, Label: "Yes, and bypass permissions", Description: "Tools run without asking.", Kind: native.OptionKindAllow})
+		p.req.Options = append(p.req.Options, agentstate.RequestOption{ID: optionBypass, Label: "Yes, and bypass permissions", Description: "Tools run without asking.", Kind: agentstate.OptionKindAllow})
 	}
-	p.req.Options = append(p.req.Options, []native.RequestOption{
-		{ID: optionAcceptEdits, Label: "Yes, and auto-accept edits", Kind: native.OptionKindAllow},
-		{ID: optionDefault, Label: "Yes, and manually approve edits", Kind: native.OptionKindAllow},
-		{ID: optionDeny, Label: "No, keep planning", Description: "Claude revises the plan; say what to change.", Kind: native.OptionKindDeny},
+	p.req.Options = append(p.req.Options, []agentstate.RequestOption{
+		{ID: optionAcceptEdits, Label: "Yes, and auto-accept edits", Kind: agentstate.OptionKindAllow},
+		{ID: optionDefault, Label: "Yes, and manually approve edits", Kind: agentstate.OptionKindAllow},
+		{ID: optionDeny, Label: "No, keep planning", Description: "Claude revises the plan; say what to change.", Kind: agentstate.OptionKindDeny},
 	}...)
 }
 
 // response builds the can_use_tool answer for resp.
-func (p *pendingRequest) response(resp native.Response) (map[string]any, error) {
+func (p *pendingRequest) response(resp agentstate.Response) (map[string]any, error) {
 	var decide func(option, feedback string) map[string]any
 	switch p.req.Kind {
-	case native.RequestKindQuestion:
+	case agentstate.RequestKindQuestion:
 		return p.answers(resp)
-	case native.RequestKindPlan:
+	case agentstate.RequestKindPlan:
 		decide = p.planDecision
-	case native.RequestKindApproval:
+	case agentstate.RequestKindApproval:
 		decide = p.approvalDecision
 	}
 	// Only what was offered: e.g. no bypassPermissions for the plan of a
 	// session that can't switch to it.
-	if decide != nil && slices.ContainsFunc(p.req.Options, func(o native.RequestOption) bool { return o.ID == resp.OptionID }) {
+	if decide != nil && slices.ContainsFunc(p.req.Options, func(o agentstate.RequestOption) bool { return o.ID == resp.OptionID }) {
 		if out := decide(resp.OptionID, strings.TrimSpace(resp.Text)); out != nil {
 			return out, nil
 		}
@@ -195,7 +196,7 @@ func (p *pendingRequest) response(resp native.Response) (map[string]any, error) 
 
 // answers is the response to a question: the tool's input with the
 // answers, by question.
-func (p *pendingRequest) answers(resp native.Response) (map[string]any, error) {
+func (p *pendingRequest) answers(resp agentstate.Response) (map[string]any, error) {
 	if resp.OptionID != "" {
 		return nil, fmt.Errorf("%w: questions take answers, not an option", native.ErrInvalidResponse)
 	}

@@ -55,6 +55,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/transcript"
 )
@@ -74,7 +75,7 @@ type Options struct {
 }
 
 // LoginHint is what the demo reports when it simulates a missing login.
-var LoginHint = native.LoginRequired{
+var LoginHint = agentstate.LoginRequired{
 	Agent:   "Native demo",
 	Message: "The demo agent is not logged in.",
 	Command: "native-demo login",
@@ -151,7 +152,7 @@ type Adapter struct {
 	turns    int
 	active   *turn
 	nextReq  int
-	settings native.Settings
+	settings agentstate.Settings
 	done     chan struct{}
 	once     sync.Once
 	// compacted is the turn the simulated context was compacted after.
@@ -166,7 +167,7 @@ var (
 
 // settingOptions are the demo's simulated models and modes.
 var settingOptions = native.SettingOptions{
-	PermissionModes: native.PermissionModeValues,
+	PermissionModes: agentstate.PermissionModeValues,
 	Models: []native.ModelOption{
 		{ID: "demo-swift", Name: "Swift", Description: "Quick answers", Efforts: []string{"low", "medium", "high"}, DefaultEffort: "medium"},
 		{ID: "demo-deep", Name: "Deep", Description: "Thinks longer about hard problems", Efforts: []string{"low", "medium", "high", "max"}, DefaultEffort: "high"},
@@ -175,7 +176,7 @@ var settingOptions = native.SettingOptions{
 }
 
 // defaultSettings are the settings a demo agent starts with.
-var defaultSettings = native.Settings{PermissionMode: native.PermissionModeBypass, Model: "demo-swift", Effort: "medium"}
+var defaultSettings = agentstate.Settings{PermissionMode: agentstate.PermissionModeBypass, Model: "demo-swift", Effort: "medium"}
 
 // Factory returns a native.Factory creating demo adapters. Its adapters
 // share the simulated login.
@@ -217,7 +218,7 @@ type turn struct {
 	steers  []string
 	steered chan struct{}
 	// waiting maps the open requests to the channel their answer goes to.
-	waiting map[string]chan native.Response
+	waiting map[string]chan agentstate.Response
 }
 
 func (a *Adapter) Start(_ context.Context, sink native.Sink) error {
@@ -260,7 +261,7 @@ func (a *Adapter) StartTurn(_ context.Context, input native.Input) error {
 		return native.ErrTurnActive
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	t := &turn{ctx: ctx, cancel: cancel, steered: make(chan struct{}, 1), waiting: map[string]chan native.Response{}}
+	t := &turn{ctx: ctx, cancel: cancel, steered: make(chan struct{}, 1), waiting: map[string]chan agentstate.Response{}}
 	a.active = t
 	a.turns++
 	go a.run(t, a.turns, input)
@@ -291,7 +292,7 @@ func (a *Adapter) Interrupt(context.Context) error {
 	return nil
 }
 
-func (a *Adapter) Respond(_ context.Context, requestID string, response native.Response) error {
+func (a *Adapter) Respond(_ context.Context, requestID string, response agentstate.Response) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.active == nil {
@@ -306,8 +307,8 @@ func (a *Adapter) Respond(_ context.Context, requestID string, response native.R
 	return nil
 }
 
-func (a *Adapter) Capabilities() native.Capabilities {
-	return native.Capabilities{Steer: true, Interrupt: true, Resume: true, Images: true, Settings: true, Compact: true}
+func (a *Adapter) Capabilities() agentstate.Capabilities {
+	return agentstate.Capabilities{Steer: true, Interrupt: true, Resume: true, Images: true, Settings: true, Compact: true}
 }
 
 // Compact implements native.Compacter: the simulated context empties.
@@ -330,7 +331,7 @@ func (a *Adapter) Compact(context.Context) error {
 	return nil
 }
 
-func (a *Adapter) Settings() native.Settings {
+func (a *Adapter) Settings() agentstate.Settings {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.settings
@@ -342,7 +343,7 @@ func (a *Adapter) SettingOptions(context.Context) (native.SettingOptions, error)
 
 // ApplySettings changes the settings. A new model without the current
 // effort gets its default one.
-func (a *Adapter) ApplySettings(_ context.Context, change native.Settings) error {
+func (a *Adapter) ApplySettings(_ context.Context, change agentstate.Settings) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if err := settingOptions.Check(change, a.settings); err != nil {
@@ -393,12 +394,12 @@ func (a *Adapter) takeSteers(t *turn) []string {
 
 // open registers a request of t and returns the channel its answer
 // arrives on.
-func (a *Adapter) open(t *turn) (string, chan native.Response) {
+func (a *Adapter) open(t *turn) (string, chan agentstate.Response) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.nextReq++
 	id := fmt.Sprintf("%s-req-%d", a.prefix, a.nextReq)
-	ch := make(chan native.Response, 1)
+	ch := make(chan agentstate.Response, 1)
 	t.waiting[id] = ch
 	return id, ch
 }
@@ -418,7 +419,7 @@ func (a *Adapter) finish(t *turn, result native.TurnResult) {
 	if a.limited.Swap(false) {
 		// The limit that stopped the turn, as Claude Code reports it.
 		full := 100.0
-		usage.RateLimits[0].UsedPercent, usage.RateLimits[0].Status = &full, "rejected"
+		usage.RateLimits[0].UsedPercent, usage.RateLimits[0].Status = &full, agentstate.RateLimitRejected
 	}
 	if a.cold.Swap(false) {
 		usage.Context.Used = max(usage.Context.Used, 120000)
@@ -430,17 +431,17 @@ func (a *Adapter) finish(t *turn, result native.TurnResult) {
 
 // demoUsage is the simulated usage after the nth turn: the context grows
 // with every turn, as do the rate limits.
-func demoUsage(n int, now time.Time) native.AgentUsage {
+func demoUsage(n int, now time.Time) agentstate.AgentUsage {
 	fiveHour, weekly := min(float64(n)*7, 100), min(20+float64(n)*2, 100)
 	fiveHourReset, weeklyReset := now.Add(3*time.Hour).Truncate(time.Minute), now.Add(4*24*time.Hour).Truncate(time.Hour)
-	status := "allowed"
+	status := agentstate.RateLimitAllowed
 	if fiveHour >= 80 {
-		status = "allowed_warning"
+		status = agentstate.RateLimitAllowedWarning
 	}
-	return native.AgentUsage{
-		Context:     &native.ContextUsage{Used: min(18000+n*9500, 200000), Size: 200000},
-		PromptCache: &native.PromptCache{TTLSeconds: 3600, ExpiresAt: now.Add(time.Hour)},
-		RateLimits: []native.RateLimit{
+	return agentstate.AgentUsage{
+		Context:     &agentstate.ContextUsage{Used: min(18000+n*9500, 200000), Size: 200000},
+		PromptCache: &agentstate.PromptCache{TTLSeconds: 3600, ExpiresAt: now.Add(time.Hour)},
+		RateLimits: []agentstate.RateLimit{
 			{ID: "five_hour", Label: "5-hour limit", UsedPercent: &fiveHour, ResetsAt: &fiveHourReset, Status: status},
 			{ID: "seven_day", Label: "Weekly limit", UsedPercent: &weekly, ResetsAt: &weeklyReset},
 		},
@@ -518,7 +519,7 @@ func (s *script) play() error {
 		return err
 	}
 	var ask decide
-	if mode == native.PermissionModeAsk {
+	if mode == agentstate.PermissionModeAsk {
 		ask = s.askToRun("ls", "Lists the workspace.")
 	}
 	if err := s.tool(work, "Bash", map[string]any{"command": "ls", "description": "List the workspace"}, ask); err != nil {
@@ -560,7 +561,7 @@ func (s *script) play() error {
 			return err
 		}
 	}
-	if words["plan"] || mode == native.PermissionModePlan {
+	if words["plan"] || mode == agentstate.PermissionModePlan {
 		if err := s.tool(work, "ExitPlanMode", map[string]any{"plan": demoPlan}, s.plan); err != nil {
 			return err
 		}
@@ -696,7 +697,7 @@ func (s *script) tool(m *message, name string, input any, ask decide) error {
 }
 
 // wait opens req and waits for its answer.
-func (s *script) wait(req native.Request) (native.Response, error) {
+func (s *script) wait(req agentstate.Request) (agentstate.Response, error) {
 	id, ch := s.a.open(s.t)
 	req.ID = id
 	req.CreatedAt = s.a.now()
@@ -705,22 +706,22 @@ func (s *script) wait(req native.Request) (native.Response, error) {
 	case resp := <-ch:
 		return resp, nil
 	case <-s.t.ctx.Done():
-		return native.Response{}, errInterrupted
+		return agentstate.Response{}, errInterrupted
 	}
 }
 
 func (s *script) approval(toolUseID string, input json.RawMessage) (string, bool, error) {
-	resp, err := s.wait(native.Request{
-		Kind:      native.RequestKindApproval,
+	resp, err := s.wait(agentstate.Request{
+		Kind:      agentstate.RequestKindApproval,
 		Title:     "Run rm -rf ./build && make release",
 		Detail:    "Rebuilds the release artifacts from scratch. This **deletes** `./build` first.",
 		ToolName:  "Bash",
 		ToolUseID: toolUseID,
 		Input:     input,
-		Options: []native.RequestOption{
-			{ID: "allow", Label: "Allow", Kind: native.OptionKindAllow},
-			{ID: "allow_always", Label: "Always allow Bash in this session", Kind: native.OptionKindAllowAlways},
-			{ID: "deny", Label: "Deny", Description: "Tell the agent what to do instead", Kind: native.OptionKindDeny},
+		Options: []agentstate.RequestOption{
+			{ID: "allow", Label: "Allow", Kind: agentstate.OptionKindAllow},
+			{ID: "allow_always", Label: "Always allow Bash in this session", Kind: agentstate.OptionKindAllowAlways},
+			{ID: "deny", Label: "Deny", Description: "Tell the agent what to do instead", Kind: agentstate.OptionKindDeny},
 		},
 		Feedback: true,
 	})
@@ -741,13 +742,13 @@ func (s *script) approval(toolUseID string, input json.RawMessage) (string, bool
 
 // demoQuestions are what "ask" asks; the last one, a secret, only with
 // "secret".
-var demoQuestions = []native.Question{
-	{ID: "pm", Header: "Package manager", Question: "Which package manager should I use?", Options: []native.QuestionOption{
+var demoQuestions = []agentstate.Question{
+	{ID: "pm", Header: "Package manager", Question: "Which package manager should I use?", Options: []agentstate.QuestionOption{
 		{Label: "bun", Description: "Fast, what the chat uses"},
 		{Label: "pnpm", Description: "Strict and disk-efficient"},
 		{Label: "npm", Description: "Comes with Node.js"},
 	}},
-	{ID: "checks", Header: "Checks", Question: "Which checks should run before I commit?", MultiSelect: true, Options: []native.QuestionOption{
+	{ID: "checks", Header: "Checks", Question: "Which checks should run before I commit?", MultiSelect: true, Options: []agentstate.QuestionOption{
 		{Label: "Lint"}, {Label: "Unit tests"}, {Label: "Type check"},
 	}},
 	{ID: "notes", Header: "Notes", Question: "Anything else I should know?", FreeText: true},
@@ -755,7 +756,7 @@ var demoQuestions = []native.Question{
 }
 
 // askInput is the AskUserQuestion input that asks questions.
-func askInput(questions []native.Question) map[string]any {
+func askInput(questions []agentstate.Question) map[string]any {
 	var entries []map[string]any
 	for _, q := range questions {
 		entry := map[string]any{"header": q.Header, "question": q.Question}
@@ -777,10 +778,10 @@ func askInput(questions []native.Question) map[string]any {
 }
 
 // question asks questions and reports the answers.
-func (s *script) question(questions []native.Question) decide {
+func (s *script) question(questions []agentstate.Question) decide {
 	return func(toolUseID string, input json.RawMessage) (string, bool, error) {
-		resp, err := s.wait(native.Request{
-			Kind: native.RequestKindQuestion, Title: "A few questions before I start",
+		resp, err := s.wait(agentstate.Request{
+			Kind: agentstate.RequestKindQuestion, Title: "A few questions before I start",
 			ToolName: "AskUserQuestion", ToolUseID: toolUseID, Input: input, Questions: questions,
 		})
 		if err != nil {
@@ -800,12 +801,12 @@ func (s *script) question(questions []native.Question) decide {
 }
 
 func (s *script) plan(toolUseID string, input json.RawMessage) (string, bool, error) {
-	resp, err := s.wait(native.Request{
-		Kind: native.RequestKindPlan, Title: "Ready to code?", Detail: demoPlan,
+	resp, err := s.wait(agentstate.Request{
+		Kind: agentstate.RequestKindPlan, Title: "Ready to code?", Detail: demoPlan,
 		ToolName: "ExitPlanMode", ToolUseID: toolUseID, Input: input,
-		Options: []native.RequestOption{
-			{ID: "approve", Label: "Approve the plan", Kind: native.OptionKindAllow},
-			{ID: "reject", Label: "Keep planning", Kind: native.OptionKindDeny},
+		Options: []agentstate.RequestOption{
+			{ID: "approve", Label: "Approve the plan", Kind: agentstate.OptionKindAllow},
+			{ID: "reject", Label: "Keep planning", Kind: agentstate.OptionKindDeny},
 		},
 		Feedback: true,
 	})
@@ -825,11 +826,11 @@ func (s *script) plan(toolUseID string, input json.RawMessage) (string, bool, er
 // approved, as Claude Code does.
 func (s *script) leavePlanMode() {
 	s.a.mu.Lock()
-	if s.a.settings.PermissionMode != native.PermissionModePlan {
+	if s.a.settings.PermissionMode != agentstate.PermissionModePlan {
 		s.a.mu.Unlock()
 		return
 	}
-	s.a.settings.PermissionMode = native.PermissionModeBypass
+	s.a.settings.PermissionMode = agentstate.PermissionModeBypass
 	settings := s.a.settings
 	s.a.mu.Unlock()
 	native.ReportSettings(s.sink, settings)
@@ -838,12 +839,12 @@ func (s *script) leavePlanMode() {
 // askToRun returns a decide that asks to run command, for the ask mode.
 func (s *script) askToRun(command, detail string) decide {
 	return func(toolUseID string, input json.RawMessage) (string, bool, error) {
-		resp, err := s.wait(native.Request{
-			Kind: native.RequestKindApproval, Title: "Run " + command, Detail: detail,
+		resp, err := s.wait(agentstate.Request{
+			Kind: agentstate.RequestKindApproval, Title: "Run " + command, Detail: detail,
 			ToolName: "Bash", ToolUseID: toolUseID, Input: input,
-			Options: []native.RequestOption{
-				{ID: "allow", Label: "Allow", Kind: native.OptionKindAllow},
-				{ID: "deny", Label: "Deny", Kind: native.OptionKindDeny},
+			Options: []agentstate.RequestOption{
+				{ID: "allow", Label: "Allow", Kind: agentstate.OptionKindAllow},
+				{ID: "deny", Label: "Deny", Kind: agentstate.OptionKindDeny},
 			},
 			Feedback: true,
 		})
@@ -866,8 +867,8 @@ func (s *script) reply(long bool) error {
 	for _, o := range s.outcomes {
 		sb.WriteString("- " + o + "\n")
 	}
-	finish := func(stop string) {
-		m.stop = stop
+	finish := func(stop native.StopReason) {
+		m.stop = string(stop)
 		m.usage = &transcript.Usage{InputTokens: 1200 + 40*len(s.text), OutputTokens: 4 * len(m.blocks[0].Text) / 3}
 		s.send(m)
 	}

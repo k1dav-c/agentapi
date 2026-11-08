@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/native"
 )
 
@@ -46,7 +47,7 @@ func TestSettings(t *testing.T) {
 	h.answerState(lunaState)
 	h.started()
 	assert.True(t, h.a.Capabilities().Settings)
-	assert.Equal(t, native.Settings{Model: "openai-codex/gpt-6-luna", Effort: "medium"}, h.a.Settings())
+	assert.Equal(t, agentstate.Settings{Model: "openai-codex/gpt-6-luna", Effort: "medium"}, h.a.Settings())
 
 	var options native.SettingOptions
 	h.call("options", func() (err error) {
@@ -66,7 +67,7 @@ func TestSettings(t *testing.T) {
 	// The model, then the level, then the state that says what Pi made of
 	// them.
 	h.call("apply", func() error {
-		return h.a.ApplySettings(context.Background(), native.Settings{Model: "openai-codex/gpt-6.1-sol", Effort: "high"})
+		return h.a.ApplySettings(context.Background(), agentstate.Settings{Model: "openai-codex/gpt-6.1-sol", Effort: "high"})
 	})
 	cmd = h.pi.nextCmd()
 	require.Equal(t, "set_model", cmd["type"])
@@ -81,16 +82,16 @@ func TestSettings(t *testing.T) {
 	require.Equal(t, "get_state", cmd["type"])
 	h.answer(cmd, `{"model":{"id":"gpt-6.1-sol","provider":"openai-codex","reasoning":true},"thinkingLevel":"high","sessionId":"s1"}`)
 	require.NoError(t, h.result("apply"))
-	assert.Equal(t, native.Settings{Model: "openai-codex/gpt-6.1-sol", Effort: "high"}, h.a.Settings())
+	assert.Equal(t, agentstate.Settings{Model: "openai-codex/gpt-6.1-sol", Effort: "high"}, h.a.Settings())
 
-	assert.ErrorIs(t, h.a.ApplySettings(context.Background(), native.Settings{PermissionMode: native.PermissionModeAsk}), native.ErrInvalidSetting)
-	assert.ErrorIs(t, h.a.ApplySettings(context.Background(), native.Settings{Model: "openai-codex/llama"}), native.ErrInvalidSetting)
+	assert.ErrorIs(t, h.a.ApplySettings(context.Background(), agentstate.Settings{PermissionMode: agentstate.PermissionModeAsk}), native.ErrInvalidSetting)
+	assert.ErrorIs(t, h.a.ApplySettings(context.Background(), agentstate.Settings{Model: "openai-codex/llama"}), native.ErrInvalidSetting)
 
 	// A level Pi changed by itself (an extension, or a model that clamped
 	// it) is reported.
 	h.write(`{"type":"thinking_level_changed","level":"max"}`)
 	h.settle()
-	assert.Equal(t, []native.Settings{{Model: "openai-codex/gpt-6.1-sol", Effort: "max"}}, h.sink.State().Settings)
+	assert.Equal(t, []agentstate.Settings{{Model: "openai-codex/gpt-6.1-sol", Effort: "max"}}, h.sink.State().Settings)
 }
 
 func TestSettingsWithoutAModel(t *testing.T) {
@@ -99,7 +100,7 @@ func TestSettingsWithoutAModel(t *testing.T) {
 	h.answerState(noCredentialsState)
 	h.answerModels(map[string]any{"success": true, "data": map[string]any{"models": []any{map[string]any{"id": "x", "provider": "y"}}}})
 	require.NoError(t, h.startResult())
-	assert.Equal(t, native.Settings{}, h.a.Settings())
+	assert.Equal(t, agentstate.Settings{}, h.a.Settings())
 }
 
 func TestCompact(t *testing.T) {

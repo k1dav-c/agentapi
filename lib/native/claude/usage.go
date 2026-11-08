@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/native"
 )
 
@@ -56,7 +57,7 @@ func (a *Adapter) handleRateLimit(raw json.RawMessage) {
 	if len(info.UnifiedWindows) > 0 {
 		limits = nil
 		for id, w := range info.UnifiedWindows {
-			limit := native.RateLimit{ID: id, Label: windowLabel(id), ResetsAt: native.ResetTime(w.ResetsAt)}
+			limit := agentstate.RateLimit{ID: id, Label: windowLabel(id), ResetsAt: native.ResetTime(w.ResetsAt)}
 			if w.Utilization != nil {
 				// Two decimals: 0.29 is 29%, not 28.999999999999996.
 				percent := math.Round(*w.Utilization*10000) / 100
@@ -66,9 +67,9 @@ func (a *Adapter) handleRateLimit(raw json.RawMessage) {
 		}
 	}
 	if info.RateLimitType != "" {
-		i := slices.IndexFunc(limits, func(l native.RateLimit) bool { return l.ID == info.RateLimitType })
+		i := slices.IndexFunc(limits, func(l agentstate.RateLimit) bool { return l.ID == info.RateLimitType })
 		if i < 0 {
-			limits = append(limits, native.RateLimit{ID: info.RateLimitType, Label: windowLabel(info.RateLimitType)})
+			limits = append(limits, agentstate.RateLimit{ID: info.RateLimitType, Label: windowLabel(info.RateLimitType)})
 			i = len(limits) - 1
 		}
 		limits[i].Status = info.Status
@@ -78,7 +79,7 @@ func (a *Adapter) handleRateLimit(raw json.RawMessage) {
 			limits[i].ResetsAt = resetsAt
 		}
 	}
-	slices.SortFunc(limits, func(x, y native.RateLimit) int {
+	slices.SortFunc(limits, func(x, y agentstate.RateLimit) int {
 		xi, yi := slices.Index(windowOrder, x.ID), slices.Index(windowOrder, y.ID)
 		switch {
 		case xi >= 0 && yi >= 0:
@@ -99,7 +100,7 @@ func (a *Adapter) handleRateLimit(raw json.RawMessage) {
 func (a *Adapter) limitReached() bool {
 	now := a.cfg.Clock.Now()
 	for _, l := range a.usage.RateLimits {
-		if l.Status == "rejected" && (l.ResetsAt == nil || l.ResetsAt.After(now)) {
+		if l.Status == agentstate.RateLimitRejected && (l.ResetsAt == nil || l.ResetsAt.After(now)) {
 			return true
 		}
 	}
@@ -144,7 +145,7 @@ func (a *Adapter) cacheUsed(u *resultUsage) {
 	if ttl == 0 {
 		return
 	}
-	a.usage.PromptCache = &native.PromptCache{TTLSeconds: int(ttl / time.Second), ExpiresAt: a.cfg.Clock.Now().Add(ttl).UTC()}
+	a.usage.PromptCache = &agentstate.PromptCache{TTLSeconds: int(ttl / time.Second), ExpiresAt: a.cfg.Clock.Now().Add(ttl).UTC()}
 	a.reportUsage()
 }
 
@@ -167,7 +168,7 @@ func (a *Adapter) contextUsage(response json.RawMessage) {
 	if a.drift.Decode("get_context_usage response", response, &usage) != nil || usage.MaxTokens <= 0 {
 		return
 	}
-	a.usage.Context = &native.ContextUsage{Used: usage.TotalTokens, Size: usage.MaxTokens}
+	a.usage.Context = &agentstate.ContextUsage{Used: usage.TotalTokens, Size: usage.MaxTokens}
 	a.reportUsage()
 }
 

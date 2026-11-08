@@ -13,7 +13,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/coder/quartz"
 	"github.com/danielgtaylor/huma/v2"
@@ -23,6 +22,7 @@ import (
 
 	"github.com/coder/agentapi/internal/version"
 	"github.com/coder/agentapi/lib/convstate"
+	"github.com/coder/agentapi/lib/httpmw"
 	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/logctx"
 	"github.com/coder/agentapi/lib/native"
@@ -59,11 +59,11 @@ type Server struct {
 	// queueStoreMu guards what storeQueue last stored in stateDB: the
 	// queue, its last ID and the version of the queue they are.
 	queueStoreMu      sync.Mutex
-	savedQueue        []QueuedMessage
+	savedQueue        []convstate.QueuedMessage
 	savedNextQueueID  int
 	savedQueueVersion uint64
 	agentType         instanceapi.AgentType
-	emitter           *EventEmitter
+	emitter           *convstate.EventEmitter
 	chatBasePath      string
 	uploads           *uploadStore
 	uploadPruneNow    chan struct{} // nil until startUploadPruning
@@ -95,7 +95,7 @@ type ServerConfig struct {
 	Clock             quartz.Clock
 	CWD               string // Working directory (used by Codex resolver)
 	// Webhook sends an event whenever the agent status changes.
-	Webhook WebhookConfig
+	Webhook webhook.Config
 	// Name is what clients call this AgentAPI (GET /summary, webhook
 	// events); empty is the working directory's name.
 	Name string
@@ -138,22 +138,16 @@ type NativeConfig struct {
 	// UpdateAgent, if set, updates the agent's CLI before a restart starts
 	// a new one (Codex, Pi).
 	UpdateAgent func(context.Context)
-	// AutoContinue continues a turn a usage limit stopped once the limit
-	// resets.
-	AutoContinue bool
 	// Prices price the model calls of the agent's sessions; nil is the
 	// built-in prices.
 	Prices *pricing.Table
 	// PiSessionDir is the --session-dir Pi runs with, where its session
 	// logs are; empty without one.
 	PiSessionDir string
-	// RestartDelays are native.Config.RestartDelays: the waits before an
-	// agent that exited is started again. Nil is the default.
-	RestartDelays []time.Duration
-	// RetryDelays are native.Config.RetryDelays: the waits before a turn
-	// that failed on a transient upstream error is tried again. Nil is the
-	// default; empty tries none again.
-	RetryDelays []time.Duration
+	// Policy is the conversation's: whether it continues a turn a usage
+	// limit stopped, and how long it waits before it tries a failed turn
+	// again or starts an agent that exited again.
+	native.Policy
 }
 
 // CheckConfig returns an error NewServer would return for config before it
@@ -172,13 +166,13 @@ func CheckConfig(config ServerConfig) error {
 // parseListenConfig parses the allowed hosts and origins and the bind
 // address of config.
 func parseListenConfig(config ServerConfig) (hosts, origins []string, bind string, err error) {
-	if hosts, err = parseAllowedHosts(config.AllowedHosts); err != nil {
+	if hosts, err = httpmw.ParseAllowedHosts(config.AllowedHosts); err != nil {
 		return nil, nil, "", fmt.Errorf("failed to parse allowed hosts: %w", err)
 	}
-	if origins, err = parseAllowedOrigins(config.AllowedOrigins); err != nil {
+	if origins, err = httpmw.ParseAllowedOrigins(config.AllowedOrigins); err != nil {
 		return nil, nil, "", fmt.Errorf("failed to parse allowed origins: %w", err)
 	}
-	if bind, err = ParseBindAddress(config.Bind); err != nil {
+	if bind, err = httpmw.ParseBindAddress(config.Bind); err != nil {
 		return nil, nil, "", fmt.Errorf("invalid bind address: %w", err)
 	}
 	return hosts, origins, bind, nil
@@ -265,7 +259,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	// Clients follow the queue through queue_update events, and the state
 	// database has every change: a message that went out isn't sent again
 	// after a crash.
-	s.queue.onChange = func(queue []QueuedMessage, lastID int, version uint64) {
+	s.queue.onChange = func(queue []convstate.QueuedMessage, lastID int, version uint64) {
 		emitter.SetQueue(queue, version)
 		s.storeQueue(queue, lastID, version)
 	}
@@ -320,7 +314,7 @@ func newServerID() (string, error) {
 // tells dispatcher of status changes, keeps the conversation in the state
 // database if there is one and, with withTerminal, says a terminal is
 // offered.
-func newEventEmitter(config ServerConfig, serverID string, dispatcher *webhook.Dispatcher, withTerminal bool) *EventEmitter {
+func newEventEmitter(config ServerConfig, serverID string, dispatcher *webhook.Dispatcher, withTerminal bool) *convstate.EventEmitter {
 	options := []convstate.EventEmitterOption{
 		convstate.WithAgentType(config.AgentType),
 		convstate.WithServerID(serverID),
@@ -348,10 +342,10 @@ func newRouter(config ServerConfig, logger *slog.Logger, allowedHosts, allowedOr
 	badHostHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid host header. Allowed hosts: "+strings.Join(allowedHosts, ", "), http.StatusBadRequest)
 	})
-	router.Use(hostAuthorizationMiddleware(allowedHosts, publicIP, badHostHandler))
+	router.Use(httpmw.HostAuthorization(allowedHosts, publicIP, badHostHandler))
 
 	router.Use(requestLogMiddleware(logger))
-	router.Use(Compress())
+	router.Use(httpmw.Compress())
 
 	corsMiddleware := cors.New(cors.Options{
 		AllowedOrigins:   allowedOrigins,
@@ -364,7 +358,7 @@ func newRouter(config ServerConfig, logger *slog.Logger, allowedHosts, allowedOr
 	router.Use(corsMiddleware.Handler)
 
 	// After CORS, so that a refused request's 403 has the CORS headers.
-	router.Use(CrossOriginProtection(allowedOrigins, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	router.Use(httpmw.CrossOriginProtection(allowedOrigins, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		logger.Warn("Refused a request a page of another origin sent", "method", r.Method, "path", r.URL.Path, "origin", r.Header.Get("Origin"))
 		http.Error(w, "A page of another origin sent this request. To let it, add its origin to --allowed-origins.", http.StatusForbidden)
 	})))
@@ -384,7 +378,7 @@ func newRouter(config ServerConfig, logger *slog.Logger, allowedHosts, allowedOr
 
 // newNativeConversation returns the conversation of a native agent, which
 // continues the restored one.
-func newNativeConversation(config ServerConfig, restored restoredState, emitter *EventEmitter, uploads *uploadStore, logger *slog.Logger) *native.Conversation {
+func newNativeConversation(config ServerConfig, restored restoredState, emitter *convstate.EventEmitter, uploads *uploadStore, logger *slog.Logger) *native.Conversation {
 	observer := &nativeObserver{emitter: emitter}
 	if config.StateDB != nil {
 		observer.persister = config.StateDB
@@ -395,8 +389,7 @@ func newNativeConversation(config ServerConfig, restored restoredState, emitter 
 		Settings:          restored.settings,
 		LimitStop:         restored.limitStop,
 		RetryWait:         restored.retryWait,
-		RetryDelays:       config.Native.RetryDelays,
-		AutoContinue:      config.Native.AutoContinue,
+		Policy:            config.Native.Policy,
 		InitialMessages:   restored.messages,
 		InitialPrompt:     config.InitialPrompt,
 		InitialPromptSent: config.InitialPromptSent,
@@ -404,7 +397,6 @@ func newNativeConversation(config ServerConfig, restored restoredState, emitter 
 		Observer:          observer,
 		Logger:            logger,
 		Clock:             config.Clock,
-		RestartDelays:     config.Native.RestartDelays,
 		PrepareRichMessage: func(msg *transcript.RichMessage) {
 			uploads.storeRichImages(msg, logger)
 		},
@@ -428,7 +420,8 @@ func restoreWebhook(dispatcher *webhook.Dispatcher, snap statedb.Snapshot, logge
 	}
 }
 
-// Handler returns the underlying chi.Router for testing purposes.
+// Handler returns the server's router. The tests of lib/httpapi and of
+// the hub (which runs real servers behind it) serve it with httptest.
 func (s *Server) Handler() http.Handler {
 	return s.router
 }

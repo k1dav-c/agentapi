@@ -22,7 +22,6 @@ import (
 
 	"github.com/coder/quartz"
 
-	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/netaddr"
 )
@@ -141,26 +140,19 @@ func webhookEventMatches(pattern, event string) bool {
 	return ok && strings.HasPrefix(event, group+".")
 }
 
-// The webhook's envelope and the instance it names are the contract with
-// the receivers that watch many AgentAPIs (lib/instanceapi).
-type (
-	WebhookEvent    = instanceapi.WebhookEvent
-	WebhookInstance = instanceapi.WebhookInstance
-)
-
 // queuedEvent is an event waiting to be delivered.
 type queuedEvent struct {
-	WebhookEvent
+	instanceapi.WebhookEvent
 	// done, if set, is closed once the event was delivered or given up on.
 	done chan struct{}
 }
 
 type WebhookEventData struct {
-	ServerID       string                `json:"server_id" doc:"Random identifier of this AgentAPI run, as server_id in GET /status."`
-	Status         convstate.AgentStatus `json:"status" doc:"Current agent status."`
-	PreviousStatus convstate.AgentStatus `json:"previous_status" doc:"Previous agent status."`
-	AgentType      instanceapi.AgentType `json:"agent_type" doc:"Type of agent being used."`
-	Transport      instanceapi.Transport `json:"transport" doc:"How AgentAPI drives the agent: native."`
+	ServerID       string                  `json:"server_id" doc:"Random identifier of this AgentAPI run, as server_id in GET /status."`
+	Status         instanceapi.AgentStatus `json:"status" doc:"Current agent status."`
+	PreviousStatus instanceapi.AgentStatus `json:"previous_status" doc:"Previous agent status."`
+	AgentType      instanceapi.AgentType   `json:"agent_type" doc:"Type of agent being used."`
+	Transport      instanceapi.Transport   `json:"transport" doc:"How AgentAPI drives the agent: native."`
 }
 
 // WebhookTemplateData is the context available to custom payload templates.
@@ -176,7 +168,7 @@ type WebhookTemplateData struct {
 	Transport      string
 	// Instance is the AgentAPI that sent the event; Data the event's data
 	// as JSON decodes it (a map), for {{.Data.prompt}} and the like.
-	Instance *WebhookInstance
+	Instance *instanceapi.WebhookInstance
 	Data     any
 }
 
@@ -192,7 +184,7 @@ type Dispatcher struct {
 	clock     quartz.Clock
 	serverID  string
 	agentType instanceapi.AgentType
-	instance  WebhookInstance
+	instance  instanceapi.WebhookInstance
 	// startup is the configuration AgentAPI started with.
 	startup Config
 	queue   chan queuedEvent
@@ -255,7 +247,7 @@ func parseWebhookTemplate(templateStr string) (*template.Template, error) {
 	// A field WebhookTemplateData lacks (.RunID before 1.0) fails only when
 	// the template runs, so run it once on an empty event: it would fail
 	// every delivery. Other errors may come from the empty data alone.
-	sample := WebhookTemplateData{Instance: &WebhookInstance{}, Data: map[string]any{}}
+	sample := WebhookTemplateData{Instance: &instanceapi.WebhookInstance{}, Data: map[string]any{}}
 	if err := tmpl.Execute(io.Discard, sample); err != nil && strings.Contains(err.Error(), "can't evaluate field") {
 		return nil, fmt.Errorf("invalid webhook payload template: %w", err)
 	}
@@ -293,7 +285,7 @@ func New(config Config, logger *slog.Logger, agentType instanceapi.AgentType, cl
 		clock:         clock,
 		serverID:      serverID,
 		agentType:     agentType,
-		instance:      WebhookInstance{ServerID: serverID, AgentType: agentType, Transport: instanceapi.TransportNative},
+		instance:      instanceapi.WebhookInstance{ServerID: serverID, AgentType: agentType, Transport: instanceapi.TransportNative},
 		startup:       config,
 		queue:         make(chan queuedEvent, webhookQueueSize),
 		configChanged: make(chan struct{}, 1),
@@ -353,7 +345,7 @@ func (d *Dispatcher) Restore(stored string) (bool, error) {
 }
 
 // SetInstance describes the AgentAPI that sends the events.
-func (d *Dispatcher) SetInstance(instance WebhookInstance) {
+func (d *Dispatcher) SetInstance(instance instanceapi.WebhookInstance) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	instance.ServerID = d.serverID
@@ -364,7 +356,7 @@ func (d *Dispatcher) SetInstance(instance WebhookInstance) {
 
 // Instance is the AgentAPI the events name, with the instance ID and the
 // public URL the configuration sets.
-func (d *Dispatcher) Instance() WebhookInstance {
+func (d *Dispatcher) Instance() instanceapi.WebhookInstance {
 	d.mu.RLock()
 	instance := d.instance
 	config := d.config
@@ -505,7 +497,7 @@ func randomWebhookID() string {
 
 // StatusChanged queues run.status_changed, for the emitter's status change
 // handler.
-func (d *Dispatcher) StatusChanged(previous, current convstate.AgentStatus) {
+func (d *Dispatcher) StatusChanged(previous, current instanceapi.AgentStatus) {
 	d.emit(webhookEventRunStatusChanged, WebhookEventData{
 		ServerID:       d.serverID,
 		Status:         current,
@@ -537,9 +529,9 @@ func (d *Dispatcher) enqueue(eventType string, data any, done chan struct{}) boo
 
 // newEvent returns a new event of type eventType with data, from this
 // instance now.
-func (d *Dispatcher) newEvent(eventType string, data any) WebhookEvent {
+func (d *Dispatcher) newEvent(eventType string, data any) instanceapi.WebhookEvent {
 	instance := d.Instance()
-	return WebhookEvent{
+	return instanceapi.WebhookEvent{
 		ID:        randomWebhookID(),
 		Type:      eventType,
 		CreatedAt: d.clock.Now().UTC(),
@@ -623,7 +615,7 @@ func (d *Dispatcher) Stop(ctx context.Context) {
 	}
 }
 
-func (d *Dispatcher) renderBody(event WebhookEvent) ([]byte, error) {
+func (d *Dispatcher) renderBody(event instanceapi.WebhookEvent) ([]byte, error) {
 	d.mu.RLock()
 	tmpl := d.tmpl
 	d.mu.RUnlock()
@@ -718,7 +710,7 @@ func (e *permanentWebhookError) Error() string {
 }
 
 // send POSTs one delivery of event and returns the receiver's status.
-func (d *Dispatcher) send(ctx context.Context, config Config, client *http.Client, event WebhookEvent, body []byte) (string, error) {
+func (d *Dispatcher) send(ctx context.Context, config Config, client *http.Client, event instanceapi.WebhookEvent, body []byte) (string, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, config.URL, bytes.NewReader(body))
 	if err != nil {
 		return "", err

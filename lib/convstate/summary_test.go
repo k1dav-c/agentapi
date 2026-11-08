@@ -8,15 +8,15 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/instanceapi"
-	"github.com/coder/agentapi/lib/native"
 )
 
 // summaries returns the summaries among events.
-func summaries(t *testing.T, events []Event) []SummaryBody {
+func summaries(t *testing.T, events []Event) []instanceapi.SummaryBody {
 	t.Helper()
-	var out []SummaryBody
+	var out []instanceapi.SummaryBody
 	for _, event := range events {
 		require.Equal(t, EventTypeSummaryUpdate, event.Type)
 		out = append(out, event.Payload.(SummaryUpdateBody).SummaryBody)
@@ -30,7 +30,7 @@ func TestSummary(t *testing.T) {
 	e.EmitStatus(conv.StatusStable)
 	summary := e.Summary()
 	assert.Equal(t, instanceapi.WebhookInstance{ID: "host:3284", Name: "repo"}, summary.Instance)
-	assert.Equal(t, AttentionNone, summary.Attention)
+	assert.Equal(t, instanceapi.AttentionNone, summary.Attention)
 	assert.Empty(t, summary.Title)
 	assert.Nil(t, summary.Task)
 
@@ -40,9 +40,9 @@ func TestSummary(t *testing.T) {
 	e.EmitMessages(taskMessages(start, "", ">Fix the bug in the parser\nand add a test"))
 	e.EmitStatus(conv.StatusChanging)
 	summary = e.Summary()
-	assert.Equal(t, AgentStatusRunning, summary.Status)
+	assert.Equal(t, instanceapi.AgentStatusRunning, summary.Status)
 	require.NotNil(t, summary.Task)
-	assert.Equal(t, TaskStatusRunning, summary.Task.Status)
+	assert.Equal(t, instanceapi.TaskStatusRunning, summary.Task.Status)
 	assert.Equal(t, 1, summary.Tasks)
 	assert.Equal(t, "Fix the bug in the parser and add a test", summary.Title)
 	e.SetSessionName("Parser fix")
@@ -50,26 +50,26 @@ func TestSummary(t *testing.T) {
 
 	// What the agent waits for, the most pressing first.
 	e.EmitStatus(conv.StatusStable)
-	e.SetLimitStop(&native.LimitStop{Message: "limit", StoppedAt: start})
-	assert.Equal(t, AttentionLimit, e.Summary().Attention)
-	e.EmitRequest(native.RequestState{Request: native.Request{ID: "r1"}, Status: native.RequestStatusPending})
-	assert.Equal(t, AttentionRequest, e.Summary().Attention)
+	e.SetLimitStop(&agentstate.LimitStop{Message: "limit", StoppedAt: start})
+	assert.Equal(t, instanceapi.AttentionLimit, e.Summary().Attention)
+	e.EmitRequest(agentstate.RequestState{Request: agentstate.Request{ID: "r1"}, Status: agentstate.RequestStatusPending})
+	assert.Equal(t, instanceapi.AttentionRequest, e.Summary().Attention)
 	assert.Equal(t, 1, e.Summary().PendingRequests)
-	e.SetLoginRequired(&native.LoginRequired{Agent: "Claude Code", Command: "claude auth login"})
-	assert.Equal(t, AttentionLogin, e.Summary().Attention)
+	e.SetLoginRequired(&agentstate.LoginRequired{Agent: "Claude Code", Command: "claude auth login"})
+	assert.Equal(t, instanceapi.AttentionLogin, e.Summary().Attention)
 	e.SetLoginRequired(nil)
-	e.EmitRequest(native.RequestState{Request: native.Request{ID: "r1"}, Status: native.RequestStatusResolved})
+	e.EmitRequest(agentstate.RequestState{Request: agentstate.Request{ID: "r1"}, Status: agentstate.RequestStatusResolved})
 	e.SetLimitStop(nil)
-	assert.Equal(t, AttentionNone, e.Summary().Attention)
+	assert.Equal(t, instanceapi.AttentionNone, e.Summary().Attention)
 	// A failed turn that waits to be tried again needs nothing of the user.
-	retry := &native.RetryWait{Message: "API Error: 502 Bad Gateway", StoppedAt: start, Attempt: 1, Attempts: 3}
+	retry := &agentstate.RetryWait{Message: "API Error: 502 Bad Gateway", StoppedAt: start, Attempt: 1, Attempts: 3}
 	e.SetRetryWait(retry)
-	assert.Equal(t, AttentionNone, e.Summary().Attention)
+	assert.Equal(t, instanceapi.AttentionNone, e.Summary().Attention)
 	assert.Equal(t, retry, e.Summary().RetryWait)
 	e.SetRetryWait(nil)
 	assert.Nil(t, e.Summary().RetryWait)
-	e.SetLifecycle(LifecycleExited)
-	assert.Equal(t, AttentionExited, e.Summary().Attention)
+	e.SetLifecycle(instanceapi.LifecycleExited)
+	assert.Equal(t, instanceapi.AttentionExited, e.Summary().Attention)
 }
 
 // The summary goes only to subscriptions that ask for it, once when they
@@ -81,7 +81,7 @@ func TestSummaryEvents(t *testing.T) {
 	_, others, _ := e.SubscribeTo(AllEvents, 0, "")
 	_, ch, replay := e.SubscribeTo(SummaryEvents, 0, "")
 	require.Len(t, summaries(t, replay), 1)
-	assert.Equal(t, AgentStatusStable, summaries(t, replay)[0].Status)
+	assert.Equal(t, instanceapi.AgentStatusStable, summaries(t, replay)[0].Status)
 
 	start := time.Now()
 	e.EmitMessages(taskMessages(start, "", ">Fix the bug"))
@@ -89,7 +89,7 @@ func TestSummaryEvents(t *testing.T) {
 	got := summaries(t, drain(ch))
 	require.NotEmpty(t, got)
 	last := got[len(got)-1]
-	assert.Equal(t, AgentStatusRunning, last.Status)
+	assert.Equal(t, instanceapi.AgentStatusRunning, last.Status)
 	require.NotNil(t, last.Task)
 	assert.Equal(t, "Fix the bug", last.Task.Prompt)
 
@@ -137,15 +137,15 @@ func TestSummaryOncePerChange(t *testing.T) {
 	e.EmitStatus(conv.StatusStable)
 	got := summaries(t, drain(ch))
 	require.Len(t, got, 1)
-	assert.Equal(t, AgentStatusStable, got[0].Status)
+	assert.Equal(t, instanceapi.AgentStatusStable, got[0].Status)
 	require.NotNil(t, got[0].Task)
-	assert.Equal(t, TaskStatusCompleted, got[0].Task.Status)
+	assert.Equal(t, instanceapi.TaskStatusCompleted, got[0].Task.Status)
 
 	// A request is a request update and a status change.
-	e.EmitRequest(native.RequestState{Request: native.Request{ID: "r1", Title: "Run make"}, Status: native.RequestStatusPending})
+	e.EmitRequest(agentstate.RequestState{Request: agentstate.Request{ID: "r1", Title: "Run make"}, Status: agentstate.RequestStatusPending})
 	got = summaries(t, drain(ch))
 	require.Len(t, got, 1)
-	assert.Equal(t, AttentionRequest, got[0].Attention)
+	assert.Equal(t, instanceapi.AttentionRequest, got[0].Attention)
 	assert.Equal(t, "r1", got[0].Request.ID)
 }
 
@@ -182,11 +182,11 @@ func TestSummaryUnreadRestored(t *testing.T) {
 	t.Parallel()
 	start := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
 	end := start.Add(time.Minute)
-	task := Task{ID: 0, Status: TaskStatusCompleted, Prompt: "Fix the bug", StartedAt: start, EndedAt: &end}
+	task := instanceapi.Task{ID: 0, Status: instanceapi.TaskStatusCompleted, Prompt: "Fix the bug", StartedAt: start, EndedAt: &end}
 	state := EmitterState{
 		Messages:    taskMessages(start, ">Fix the bug", "Fixed"),
 		MessageSeqs: []uint64{1, 2},
-		Tasks:       []Task{task},
+		Tasks:       []instanceapi.Task{task},
 		TaskSeqs:    []uint64{3},
 		Seq:         3,
 	}
@@ -206,11 +206,11 @@ func TestSummaryRequest(t *testing.T) {
 	e := NewEventEmitter()
 	assert.Nil(t, e.Summary().Request)
 	start := time.Date(2026, 10, 26, 9, 0, 0, 0, time.UTC)
-	e.EmitRequest(native.RequestState{Request: native.Request{ID: "r2", Kind: native.RequestKindQuestion, Title: "Which fix?", CreatedAt: start.Add(time.Minute)}, Status: native.RequestStatusPending})
-	e.EmitRequest(native.RequestState{Request: native.Request{ID: "r1", Kind: native.RequestKindApproval, Title: "Run: rm -rf build", CreatedAt: start}, Status: native.RequestStatusPending})
+	e.EmitRequest(agentstate.RequestState{Request: agentstate.Request{ID: "r2", Kind: agentstate.RequestKindQuestion, Title: "Which fix?", CreatedAt: start.Add(time.Minute)}, Status: agentstate.RequestStatusPending})
+	e.EmitRequest(agentstate.RequestState{Request: agentstate.Request{ID: "r1", Kind: agentstate.RequestKindApproval, Title: "Run: rm -rf build", CreatedAt: start}, Status: agentstate.RequestStatusPending})
 	request := e.Summary().Request
 	require.NotNil(t, request)
-	assert.Equal(t, SummaryRequest{ID: "r1", Kind: native.RequestKindApproval, Title: "Run: rm -rf build", CreatedAt: start}, *request)
-	e.EmitRequest(native.RequestState{Request: native.Request{ID: "r1", Kind: native.RequestKindApproval, Title: "Run: rm -rf build", CreatedAt: start}, Status: native.RequestStatusResolved})
+	assert.Equal(t, instanceapi.SummaryRequest{ID: "r1", Kind: agentstate.RequestKindApproval, Title: "Run: rm -rf build", CreatedAt: start}, *request)
+	e.EmitRequest(agentstate.RequestState{Request: agentstate.Request{ID: "r1", Kind: agentstate.RequestKindApproval, Title: "Run: rm -rf build", CreatedAt: start}, Status: agentstate.RequestStatusResolved})
 	assert.Equal(t, "r2", e.Summary().Request.ID)
 }

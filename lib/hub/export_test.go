@@ -7,3 +7,18 @@ import "errors"
 func (h *Hub) Flush() error {
 	return errors.Join(h.store.flush(), h.deliveries.flush())
 }
+
+// flush writes what the file is behind on now.
+func (s *store) flush() error {
+	if s.persist == nil {
+		return nil
+	}
+	return s.persist.flush()
+}
+
+func (d *deliveries) flush() error {
+	if d.persist == nil {
+		return nil
+	}
+	return d.persist.flush()
+}

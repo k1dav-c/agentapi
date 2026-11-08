@@ -28,7 +28,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/coder/agentapi/internal/version"
-	"github.com/coder/agentapi/lib/httpapi"
+	"github.com/coder/agentapi/lib/httpmw"
 	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/netaddr"
 	"github.com/coder/agentapi/lib/sse"
@@ -153,7 +153,7 @@ func (h *Hub) Run(ctx context.Context) {
 	h.ctx = ctx
 	h.watchMu.Unlock()
 	for _, instance := range h.store.list() {
-		if instance.Connection != ConnectionStopped {
+		if instance.Connection != instanceapi.ConnectionStopped {
 			h.watch(instance)
 		}
 	}
@@ -181,13 +181,13 @@ func (h *Hub) tokenFor(instance Instance) string {
 func (h *Hub) Handler() http.Handler {
 	r := chi.NewRouter()
 	// The instances' responses through the proxy come compressed already.
-	r.Use(httpapi.Compress())
+	r.Use(httpmw.Compress())
 	// Instances sign their webhook events, whatever name or origin they
 	// come by.
 	r.Post("/hooks", h.receiveWebhook)
 	r.Group(func(r chi.Router) {
 		r.Use(h.checkHost)
-		r.Use(httpapi.CrossOriginProtection(nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Use(httpmw.CrossOriginProtection(nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			h.logger.Warn("Refused a request a page of another origin sent", "method", r.Method, "path", r.URL.Path, "origin", r.Header.Get("Origin"))
 			writeError(w, http.StatusForbidden, "a page of another origin sent this request")
 		})))
@@ -215,7 +215,7 @@ func (h *Hub) routes(r chi.Router) {
 		r.Handle("/i/{id}", http.HandlerFunc(h.proxy))
 		r.Handle("/i/{id}/*", http.HandlerFunc(h.proxy))
 	})
-	chat := http.StripPrefix(h.config.ChatBasePath, httpapi.FileServerWithIndexFallback(h.config.ChatBasePath))
+	chat := http.StripPrefix(h.config.ChatBasePath, httpmw.FileServerWithIndexFallback(h.config.ChatBasePath))
 	r.Handle(h.config.ChatBasePath, chat)
 	r.Handle(h.config.ChatBasePath+"/*", chat)
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
@@ -321,7 +321,7 @@ func (h *Hub) addInstance(w http.ResponseWriter, r *http.Request) {
 		i.LastSeen = h.clock.Now()
 		i.Summary = summary
 		// The hub just read its summary there.
-		i.Connection = ConnectionConnected
+		i.Connection = instanceapi.ConnectionConnected
 		i.confirmedURL = base
 		i.Error = ""
 		i.failed = false

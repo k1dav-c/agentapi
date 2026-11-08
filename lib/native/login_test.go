@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/nativetest"
@@ -34,7 +35,7 @@ func loginClock(t *testing.T) (*quartz.Mock, *quartz.Trap) {
 }
 
 func needsLogin(agent, command string) error {
-	return &native.LoginRequiredError{Login: native.LoginRequired{Agent: agent, Message: agent + " is not logged in.", Command: command}}
+	return &native.LoginRequiredError{Login: agentstate.LoginRequired{Agent: agent, Message: agent + " is not logged in.", Command: command}}
 }
 
 func TestLoginRequiredAtStartWaitsAndRetries(t *testing.T) {
@@ -112,7 +113,7 @@ func TestLoginLostWhileRunningResumesOnRetry(t *testing.T) {
 	}, native.Config{})
 	first := factory.Last()
 	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "one"}))
-	first.Sink().LoginRequired(native.LoginRequired{Agent: "Codex", Message: "Codex's login expired.", Command: "codex login"})
+	first.Sink().LoginRequired(agentstate.LoginRequired{Agent: "Codex", Message: "Codex's login expired.", Command: "codex login"})
 	first.Sink().TurnCompleted(native.TurnResult{Error: "401 Unauthorized"})
 	require.NotNil(t, c.LoginRequired())
 
@@ -130,7 +131,7 @@ func TestRetryLoginStartsNewAgentMessages(t *testing.T) {
 	first := factory.Last()
 	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "one"}))
 	first.Sink().RichMessage(text("m1", "first reply"))
-	first.Sink().LoginRequired(native.LoginRequired{Agent: "Codex", Message: "Codex's login expired.", Command: "codex login"})
+	first.Sink().LoginRequired(agentstate.LoginRequired{Agent: "Codex", Message: "Codex's login expired.", Command: "codex login"})
 	first.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonError, Error: "401 Unauthorized"})
 	require.NoError(t, c.RetryLogin(context.Background()))
 	require.Eventually(t, func() bool { return len(factory.Adapters()) == 2 && c.Idle() }, 5*time.Second, time.Millisecond)
@@ -149,13 +150,13 @@ func TestLoginClearedByAWorkingTurn(t *testing.T) {
 	c, factory, _ := start(t, nil, native.Config{})
 	a := factory.Last()
 	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "one"}))
-	a.Sink().LoginRequired(native.LoginRequired{Agent: "Pi", Message: "No API key.", Command: "pi"})
+	a.Sink().LoginRequired(agentstate.LoginRequired{Agent: "Pi", Message: "No API key.", Command: "pi"})
 	a.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonError, Error: "no api key"})
 	require.NotNil(t, c.LoginRequired())
 
 	// Turns that didn't need the model prove nothing.
-	for _, reason := range []string{native.StopReasonInterrupted, native.StopReasonHandled} {
-		require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: reason}))
+	for _, reason := range []native.StopReason{native.StopReasonInterrupted, native.StopReasonHandled} {
+		require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: string(reason)}))
 		a.Sink().TurnCompleted(native.TurnResult{StopReason: reason})
 		assert.NotNil(t, c.LoginRequired(), reason)
 	}
@@ -220,7 +221,7 @@ func TestRestartAfterLostLoginShowsWarnings(t *testing.T) {
 	}, native.Config{})
 	a := factory.Last()
 	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "one"}))
-	a.Sink().LoginRequired(native.LoginRequired{Agent: "Codex", Message: "Codex is not logged in.", Command: "codex login"})
+	a.Sink().LoginRequired(agentstate.LoginRequired{Agent: "Codex", Message: "Codex is not logged in.", Command: "codex login"})
 	a.Sink().TurnCompleted(native.TurnResult{Error: "401 Unauthorized"})
 	require.NoError(t, c.RetryLogin(context.Background()))
 	require.Eventually(t, func() bool { return len(factory.Adapters()) == 2 && c.Idle() }, 5*time.Second, time.Millisecond)

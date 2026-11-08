@@ -1,6 +1,7 @@
 package native
 
 import (
+	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/transcript"
 )
@@ -74,6 +75,7 @@ func provesLogin(result TurnResult) bool {
 	switch result.StopReason {
 	case StopReasonEndTurn, StopReasonMaxTokens:
 		return true
+	case StopReasonInterrupted, StopReasonHandled, StopReasonError, StopReasonLimited, StopReasonTransient:
 	}
 	return false
 }
@@ -97,7 +99,7 @@ func (s *sink) SessionEvents(events []transcript.SessionEvent) {
 	s.update(func(c *Conversation) { c.cfg.Observer.SessionEvents(events) })
 }
 
-func (s *sink) RequestOpened(req Request) {
+func (s *sink) RequestOpened(req agentstate.Request) {
 	s.update(func(c *Conversation) {
 		c.cfg.Observer.RequestUpdated(c.requests.open(req))
 		c.cfg.Emitter.EmitStatus(c.statusLocked())
@@ -107,13 +109,13 @@ func (s *sink) RequestOpened(req Request) {
 func (s *sink) RequestClosed(id string) {
 	s.update(func(c *Conversation) {
 		if r := c.requests.find(id); r != nil {
-			c.closeRequestLocked(r, RequestStatusWithdrawn, closedCapability(r.Kind))
+			c.closeRequestLocked(r, agentstate.RequestStatusWithdrawn, closedCapability(r.Kind))
 			c.cfg.Emitter.EmitStatus(c.statusLocked())
 		}
 	})
 }
 
-func (s *sink) LoginRequired(login LoginRequired) {
+func (s *sink) LoginRequired(login agentstate.LoginRequired) {
 	login = withLocalAccount(login)
 	s.update(func(c *Conversation) {
 		if c.setLoginLocked(login) {
@@ -122,11 +124,11 @@ func (s *sink) LoginRequired(login LoginRequired) {
 	})
 }
 
-func (s *sink) UsageChanged(usage AgentUsage) {
+func (s *sink) UsageChanged(usage agentstate.AgentUsage) {
 	s.update(func(c *Conversation) { c.setUsageLocked(usage) })
 }
 
-func (s *sink) SettingsChanged(settings Settings) {
+func (s *sink) SettingsChanged(settings agentstate.Settings) {
 	s.update(func(c *Conversation) { c.agentSettingsLocked(settings) })
 }
 

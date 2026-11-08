@@ -17,24 +17,6 @@ import (
 	"github.com/coder/agentapi/lib/webhook"
 )
 
-// The webhook's configuration, its envelope and the instance it names;
-// the dispatcher and the observer are lib/webhook's.
-type (
-	WebhookConfig   = webhook.Config
-	WebhookEvent    = instanceapi.WebhookEvent
-	WebhookInstance = instanceapi.WebhookInstance
-)
-
-// WebhookEventTypes are the events a webhook can be sent, for
-// --webhook-events.
-var WebhookEventTypes = webhook.EventTypes
-
-// ExpandPublicURL fills in a public URL's placeholders; see
-// instanceapi.ExpandPublicURL.
-func ExpandPublicURL(publicURL string, port int) string {
-	return instanceapi.ExpandPublicURL(publicURL, port)
-}
-
 // startWebhook describes this AgentAPI to the webhook and starts sending
 // events: the instance's, and while the webhook sends any of them the
 // conversation's, as the observer turns them into webhook events.
@@ -44,7 +26,7 @@ func (s *Server) startWebhook(config ServerConfig) {
 	if name == "" && config.CWD != "" {
 		name = filepath.Base(config.CWD)
 	}
-	s.webhook.SetInstance(WebhookInstance{
+	s.webhook.SetInstance(instanceapi.WebhookInstance{
 		ID:           net.JoinHostPort(hostname, strconv.Itoa(config.Port)),
 		Name:         name,
 		Hostname:     hostname,

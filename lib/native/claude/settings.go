@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/native"
 )
 
@@ -39,30 +40,30 @@ type initializeInfo struct {
 
 // permissionMode maps Claude Code's permission mode to AgentAPI's, "" for
 // one of its own.
-func permissionMode(mode string) native.PermissionMode {
+func permissionMode(mode string) agentstate.PermissionMode {
 	switch mode {
 	case modeBypass:
-		return native.PermissionModeBypass
+		return agentstate.PermissionModeBypass
 	case modeAuto:
-		return native.PermissionModeAuto
+		return agentstate.PermissionModeAuto
 	case modeDefault, modeManual:
-		return native.PermissionModeAsk
+		return agentstate.PermissionModeAsk
 	case modePlan:
-		return native.PermissionModePlan
+		return agentstate.PermissionModePlan
 	}
 	return ""
 }
 
 // claudeMode maps AgentAPI's permission mode to Claude Code's.
-func claudeMode(mode native.PermissionMode) string {
+func claudeMode(mode agentstate.PermissionMode) string {
 	switch mode {
-	case native.PermissionModeBypass:
+	case agentstate.PermissionModeBypass:
 		return modeBypass
-	case native.PermissionModeAuto:
+	case agentstate.PermissionModeAuto:
 		return modeAuto
-	case native.PermissionModeAsk:
+	case agentstate.PermissionModeAsk:
 		return modeDefault
-	case native.PermissionModePlan:
+	case agentstate.PermissionModePlan:
 		return modePlan
 	}
 	return ""
@@ -153,10 +154,10 @@ func (a *Adapter) reportSettings() {
 }
 
 // Settings implements native.Configurable.
-func (a *Adapter) Settings() native.Settings {
+func (a *Adapter) Settings() agentstate.Settings {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return native.Settings{PermissionMode: permissionMode(a.mode), Model: a.model, Effort: a.effort}
+	return agentstate.Settings{PermissionMode: permissionMode(a.mode), Model: a.model, Effort: a.effort}
 }
 
 // SettingOptions implements native.Configurable. The modes are those
@@ -167,13 +168,13 @@ func (a *Adapter) SettingOptions(context.Context) (native.SettingOptions, error)
 	defer a.mu.Unlock()
 	var options native.SettingOptions
 	if a.args.allowBypass {
-		options.PermissionModes = append(options.PermissionModes, native.PermissionModeBypass)
+		options.PermissionModes = append(options.PermissionModes, agentstate.PermissionModeBypass)
 	}
 	i := slices.IndexFunc(a.models, func(m claudeModel) bool { return m.Value == a.model })
 	if i < 0 || a.models[i].SupportsAutoMode == nil || *a.models[i].SupportsAutoMode {
-		options.PermissionModes = append(options.PermissionModes, native.PermissionModeAuto)
+		options.PermissionModes = append(options.PermissionModes, agentstate.PermissionModeAuto)
 	}
-	options.PermissionModes = append(options.PermissionModes, native.PermissionModeAsk, native.PermissionModePlan)
+	options.PermissionModes = append(options.PermissionModes, agentstate.PermissionModeAsk, agentstate.PermissionModePlan)
 	for _, m := range a.models {
 		option := native.ModelOption{ID: m.Value, Name: m.DisplayName, Description: m.Description}
 		if m.SupportsEffort {
@@ -186,7 +187,7 @@ func (a *Adapter) SettingOptions(context.Context) (native.SettingOptions, error)
 
 // ApplySettings implements native.Configurable. Each setting is a control
 // request, so a change applies at once, also during a turn.
-func (a *Adapter) ApplySettings(ctx context.Context, s native.Settings) error {
+func (a *Adapter) ApplySettings(ctx context.Context, s agentstate.Settings) error {
 	options, _ := a.SettingOptions(ctx)
 	current := a.Settings()
 	if err := options.Check(s, current); err != nil {

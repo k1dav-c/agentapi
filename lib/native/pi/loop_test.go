@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/nativetest"
 )
@@ -75,7 +76,7 @@ func TestExtensionCommandTurns(t *testing.T) {
 		h.write(`{"type":"extension_ui_request","id":"d1","method":"confirm","title":"Commit the changes?","message":"2 files changed"}`)
 		require.NoError(t, h.result("p"))
 		h.settle()
-		require.NoError(t, h.a.Respond(h.ctx, "d1", native.Response{OptionID: optionYes}))
+		require.NoError(t, h.a.Respond(h.ctx, "d1", agentstate.Response{OptionID: optionYes}))
 		assert.Equal(t, true, h.pi.nextCmd()["confirmed"])
 		h.answer(cmd, `{"disposition":"handled"}`)
 		h.settle()
@@ -130,7 +131,7 @@ func TestPromptRefusedAfterAcceptance(t *testing.T) {
 		// An input handler asks first.
 		h.write(`{"type":"extension_ui_request","id":"d1","method":"confirm","title":"Send it?","message":"hi"}`)
 		require.NoError(t, h.result("p"))
-		require.NoError(t, h.a.Respond(h.ctx, "d1", native.Response{OptionID: optionYes}))
+		require.NoError(t, h.a.Respond(h.ctx, "d1", agentstate.Response{OptionID: optionYes}))
 		assert.Equal(t, "extension_ui_response", h.pi.nextCmd()["type"])
 		h.refuse(cmd, "No API key found for anthropic.\n\nUse /login to log into a provider via OAuth or API key.")
 		h.settle()

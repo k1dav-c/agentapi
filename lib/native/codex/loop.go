@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/coder/agentapi/lib/agentlog/codexlog"
+	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/agentio"
@@ -32,7 +33,7 @@ type loopState struct {
 	// interrupt runs from when app-server took the interrupt of the turn.
 	interrupt agentio.InterruptDeadline
 	// usage is what app-server reported of the context and rate limits.
-	usage native.AgentUsage
+	usage agentstate.AgentUsage
 	// spawns holds the spawn_agent tool calls of the subagents still
 	// running, by their thread, to end once they are done.
 	spawns map[string]*itemState
@@ -712,7 +713,7 @@ func (s *loopState) completeTurn(tr turn) {
 	s.closeTurnRequests()
 
 	last := t.lastVisible()
-	last.stop = result.StopReason
+	last.stop = string(result.StopReason)
 	s.emit(&last.msgState)
 	s.flush(true)
 	// The turn's messages are final.
@@ -761,14 +762,14 @@ func (s *loopState) turnResult(t *turnState, tr turn, status string) native.Turn
 		if cause == nil {
 			cause = t.lastErrorInfo
 		}
-		switch {
-		case isLimitError(tr.Error) || (tr.Error == nil && native.IsLimitError(result.Error)):
-			result.StopReason = native.StopReasonLimited
-		case cause != nil && !isAuthError(cause):
-			if status, ok := transientError(cause); ok {
-				result.StopReason, result.APIStatus = native.StopReasonTransient, status
-			}
+		hints := native.FailureHints{
+			Limit: isLimitError(tr.Error) || (tr.Error == nil && native.IsLimitError(result.Error)),
 		}
+		if cause != nil {
+			hints.Auth = isAuthError(cause)
+			hints.APIStatus, hints.Transient = transientError(cause)
+		}
+		native.ClassifyFailure(&result, hints)
 	}
 	return result
 }
@@ -810,7 +811,7 @@ func (s *loopState) exited() {
 	if t := s.turn; t != nil {
 		s.closeOpenItems(t, "failed")
 		last := t.lastVisible()
-		last.stop = native.StopReasonError
+		last.stop = string(native.StopReasonError)
 		s.emit(&last.msgState)
 		s.turn = nil
 	}

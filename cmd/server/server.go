@@ -21,30 +21,23 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/coder/agentapi/lib/httpapi"
+	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/logctx"
+	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/demo"
 	"github.com/coder/agentapi/lib/pricing"
 	"github.com/coder/agentapi/lib/statedb"
 )
 
-type AgentType = httpapi.AgentType
-
-const (
-	AgentTypeClaude = httpapi.AgentTypeClaude
-	AgentTypeCodex  = httpapi.AgentTypeCodex
-	AgentTypePi     = httpapi.AgentTypePi
-	AgentTypeCustom = httpapi.AgentTypeCustom
-)
-
 // agentTypeAliases are the agent types --type takes, and the programs
 // whose type is known without it. custom is native-demo's type
 // (lib/native/demo), which it reports.
-var agentTypeAliases = map[string]AgentType{
-	"claude":      AgentTypeClaude,
-	"codex":       AgentTypeCodex,
-	"pi":          AgentTypePi,
-	"native-demo": AgentTypeCustom,
-	"custom":      AgentTypeCustom,
+var agentTypeAliases = map[string]instanceapi.AgentType{
+	"claude":      instanceapi.AgentTypeClaude,
+	"codex":       instanceapi.AgentTypeCodex,
+	"pi":          instanceapi.AgentTypePi,
+	"native-demo": instanceapi.AgentTypeCustom,
+	"custom":      instanceapi.AgentTypeCustom,
 }
 
 // agentNames are the agent types --type takes, as help names them.
@@ -62,7 +55,7 @@ func unsupportedAgent(name string) error {
 // parseAgentType returns the agent type --type (typeFlag) names, or
 // without it the type of program, the agent's command. The custom type
 // runs native-demo only.
-func parseAgentType(program, typeFlag string) (AgentType, error) {
+func parseAgentType(program, typeFlag string) (instanceapi.AgentType, error) {
 	name := typeFlag
 	if name == "" {
 		name = strings.TrimSuffix(filepath.Base(program), ".exe")
@@ -73,7 +66,7 @@ func parseAgentType(program, typeFlag string) (AgentType, error) {
 		return "", fmt.Errorf("unknown agent %s: set --type (%s); AgentAPI 3 runs Claude Code, Codex and Pi natively, and for other agents AgentAPI %s is the last release with the PTY transport", program, agentNames, lastPTYRelease)
 	case !ok:
 		return "", unsupportedAgent(name)
-	case agentType == AgentTypeCustom && program != demo.Program:
+	case agentType == instanceapi.AgentTypeCustom && program != demo.Program:
 		return "", unsupportedAgent("a custom agent")
 	}
 	return agentType, nil
@@ -261,14 +254,13 @@ func serverConfig(opts serverOptions, agent *runningAgent, stateDB *statedb.DB, 
 	}
 	if !opts.printOpenAPI {
 		config.Native = httpapi.NativeConfig{
-			Factory:      agent.factory,
-			UpdateAgent:  agent.updateNative,
-			Terminal:     opts.terminal,
-			AutoContinue: opts.autoContinue,
-			RetryDelays:  opts.retryDelays,
-			Prices:       prices,
+			Factory:     agent.factory,
+			UpdateAgent: agent.updateNative,
+			Terminal:    opts.terminal,
+			Policy:      opts.policy,
+			Prices:      prices,
 		}
-		if opts.agentType == AgentTypePi {
+		if opts.agentType == instanceapi.AgentTypePi {
 			config.Native.PiSessionDir = piSessionDir(opts.agentArgs)
 		}
 	}
@@ -626,7 +618,7 @@ func serverFlagSpecs() []flagSpec {
 		{FlagTransport, "", "native", "Deprecated: native, the only transport, which drives the agent through its own structured protocol. AgentAPI 3 has no pty", "string"},
 		{FlagTerminal, "", true, "Offer a shell in the agent's working directory to the chat (its Terminal button) and at GET /terminal", "bool"},
 		{FlagAutoContinue, "", false, "When a usage limit stops the agent's turn, continue it once the limit resets, if the agent says when", "bool"},
-		{FlagRetryDelays, "", []string{"30s", "1m", "2m", "5m*12"}, "When the agent's turn fails on an upstream error that may pass (an HTTP 5xx or 429, an overloaded API), wait this long and ask the agent to go on: one delay per retry in a row (5m*12 is 5m twelve times), after which the failure is an error. Comma-separated via flag, space-separated via AGENTAPI_RETRY_DELAYS; off (or 0) turns retries off", "stringSlice"},
+		{FlagRetryDelays, "", native.FormatDelays(native.DefaultRetryDelays()), "When the agent's turn fails on an upstream error that may pass (an HTTP 5xx or 429, an overloaded API), wait this long and ask the agent to go on: one delay per retry in a row (5m*12 is 5m twelve times), after which the failure is an error. Comma-separated via flag, space-separated via AGENTAPI_RETRY_DELAYS; off (or 0) turns retries off", "stringSlice"},
 		{FlagPrices, "", "", "JSON file of model prices per million tokens, which add to or replace the built-in ones for the sessions' API-equivalent cost (GET /sessions, GET /cost)", "string"},
 		{FlagWebhookURL, "", "", "URL the webhook events are POSTed to (by default only run.status_changed; see --webhook-events)", "string"},
 		{FlagWebhookTimeout, "", 10 * time.Second, "Timeout for each webhook delivery attempt", "duration"},

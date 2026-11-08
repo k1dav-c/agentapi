@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/native"
 )
 
@@ -57,13 +58,13 @@ func TestPolicyMode(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		p    policies
-		want native.PermissionMode
+		want agentstate.PermissionMode
 	}{
-		{policies{"never", "dangerFullAccess", "user"}, native.PermissionModeBypass},
-		{policies{"on-request", "workspaceWrite", "auto_review"}, native.PermissionModeAuto},
-		{policies{"on-request", "workspaceWrite", "guardian_subagent"}, native.PermissionModeAuto},
-		{policies{"untrusted", "workspaceWrite", "user"}, native.PermissionModeAsk},
-		{policies{"untrusted", "dangerFullAccess", "user"}, native.PermissionModeAsk},
+		{policies{"never", "dangerFullAccess", "user"}, agentstate.PermissionModeBypass},
+		{policies{"on-request", "workspaceWrite", "auto_review"}, agentstate.PermissionModeAuto},
+		{policies{"on-request", "workspaceWrite", "guardian_subagent"}, agentstate.PermissionModeAuto},
+		{policies{"untrusted", "workspaceWrite", "user"}, agentstate.PermissionModeAsk},
+		{policies{"untrusted", "dangerFullAccess", "user"}, agentstate.PermissionModeAsk},
 		// Codex's own presets that AgentAPI has no mode for.
 		{policies{"on-request", "workspaceWrite", "user"}, ""},
 		{policies{"never", "readOnly", "user"}, ""},
@@ -71,12 +72,12 @@ func TestPolicyMode(t *testing.T) {
 	} {
 		assert.Equal(t, tc.want, policyMode(tc.p), tc.p)
 	}
-	for _, mode := range []native.PermissionMode{native.PermissionModeBypass, native.PermissionModeAuto, native.PermissionModeAsk} {
+	for _, mode := range []agentstate.PermissionMode{agentstate.PermissionModeBypass, agentstate.PermissionModeAuto, agentstate.PermissionModeAsk} {
 		p, ok := modePolicies(mode)
 		require.True(t, ok, mode)
 		assert.Equal(t, mode, policyMode(p), "the policies of %s amount to it", mode)
 	}
-	_, ok := modePolicies(native.PermissionModePlan)
+	_, ok := modePolicies(agentstate.PermissionModePlan)
 	assert.False(t, ok)
 }
 
@@ -84,10 +85,10 @@ func TestSettings(t *testing.T) {
 	h := newHarness(t, "", nil)
 	h.bootWith(`"approvalPolicy":"never","approvalsReviewer":"user","sandbox":{"type":"dangerFullAccess"},"reasoningEffort":null`)
 	assert.True(t, h.a.Capabilities().Settings)
-	assert.Equal(t, native.Settings{PermissionMode: native.PermissionModeBypass, Model: "gpt-6-luna"}, h.a.Settings())
+	assert.Equal(t, agentstate.Settings{PermissionMode: agentstate.PermissionModeBypass, Model: "gpt-6-luna"}, h.a.Settings())
 
 	options := h.options(true)
-	assert.Equal(t, native.PermissionModeValues, options.PermissionModes)
+	assert.Equal(t, agentstate.PermissionModeValues, options.PermissionModes)
 	require.Len(t, options.Models, 2, "hidden models are left out")
 	assert.Equal(t, native.ModelOption{ID: "gpt-6-astra", Name: "GPT-6-Astra", Description: "Frontier", Efforts: []string{"medium", "high", "max"}, DefaultEffort: "medium"}, options.Models[1])
 	// The thread runs on the model's default effort.
@@ -95,8 +96,8 @@ func TestSettings(t *testing.T) {
 	h.options(false)
 
 	// A change shows at once and goes with the next turn.
-	require.NoError(t, h.a.ApplySettings(context.Background(), native.Settings{PermissionMode: native.PermissionModeAsk, Model: "gpt-6-astra", Effort: "high"}))
-	assert.Equal(t, native.Settings{PermissionMode: native.PermissionModeAsk, Model: "gpt-6-astra", Effort: "high"}, h.a.Settings())
+	require.NoError(t, h.a.ApplySettings(context.Background(), agentstate.Settings{PermissionMode: agentstate.PermissionModeAsk, Model: "gpt-6-astra", Effort: "high"}))
+	assert.Equal(t, agentstate.Settings{PermissionMode: agentstate.PermissionModeAsk, Model: "gpt-6-astra", Effort: "high"}, h.a.Settings())
 	h.expectNothingSent()
 	h.act("turn", func(ctx context.Context) error { return h.a.StartTurn(ctx, native.Input{Text: "go"}) })
 	sent := h.expectSent("turn/start")
@@ -114,7 +115,7 @@ func TestSettings(t *testing.T) {
 
 	// Settings already sent aren't sent again; a failed turn/start keeps
 	// them for the next one.
-	require.NoError(t, h.a.ApplySettings(context.Background(), native.Settings{PermissionMode: native.PermissionModeAuto}))
+	require.NoError(t, h.a.ApplySettings(context.Background(), agentstate.Settings{PermissionMode: agentstate.PermissionModeAuto}))
 	h.act("refused", func(ctx context.Context) error { return h.a.StartTurn(ctx, native.Input{Text: "go"}) })
 	sent = h.expectSent("turn/start")
 	h.feedJSON(`{"id":` + string(sent.ID) + `,"error":{"code":-32603,"message":"boom"}}`)
@@ -132,9 +133,9 @@ func TestSettings(t *testing.T) {
 	h.settle()
 
 	// A model without the current effort gets its default one.
-	require.NoError(t, h.a.ApplySettings(context.Background(), native.Settings{Model: "gpt-6-luna"}))
+	require.NoError(t, h.a.ApplySettings(context.Background(), agentstate.Settings{Model: "gpt-6-luna"}))
 	assert.Equal(t, "low", h.a.Settings().Effort)
-	assert.ErrorIs(t, h.a.ApplySettings(context.Background(), native.Settings{Effort: "max"}), native.ErrInvalidSetting)
+	assert.ErrorIs(t, h.a.ApplySettings(context.Background(), agentstate.Settings{Effort: "max"}), native.ErrInvalidSetting)
 }
 
 func TestSettingsOfTheUsersPolicies(t *testing.T) {
@@ -142,7 +143,7 @@ func TestSettingsOfTheUsersPolicies(t *testing.T) {
 	h.bootWith(`"approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":{"type":"readOnly"},"reasoningEffort":"medium"`)
 	// A combination of the user's own is no mode of AgentAPI's, and isn't
 	// changed until the user switches.
-	assert.Equal(t, native.Settings{Model: "gpt-6-luna", Effort: "medium"}, h.a.Settings())
+	assert.Equal(t, agentstate.Settings{Model: "gpt-6-luna", Effort: "medium"}, h.a.Settings())
 	h.act("turn", func(ctx context.Context) error { return h.a.StartTurn(ctx, native.Input{Text: "go"}) })
 	sent := h.expectSent("turn/start")
 	var params map[string]any
@@ -153,7 +154,7 @@ func TestSettingsOfTheUsersPolicies(t *testing.T) {
 
 // planTurn runs a turn in the plan mode that ends with a plan, and returns
 // the plan request it opened.
-func (h *harness) planTurn(turnID string) native.Request {
+func (h *harness) planTurn(turnID string) agentstate.Request {
 	h.t.Helper()
 	h.beginTurn(turnID)
 	h.item("started", turnID, `{"type":"plan","id":"`+turnID+`-plan","text":""}`)
@@ -168,8 +169,8 @@ func TestPlanMode(t *testing.T) {
 	h := newHarness(t, "", nil)
 	h.bootWith(`"approvalPolicy":"never","approvalsReviewer":"user","sandbox":{"type":"dangerFullAccess"},"reasoningEffort":"low"`)
 	h.options(true)
-	require.NoError(t, h.a.ApplySettings(context.Background(), native.Settings{PermissionMode: native.PermissionModePlan}))
-	assert.Equal(t, native.PermissionModePlan, h.a.Settings().PermissionMode)
+	require.NoError(t, h.a.ApplySettings(context.Background(), agentstate.Settings{PermissionMode: agentstate.PermissionModePlan}))
+	assert.Equal(t, agentstate.PermissionModePlan, h.a.Settings().PermissionMode)
 
 	// The turn switches to the plan collaboration mode, on the thread's
 	// model and effort; the policies stay.
@@ -189,7 +190,7 @@ func TestPlanMode(t *testing.T) {
 	assert.Empty(t, s.completions, "the turn goes on")
 	require.Len(t, s.opened, 1)
 	plan := s.opened[0]
-	assert.Equal(t, native.RequestKindPlan, plan.Kind)
+	assert.Equal(t, agentstate.RequestKindPlan, plan.Kind)
 	assert.Contains(t, plan.Detail, "Create it with hi.")
 	// The mode before the plan comes first.
 	assert.Equal(t, []string{"implement_bypass", "implement_auto", "implement_ask", optionKeepPlanning}, optionIDs(plan))
@@ -197,7 +198,7 @@ func TestPlanMode(t *testing.T) {
 	// Approved: Codex implements it in the default collaboration mode and
 	// the permission mode picked.
 	h.act("respond", func(ctx context.Context) error {
-		return h.a.Respond(ctx, plan.ID, native.Response{OptionID: "implement_auto"})
+		return h.a.Respond(ctx, plan.ID, agentstate.Response{OptionID: "implement_auto"})
 	})
 	sent = h.expectSent("turn/start")
 	params = nil
@@ -212,8 +213,8 @@ func TestPlanMode(t *testing.T) {
 	require.NoError(t, h.err("respond"))
 	h.eventually(func() bool { return len(snapshot(h.rec).settings) > 0 }, "the settings to be reported")
 	s = snapshot(h.rec)
-	assert.Equal(t, native.PermissionModeAuto, s.settings[len(s.settings)-1].PermissionMode)
-	assert.Equal(t, native.PermissionModeAuto, h.a.Settings().PermissionMode)
+	assert.Equal(t, agentstate.PermissionModeAuto, s.settings[len(s.settings)-1].PermissionMode)
+	assert.Equal(t, agentstate.PermissionModeAuto, h.a.Settings().PermissionMode)
 	h.completeTurn("turn-2", "completed", "")
 	assert.Len(t, snapshot(h.rec).completions, 1, "the implementation ends the turn")
 }
@@ -222,12 +223,12 @@ func TestPlanFeedbackAndInterrupt(t *testing.T) {
 	h := newHarness(t, "", nil)
 	h.bootWith(`"approvalPolicy":"never","approvalsReviewer":"user","sandbox":{"type":"dangerFullAccess"}`)
 	h.options(true)
-	require.NoError(t, h.a.ApplySettings(context.Background(), native.Settings{PermissionMode: native.PermissionModePlan}))
+	require.NoError(t, h.a.ApplySettings(context.Background(), agentstate.Settings{PermissionMode: agentstate.PermissionModePlan}))
 	plan := h.planTurn("turn-1")
 
 	// Feedback goes back to Codex, still in the plan mode.
 	h.act("revise", func(ctx context.Context) error {
-		return h.a.Respond(ctx, plan.ID, native.Response{OptionID: optionKeepPlanning, Text: "Use hello.md instead"})
+		return h.a.Respond(ctx, plan.ID, agentstate.Response{OptionID: optionKeepPlanning, Text: "Use hello.md instead"})
 	})
 	sent := h.expectSent("turn/start")
 	var params map[string]any
@@ -237,7 +238,7 @@ func TestPlanFeedbackAndInterrupt(t *testing.T) {
 	h.feedJSON(`{"id":` + string(sent.ID) + `,"result":{"turn":{"id":"turn-2","items":[],"status":"inProgress"}}}`)
 	h.settle()
 	require.NoError(t, h.err("revise"))
-	assert.ErrorIs(t, h.a.Respond(context.Background(), plan.ID, native.Response{OptionID: "implement_bypass"}), native.ErrRequestNotFound, "answered once")
+	assert.ErrorIs(t, h.a.Respond(context.Background(), plan.ID, agentstate.Response{OptionID: "implement_bypass"}), native.ErrRequestNotFound, "answered once")
 	h.item("completed", "turn-2", `{"type":"plan","id":"turn-2-plan","text":"## Add hello.md"}`)
 	h.completeTurn("turn-2", "completed", "")
 	second := snapshot(h.rec).opened[1]
@@ -249,19 +250,19 @@ func TestPlanFeedbackAndInterrupt(t *testing.T) {
 	assert.Contains(t, s.closed, second.ID)
 	require.Len(t, s.completions, 1)
 	assert.Equal(t, native.StopReasonInterrupted, s.completions[0].StopReason)
-	assert.Equal(t, native.PermissionModePlan, h.a.Settings().PermissionMode)
+	assert.Equal(t, agentstate.PermissionModePlan, h.a.Settings().PermissionMode)
 
 	// No feedback: the turn ends, still in the plan mode.
 	third := h.planTurn("turn-3")
-	require.NoError(t, h.a.Respond(context.Background(), third.ID, native.Response{OptionID: optionKeepPlanning}))
+	require.NoError(t, h.a.Respond(context.Background(), third.ID, agentstate.Response{OptionID: optionKeepPlanning}))
 	h.eventually(func() bool { return len(snapshot(h.rec).completions) == 2 }, "the turn to end")
 	s = snapshot(h.rec)
 	require.Len(t, s.completions, 2)
 	assert.Equal(t, native.StopReasonEndTurn, s.completions[1].StopReason)
-	assert.ErrorIs(t, h.a.Respond(context.Background(), third.ID, native.Response{OptionID: "maybe"}), native.ErrRequestNotFound)
+	assert.ErrorIs(t, h.a.Respond(context.Background(), third.ID, agentstate.Response{OptionID: "maybe"}), native.ErrRequestNotFound)
 	fourth := h.planTurn("turn-4")
 	for _, id := range []string{"maybe", "implement_plan", "implement_"} {
-		assert.ErrorIs(t, h.a.Respond(context.Background(), fourth.ID, native.Response{OptionID: id}), native.ErrInvalidResponse, id)
+		assert.ErrorIs(t, h.a.Respond(context.Background(), fourth.ID, agentstate.Response{OptionID: id}), native.ErrInvalidResponse, id)
 	}
 }
 
@@ -281,11 +282,11 @@ func TestResumedThreadInPlanMode(t *testing.T) {
 		"collaborationMode":{"mode":"plan","settings":{"model":"gpt-6-luna","reasoning_effort":null,"developer_instructions":null}}}}`)
 	h.settle()
 	require.NoError(t, h.err("start"))
-	assert.Equal(t, native.PermissionModePlan, h.a.Settings().PermissionMode)
+	assert.Equal(t, agentstate.PermissionModePlan, h.a.Settings().PermissionMode)
 
 	// Leaving it, and a new model, go with the next turn.
 	h.options(true)
-	require.NoError(t, h.a.ApplySettings(context.Background(), native.Settings{PermissionMode: native.PermissionModeAsk, Model: "gpt-6-astra"}))
+	require.NoError(t, h.a.ApplySettings(context.Background(), agentstate.Settings{PermissionMode: agentstate.PermissionModeAsk, Model: "gpt-6-astra"}))
 	h.act("turn", func(ctx context.Context) error { return h.a.StartTurn(ctx, native.Input{Text: "go"}) })
 	sent := h.expectSent("turn/start")
 	var turn map[string]any
@@ -311,7 +312,7 @@ func TestUsage(t *testing.T) {
 	h.sync()
 	require.Len(t, h.rec.State().Usage, 3)
 	usage := h.rec.State().Usage[2]
-	assert.Equal(t, &native.ContextUsage{Used: 17721, Size: 258400}, usage.Context)
+	assert.Equal(t, &agentstate.ContextUsage{Used: 17721, Size: 258400}, usage.Context)
 	require.Len(t, usage.RateLimits, 3)
 	assert.Equal(t, "gpt-6-astra-primary", usage.RateLimits[0].ID)
 	assert.Equal(t, "Astra 5-hour limit", usage.RateLimits[0].Label)
@@ -349,23 +350,23 @@ func TestFailedImplementationKeepsPlanning(t *testing.T) {
 	h := newHarness(t, "", nil)
 	h.bootWith(`"approvalPolicy":"untrusted","approvalsReviewer":"user","sandbox":{"type":"workspaceWrite"}`)
 	h.options(true)
-	require.NoError(t, h.a.ApplySettings(context.Background(), native.Settings{PermissionMode: native.PermissionModePlan}))
+	require.NoError(t, h.a.ApplySettings(context.Background(), agentstate.Settings{PermissionMode: agentstate.PermissionModePlan}))
 	plan := h.planTurn("turn-1")
 	assert.Equal(t, []string{"implement_ask", "implement_bypass", "implement_auto", optionKeepPlanning}, optionIDs(plan))
 
 	h.act("implement", func(ctx context.Context) error {
-		return h.a.Respond(ctx, plan.ID, native.Response{OptionID: "implement_bypass"})
+		return h.a.Respond(ctx, plan.ID, agentstate.Response{OptionID: "implement_bypass"})
 	})
 	sent := h.expectSent("turn/start")
 	h.feedJSON(`{"id":` + string(sent.ID) + `,"error":{"code":-32603,"message":"boom"}}`)
 	h.settle()
 	require.Error(t, h.err("implement"))
-	assert.Equal(t, native.PermissionModePlan, h.a.Settings().PermissionMode, "the thread still plans")
+	assert.Equal(t, agentstate.PermissionModePlan, h.a.Settings().PermissionMode, "the thread still plans")
 
 	// Feedback now revises the plan, still in the plan mode and the
 	// policies of before.
 	h.act("revise", func(ctx context.Context) error {
-		return h.a.Respond(ctx, plan.ID, native.Response{OptionID: optionKeepPlanning, Text: "smaller"})
+		return h.a.Respond(ctx, plan.ID, agentstate.Response{OptionID: optionKeepPlanning, Text: "smaller"})
 	})
 	sent = h.expectSent("turn/start")
 	var params map[string]any
@@ -383,14 +384,14 @@ func TestFailedImplementationKeepsPlanning(t *testing.T) {
 // A setting changed while the turn that carries out the plan is on its way
 // stays, whether the turn starts or not.
 func TestImplementationKeepsSettingsChangedMeanwhile(t *testing.T) {
-	implementing := func(t *testing.T) (*harness, native.Request, rpcMessage) {
+	implementing := func(t *testing.T) (*harness, agentstate.Request, rpcMessage) {
 		h := newHarness(t, "", nil)
 		h.bootWith(`"approvalPolicy":"untrusted","approvalsReviewer":"user","sandbox":{"type":"workspaceWrite"},"reasoningEffort":"low"`)
 		h.options(true)
-		require.NoError(t, h.a.ApplySettings(context.Background(), native.Settings{PermissionMode: native.PermissionModePlan}))
+		require.NoError(t, h.a.ApplySettings(context.Background(), agentstate.Settings{PermissionMode: agentstate.PermissionModePlan}))
 		plan := h.planTurn("turn-1")
 		h.act("implement", func(ctx context.Context) error {
-			return h.a.Respond(ctx, plan.ID, native.Response{OptionID: "implement_bypass"})
+			return h.a.Respond(ctx, plan.ID, agentstate.Response{OptionID: "implement_bypass"})
 		})
 		return h, plan, h.expectSent("turn/start")
 	}
@@ -402,15 +403,15 @@ func TestImplementationKeepsSettingsChangedMeanwhile(t *testing.T) {
 
 	t.Run("a new model, and the turn fails", func(t *testing.T) {
 		h, plan, sent := implementing(t)
-		require.NoError(t, h.a.ApplySettings(context.Background(), native.Settings{Model: "gpt-6-astra"}))
+		require.NoError(t, h.a.ApplySettings(context.Background(), agentstate.Settings{Model: "gpt-6-astra"}))
 		h.feedJSON(`{"id":` + string(sent.ID) + `,"error":{"code":-32603,"message":"boom"}}`)
 		h.settle()
 		require.Error(t, h.err("implement"))
-		assert.Equal(t, native.Settings{PermissionMode: native.PermissionModePlan, Model: "gpt-6-astra", Effort: "medium"}, h.a.Settings())
+		assert.Equal(t, agentstate.Settings{PermissionMode: agentstate.PermissionModePlan, Model: "gpt-6-astra", Effort: "medium"}, h.a.Settings())
 
 		// The thread goes on planning, on the new model.
 		h.act("revise", func(ctx context.Context) error {
-			return h.a.Respond(ctx, plan.ID, native.Response{OptionID: optionKeepPlanning, Text: "smaller"})
+			return h.a.Respond(ctx, plan.ID, agentstate.Response{OptionID: optionKeepPlanning, Text: "smaller"})
 		})
 		params := turnParams(t, h.expectSent("turn/start"))
 		assert.Equal(t, map[string]any{"mode": "plan", "settings": map[string]any{"model": "gpt-6-astra", "reasoning_effort": "medium", "developer_instructions": nil}}, params["collaborationMode"])
@@ -419,11 +420,11 @@ func TestImplementationKeepsSettingsChangedMeanwhile(t *testing.T) {
 
 	t.Run("another mode, and the turn fails", func(t *testing.T) {
 		h, _, sent := implementing(t)
-		require.NoError(t, h.a.ApplySettings(context.Background(), native.Settings{PermissionMode: native.PermissionModeAuto}))
+		require.NoError(t, h.a.ApplySettings(context.Background(), agentstate.Settings{PermissionMode: agentstate.PermissionModeAuto}))
 		h.feedJSON(`{"id":` + string(sent.ID) + `,"error":{"code":-32603,"message":"boom"}}`)
 		h.settle()
 		require.Error(t, h.err("implement"))
-		assert.Equal(t, native.PermissionModeAuto, h.a.Settings().PermissionMode)
+		assert.Equal(t, agentstate.PermissionModeAuto, h.a.Settings().PermissionMode)
 	})
 
 	t.Run("another mode, and the turn starts", func(t *testing.T) {
@@ -431,11 +432,11 @@ func TestImplementationKeepsSettingsChangedMeanwhile(t *testing.T) {
 		params := turnParams(t, sent)
 		assert.Equal(t, "default", params["collaborationMode"].(map[string]any)["mode"])
 		assert.Equal(t, "never", params["approvalPolicy"], "the mode the answer picked")
-		require.NoError(t, h.a.ApplySettings(context.Background(), native.Settings{PermissionMode: native.PermissionModeAuto}))
+		require.NoError(t, h.a.ApplySettings(context.Background(), agentstate.Settings{PermissionMode: agentstate.PermissionModeAuto}))
 		h.feedJSON(`{"id":` + string(sent.ID) + `,"result":{"turn":{"id":"turn-2","items":[],"status":"inProgress"}}}`)
 		h.settle()
 		require.NoError(t, h.err("implement"))
-		assert.Equal(t, native.PermissionModeAuto, h.a.Settings().PermissionMode, "the later choice wins")
+		assert.Equal(t, agentstate.PermissionModeAuto, h.a.Settings().PermissionMode, "the later choice wins")
 		h.completeTurn("turn-2", "completed", "")
 
 		h.act("turn", func(ctx context.Context) error { return h.a.StartTurn(ctx, native.Input{Text: "next"}) })

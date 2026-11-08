@@ -18,6 +18,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/nativetest"
 	"github.com/coder/agentapi/lib/native/procutil"
@@ -94,14 +95,14 @@ type recorderState struct {
 	log         []string
 	completions []native.TurnResult
 	started     int
-	opened      []native.Request
+	opened      []agentstate.Request
 	closed      []string
 	names       []string
 	refs        []string
 	errors      []string
 	events      []transcript.SessionEvent
-	logins      []native.LoginRequired
-	settings    []native.Settings
+	logins      []agentstate.LoginRequired
+	settings    []agentstate.Settings
 }
 
 func snapshot(r *recorder) recorderState {
@@ -363,7 +364,7 @@ func inputFromParams(t *testing.T, params json.RawMessage) native.Input {
 
 // responseFromResult turns a captured answer to a server request into the
 // native response that produces it.
-func responseFromResult(t *testing.T, result json.RawMessage) native.Response {
+func responseFromResult(t *testing.T, result json.RawMessage) agentstate.Response {
 	var r struct {
 		Decision json.RawMessage                       `json:"decision"`
 		Action   string                                `json:"action"`
@@ -374,24 +375,24 @@ func responseFromResult(t *testing.T, result json.RawMessage) native.Response {
 	case len(r.Decision) > 0:
 		var name string
 		if json.Unmarshal(r.Decision, &name) == nil {
-			return native.Response{OptionID: name}
+			return agentstate.Response{OptionID: name}
 		}
 		var obj map[string]json.RawMessage
 		require.NoError(t, json.Unmarshal(r.Decision, &obj))
 		for k := range obj {
-			return native.Response{OptionID: k}
+			return agentstate.Response{OptionID: k}
 		}
 	case r.Action != "":
-		return native.Response{OptionID: r.Action}
+		return agentstate.Response{OptionID: r.Action}
 	case r.Answers != nil:
 		answers := map[string][]string{}
 		for k, v := range r.Answers {
 			answers[k] = v.Answers
 		}
-		return native.Response{Answers: answers}
+		return agentstate.Response{Answers: answers}
 	}
 	t.Fatalf("can't answer %s", result)
-	return native.Response{}
+	return agentstate.Response{}
 }
 
 // replay plays a capture against the adapter: it feeds what app-server

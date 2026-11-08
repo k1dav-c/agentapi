@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/agentstate"
 )
 
 // The webhook events an AgentAPI sends about itself, which a hub needs.
@@ -51,17 +51,17 @@ type WebhookEvent struct {
 // WebhookInstanceState is the data of instance.started, instance.heartbeat
 // and instance.stopped: what the agent is doing.
 type WebhookInstanceState struct {
-	Status          AgentStatus           `json:"status"`
-	Lifecycle       LifecycleState        `json:"lifecycle"`
-	AgentSessionID  string                `json:"agent_session_id,omitempty"`
-	SessionName     string                `json:"session_name,omitempty"`
-	PendingRequests int                   `json:"pending_requests"`
-	QueuedMessages  int                   `json:"queued_messages"`
-	LoginRequired   *native.LoginRequired `json:"login_required,omitempty"`
-	LimitStop       *native.LimitStop     `json:"limit_stop,omitempty"`
-	RetryWait       *native.RetryWait     `json:"retry_wait,omitempty"`
-	Usage           *native.AgentUsage    `json:"usage,omitempty"`
-	Settings        *native.Settings      `json:"settings,omitempty"`
+	Status          AgentStatus               `json:"status"`
+	Lifecycle       LifecycleState            `json:"lifecycle"`
+	AgentSessionID  string                    `json:"agent_session_id,omitempty"`
+	SessionName     string                    `json:"session_name,omitempty"`
+	PendingRequests int                       `json:"pending_requests"`
+	QueuedMessages  int                       `json:"queued_messages"`
+	LoginRequired   *agentstate.LoginRequired `json:"login_required,omitempty"`
+	LimitStop       *agentstate.LimitStop     `json:"limit_stop,omitempty"`
+	RetryWait       *agentstate.RetryWait     `json:"retry_wait,omitempty"`
+	Usage           *agentstate.AgentUsage    `json:"usage,omitempty"`
+	Settings        *agentstate.Settings      `json:"settings,omitempty"`
 	// HeartbeatSeconds is how often instance.heartbeat is sent; 0 when it
 	// is off. A receiver that misses a few takes the instance as stopped.
 	HeartbeatSeconds int `json:"heartbeat_seconds,omitempty"`

@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+
+	"github.com/coder/agentapi/lib/httpmw"
 )
 
 func (s *Server) NormalizeSchema(schema any) any {
@@ -92,7 +94,7 @@ func (s *Server) registerRoutes() {
 
 // registerStaticFileRoutes sets up routes for serving static files
 func (s *Server) registerStaticFileRoutes() {
-	chatHandler := FileServerWithIndexFallback(s.chatBasePath)
+	chatHandler := httpmw.FileServerWithIndexFallback(s.chatBasePath)
 
 	// Mount the file server at /chat
 	s.router.Handle("/chat", http.StripPrefix("/chat", chatHandler))

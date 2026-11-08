@@ -20,6 +20,7 @@ import (
 
 	"github.com/coder/quartz"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/agentio"
@@ -205,7 +206,7 @@ type Adapter struct {
 	models []claudeModel
 	// usage is the usage the CLI last reported (see usage.go). Read loop
 	// only.
-	usage native.AgentUsage
+	usage agentstate.AgentUsage
 }
 
 var (
@@ -258,8 +259,8 @@ func newUUID() string {
 }
 
 // Capabilities implements native.Adapter.
-func (a *Adapter) Capabilities() native.Capabilities {
-	return native.Capabilities{Steer: true, Interrupt: true, Resume: !a.args.noPersistence, Images: true, Settings: true}
+func (a *Adapter) Capabilities() agentstate.Capabilities {
+	return agentstate.Capabilities{Steer: true, Interrupt: true, Resume: !a.args.noPersistence, Images: true, Settings: true}
 }
 
 // Start implements native.Adapter: it checks the login, starts the CLI and
@@ -510,7 +511,7 @@ func (a *Adapter) interruptAccepted(json.RawMessage) {
 }
 
 // Respond implements native.Adapter.
-func (a *Adapter) Respond(ctx context.Context, requestID string, response native.Response) error {
+func (a *Adapter) Respond(ctx context.Context, requestID string, response agentstate.Response) error {
 	a.mu.Lock()
 	p, ok := a.requests[requestID]
 	if !ok || p.answering {
@@ -734,7 +735,7 @@ func (a *Adapter) handleControlRequest(f *frame) {
 	a.mu.Lock()
 	a.requests[f.RequestID] = p
 	a.mu.Unlock()
-	if p.req.Kind == native.RequestKindPlan {
+	if p.req.Kind == agentstate.RequestKindPlan {
 		// The ExitPlanMode call can come without its input; the plan is
 		// added to the permission request.
 		a.sendRich(a.parser.patchToolInput(r.ToolUseID, r.Input))
@@ -848,21 +849,22 @@ func (a *Adapter) handleResult(f *frame) {
 	limited := a.limitReached()
 	a.mu.Lock()
 	result := turnResult(f, a.turn.interrupted)
-	if result.StopReason == native.StopReasonError && (limited || native.IsLimitError(result.Error)) {
-		result.StopReason = native.StopReasonLimited
-		if text := stringField(f.Result); text != "" {
-			// Claude Code's own words, e.g. You've hit your limit ·
-			// resets 3pm.
-			result.Error = text
-		}
-	}
 	inTurn := a.turn.phase != turnIdle
 	started := a.started
 	byResult := !a.sessionStates
 	authFailed := a.turn.authFailed
-	if result.StopReason == native.StopReasonError && !authFailed && !authFailure(f) {
-		if status, ok := transientFailure(f); ok {
-			result.StopReason, result.APIStatus = native.StopReasonTransient, status
+	status, transient := transientFailure(f)
+	native.ClassifyFailure(&result, native.FailureHints{
+		Limit:     limited || native.IsLimitError(result.Error),
+		Auth:      authFailed || authFailure(f),
+		Transient: transient,
+		APIStatus: status,
+	})
+	if result.StopReason == native.StopReasonLimited {
+		if text := stringField(f.Result); text != "" {
+			// Claude Code's own words, e.g. You've hit your limit ·
+			// resets 3pm.
+			result.Error = text
 		}
 	}
 	var replaced *native.TurnResult
@@ -900,7 +902,7 @@ func turnResult(f *frame, interrupted bool) native.TurnResult {
 	case f.TerminalReason == "aborted_streaming" || f.TerminalReason == "aborted_tools":
 		return native.TurnResult{StopReason: native.StopReasonInterrupted}
 	case f.Subtype == "success" && !f.IsError:
-		if f.StopReason != nil && *f.StopReason == native.StopReasonMaxTokens {
+		if f.StopReason != nil && native.StopReason(*f.StopReason) == native.StopReasonMaxTokens {
 			return native.TurnResult{StopReason: native.StopReasonMaxTokens}
 		}
 		return native.TurnResult{StopReason: native.StopReasonEndTurn}

@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
-	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/statedb"
 	"github.com/coder/agentapi/lib/transcript"
 )
@@ -45,9 +45,9 @@ func TestRoundTrip(t *testing.T) {
 	db.PutMessage(msg(1, "b2"), 3) // replaces the pending write
 	db.PutRichMessage(0, transcript.RichMessage{MessageID: "m1", Role: "assistant"}, 4)
 	db.AppendSessionEvents([]transcript.SessionEvent{{EventID: 1, Kind: "text"}, {EventID: 2, Kind: "tool_call"}})
-	db.PutRequest(native.RequestState{Request: native.Request{ID: "r2", Kind: native.RequestKindApproval}, Status: native.RequestStatusPending}, 5)
-	db.PutRequest(native.RequestState{Request: native.Request{ID: "r1", Kind: native.RequestKindQuestion}, Status: native.RequestStatusPending}, 6)
-	db.PutRequest(native.RequestState{Request: native.Request{ID: "r2", Kind: native.RequestKindApproval}, Status: native.RequestStatusResolved}, 7)
+	db.PutRequest(agentstate.RequestState{Request: agentstate.Request{ID: "r2", Kind: agentstate.RequestKindApproval}, Status: agentstate.RequestStatusPending}, 5)
+	db.PutRequest(agentstate.RequestState{Request: agentstate.Request{ID: "r1", Kind: agentstate.RequestKindQuestion}, Status: agentstate.RequestStatusPending}, 6)
+	db.PutRequest(agentstate.RequestState{Request: agentstate.Request{ID: "r2", Kind: agentstate.RequestKindApproval}, Status: agentstate.RequestStatusResolved}, 7)
 	db.PutQueue([]statedb.QueuedMessage{{ID: 3, Content: "later"}}, 3)
 	require.NoError(t, db.Close())
 
@@ -71,7 +71,7 @@ func TestRoundTrip(t *testing.T) {
 	require.Len(t, snap.Requests, 2)
 	// Requests keep the order they were first stored in.
 	assert.Equal(t, "r2", snap.Requests[0].State.ID)
-	assert.Equal(t, native.RequestStatusResolved, snap.Requests[0].State.Status)
+	assert.Equal(t, agentstate.RequestStatusResolved, snap.Requests[0].State.Status)
 	assert.Equal(t, uint64(7), snap.Requests[0].Seq)
 	assert.Equal(t, "r1", snap.Requests[1].State.ID)
 	assert.Equal(t, []statedb.QueuedMessage{{ID: 3, Content: "later"}}, snap.Queue)
@@ -235,7 +235,7 @@ func TestLimitStopRoundTrip(t *testing.T) {
 	db := open(t, path)
 	resets := time.Unix(1800000000, 0).UTC()
 	db.SetMeta(statedb.MetaAgentType, "claude")
-	db.SetLimitStop(&native.LimitStop{Message: "You've hit your limit", StoppedAt: time.Unix(1700000000, 0).UTC(), ResetsAt: &resets})
+	db.SetLimitStop(&agentstate.LimitStop{Message: "You've hit your limit", StoppedAt: time.Unix(1700000000, 0).UTC(), ResetsAt: &resets})
 	require.NoError(t, db.Close())
 
 	db = open(t, path)
@@ -262,7 +262,7 @@ func TestRetryWaitRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.db")
 	db := open(t, path)
 	stopped := time.Unix(1700000000, 0).UTC()
-	want := native.RetryWait{Message: "API Error: 502 Bad Gateway", APIStatus: 502, StoppedAt: stopped, Attempt: 2, Attempts: 3, RetryAt: stopped.Add(2 * time.Minute)}
+	want := agentstate.RetryWait{Message: "API Error: 502 Bad Gateway", APIStatus: 502, StoppedAt: stopped, Attempt: 2, Attempts: 3, RetryAt: stopped.Add(2 * time.Minute)}
 	db.SetMeta(statedb.MetaAgentType, "claude")
 	db.SetRetryWait(&want)
 	require.NoError(t, db.Close())

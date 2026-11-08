@@ -86,29 +86,29 @@ func TestSummaryFromAnEndingWatch(t *testing.T) {
 	require.NoError(t, err)
 	_, _ = h.store.update("dev:1", true, func(i *Instance) {
 		i.URL = "http://dev:1"
-		i.Connection = ConnectionStopped
+		i.Connection = instanceapi.ConnectionStopped
 	})
 	summary := instanceapi.SummaryBody{Instance: instanceapi.WebhookInstance{ID: "dev:1", ServerID: "s1"}}
-	connection := func() Connection {
+	connection := func() instanceapi.Connection {
 		instance, _ := h.store.get("dev:1")
 		return instance.Connection
 	}
 	assert.False(t, h.applySummary(t.Context(), "dev:1", "http://dev:1", summary))
-	assert.Equal(t, ConnectionStopped, connection())
+	assert.Equal(t, instanceapi.ConnectionStopped, connection())
 
 	_, _ = h.store.update("dev:1", false, func(i *Instance) {
 		i.URL = "http://dev:2"
-		i.Connection = ConnectionConnecting
+		i.Connection = instanceapi.ConnectionConnecting
 	})
 	assert.False(t, h.applySummary(t.Context(), "dev:1", "http://dev:1", summary), "a URL it left")
 	ended, cancel := context.WithCancel(t.Context())
 	cancel()
 	assert.False(t, h.applySummary(ended, "dev:1", "http://dev:2", summary), "a watch that ended")
-	assert.Equal(t, ConnectionConnecting, connection())
+	assert.Equal(t, instanceapi.ConnectionConnecting, connection())
 
 	assert.True(t, h.applySummary(t.Context(), "dev:1", "http://dev:2", summary))
 	instance, _ := h.store.get("dev:1")
-	assert.Equal(t, ConnectionConnected, instance.Connection)
+	assert.Equal(t, instanceapi.ConnectionConnected, instance.Connection)
 	assert.Equal(t, "http://dev:2", instance.URL)
 	assert.Equal(t, "s1", instance.ServerID)
 }
@@ -122,7 +122,7 @@ func TestStoreTellsWhatBrowsersSee(t *testing.T) {
 	now := time.Date(2026, 10, 27, 9, 0, 0, 0, time.UTC)
 	_, _ = s.update("dev:1", true, func(i *Instance) {
 		i.URL = "http://dev:1"
-		i.Connection = ConnectionConnected
+		i.Connection = instanceapi.ConnectionConnected
 		i.Summary = &instanceapi.SummaryBody{Status: instanceapi.AgentStatusStable, Attention: instanceapi.AttentionNone}
 		i.LastSeen = now
 	})
@@ -141,7 +141,7 @@ func TestStoreTellsWhatBrowsersSee(t *testing.T) {
 	_, _ = s.update("dev:1", false, func(i *Instance) { i.Group = "Work" })
 	assert.True(t, heard())
 
-	_, _ = s.update("dev:1", false, func(i *Instance) { i.Connection = ConnectionUnreachable })
+	_, _ = s.update("dev:1", false, func(i *Instance) { i.Connection = instanceapi.ConnectionUnreachable })
 	assert.True(t, heard())
 	_, _ = s.update("dev:1", false, func(i *Instance) { i.LastSeen = now.Add(2 * time.Minute) })
 	assert.True(t, heard(), "offline since then")
@@ -162,5 +162,5 @@ func TestSummaryThatEndsAMuteIsOneEvent(t *testing.T) {
 	require.Len(t, events, 1)
 	event := <-events
 	assert.Empty(t, event.Instance.Muted)
-	assert.Equal(t, ConnectionConnected, event.Instance.Connection)
+	assert.Equal(t, instanceapi.ConnectionConnected, event.Instance.Connection)
 }

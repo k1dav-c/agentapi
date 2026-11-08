@@ -4,18 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"time"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
 )
 
-// A turn that stops on a usage limit (LimitStop) or fails on a transient
-// upstream error (RetryWait) holds the queue: the queued messages wait
-// until a message that continues the turn (ContinuePrompt) went out, or
-// for a limit without one scheduled until it resets. A conversation has
-// at most one hold, which the next turn ends, and a turn whose message
-// doesn't reach the agent gives back.
+// A turn that stops on a usage limit (agentstate.LimitStop) or fails on a
+// transient upstream error (agentstate.RetryWait) holds the queue: the
+// queued messages wait until a message that continues the turn
+// (ContinuePrompt) went out, or for a limit without one scheduled until it
+// resets. A conversation has at most one hold, which the next turn ends,
+// and a turn whose message doesn't reach the agent gives back.
 
 var (
 	// ErrNoLimitStop is returned when no turn stopped on a usage limit.
@@ -35,55 +35,18 @@ const ContinuePrompt = "Continue from where you left off."
 // too.
 const continueMargin = time.Minute
 
-// defaultRetryDelays are Config.RetryDelays' default (--retry-delays
-// 30s,1m,2m,5m*12): 15 retries, about an hour in all.
-var defaultRetryDelays = append([]time.Duration{30 * time.Second, time.Minute, 2 * time.Minute}, slices.Repeat([]time.Duration{5 * time.Minute}, 12)...)
-
-// LimitStop is a turn that stopped because the account reached a usage
-// limit. It holds the queue until the limit resets, or until a
-// continuation that is due went out.
-type LimitStop struct {
-	Message   string    `json:"message" doc:"What the agent said, e.g. You've hit your limit · resets 3pm."`
-	StoppedAt time.Time `json:"stopped_at" doc:"When the turn stopped."`
-	// ResetsAt is nil when the agent doesn't say.
-	ResetsAt *time.Time `json:"resets_at,omitempty" doc:"When the limit resets, if the agent says. Queued messages wait until then."`
-	// ContinueAt is set while a continuation is scheduled.
-	ContinueAt *time.Time `json:"continue_at,omitempty" doc:"When AgentAPI sends a message that continues the turn, if one is scheduled (POST /limit/continue). Queued messages go out after it."`
-}
-
-// RetryWait is a turn that failed on a transient upstream error (an HTTP
-// 5xx or 429, an overloaded API) after the agent's own retries. It holds
-// the queue until AgentAPI tried the turn again: it sends ContinuePrompt
-// at RetryAt, so the agent goes on without the user's message twice.
-type RetryWait struct {
-	Message string `json:"message" doc:"What the agent said, e.g. API Error: 502 Bad Gateway."`
-	// APIStatus is 0 when the agent doesn't say.
-	APIStatus int       `json:"api_status,omitempty" doc:"The HTTP status the API or gateway answered with, e.g. 502, if the agent says."`
-	StoppedAt time.Time `json:"stopped_at" doc:"When the turn failed."`
-	Attempt   int       `json:"attempt" doc:"Which retry comes next, from 1."`
-	Attempts  int       `json:"attempts" doc:"How many times in a row AgentAPI tries a failed turn again (--retry-delays). After the last, a failure is an error."`
-	RetryAt   time.Time `json:"retry_at" doc:"When AgentAPI sends a message that continues the turn. Queued messages go out after it."`
-}
-
-func (l *LimitStop) clone() *LimitStop {
-	if l == nil {
+// clone returns a copy of *p, or nil for nil.
+func clone[T any](p *T) *T {
+	if p == nil {
 		return nil
 	}
-	copied := *l
+	copied := *p
 	return &copied
 }
 
-func (r *RetryWait) clone() *RetryWait {
-	if r == nil {
-		return nil
-	}
-	copied := *r
-	return &copied
-}
-
-// ContinueAtReset is when a continuation scheduled for the limit's reset
-// goes out, or nil when the agent didn't say when it resets.
-func (l *LimitStop) ContinueAtReset() *time.Time {
+// ContinueAtReset is when a continuation scheduled for the reset of l's
+// limit goes out, or nil when the agent didn't say when it resets.
+func ContinueAtReset(l *agentstate.LimitStop) *time.Time {
 	if l == nil || l.ResetsAt == nil {
 		return nil
 	}
@@ -106,21 +69,21 @@ const (
 // hold is what holds the queue: a limit stop, a retry wait, or with
 // neither nothing. Its values are never changed, only replaced.
 type hold struct {
-	limit *LimitStop
-	retry *RetryWait
+	limit *agentstate.LimitStop
+	retry *agentstate.RetryWait
 }
 
 // restoredHold is the hold restored from before AgentAPI restarted. Only
 // one of limit and retry holds at a time; if both are given, the later
 // one does.
-func restoredHold(limit *LimitStop, retry *RetryWait) hold {
+func restoredHold(limit *agentstate.LimitStop, retry *agentstate.RetryWait) hold {
 	switch {
 	case limit != nil && retry != nil && retry.StoppedAt.After(limit.StoppedAt):
-		return hold{retry: retry.clone()}
+		return hold{retry: clone(retry)}
 	case limit != nil:
-		return hold{limit: limit.clone()}
+		return hold{limit: clone(limit)}
 	}
-	return hold{retry: retry.clone()}
+	return hold{retry: clone(retry)}
 }
 
 func (h hold) kind() HoldKind {
@@ -203,27 +166,27 @@ func (c *Conversation) setHoldLocked(h hold) {
 		c.cfg.Observer.RetryWait(nil)
 	}
 	if old.limit != h.limit && h.limit != nil {
-		c.cfg.Observer.LimitStop(h.limit.clone())
+		c.cfg.Observer.LimitStop(clone(h.limit))
 	}
 	if old.retry != h.retry && h.retry != nil {
-		c.cfg.Observer.RetryWait(h.retry.clone())
+		c.cfg.Observer.RetryWait(clone(h.retry))
 	}
 }
 
 // LimitStop reports the turn a usage limit stopped, if no turn started
 // since; nil otherwise.
-func (c *Conversation) LimitStop() *LimitStop {
+func (c *Conversation) LimitStop() *agentstate.LimitStop {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.hold.limit.clone()
+	return clone(c.hold.limit)
 }
 
 // RetryWait reports the failed turn that waits to be tried again, if no
 // turn started since; nil otherwise.
-func (c *Conversation) RetryWait() *RetryWait {
+func (c *Conversation) RetryWait() *agentstate.RetryWait {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.hold.retry.clone()
+	return clone(c.hold.retry)
 }
 
 // HoldsQueue reports whether queued messages wait at now: for a usage
@@ -262,23 +225,24 @@ func (c *Conversation) ContinueIfDue(ctx context.Context, now time.Time) (HoldKi
 // with result; again: that turn was a continuation, so it is scheduled
 // again.
 func (c *Conversation) limitStoppedLocked(result TurnResult, again bool) {
-	ls := &LimitStop{Message: result.Error, StoppedAt: c.cfg.Clock.Now(), ResetsAt: result.ResetsAt}
+	ls := &agentstate.LimitStop{Message: result.Error, StoppedAt: c.cfg.Clock.Now(), ResetsAt: result.ResetsAt}
 	if ls.ResetsAt == nil {
-		ls.ResetsAt = c.usage.reachedLimitReset()
+		ls.ResetsAt = reachedLimitReset(c.usage)
 	}
 	if c.cfg.AutoContinue || again {
-		ls.ContinueAt = ls.ContinueAtReset()
+		ls.ContinueAt = ContinueAtReset(ls)
 	}
 	c.setHoldLocked(hold{limit: ls})
 }
 
-// reachedLimitReset returns when the limits the account reached reset: the
-// latest reset among them, as the account can't work before then. It is
-// nil when the agent reported no reached limit with a reset time.
-func (u AgentUsage) reachedLimitReset() *time.Time {
+// reachedLimitReset returns when the limits the account reached in u
+// reset: the latest reset among them, as the account can't work before
+// then. It is nil when the agent reported no reached limit with a reset
+// time.
+func reachedLimitReset(u agentstate.AgentUsage) *time.Time {
 	var latest *time.Time
 	for _, l := range u.RateLimits {
-		reached := l.Status == "rejected" || (l.UsedPercent != nil && *l.UsedPercent >= 100)
+		reached := l.Status == agentstate.RateLimitRejected || (l.UsedPercent != nil && *l.UsedPercent >= 100)
 		if reached && l.ResetsAt != nil && (latest == nil || l.ResetsAt.After(*latest)) {
 			at := *l.ResetsAt
 			latest = &at
@@ -333,7 +297,7 @@ func (c *Conversation) retryLocked(result TurnResult, attempt int) bool {
 	if status == 0 {
 		status = TransientStatus(result.Error)
 	}
-	c.setHoldLocked(hold{retry: &RetryWait{
+	c.setHoldLocked(hold{retry: &agentstate.RetryWait{
 		Message: result.Error, APIStatus: status, StoppedAt: now,
 		Attempt: attempt, Attempts: len(delays), RetryAt: now.Add(delay),
 	}})
@@ -352,18 +316,6 @@ func retriesOutText(result TurnResult, retries int) string {
 		times = "time"
 	}
 	return fmt.Sprintf("%s AgentAPI tried again %d %s and gave up.", result.Error, retries, times)
-}
-
-// formatDelay writes a retry delay the way a flag gives it: 30s, 2m, 1m30s.
-func formatDelay(d time.Duration) string {
-	d = d.Round(time.Second)
-	switch {
-	case d >= time.Minute && d%time.Minute == 0:
-		return fmt.Sprintf("%dm", d/time.Minute)
-	case d < time.Minute:
-		return fmt.Sprintf("%ds", d/time.Second)
-	}
-	return fmt.Sprintf("%dm%ds", d/time.Minute, (d%time.Minute)/time.Second)
 }
 
 // RetryNow tries the failed turn that waits now, as the retry it waits

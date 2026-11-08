@@ -6,12 +6,13 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/native"
 )
 
 // loginHint tells the user how to give Pi a model provider. Pi logs in
 // from its own terminal UI (/login); there is no command for it.
-var loginHint = native.LoginRequired{
+var loginHint = agentstate.LoginRequired{
 	Agent:   "Pi",
 	Message: "Pi has no logged-in model provider.",
 	Command: "pi",

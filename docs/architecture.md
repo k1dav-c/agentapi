@@ -62,7 +62,8 @@ emitter. Handlers call the conversation and read state from the emitter.
 | Path | What it holds |
 | --- | --- |
 | `main.go`, `cmd/` | The Cobra CLI: `server` (flags, agent type, starting the agent, signals, restarting in place), `list` (the registered AgentAPIs and their summaries), `hub` (`serve`: the hub; `join`, `leave` and `status`: a hub's webhook in the config file and in the running AgentAPIs), `restart` (has registered AgentAPIs restart in place) and `update` (self-update with checksum verification) |
-| `lib/httpapi/` | The HTTP server: routes and handlers, the queue, token auth, CORS and cross-origin checks, the event streams, the files, terminal and webhook endpoints, and the embedded chat UI; it wires the three packages below |
+| `lib/httpapi/` | The HTTP server: routes and handlers, the queue, token auth, CORS, the event streams, the files, terminal and webhook endpoints; it wires the three packages below |
+| `lib/httpmw/` | What the server and the hub share of HTTP: the `Host` check and the parsing of `--allowed-hosts`, `--allowed-origins` and `--bind`, cross-origin protection, compression, and the embedded chat UI's file server (`lib/httpmw/chat/`) |
 | `lib/convstate/` | The conversation state clients read, without HTTP: the `EventEmitter` (its changes numbered by epoch and seq, subscriptions and replay), the tasks and the summary it derives, the queue as the server reported it, and the `Persister` it hands every change to |
 | `lib/webhook/` | Webhook delivery (`Dispatcher`: queue, retries, signatures, heartbeats, `{ip}` in the public URL) and the observer that turns the emitter's events into webhook events (`Observe`, through `Source`) |
 | `lib/workspacefs/` | What the file viewer reads of the working directory (`Dir`): a file's text, its diff through git, an HTML preview, a file to serve, the search for a path; a refusal is an `Error` whose kind `lib/httpapi` turns into a status |
@@ -71,15 +72,16 @@ emitter. Handlers call the conversation and read state from the emitter.
 | `lib/agentlog/` | The agents' session-log formats, one package each (`claudelog`, `codexlog`, `pilog`): their records, the parsers into rich messages and timeline events (the adapters use them too), prompts and injected context, model calls and file layout; plus line reading, the incremental file index and format-drift warnings |
 | `lib/sessions/` | A server-held `Store` reads earlier sessions and their conversations (`history.go`), subagents (`subagents.go`) and costs (`cost.go`) for a directory |
 | `lib/pricing/` | Model prices per million tokens (built-in `prices.json` and a `--prices` file), and per-call cost calculation |
-| `lib/native/` | The native transport: `Conversation`, the `Adapter` and `Sink` contracts, requests, settings, usage, logins, and the queue's hold (`hold.go`: a usage limit stop or a failed turn that waits to be tried again) |
+| `lib/native/` | The native transport: `Conversation`, the `Adapter` and `Sink` contracts, requests, settings, usage, logins, the queue's hold (`hold.go`: a usage limit stop or a failed turn that waits to be tried again), its `Policy` (`policy.go`: continue, retry and restart delays) and `ClassifyFailure` (a failed turn's stop reason) |
+| `lib/agentstate/` | The values a native agent reports and the API serves: capabilities, login, settings, usage, requests, the limit stop and the retry wait. A leaf package (huma and `lib/util` only), so the packages that serve them don't depend on `lib/native` |
 | `lib/native/claude`, `codex`, `pi` | One adapter per agent protocol |
 | `lib/native/agentio` | What those adapters share to run their agent: the process and its loop (`Host`), writing to its stdin, matching its responses to the requests waiting for them, lenient decoding with drift warnings, the snapshot throttle |
 | `lib/native/demo` | `native-demo`, a simulated agent for working on the chat |
 | `lib/native/nativetest` | A scriptable fake adapter for tests |
 | `lib/native/procutil` | Child process groups and graceful shutdown |
 | `lib/statedb/` | SQLite persistence for `--state-db`, and the import of a `--state-file` |
-| `lib/instanceapi/` | The contract between an AgentAPI and the clients that watch many: who it is (`WebhookInstance`, in its webhook events, summary and registry entry, with its `AgentType`), its summary, the webhook envelope with its signature (`Sign`, `Verify`), and the state a hub shows of each instance (`StateOf`). `lib/httpapi` keeps aliases under the same names, which the OpenAPI schema uses |
-| `lib/hub/` | `agentapi hub serve`: the instances, the groups and pins set on its page, when each last changed what its row shows and when the hub saw each working (`store.go`, `work.go`, kept in a file by `persist.go`), the favorite prompts (`favorites.go`, `GET`/`PUT /api/favorites`, in the same file), the signed webhook receiver (`webhook.go`), each instance's summary stream (`watch.go`), sign-in, the browser's event stream and the proxy to the instances (`hub.go`, `proxy.go`), where machines join it (`join.go`: its addresses for `GET /api/join` and the startup log); the user guide is [hub.md](hub.md) |
+| `lib/instanceapi/` | The contract between an AgentAPI and the clients that watch many: who it is (`WebhookInstance`, in its webhook events, summary and registry entry, with its `AgentType`), its summary, the webhook envelope with its signature (`Sign`, `Verify`), and the state a hub shows of each instance (`StateOf`). It imports only `lib/agentstate` and `lib/util` |
+| `lib/hub/` | `agentapi hub serve`, over `lib/instanceapi` and `lib/httpmw` rather than the server: the instances, the groups and pins set on its page, when each last changed what its row shows and when the hub saw each working (`store.go`, `work.go`, kept in a file by `persist.go`), the favorite prompts (`favorites.go`, `GET`/`PUT /api/favorites`, in the same file), the signed webhook receiver (`webhook.go`), each instance's summary stream (`watch.go`), sign-in, the browser's event stream and the proxy to the instances (`hub.go`, `proxy.go`), where machines join it (`join.go`: its addresses for `GET /api/join` and the startup log); the user guide is [hub.md](hub.md) |
 | `lib/sse/` | Server-sent events as the HTML standard defines them: a reader (data: lines joined, comments skipped, CR, LF or CRLF line ends) and a writer, used by the hub for the instances' summary streams and the browser's stream. `lib/httpapi` writes its streams with huma's `sse` |
 | `lib/netaddr/` | The machine's IPv4 addresses: those other machines may reach it at (the hub's join URLs), and the one it reaches a host from (`Resolver`, for `{ip}` in `--public-url`) |
 | `lib/userconfig/` | The user's settings file, `~/.agentapi/config.yaml`: flags by name, read by `agentapi server`, written by `agentapi hub` |
@@ -96,6 +98,16 @@ emitter. Handlers call the conversation and read state from the emitter.
 | `internal/version/` | The version, stamped at build time |
 | `chat/` | The chat UI (Next.js) |
 | `e2e/` | End-to-end tests against a scripted Claude Code (`e2e/fakeclaude`) |
+
+The internal imports point one way, from the commands to the leaves:
+
+- `cmd/server` → `lib/httpapi` → `lib/convstate`, `lib/webhook`, `lib/native`, `lib/statedb`,
+  `lib/httpmw`
+- `lib/convstate`, `lib/webhook` → `lib/instanceapi` → `lib/agentstate` → `lib/util`
+- `lib/native` and its adapters, `lib/statedb` → `lib/agentstate`: only the server reaches
+  `lib/native`
+- `cmd/hub`, `lib/hub` → `lib/instanceapi`, `lib/httpmw`, which imports no package of the
+  repository: the hub doesn't build the server
 
 ## Startup and shutdown
 
@@ -191,7 +203,7 @@ in order:
    which only `--log-level debug` shows: a client that polls `GET /status`
    would fill the log. Changes and refused requests log at Info, server
    errors at Warn.
-3. Compression (`compress.go`): text, JSON, the event streams (flushed event by
+3. Compression (`lib/httpmw`'s `Compress`): text, JSON, the event streams (flushed event by
    event) and the chat's files are gzipped for clients that take it; images
    go as they are. The hub uses the same middleware, and its proxy passes an
    instance's compressed responses on as they are.
@@ -205,7 +217,7 @@ The handlers are grouped by file:
 
 | File | Handles |
 | --- | --- |
-| `server.go`, `routes.go`, `hosts.go`, `middleware.go`, `compress.go` | The server's setup, start and stop; the routes, which each feature registers; allowed hosts and origins; request logging; compression |
+| `server.go`, `routes.go`, `middleware.go` | The server's setup, start and stop, with `lib/httpmw`'s host, cross-origin and compression middleware; the routes, which each feature registers; request logging |
 | `conversation_api.go`, `queue.go`, `turngate.go`, `sse.go` | Messages, status and timeline; the queue, its dispatch (with a continuation that is due first, `beforeQueue`) and `queue_update`; whether a turn may start now (`turnGateLocked`); `GET /events` |
 | `tasks_api.go` | `GET /tasks`: the tasks the emitter derives (`lib/convstate`) |
 | `summary_api.go`, `spend.go`, `registry.go` | `GET /summary` and `POST /tasks/seen`, the summary the emitter keeps for clients that watch many AgentAPIs; the spend worked out once a minute; the server's registry entry (`instanceRegistry`) |
@@ -216,8 +228,8 @@ The handlers are grouped by file:
 | `auth.go` | Token auth and the chat's sign-in (`authAPI`) |
 | `restart.go`, `statedb.go` | Restarts (`beginRestart`); restoring and persisting the state |
 | `update.go` | Updating AgentAPI through its API (`POST /update`, `DELETE /update`, the `updater`) and the summary's `update`; see [Restarts and updates](#restarts-and-updates) |
-| `convstate.go`, `models.go` | Aliases of `lib/convstate`'s types; the API's types |
-| `embed.go`, `uploads.go` | The embedded chat UI; uploaded files (`uploadAPI`, which serves `POST /upload` from the operation's middleware: huma v2.32 changes the shared operation on every multipart request) |
+| `models.go` | The API's types |
+| `uploads.go` | Uploaded files (`uploadAPI`, which serves `POST /upload` from the operation's middleware: huma v2.32 changes the shared operation on every multipart request) |
 
 Chi routes outside huma serve the chat (`/chat/*`, with `/` redirecting there), uploaded images
 (`/uploads/{checksum}/{name}`) and workspace images (`/files/image`).
@@ -241,9 +253,9 @@ store, `authAPI` the token check, and `webhookAPI` the dispatcher and state DB.
 - `lib/workspacefs` reads the working directory; `fileAPI` turns its
   refusals into 400, 403 and 404.
 
-Huma names the OpenAPI schemas after the Go types, so `lib/httpapi` keeps
-aliases of the types that moved (`convstate.go`, `FileMatch`,
-`WebhookConfig`), so the schema and the package's API keep their names.
+Huma names an OpenAPI schema after its Go type's name, whichever package
+declares it, so the handlers use `convstate.StatusChangeBody`,
+`instanceapi.SummaryBody` or `webhook.Config` as they are, without aliases.
 
 ## The native transport
 
@@ -392,9 +404,10 @@ type Factory func(resume Resume) (Adapter, error)
   HTTP 5xx or 429 (Claude Code's `api_error_status`, the `httpStatusCode` of
   Codex's `codexErrorInfo`), Codex's `serverOverloaded`, a connection that
   failed, Pi's `auto_retry_end` without success, or text `IsTransientError`
-  matches. Usage limits and login problems are classified first. The
-  conversation keeps a `RetryWait` with the next retry's time
-  (`Config.RetryDelays`, `--retry-delays`), warns instead of reporting an
+  matches. Usage limits and login problems are classified first
+  (`ClassifyFailure`, which all three adapters call). The conversation
+  keeps a `RetryWait` with the next retry's time
+  (`Policy.RetryDelays`, `--retry-delays`), warns instead of reporting an
   error, and holds the queue (`HoldsQueue`). `ContinueIfDue` sends
   `ContinuePrompt` on the queue's tick once it is due; if that turn fails the
   same way, the next delay follows (the hold it continued counts them), and after the
@@ -755,7 +768,7 @@ of the content's SHA-256, so a path never changes; unused ones are removed after
   rebinding), and `--allowed-origins` which origins may call the API from a
   browser. A request that changes something (not GET, HEAD or OPTIONS) from
   a page of another origin is refused unless that origin is listed; `*`
-  trusts none (`crossorigin.go`, the rules of Go 1.25's
+  trusts none (`lib/httpmw/crossorigin.go`, the rules of Go 1.25's
   `http.CrossOriginProtection`).
 - Uploads go to a private directory, and only images are served back. Files
   outside the working directory can't be opened.
@@ -856,7 +869,7 @@ AgentAPI's own `AGENTAPI_*` variables.
 ## The chat UI
 
 `chat/` is a Next.js 15 and React 19 app, built with bun as a static export. `make embed` copies the
-build into `lib/httpapi/chat/`, which `embed.go` embeds with `go:embed`. The build uses a
+build into `lib/httpmw/chat/`, which `fileserver.go` embeds with `go:embed`. The build uses a
 placeholder base path that the server rewrites to `--chat-base-path` (default `/chat`). The UI also
 runs as a standalone development server (`bun run dev`, with `?url=<server>`), and `/chat/embed` is
 a variant for embedding in other pages (`hub=1`: in the hub's frame it draws the hub's bar for the

@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/instanceapi"
-	"github.com/coder/agentapi/lib/native"
 )
 
 // A signature covers the timestamp and the body, with the secret.
@@ -64,7 +64,7 @@ func TestStateOf(t *testing.T) {
 		"another request":     {connected, request, "request:r0", instanceapi.StateNeedsYou},
 		"working":             {connected, summary(func(s *instanceapi.SummaryBody) { s.Status = instanceapi.AgentStatusRunning }), "", instanceapi.StateWorking},
 		"unread":              {connected, summary(func(s *instanceapi.SummaryBody) { s.Unread = true }), "", instanceapi.StateUnread},
-		"waits to retry":      {connected, summary(func(s *instanceapi.SummaryBody) { s.RetryWait, s.Unread = &native.RetryWait{Attempt: 1}, true }), "", instanceapi.StateWorking},
+		"waits to retry":      {connected, summary(func(s *instanceapi.SummaryBody) { s.RetryWait, s.Unread = &agentstate.RetryWait{Attempt: 1}, true }), "", instanceapi.StateWorking},
 		"idle":                {connected, summary(func(*instanceapi.SummaryBody) {}), "", instanceapi.StateIdle},
 		"exited":              {connected, summary(func(s *instanceapi.SummaryBody) { s.Attention = instanceapi.AttentionExited }), "", instanceapi.StateStopped},
 		"no summary yet":      {instanceapi.ConnectionConnecting, nil, "", instanceapi.StateConnecting},

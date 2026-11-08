@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/native"
 )
 
@@ -61,7 +62,7 @@ func TestContextUsageAfterATurn(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return len(sink.State().Usage) == 1
 	}, 5*time.Second, time.Millisecond)
-	assert.Equal(t, &native.ContextUsage{Used: 41000, Size: 200000}, sink.State().Usage[0].Context)
+	assert.Equal(t, &agentstate.ContextUsage{Used: 41000, Size: 200000}, sink.State().Usage[0].Context)
 }
 
 func TestTurnStoppedByALimit(t *testing.T) {
@@ -106,7 +107,7 @@ func TestPromptCacheAfterATurn(t *testing.T) {
 		proc.send(t, []byte(`{"type":"result","subtype":"success","is_error":false,"result":"done","usage":`+usage+`}`))
 		proc.barrier(t)
 	}
-	cache := func() *native.PromptCache {
+	cache := func() *agentstate.PromptCache {
 		usage := sink.State().Usage
 		require.NotEmpty(t, usage)
 		return usage[len(usage)-1].PromptCache
@@ -114,12 +115,12 @@ func TestPromptCacheAfterATurn(t *testing.T) {
 
 	// As Claude Code 2.1.302 reports it on a subscription.
 	turn(`{"input_tokens":4,"cache_creation_input_tokens":4144,"cache_read_input_tokens":32278,"cache_creation":{"ephemeral_1h_input_tokens":4144,"ephemeral_5m_input_tokens":0}}`)
-	assert.Equal(t, &native.PromptCache{TTLSeconds: 3600, ExpiresAt: clock.Now().Add(time.Hour).UTC()}, cache())
+	assert.Equal(t, &agentstate.PromptCache{TTLSeconds: 3600, ExpiresAt: clock.Now().Add(time.Hour).UTC()}, cache())
 
 	// A turn that only read the cache keeps its time to live.
 	clock.Advance(10 * time.Minute)
 	turn(`{"input_tokens":3,"cache_read_input_tokens":36422,"cache_creation":{"ephemeral_1h_input_tokens":0,"ephemeral_5m_input_tokens":0}}`)
-	assert.Equal(t, &native.PromptCache{TTLSeconds: 3600, ExpiresAt: clock.Now().Add(time.Hour).UTC()}, cache())
+	assert.Equal(t, &agentstate.PromptCache{TTLSeconds: 3600, ExpiresAt: clock.Now().Add(time.Hour).UTC()}, cache())
 
 	// With an API key the cache is kept five minutes.
 	turn(`{"input_tokens":3,"cache_read_input_tokens":36422,"cache_creation":{"ephemeral_1h_input_tokens":0,"ephemeral_5m_input_tokens":120}}`)

@@ -6,7 +6,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/util"
 )
 
@@ -83,7 +83,7 @@ type Task struct {
 	// Errors the agent reported during the task.
 	Errors []string `json:"errors,omitempty" doc:"Errors the agent reported during the task."`
 	// Limit is the usage limit that stopped a limited task.
-	Limit *native.LimitStop `json:"limit,omitempty" doc:"The usage limit stop of a limited task."`
+	Limit *agentstate.LimitStop `json:"limit,omitempty" doc:"The usage limit stop of a limited task."`
 }
 
 // Final reports whether the task ended.
@@ -139,12 +139,12 @@ type SummaryBody struct {
 	Tasks int   `json:"tasks" doc:"How many tasks the conversation has."`
 	// Unread: the latest task ended after a client last showed the
 	// conversation (POST /tasks/seen).
-	Unread        bool                  `json:"unread" doc:"The latest task ended after a client last showed the conversation to the user (POST /tasks/seen): its result wasn't seen yet."`
-	SeenAt        time.Time             `json:"seen_at" doc:"When a client last showed the conversation to the user (POST /tasks/seen); when AgentAPI started, before any did."`
-	LoginRequired *native.LoginRequired `json:"login_required,omitempty" doc:"Set while the agent waits for the user to log in, as in GET /status."`
-	LimitStop     *native.LimitStop     `json:"limit_stop,omitempty" doc:"Set while a usage limit holds the agent, as in GET /status."`
-	RetryWait     *native.RetryWait     `json:"retry_wait,omitempty" doc:"Set while a failed turn waits to be tried again, as in GET /status. The agent needs nothing of the user meanwhile: attention stays none."`
-	Usage         *native.AgentUsage    `json:"usage,omitempty" doc:"The context window and the account's usage limits, as in GET /status."`
+	Unread        bool                      `json:"unread" doc:"The latest task ended after a client last showed the conversation to the user (POST /tasks/seen): its result wasn't seen yet."`
+	SeenAt        time.Time                 `json:"seen_at" doc:"When a client last showed the conversation to the user (POST /tasks/seen); when AgentAPI started, before any did."`
+	LoginRequired *agentstate.LoginRequired `json:"login_required,omitempty" doc:"Set while the agent waits for the user to log in, as in GET /status."`
+	LimitStop     *agentstate.LimitStop     `json:"limit_stop,omitempty" doc:"Set while a usage limit holds the agent, as in GET /status."`
+	RetryWait     *agentstate.RetryWait     `json:"retry_wait,omitempty" doc:"Set while a failed turn waits to be tried again, as in GET /status. The agent needs nothing of the user meanwhile: attention stays none."`
+	Usage         *agentstate.AgentUsage    `json:"usage,omitempty" doc:"The context window and the account's usage limits, as in GET /status."`
 	// Request is the oldest pending request, what a client shows of what
 	// the agent waits for without opening it.
 	Request *SummaryRequest `json:"request,omitempty" doc:"The oldest request the agent waits on (see GET /requests); missing when none waits."`
@@ -193,10 +193,10 @@ type UpdateStatus struct {
 
 // SummaryRequest is what a summary says of a pending request.
 type SummaryRequest struct {
-	ID        string             `json:"id" doc:"The request's ID, as in GET /requests."`
-	Kind      native.RequestKind `json:"kind" doc:"approval, question or plan."`
-	Title     string             `json:"title" doc:"One-line summary, such as the command to run."`
-	CreatedAt time.Time          `json:"created_at" doc:"When the agent asked."`
+	ID        string                 `json:"id" doc:"The request's ID, as in GET /requests."`
+	Kind      agentstate.RequestKind `json:"kind" doc:"approval, question or plan."`
+	Title     string                 `json:"title" doc:"One-line summary, such as the command to run."`
+	CreatedAt time.Time              `json:"created_at" doc:"When the agent asked."`
 }
 
 // SummarySpend is what the agent's sessions in its working directory cost

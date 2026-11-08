@@ -28,7 +28,7 @@ import (
 func serveWith(ctx context.Context, t *testing.T, self *selfExec) *servedNative {
 	t.Helper()
 	s := serveNative(ctx, t, &nativetest.Factory{}, self)
-	s.awaitLifecycle(httpapi.LifecycleReady)
+	s.awaitLifecycle(instanceapi.LifecycleReady)
 	return s
 }
 
@@ -103,7 +103,7 @@ func TestServeRestartsForAnUpdate(t *testing.T) {
 			Restart: func(ctx context.Context) error { return self.restart(ctx, "update") },
 		}
 	})
-	s.awaitLifecycle(httpapi.LifecycleReady)
+	s.awaitLifecycle(instanceapi.LifecycleReady)
 
 	resp, err := http.Post(s.url+"/update", "application/json", strings.NewReader(`{"when":"now"}`))
 	require.NoError(t, err)
@@ -134,7 +134,7 @@ func TestServeKeepsServingIfTheProgramDoesntRun(t *testing.T) {
 		t.Fatalf("the server stopped: %v", err)
 	case <-time.After(500 * time.Millisecond):
 	}
-	assert.Equal(t, httpapi.LifecycleReady, s.lifecycle())
+	assert.Equal(t, instanceapi.LifecycleReady, s.lifecycle())
 	cancel()
 	select {
 	case err := <-s.served:

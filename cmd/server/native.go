@@ -3,6 +3,7 @@ package server
 import (
 	"log/slog"
 
+	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/claude"
 	"github.com/coder/agentapi/lib/native/codex"
@@ -23,33 +24,33 @@ type nativeAdapterConfig struct {
 // simulated agent for developing clients (lib/native/demo), runs as any
 // type: posing as Claude Code, Codex or Pi, AgentAPI reads that agent's
 // session logs for it (its earlier sessions and subagents).
-func nativeFactory(agentType AgentType, cfg nativeAdapterConfig) (native.Factory, error) {
+func nativeFactory(agentType instanceapi.AgentType, cfg nativeAdapterConfig) (native.Factory, error) {
 	if cfg.Program == demo.Program {
 		return demo.Factory(demo.Options{}), nil
 	}
 	switch agentType {
-	case AgentTypeClaude:
+	case instanceapi.AgentTypeClaude:
 		return claude.NewFactory(claude.Config{
 			Program: cfg.Program,
 			Args:    cfg.Args,
 			CWD:     cfg.CWD,
 			Logger:  cfg.Logger,
 		})
-	case AgentTypeCodex:
+	case instanceapi.AgentTypeCodex:
 		return codex.NewFactory(codex.Config{
 			Program: cfg.Program,
 			Args:    cfg.Args,
 			CWD:     cfg.CWD,
 			Logger:  cfg.Logger,
 		})
-	case AgentTypePi:
+	case instanceapi.AgentTypePi:
 		return nativepi.NewFactory(nativepi.Config{
 			Program: cfg.Program,
 			Args:    cfg.Args,
 			CWD:     cfg.CWD,
 			Logger:  cfg.Logger,
 		})
-	case AgentTypeCustom:
+	case instanceapi.AgentTypeCustom:
 	}
 	return nil, unsupportedAgent("a custom agent")
 }

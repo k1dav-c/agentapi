@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/native"
 )
 
@@ -21,15 +22,15 @@ type policies struct {
 // bypass runs everything without a sandbox; auto works in the workspace
 // sandbox and Codex's auto review decides on what needs more; ask asks for
 // every command Codex doesn't trust.
-func modePolicies(mode native.PermissionMode) (policies, bool) {
+func modePolicies(mode agentstate.PermissionMode) (policies, bool) {
 	switch mode {
-	case native.PermissionModeBypass:
+	case agentstate.PermissionModeBypass:
 		return policies{approval: "never", sandbox: "dangerFullAccess", reviewer: "user"}, true
-	case native.PermissionModeAuto:
+	case agentstate.PermissionModeAuto:
 		return policies{approval: "on-request", sandbox: "workspaceWrite", reviewer: "auto_review"}, true
-	case native.PermissionModeAsk:
+	case agentstate.PermissionModeAsk:
 		return policies{approval: "untrusted", sandbox: "workspaceWrite", reviewer: "user"}, true
-	case native.PermissionModePlan:
+	case agentstate.PermissionModePlan:
 		// Not a matter of policies.
 		return policies{}, false
 	default:
@@ -39,14 +40,14 @@ func modePolicies(mode native.PermissionMode) (policies, bool) {
 
 // policyMode returns the permission mode that policies amount to, or ""
 // for a combination of the user's own (from the command line or config).
-func policyMode(p policies) native.PermissionMode {
+func policyMode(p policies) agentstate.PermissionMode {
 	switch {
 	case p.approval == "never" && p.sandbox == "dangerFullAccess":
-		return native.PermissionModeBypass
+		return agentstate.PermissionModeBypass
 	case p.approval == "on-request" && (p.reviewer == "auto_review" || p.reviewer == "guardian_subagent"):
-		return native.PermissionModeAuto
+		return agentstate.PermissionModeAuto
 	case p.approval == "untrusted":
-		return native.PermissionModeAsk
+		return agentstate.PermissionModeAsk
 	}
 	return ""
 }
@@ -63,7 +64,7 @@ func (a *Adapter) threadSettings(resp threadStartResponse) {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.settings = native.Settings{
+	a.settings = agentstate.Settings{
 		PermissionMode: policyMode(policies{approval: approval, sandbox: resp.Sandbox.Type, reviewer: resp.ApprovalsReviewer}),
 		Model:          resp.Model,
 		Effort:         effort,
@@ -131,7 +132,7 @@ func (a *Adapter) loadModels(ctx context.Context) ([]native.ModelOption, error) 
 
 // Settings implements native.Configurable. A change shows here at once,
 // though Codex applies it from the next turn.
-func (a *Adapter) Settings() native.Settings {
+func (a *Adapter) Settings() agentstate.Settings {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.settingsLocked()
@@ -139,10 +140,10 @@ func (a *Adapter) Settings() native.Settings {
 
 // settingsLocked is a.settings, in the plan mode while the thread plans:
 // a.settings keeps the mode whose policies apply meanwhile.
-func (a *Adapter) settingsLocked() native.Settings {
+func (a *Adapter) settingsLocked() agentstate.Settings {
 	s := a.settings
 	if a.plan {
-		s.PermissionMode = native.PermissionModePlan
+		s.PermissionMode = agentstate.PermissionModePlan
 	}
 	return s
 }
@@ -154,7 +155,7 @@ func (a *Adapter) SettingOptions(ctx context.Context) (native.SettingOptions, er
 		return native.SettingOptions{}, err
 	}
 	return native.SettingOptions{
-		PermissionModes: native.PermissionModeValues,
+		PermissionModes: agentstate.PermissionModeValues,
 		Models:          slices.Clone(models),
 	}, nil
 }
@@ -162,7 +163,7 @@ func (a *Adapter) SettingOptions(ctx context.Context) (native.SettingOptions, er
 // ApplySettings implements native.Configurable. Codex takes the settings
 // with the next turn/start, for that turn and the ones after it. A new
 // model without the current effort gets its default one.
-func (a *Adapter) ApplySettings(ctx context.Context, s native.Settings) error {
+func (a *Adapter) ApplySettings(ctx context.Context, s agentstate.Settings) error {
 	options, err := a.SettingOptions(ctx)
 	if err != nil {
 		return err
@@ -179,7 +180,7 @@ func (a *Adapter) ApplySettings(ctx context.Context, s native.Settings) error {
 		s.Effort = effort
 	}
 	switch {
-	case s.PermissionMode == native.PermissionModePlan:
+	case s.PermissionMode == agentstate.PermissionModePlan:
 		// The policies stay those of the mode before.
 		s.PermissionMode = ""
 		a.plan = true
@@ -201,26 +202,26 @@ func (a *Adapter) ApplySettings(ctx context.Context, s native.Settings) error {
 // turnChanges are the changes a turn/start carries.
 type turnChanges struct {
 	// settings changed since the last turn/start; stale is collabStale.
-	settings native.Settings
+	settings agentstate.Settings
 	stale    bool
 	// collab is the collaboration mode the turn switches to, or "".
 	collab string
 	// implement is the permission mode a turn that carries out the plan
 	// switches to; plan and mode are what the thread had before.
-	implement native.PermissionMode
+	implement agentstate.PermissionMode
 	plan      bool
-	mode      native.PermissionMode
+	mode      agentstate.PermissionMode
 }
 
 // takeChanges puts the changes the next turn/start carries in params and
 // clears them. With implement set, the turn leaves the plan mode, in the
 // policies of implement. commitChanges applies what the turn changed once
 // it started; restoreChanges puts the changes back if it didn't.
-func (a *Adapter) takeChanges(params *turnStartParams, implement native.PermissionMode) turnChanges {
+func (a *Adapter) takeChanges(params *turnStartParams, implement agentstate.PermissionMode) turnChanges {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	c := turnChanges{settings: a.pending, stale: a.collabStale, implement: implement, plan: a.plan, mode: a.settings.PermissionMode}
-	a.pending, a.collabStale = native.Settings{}, false
+	a.pending, a.collabStale = agentstate.Settings{}, false
 	mode, plan := c.settings.PermissionMode, a.plan
 	if implement != "" {
 		mode, plan = implement, false

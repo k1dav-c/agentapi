@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/httpapi"
 	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/logctx"
@@ -110,7 +111,7 @@ func newUpdateServer(t *testing.T, opts updateOptions) *updateServer {
 	})
 	u.nativeServer = &nativeServer{t: t, url: ts.URL, factory: factory}
 	require.Eventually(t, func() bool {
-		var status httpapi.StatusChangeBody
+		var status convstate.StatusChangeBody
 		u.do(http.MethodGet, "/status", nil, &status)
 		return status.Capabilities != nil
 	}, 5*time.Second, 5*time.Millisecond)
@@ -118,17 +119,17 @@ func newUpdateServer(t *testing.T, opts updateOptions) *updateServer {
 }
 
 // update is the summary's update.
-func (u *updateServer) update() httpapi.UpdateStatus {
+func (u *updateServer) update() instanceapi.UpdateStatus {
 	u.t.Helper()
-	var summary httpapi.SummaryBody
+	var summary instanceapi.SummaryBody
 	require.Equal(u.t, http.StatusOK, u.do(http.MethodGet, "/summary", nil, &summary))
 	require.NotNil(u.t, summary.Update, "servers of this version always say")
 	return *summary.Update
 }
 
-func (u *updateServer) awaitState(state httpapi.UpdateState) httpapi.UpdateStatus {
+func (u *updateServer) awaitState(state instanceapi.UpdateState) instanceapi.UpdateStatus {
 	u.t.Helper()
-	var last httpapi.UpdateStatus
+	var last instanceapi.UpdateStatus
 	require.Eventually(u.t, func() bool {
 		last = u.update()
 		return last.State == state
@@ -177,9 +178,9 @@ func (u *updateServer) busy() {
 	code, _ := u.send("work", "")
 	require.Equal(u.t, http.StatusOK, code)
 	require.Eventually(u.t, func() bool {
-		var status httpapi.StatusChangeBody
+		var status convstate.StatusChangeBody
 		u.do(http.MethodGet, "/status", nil, &status)
-		return status.Status == httpapi.AgentStatusRunning
+		return status.Status == instanceapi.AgentStatusRunning
 	}, 5*time.Second, 5*time.Millisecond)
 }
 
@@ -199,7 +200,7 @@ func (u *updateServer) onDisk() string {
 func TestUpdate_Off(t *testing.T) {
 	t.Parallel()
 	u := newUpdateServer(t, updateOptions{off: true})
-	assert.Equal(t, httpapi.UpdateStatus{State: httpapi.UpdateStateIdle}, u.update())
+	assert.Equal(t, instanceapi.UpdateStatus{State: instanceapi.UpdateStateIdle}, u.update())
 	code, _, detail := u.post("")
 	assert.Equal(t, http.StatusForbidden, code)
 	assert.Contains(t, detail, "--allow-update")
@@ -213,14 +214,14 @@ func TestUpdate_Off(t *testing.T) {
 func TestUpdate_UpToDate(t *testing.T) {
 	t.Parallel()
 	u := newUpdateServer(t, updateOptions{running: "2.2.0", latest: "2.2.0"})
-	assert.Equal(t, httpapi.UpdateStatus{Allowed: true, State: httpapi.UpdateStateIdle}, u.update())
+	assert.Equal(t, instanceapi.UpdateStatus{Allowed: true, State: instanceapi.UpdateStateIdle}, u.update())
 	code, body, _ := u.post("")
 	require.Equal(t, http.StatusOK, code)
-	assert.Equal(t, httpapi.UpdateResponseBody{State: httpapi.UpdateStateIdle, UpToDate: true}, body)
+	assert.Equal(t, httpapi.UpdateResponseBody{State: instanceapi.UpdateStateIdle, UpToDate: true}, body)
 	assert.Equal(t, 1, u.release.Lookups())
 	assert.Zero(t, u.release.Downloads())
 	assert.Zero(t, u.restarts.Load())
-	assert.Equal(t, httpapi.UpdateStatus{Allowed: true, State: httpapi.UpdateStateIdle}, u.update())
+	assert.Equal(t, instanceapi.UpdateStatus{Allowed: true, State: instanceapi.UpdateStateIdle}, u.update())
 
 	// No body is fine too.
 	code, body, _ = u.request(http.MethodPost, "")
@@ -238,9 +239,9 @@ func TestUpdate_WaitsForTheAgent(t *testing.T) {
 	code, body, _ := u.post("")
 	require.Equal(t, http.StatusAccepted, code)
 	assert.Equal(t, "2.2.0", body.Target)
-	assert.Contains(t, []httpapi.UpdateState{httpapi.UpdateStateDownloading, httpapi.UpdateStateWaiting}, body.State)
+	assert.Contains(t, []instanceapi.UpdateState{instanceapi.UpdateStateDownloading, instanceapi.UpdateStateWaiting}, body.State)
 
-	status := u.awaitState(httpapi.UpdateStateWaiting)
+	status := u.awaitState(instanceapi.UpdateStateWaiting)
 	assert.Equal(t, "2.2.0", status.Target)
 	assert.Equal(t, "2.2.0", u.onDisk(), "installed while it waits")
 	assert.Equal(t, 1, u.release.Downloads())
@@ -252,7 +253,7 @@ func TestUpdate_WaitsForTheAgent(t *testing.T) {
 
 	u.idle()
 	require.Eventually(t, func() bool { return u.restarts.Load() == 1 }, 10*time.Second, 5*time.Millisecond)
-	assert.Equal(t, httpapi.UpdateStateRestarting, u.update().State)
+	assert.Equal(t, instanceapi.UpdateStateRestarting, u.update().State)
 	// The queue holds its message for the new program.
 	time.Sleep(700 * time.Millisecond)
 	assert.Len(t, u.factory.Last().Turns(), 1)
@@ -266,7 +267,7 @@ func TestUpdate_WaitsForTheAgent(t *testing.T) {
 	assert.Contains(t, detail, "restarting into 2.2.0")
 	code, body, _ = u.post(httpapi.UpdateWhenNow)
 	assert.Equal(t, http.StatusAccepted, code)
-	assert.Equal(t, httpapi.UpdateStateRestarting, body.State)
+	assert.Equal(t, instanceapi.UpdateStateRestarting, body.State)
 	assert.EqualValues(t, 1, u.restarts.Load())
 	assert.Equal(t, http.StatusConflict, u.do(http.MethodDelete, "/messages", nil, nil), "nor does the agent restart")
 }
@@ -279,7 +280,7 @@ func TestUpdate_DoesntWaitForAnAgentThatExited(t *testing.T) {
 	u.busy()
 	code, _, _ := u.post("")
 	require.Equal(t, http.StatusAccepted, code)
-	u.awaitState(httpapi.UpdateStateWaiting)
+	u.awaitState(instanceapi.UpdateStateWaiting)
 	assert.Zero(t, u.restarts.Load(), "the agent works")
 
 	u.factory.Last().Exit(errors.New("exit status 1"))
@@ -295,7 +296,7 @@ func TestUpdate_Now(t *testing.T) {
 	require.Equal(t, http.StatusAccepted, code)
 	assert.Equal(t, "2.2.0", body.Target)
 	require.Eventually(t, func() bool { return u.restarts.Load() == 1 }, 10*time.Second, 5*time.Millisecond)
-	assert.Equal(t, httpapi.UpdateStateRestarting, u.update().State)
+	assert.Equal(t, instanceapi.UpdateStateRestarting, u.update().State)
 	assert.Equal(t, "2.2.0", u.onDisk())
 }
 
@@ -307,17 +308,17 @@ func TestUpdate_CancelAndRepeat(t *testing.T) {
 	u.busy()
 	code, _, _ := u.post("")
 	require.Equal(t, http.StatusAccepted, code)
-	u.awaitState(httpapi.UpdateStateWaiting)
+	u.awaitState(instanceapi.UpdateStateWaiting)
 
 	code, body, _ := u.post("")
 	assert.Equal(t, http.StatusAccepted, code)
-	assert.Equal(t, httpapi.UpdateResponseBody{State: httpapi.UpdateStateWaiting, Target: "2.2.0"}, body)
+	assert.Equal(t, httpapi.UpdateResponseBody{State: instanceapi.UpdateStateWaiting, Target: "2.2.0"}, body)
 	assert.Equal(t, 1, u.release.Lookups(), "the same update")
 
 	code, body, _ = u.request(http.MethodDelete, "")
 	require.Equal(t, http.StatusOK, code)
-	assert.Equal(t, httpapi.UpdateResponseBody{State: httpapi.UpdateStateIdle}, body)
-	assert.Equal(t, httpapi.UpdateStatus{Allowed: true, State: httpapi.UpdateStateIdle}, u.update())
+	assert.Equal(t, httpapi.UpdateResponseBody{State: instanceapi.UpdateStateIdle}, body)
+	assert.Equal(t, instanceapi.UpdateStatus{Allowed: true, State: instanceapi.UpdateStateIdle}, u.update())
 	u.idle()
 	time.Sleep(200 * time.Millisecond)
 	assert.Zero(t, u.restarts.Load(), "cancelled")
@@ -327,7 +328,7 @@ func TestUpdate_CancelAndRepeat(t *testing.T) {
 	u.busy()
 	code, body, _ = u.post("")
 	require.Equal(t, http.StatusAccepted, code)
-	assert.Equal(t, httpapi.UpdateResponseBody{State: httpapi.UpdateStateWaiting, Target: "2.2.0"}, body)
+	assert.Equal(t, httpapi.UpdateResponseBody{State: instanceapi.UpdateStateWaiting, Target: "2.2.0"}, body)
 	code, body, _ = u.post(httpapi.UpdateWhenNow)
 	assert.Equal(t, http.StatusAccepted, code)
 	assert.Equal(t, "2.2.0", body.Target)
@@ -345,7 +346,7 @@ func TestUpdate_ProgramOnDiskIsNewer(t *testing.T) {
 	assert.Equal(t, "2.2.0", body.Target)
 	require.Eventually(t, func() bool { return u.restarts.Load() == 1 }, 10*time.Second, 5*time.Millisecond)
 	assert.Zero(t, u.release.Downloads())
-	assert.Equal(t, httpapi.UpdateStatus{Allowed: true, State: httpapi.UpdateStateRestarting, Target: "2.2.0"}, u.update())
+	assert.Equal(t, instanceapi.UpdateStatus{Allowed: true, State: instanceapi.UpdateStateRestarting, Target: "2.2.0"}, u.update())
 }
 
 // A summary client sees each state of the update.
@@ -354,12 +355,12 @@ func TestUpdate_SummaryFollowsTheUpdate(t *testing.T) {
 	u := newUpdateServer(t, updateOptions{})
 	u.busy()
 	events := openEvents(t, u.url+"/events?only=summary")
-	var states []httpapi.UpdateState
-	next := func() httpapi.UpdateStatus {
+	var states []instanceapi.UpdateState
+	next := func() instanceapi.UpdateStatus {
 		t.Helper()
 		event := nextEvent(t, events)
 		require.Equal(t, "summary_update", event.event)
-		var body httpapi.SummaryUpdateBody
+		var body convstate.SummaryUpdateBody
 		require.NoError(t, json.Unmarshal([]byte(event.data), &body))
 		require.NotNil(t, body.Update)
 		if len(states) == 0 || states[len(states)-1] != body.Update.State {
@@ -367,22 +368,22 @@ func TestUpdate_SummaryFollowsTheUpdate(t *testing.T) {
 		}
 		return *body.Update
 	}
-	assert.Equal(t, httpapi.UpdateStateIdle, next().State)
+	assert.Equal(t, instanceapi.UpdateStateIdle, next().State)
 	code, _, _ := u.post("")
 	require.Equal(t, http.StatusAccepted, code)
-	for next().State != httpapi.UpdateStateWaiting {
+	for next().State != instanceapi.UpdateStateWaiting {
 	}
 	u.idle()
 	for {
 		update := next()
-		if update.State == httpapi.UpdateStateRestarting {
+		if update.State == instanceapi.UpdateStateRestarting {
 			assert.Equal(t, "2.2.0", update.Target)
 			break
 		}
 	}
-	assert.Equal(t, []httpapi.UpdateState{
-		httpapi.UpdateStateIdle, httpapi.UpdateStateChecking, httpapi.UpdateStateDownloading,
-		httpapi.UpdateStateWaiting, httpapi.UpdateStateRestarting,
+	assert.Equal(t, []instanceapi.UpdateState{
+		instanceapi.UpdateStateIdle, instanceapi.UpdateStateChecking, instanceapi.UpdateStateDownloading,
+		instanceapi.UpdateStateWaiting, instanceapi.UpdateStateRestarting,
 	}, states)
 }
 
@@ -396,15 +397,15 @@ func TestUpdate_Failures(t *testing.T) {
 		u.release.Tamper()
 		code, _, _ := u.post("")
 		require.Equal(t, http.StatusAccepted, code)
-		status := u.awaitState(httpapi.UpdateStateFailed)
+		status := u.awaitState(instanceapi.UpdateStateFailed)
 		assert.Contains(t, status.Error, "checksum mismatch")
 		assert.Equal(t, "2.1.0", u.onDisk())
 		assert.Zero(t, u.restarts.Load())
 
 		code, body, _ := u.request(http.MethodDelete, "")
 		require.Equal(t, http.StatusOK, code)
-		assert.Equal(t, httpapi.UpdateStateIdle, body.State)
-		assert.Equal(t, httpapi.UpdateStatus{Allowed: true, State: httpapi.UpdateStateIdle}, u.update())
+		assert.Equal(t, instanceapi.UpdateStateIdle, body.State)
+		assert.Equal(t, instanceapi.UpdateStatus{Allowed: true, State: instanceapi.UpdateStateIdle}, u.update())
 	})
 	t.Run("lookup", func(t *testing.T) {
 		t.Parallel()
@@ -413,7 +414,7 @@ func TestUpdate_Failures(t *testing.T) {
 		code, _, detail := u.post("")
 		require.Equal(t, http.StatusBadGateway, code)
 		assert.Contains(t, detail, "rate limit")
-		assert.Equal(t, httpapi.UpdateStateFailed, u.update().State)
+		assert.Equal(t, instanceapi.UpdateStateFailed, u.update().State)
 	})
 	t.Run("restart", func(t *testing.T) {
 		t.Parallel()
@@ -423,9 +424,9 @@ func TestUpdate_Failures(t *testing.T) {
 		require.Equal(t, http.StatusOK, code)
 		code, _, _ = u.post("")
 		require.Equal(t, http.StatusAccepted, code)
-		u.awaitState(httpapi.UpdateStateWaiting)
+		u.awaitState(instanceapi.UpdateStateWaiting)
 		u.idle()
-		status := u.awaitState(httpapi.UpdateStateFailed)
+		status := u.awaitState(instanceapi.UpdateStateFailed)
 		assert.Contains(t, status.Error, "restart into 2.2.0: agentapi --version: exit status 1")
 		assert.Equal(t, "2.2.0", status.Target)
 		// The server goes on, and so does its queue.
@@ -474,5 +475,5 @@ func TestUpdate_RefusesCrossOrigin(t *testing.T) {
 		assert.Equal(t, http.StatusForbidden, resp.StatusCode, method)
 	}
 	assert.Zero(t, u.release.Lookups())
-	assert.Equal(t, httpapi.UpdateStateIdle, u.update().State)
+	assert.Equal(t, instanceapi.UpdateStateIdle, u.update().State)
 }

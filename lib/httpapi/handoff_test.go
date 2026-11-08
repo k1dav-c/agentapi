@@ -12,6 +12,7 @@ import (
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/handoff"
+	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/nativetest"
 	"github.com/coder/agentapi/lib/transcript"
@@ -162,7 +163,7 @@ func TestHandoffBrowserReplyWins(t *testing.T) {
 
 func TestHandoffRestartInvalidatesEvenIdenticalPrompt(t *testing.T) {
 	s, a, pending := offeringServer(t)
-	s.emitter.SetLifecycle(LifecycleRestarting)
+	s.emitter.SetLifecycle(instanceapi.LifecycleRestarting)
 	require.Nil(t, pendingHandoff(s))
 	s.emitter.EmitStatus(conv.StatusStable)
 	require.Nil(t, pendingHandoff(s), "restarting until the restart is done")
@@ -180,7 +181,7 @@ func TestHandoffIgnoresStartupRunningAndQueuedMessages(t *testing.T) {
 	require.Nil(t, pendingHandoff(s), "the agent works")
 	a.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonEndTurn})
 	require.NotNil(t, pendingHandoff(s))
-	s.queue.Restore([]QueuedMessage{{ID: 1, Content: "queued"}}, 0)
+	s.queue.Restore([]convstate.QueuedMessage{{ID: 1, Content: "queued"}}, 0)
 	require.Nil(t, pendingHandoff(s), "the queued message goes next")
 }
 

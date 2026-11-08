@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/coder/agentapi/lib/httpapi"
+	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/statedb"
 )
 
@@ -20,7 +20,7 @@ func importStateFile(db *statedb.DB, opts serverOptions, cwd string, logger *slo
 	}
 	n, err := db.ImportStateFile(opts.stateFile, map[string]string{
 		statedb.MetaAgentType: string(opts.agentType),
-		statedb.MetaTransport: string(httpapi.TransportNative),
+		statedb.MetaTransport: string(instanceapi.TransportNative),
 		statedb.MetaCWD:       cwd,
 	})
 	switch {

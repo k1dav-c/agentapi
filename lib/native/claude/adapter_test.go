@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/agentio"
 	"github.com/coder/agentapi/lib/native/nativetest"
@@ -225,8 +226,8 @@ func TestUnconfirmedWritesStayInFlight(t *testing.T) {
 	proc.barrier(t)
 
 	release = hold()
-	require.ErrorIs(t, a.Respond(short(), "r1", native.Response{OptionID: optionAllow}), native.ErrUnconfirmed)
-	require.ErrorIs(t, a.Respond(ctx, "r1", native.Response{OptionID: optionDeny}), native.ErrRequestNotFound,
+	require.ErrorIs(t, a.Respond(short(), "r1", agentstate.Response{OptionID: optionAllow}), native.ErrUnconfirmed)
+	require.ErrorIs(t, a.Respond(ctx, "r1", agentstate.Response{OptionID: optionDeny}), native.ErrRequestNotFound,
 		"a second answer could contradict the first")
 	close(release)
 	assert.Equal(t, "control_response:allow", signature(proc.waitWritten(t, n+2)))
@@ -249,7 +250,7 @@ func TestTurnErrors(t *testing.T) {
 	ctx := context.Background()
 	require.ErrorIs(t, a.Steer(ctx, native.Input{Text: "more"}), native.ErrNoActiveTurn)
 	require.ErrorIs(t, a.Interrupt(ctx), native.ErrNoActiveTurn)
-	require.ErrorIs(t, a.Respond(ctx, "nope", native.Response{OptionID: "allow"}), native.ErrRequestNotFound)
+	require.ErrorIs(t, a.Respond(ctx, "nope", agentstate.Response{OptionID: "allow"}), native.ErrRequestNotFound)
 
 	require.NoError(t, a.StartTurn(ctx, native.Input{Text: "hi"}))
 	require.ErrorIs(t, a.StartTurn(ctx, native.Input{Text: "again"}), native.ErrTurnActive)
@@ -508,12 +509,12 @@ func TestRespondWriteFails(t *testing.T) {
 	proc.mu.Lock()
 	proc.failWrites = 1
 	proc.mu.Unlock()
-	require.Error(t, a.Respond(ctx, "r1", native.Response{OptionID: optionAllow}))
+	require.Error(t, a.Respond(ctx, "r1", agentstate.Response{OptionID: optionAllow}))
 	// The CLI didn't get the answer: the request can still be answered.
-	require.NoError(t, a.Respond(ctx, "r1", native.Response{OptionID: optionAllow}))
+	require.NoError(t, a.Respond(ctx, "r1", agentstate.Response{OptionID: optionAllow}))
 	answer := proc.waitWritten(t, 2)
 	assert.Equal(t, "control_response:allow", signature(answer))
-	require.ErrorIs(t, a.Respond(ctx, "r1", native.Response{OptionID: optionAllow}), native.ErrRequestNotFound)
+	require.ErrorIs(t, a.Respond(ctx, "r1", agentstate.Response{OptionID: optionAllow}), native.ErrRequestNotFound)
 	require.NoError(t, a.Close())
 }
 

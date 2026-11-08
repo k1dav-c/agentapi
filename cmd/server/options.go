@@ -17,9 +17,11 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/viper"
 
-	"github.com/coder/agentapi/lib/httpapi"
+	"github.com/coder/agentapi/lib/httpmw"
 	"github.com/coder/agentapi/lib/instanceapi"
+	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/registry"
+	"github.com/coder/agentapi/lib/webhook"
 )
 
 // serverOptions are the settings of `agentapi server`, from its flags and
@@ -28,7 +30,7 @@ type serverOptions struct {
 	// agent is the agent's program, and agentArgs the arguments after it.
 	agent     string
 	agentArgs []string
-	agentType AgentType
+	agentType instanceapi.AgentType
 	// printOpenAPI prints the API's schema instead of running an agent.
 	printOpenAPI bool
 
@@ -53,14 +55,11 @@ type serverOptions struct {
 	// the --state-file).
 	stateDB  string
 	terminal bool
-	// autoContinue continues a turn a usage limit stopped once it resets.
-	autoContinue bool
-	// retryDelays are the waits before a turn that failed on a transient
-	// upstream error is tried again; empty (not nil) tries none again.
-	retryDelays []time.Duration
+	// policy is the conversation's: --auto-continue and --retry-delays.
+	policy native.Policy
 	// prices is a JSON file of model prices that adds to the built-in ones.
 	prices  string
-	webhook httpapi.WebhookConfig
+	webhook webhook.Config
 	// name is what clients that watch many AgentAPIs call this one.
 	name string
 	// registryDir is where the server keeps its entry while it serves;
@@ -101,14 +100,14 @@ func loadServerOptions(flags flagSource, args []string) (serverOptions, error) {
 		initialPrompt:  flags.GetString(FlagInitialPrompt),
 		// One setting in the config file serves every server of the user,
 		// each with its own file (also pidFile).
-		stateDB:      expandHome(instanceapi.ExpandPlaceholders(flags.GetString(FlagStateDB), port)),
-		terminal:     flags.GetBool(FlagTerminal),
-		autoContinue: flags.GetBool(FlagAutoContinue),
-		prices:       expandHome(flags.GetString(FlagPrices)),
-		name:         flags.GetString(FlagName),
-		registryDir:  expandHome(flags.GetString(FlagRegistryDir)),
-		allowUpdate:  flags.GetBool(FlagAllowUpdate),
-		webhook: httpapi.WebhookConfig{
+		stateDB:     expandHome(instanceapi.ExpandPlaceholders(flags.GetString(FlagStateDB), port)),
+		terminal:    flags.GetBool(FlagTerminal),
+		policy:      native.Policy{AutoContinue: flags.GetBool(FlagAutoContinue)},
+		prices:      expandHome(flags.GetString(FlagPrices)),
+		name:        flags.GetString(FlagName),
+		registryDir: expandHome(flags.GetString(FlagRegistryDir)),
+		allowUpdate: flags.GetBool(FlagAllowUpdate),
+		webhook: webhook.Config{
 			URL:             flags.GetString(FlagWebhookURL),
 			Timeout:         flags.GetDuration(FlagWebhookTimeout),
 			MaxAttempts:     flags.GetInt(FlagWebhookMaxAttempts),
@@ -119,7 +118,7 @@ func loadServerOptions(flags flagSource, args []string) (serverOptions, error) {
 			InstanceID:      cmp.Or(flags.GetString(FlagInstanceID), flags.GetString(FlagWebhookInstanceID)),
 			// {ip} stays: it may change while the server runs, and every
 			// event and summary fill it in.
-			PublicURL: httpapi.ExpandPublicURL(flags.GetString(FlagPublicURL), port),
+			PublicURL: instanceapi.ExpandPublicURL(flags.GetString(FlagPublicURL), port),
 		},
 	}
 	if port < 0 || port > 65535 {
@@ -151,11 +150,11 @@ func loadServerOptions(flags flagSource, args []string) (serverOptions, error) {
 	}
 	// Unset, the conversation's default (the flag's) applies.
 	if flags.IsSet(FlagRetryDelays) {
-		if opts.retryDelays, err = parseRetryDelays(flags.GetStringSlice(FlagRetryDelays)); err != nil {
+		if opts.policy.RetryDelays, err = parseRetryDelays(flags.GetStringSlice(FlagRetryDelays)); err != nil {
 			return serverOptions{}, fmt.Errorf("invalid --%s: %w", FlagRetryDelays, err)
 		}
 	}
-	if opts.bind, err = httpapi.ParseBindAddress(flags.GetString(FlagBind)); err != nil {
+	if opts.bind, err = httpmw.ParseBindAddress(flags.GetString(FlagBind)); err != nil {
 		return serverOptions{}, fmt.Errorf("invalid --%s: %w", FlagBind, err)
 	}
 	return opts, nil
@@ -216,7 +215,7 @@ func checkTransport(flags flagSource) error {
 		return errACPRemoved
 	}
 	switch value := flags.GetString(FlagTransport); value {
-	case "", string(httpapi.TransportNative):
+	case "", string(instanceapi.TransportNative):
 		return nil
 	case "pty":
 		return errPTYRemoved

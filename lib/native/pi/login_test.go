@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/native"
 )
 
@@ -107,7 +108,7 @@ func TestLoginLostMidSession(t *testing.T) {
 		err := h.result("p")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "No API key found")
-		assert.Equal(t, []native.LoginRequired{loginHint}, h.sink.State().Logins)
+		assert.Equal(t, []agentstate.LoginRequired{loginHint}, h.sink.State().Logins)
 		assert.Zero(t, h.sink.State().Started, "no turn started")
 	})
 
@@ -130,9 +131,9 @@ func TestLoginLostMidSession(t *testing.T) {
 		h.writeLine(map[string]any{"type": "agent_settled"})
 		require.NoError(t, h.result("p"))
 		h.settle()
-		assert.Equal(t, []native.LoginRequired{loginHint}, h.sink.State().Logins)
+		assert.Equal(t, []agentstate.LoginRequired{loginHint}, h.sink.State().Logins)
 		require.Len(t, h.sink.State().Results, 1)
-		assert.Equal(t, "error", h.sink.State().Results[0].StopReason)
+		assert.Equal(t, native.StopReasonError, h.sink.State().Results[0].StopReason)
 		assert.Less(t, slices.Index(h.sink.State().Log, "login_required"), slices.Index(h.sink.State().Log, "turn_completed:error"))
 	})
 }

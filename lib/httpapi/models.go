@@ -5,7 +5,9 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
+	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/transcript"
@@ -25,23 +27,6 @@ var MessageTypeValues = []MessageType{
 func (m MessageType) Schema(r huma.Registry) *huma.Schema {
 	return util.OpenAPISchema(r, "MessageType", MessageTypeValues)
 }
-
-// AgentType and Transport are part of the instance's contract
-// (lib/instanceapi).
-type (
-	AgentType = instanceapi.AgentType
-	Transport = instanceapi.Transport
-)
-
-const (
-	AgentTypeClaude = instanceapi.AgentTypeClaude
-	AgentTypeCodex  = instanceapi.AgentTypeCodex
-	AgentTypePi     = instanceapi.AgentTypePi
-	AgentTypeCustom = instanceapi.AgentTypeCustom
-	TransportNative = instanceapi.TransportNative
-)
-
-var TransportValues = instanceapi.TransportValues
 
 // DispatchMode says what to do with a user message while the agent is busy.
 type DispatchMode string
@@ -76,7 +61,7 @@ type Message struct {
 // carry, and the epoch.
 type StatusResponse struct {
 	Body struct {
-		StatusChangeBody
+		convstate.StatusChangeBody
 		// Epoch lets a client resume /events without a cache.
 		Epoch string `json:"epoch" doc:"Identifies the current conversation state; pass it as epoch to /events?sync=1 (see session_sync)."`
 	}
@@ -87,10 +72,10 @@ type StatusResponse struct {
 // intentionally not represented because they are client-local.
 type TitleResponse struct {
 	Body struct {
-		Title     string                `json:"title" doc:"Current human-readable session title derived from the latest user task and agent status."`
-		Task      string                `json:"task" doc:"Latest user task used to derive the title. Empty before the first task."`
-		Status    AgentStatus           `json:"status" doc:"Current agent status."`
-		AgentType instanceapi.AgentType `json:"agent_type" doc:"Type of the agent being used by the server."`
+		Title     string                  `json:"title" doc:"Current human-readable session title derived from the latest user task and agent status."`
+		Task      string                  `json:"task" doc:"Latest user task used to derive the title. Empty before the first task."`
+		Status    instanceapi.AgentStatus `json:"status" doc:"Current agent status."`
+		AgentType instanceapi.AgentType   `json:"agent_type" doc:"Type of the agent being used by the server."`
 	}
 }
 
@@ -131,7 +116,7 @@ type MessageResponse struct {
 
 type QueueResponse struct {
 	Body struct {
-		Messages []QueuedMessage `json:"messages" nullable:"false" doc:"Messages waiting to be sent to the agent."`
+		Messages []convstate.QueuedMessage `json:"messages" nullable:"false" doc:"Messages waiting to be sent to the agent."`
 	}
 }
 
@@ -158,7 +143,7 @@ type ReorderQueueRequest struct {
 
 type RequestsResponse struct {
 	Body struct {
-		Requests []native.RequestState `json:"requests" nullable:"false" doc:"Pending requests and the most recently closed ones, oldest first."`
+		Requests []agentstate.RequestState `json:"requests" nullable:"false" doc:"Pending requests and the most recently closed ones, oldest first."`
 	}
 }
 
@@ -167,24 +152,24 @@ type RequestPath struct {
 }
 
 type RequestResponse struct {
-	Body native.RequestState
+	Body agentstate.RequestState
 }
 
 type RespondRequest struct {
 	ID   string `path:"id" doc:"Request identifier."`
-	Body native.Response
+	Body agentstate.Response
 }
 
 // SettingsResponse is the agent's settings and the values they can take.
 type SettingsResponse struct {
 	Body struct {
-		Settings native.Settings       `json:"settings" doc:"Current settings; a setting the agent doesn't report is missing."`
+		Settings agentstate.Settings   `json:"settings" doc:"Current settings; a setting the agent doesn't report is missing."`
 		Options  native.SettingOptions `json:"options" doc:"Values the settings can take."`
 	}
 }
 
 type UpdateSettingsRequest struct {
-	Body native.Settings
+	Body agentstate.Settings
 }
 
 type InterruptResponse struct {

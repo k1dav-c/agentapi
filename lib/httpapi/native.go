@@ -10,7 +10,10 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
+	"github.com/coder/agentapi/lib/convstate"
+	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/transcript"
 )
@@ -23,22 +26,22 @@ const nativeCallTimeout = 30 * time.Second
 // event emitter. The images of a rich message were stored before (see
 // native.Config.PrepareRichMessage).
 type nativeObserver struct {
-	emitter *EventEmitter
+	emitter *convstate.EventEmitter
 	// persister stores the session ref, if state is persisted.
-	persister Persister
+	persister convstate.Persister
 }
 
 var _ native.Observer = (*nativeObserver)(nil)
 
 // Started: an agent the conversation started again by itself after it
 // exited (AgentExited) is back.
-func (o *nativeObserver) Started(caps native.Capabilities) {
+func (o *nativeObserver) Started(caps agentstate.Capabilities) {
 	o.emitter.SetCapabilities(caps)
 	o.emitter.ReleaseLifecycle()
 }
 
 // LoginRequired: an agent waiting for a login is up too.
-func (o *nativeObserver) LoginRequired(login *native.LoginRequired) {
+func (o *nativeObserver) LoginRequired(login *agentstate.LoginRequired) {
 	o.emitter.SetLoginRequired(login)
 	if login != nil {
 		o.emitter.ReleaseLifecycle()
@@ -64,15 +67,15 @@ func (o *nativeObserver) SessionRef(ref string) {
 	o.emitter.SetAgentSessionID(ref)
 }
 
-func (o *nativeObserver) RequestUpdated(state native.RequestState) { o.emitter.EmitRequest(state) }
+func (o *nativeObserver) RequestUpdated(state agentstate.RequestState) { o.emitter.EmitRequest(state) }
 
-func (o *nativeObserver) Settings(settings native.Settings) { o.emitter.SetSettings(settings) }
+func (o *nativeObserver) Settings(settings agentstate.Settings) { o.emitter.SetSettings(settings) }
 
-func (o *nativeObserver) Usage(usage native.AgentUsage) { o.emitter.SetUsage(usage) }
+func (o *nativeObserver) Usage(usage agentstate.AgentUsage) { o.emitter.SetUsage(usage) }
 
 // LimitStop is stored so that the queue still waits for the limit, and a
 // scheduled continuation still goes out, after AgentAPI restarts.
-func (o *nativeObserver) LimitStop(ls *native.LimitStop) {
+func (o *nativeObserver) LimitStop(ls *agentstate.LimitStop) {
 	o.emitter.SetLimitStop(ls)
 	if o.persister != nil {
 		o.persister.SetLimitStop(ls)
@@ -81,7 +84,7 @@ func (o *nativeObserver) LimitStop(ls *native.LimitStop) {
 
 // RetryWait is stored so that the queue still waits for the retry, which
 // still goes out, after AgentAPI restarts.
-func (o *nativeObserver) RetryWait(rw *native.RetryWait) {
+func (o *nativeObserver) RetryWait(rw *agentstate.RetryWait) {
 	o.emitter.SetRetryWait(rw)
 	if o.persister != nil {
 		o.persister.SetRetryWait(rw)
@@ -90,7 +93,7 @@ func (o *nativeObserver) RetryWait(rw *native.RetryWait) {
 
 // SettingsChosen is stored so that the agent gets the settings again after
 // AgentAPI restarts.
-func (o *nativeObserver) SettingsChosen(settings native.Settings) {
+func (o *nativeObserver) SettingsChosen(settings agentstate.Settings) {
 	if o.persister != nil {
 		o.persister.SetSettings(settings)
 	}
@@ -101,10 +104,10 @@ func (o *nativeObserver) SettingsChosen(settings native.Settings) {
 // restart (DELETE /messages) starts the agent again.
 func (o *nativeObserver) AgentExited(exit native.AgentExit) {
 	if exit.Attempt > 0 {
-		o.emitter.SetLifecycle(LifecycleRestarting)
+		o.emitter.SetLifecycle(instanceapi.LifecycleRestarting)
 		return
 	}
-	o.emitter.SetLifecycle(LifecycleFailed)
+	o.emitter.SetLifecycle(instanceapi.LifecycleFailed)
 }
 
 // createNativeMessageLocked delivers a user message over the native
@@ -174,7 +177,7 @@ func (s *Server) getRequests(_ context.Context, _ *struct{}) (*RequestsResponse,
 	resp := &RequestsResponse{}
 	resp.Body.Requests = s.emitter.Requests()
 	if resp.Body.Requests == nil {
-		resp.Body.Requests = []native.RequestState{}
+		resp.Body.Requests = []agentstate.RequestState{}
 	}
 	return resp, nil
 }
@@ -193,7 +196,7 @@ func (s *Server) respondRequest(ctx context.Context, input *RespondRequest) (*Re
 	return s.respondRequestLocked(input.ID, input.Body)
 }
 
-func (s *Server) respondRequestLocked(id string, response native.Response) (*RequestResponse, error) {
+func (s *Server) respondRequestLocked(id string, response agentstate.Response) (*RequestResponse, error) {
 	ctx, cancel := s.agentCtx(nativeCallTimeout)
 	defer cancel()
 	state, err := s.native.Respond(ctx, id, response)
@@ -210,7 +213,7 @@ func (s *Server) respondRequestLocked(id string, response native.Response) (*Req
 			}
 			state = stored
 		}
-		if state.Status == native.RequestStatusPending {
+		if state.Status == agentstate.RequestStatusPending {
 			// An answer to it is on its way, or went out unconfirmed.
 			return nil, huma.Error409Conflict("request is being answered")
 		}
@@ -277,7 +280,7 @@ func (s *Server) settingsResponse(ctx context.Context) (*SettingsResponse, error
 	resp.Body.Settings = s.native.Settings()
 	resp.Body.Options = options
 	if resp.Body.Options.PermissionModes == nil {
-		resp.Body.Options.PermissionModes = []native.PermissionMode{}
+		resp.Body.Options.PermissionModes = []agentstate.PermissionMode{}
 	}
 	if resp.Body.Options.Models == nil {
 		resp.Body.Options.Models = []native.ModelOption{}
@@ -357,10 +360,10 @@ func (s *Server) steerQueuedMessage(_ context.Context, input *SteerQueuedMessage
 
 // pendingNativeHandoff describes the oldest pending native request for the
 // human reply protocol, or reports false when none is pending.
-func (s *Server) pendingNativeHandoff() (native.RequestState, string, bool) {
+func (s *Server) pendingNativeHandoff() (agentstate.RequestState, string, bool) {
 	pending := s.native.PendingRequests()
 	if len(pending) == 0 {
-		return native.RequestState{}, "", false
+		return agentstate.RequestState{}, "", false
 	}
 	r := pending[0]
 	var sb strings.Builder
@@ -383,29 +386,29 @@ func (s *Server) pendingNativeHandoff() (native.RequestState, string, bool) {
 // nativeHandoffResponse turns a human reply into a response to r: a number
 // picks an option, other text answers a single question or is feedback for
 // the deny option.
-func nativeHandoffResponse(r native.RequestState, reply string) (native.Response, bool) {
+func nativeHandoffResponse(r agentstate.RequestState, reply string) (agentstate.Response, bool) {
 	reply = strings.TrimSpace(reply)
 	if n, err := strconv.Atoi(reply); err == nil {
 		if len(r.Options) > 0 && n >= 1 && n <= len(r.Options) {
-			return native.Response{OptionID: r.Options[n-1].ID}, true
+			return agentstate.Response{OptionID: r.Options[n-1].ID}, true
 		}
 		if len(r.Questions) == 1 && n >= 1 && n <= len(r.Questions[0].Options) {
 			q := r.Questions[0]
-			return native.Response{Answers: map[string][]string{q.ID: {q.Options[n-1].Label}}}, true
+			return agentstate.Response{Answers: map[string][]string{q.ID: {q.Options[n-1].Label}}}, true
 		}
-		return native.Response{}, false
+		return agentstate.Response{}, false
 	}
 	switch {
 	case len(r.Questions) == 1 && (r.Questions[0].FreeText || len(r.Questions[0].Options) == 0):
-		return native.Response{Answers: map[string][]string{r.Questions[0].ID: {reply}}}, true
+		return agentstate.Response{Answers: map[string][]string{r.Questions[0].ID: {reply}}}, true
 	case r.Feedback:
 		for _, opt := range r.Options {
-			if opt.Kind == native.OptionKindDeny {
-				return native.Response{OptionID: opt.ID, Text: reply}, true
+			if opt.Kind == agentstate.OptionKindDeny {
+				return agentstate.Response{OptionID: opt.ID, Text: reply}, true
 			}
 		}
 	}
-	return native.Response{}, false
+	return agentstate.Response{}, false
 }
 
 func (s *Server) registerNativeRoutes() {

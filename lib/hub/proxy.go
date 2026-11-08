@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/coder/agentapi/lib/instanceapi"
 )
 
 // instanceParam is the {id} of the route, unescaped: an ID such as
@@ -36,7 +38,7 @@ func (h *Hub) proxy(w http.ResponseWriter, r *http.Request) {
 		// Its approvals would go to another agent.
 		writeError(w, http.StatusBadGateway, "another AgentAPI answers at this instance's URL ("+instance.answeredBy+")")
 		return
-	case instance.Connection != ConnectionConnected:
+	case instance.Connection != instanceapi.ConnectionConnected:
 		// Only to a URL where the hub reads the instance's summary: one an
 		// event just named gets no request, nor the instance's token,
 		// before it answers as the instance.
@@ -117,11 +119,11 @@ func changesWebhook(method, path string) bool {
 // isn't connected to.
 func proxyRefusal(instance Instance) string {
 	switch instance.Connection {
-	case ConnectionStopped:
+	case instanceapi.ConnectionStopped:
 		return "the instance stopped"
-	case ConnectionUnreachable:
+	case instanceapi.ConnectionUnreachable:
 		return "the instance is unreachable: " + instance.Error
-	default:
-		return "the hub isn't connected to the instance yet; try again once it is"
+	case instanceapi.ConnectionConnecting, instanceapi.ConnectionConnected:
 	}
+	return "the hub isn't connected to the instance yet; try again once it is"
 }

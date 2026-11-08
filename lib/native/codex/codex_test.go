@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/procutil"
 	"github.com/coder/agentapi/lib/transcript"
@@ -31,7 +32,7 @@ func toolInput(t *testing.T, b transcript.RichContentBlock) map[string]any {
 	return in
 }
 
-func optionIDs(req native.Request) []string {
+func optionIDs(req agentstate.Request) []string {
 	var ids []string
 	for _, o := range req.Options {
 		ids = append(ids, o.ID)
@@ -140,16 +141,16 @@ func TestCommandApprovalAccept(t *testing.T) {
 
 	require.Len(t, s.opened, 1)
 	req := s.opened[0]
-	assert.Equal(t, native.RequestKindApproval, req.Kind)
+	assert.Equal(t, agentstate.RequestKindApproval, req.Kind)
 	assert.Equal(t, `python3 -c "print(6*7)"`, req.Title)
 	assert.Equal(t, "exec_command", req.ToolName)
 	assert.Equal(t, "exec-7ce2bd20-5834-4962-96d7-142110034025", req.ToolUseID)
 	assert.JSONEq(t, `{"cmd":"python3 -c \"print(6*7)\"","workdir":"/work/scratch"}`, string(req.Input))
 	assert.Equal(t, []string{"accept", "acceptWithExecpolicyAmendment", "decline", "cancel"}, optionIDs(req))
-	assert.Equal(t, native.OptionKindAllowAlways, req.Options[1].Kind)
+	assert.Equal(t, agentstate.OptionKindAllowAlways, req.Options[1].Kind)
 	assert.Equal(t, "Always allow commands starting with `python3 -c print(6*7)`", req.Options[1].Label)
-	assert.Equal(t, native.OptionKindDeny, req.Options[2].Kind)
-	assert.Equal(t, native.OptionKindCancel, req.Options[3].Kind)
+	assert.Equal(t, agentstate.OptionKindDeny, req.Options[2].Kind)
+	assert.Equal(t, agentstate.OptionKindCancel, req.Options[3].Kind)
 	assert.Empty(t, s.closed, "an answered request is not withdrawn")
 	assert.Empty(t, h.a.requests)
 
@@ -243,7 +244,7 @@ func TestRequestUserInput(t *testing.T) {
 
 	require.Len(t, s.opened, 1)
 	req := s.opened[0]
-	assert.Equal(t, native.RequestKindQuestion, req.Kind)
+	assert.Equal(t, agentstate.RequestKindQuestion, req.Kind)
 	assert.Equal(t, "Which language should the tiny greeting CLI use?", req.Title)
 	require.Len(t, req.Questions, 1)
 	q := req.Questions[0]
@@ -251,7 +252,7 @@ func TestRequestUserInput(t *testing.T) {
 	assert.Equal(t, "Language", q.Header)
 	assert.True(t, q.FreeText, "isOther allows a free answer")
 	assert.False(t, q.Secret)
-	assert.Equal(t, []native.QuestionOption{
+	assert.Equal(t, []agentstate.QuestionOption{
 		{Label: "Python (Recommended)", Description: "A small script with minimal setup."},
 		{Label: "Node.js", Description: "A lightweight JavaScript command-line program."},
 		{Label: "Go", Description: "A compiled single-binary CLI."},
@@ -370,7 +371,7 @@ func TestMCPToolApproval(t *testing.T) {
 	s := snapshot(h.rec)
 	require.Len(t, s.opened, 1)
 	req := s.opened[0]
-	assert.Equal(t, native.RequestKindApproval, req.Kind)
+	assert.Equal(t, agentstate.RequestKindApproval, req.Kind)
 	assert.Equal(t, `Allow the echo MCP server to run tool "echo_upper"?`, req.Title)
 	assert.Equal(t, "mcp__echo__echo_upper", req.ToolName)
 	assert.Equal(t, "exec-957169c5-e7a0-4f5f-a702-9ea0f167f8da", req.ToolUseID)
@@ -408,7 +409,7 @@ func TestProcessExitWithPendingRequest(t *testing.T) {
 	s := snapshot(h.rec)
 	assert.Empty(t, s.completions, "the conversation ends the turn when Wait returns")
 	assert.Empty(t, s.closed, "the conversation expires the request when Wait returns")
-	require.ErrorIs(t, h.a.Respond(context.Background(), id, native.Response{OptionID: "accept"}), native.ErrRequestNotFound)
+	require.ErrorIs(t, h.a.Respond(context.Background(), id, agentstate.Response{OptionID: "accept"}), native.ErrRequestNotFound)
 	require.Error(t, h.a.StartTurn(context.Background(), native.Input{Text: "hi"}))
 
 	msg, _ := h.rec.Message("01a143b4-9c0b-7021-a76f-53bf2628f666", "assistant")

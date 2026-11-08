@@ -24,11 +24,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/httpapi"
 	"github.com/coder/agentapi/lib/hub"
 	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/logctx"
 	"github.com/coder/agentapi/lib/native/nativetest"
+	"github.com/coder/agentapi/lib/webhook"
 )
 
 const (
@@ -99,7 +101,7 @@ func startInstanceOn(t *testing.T, listener net.Listener, id string) (*httptest.
 		AllowedOrigins: []string{"*"},
 		CWD:            "/work/api",
 		APIToken:       instanceToken,
-		Webhook:        httpapi.WebhookConfig{InstanceID: id},
+		Webhook:        webhook.Config{InstanceID: id},
 	})
 	require.NoError(t, err)
 	ts := httptest.NewUnstartedServer(srv.Handler())
@@ -168,7 +170,7 @@ func TestHub(t *testing.T) {
 	var joined hub.Instance
 	require.Eventually(t, func() bool {
 		list := instances(t, hubSrv.URL)
-		if len(list) == 1 && list[0].Connection == hub.ConnectionConnected {
+		if len(list) == 1 && list[0].Connection == instanceapi.ConnectionConnected {
 			joined = list[0]
 			return true
 		}
@@ -188,7 +190,7 @@ func TestHub(t *testing.T) {
 	// The browser reaches the instance through the hub, which sends the
 	// instance's token, not the browser's credentials.
 	id := joined.ID
-	var status httpapi.StatusChangeBody
+	var status convstate.StatusChangeBody
 	require.Equal(t, http.StatusOK, request(t, http.MethodGet, hubSrv.URL+"/i/"+id+"/status", hubToken, nil, &status))
 	assert.Equal(t, joined.ServerID, status.ServerID)
 	assert.Equal(t, http.StatusUnauthorized, request(t, http.MethodGet, hubSrv.URL+"/i/"+id+"/status", "", nil, nil), "not signed in")
@@ -229,7 +231,7 @@ func TestHub(t *testing.T) {
 	again := startHub(t, statePath)
 	require.Eventually(t, func() bool {
 		list := instances(t, again.URL)
-		return len(list) == 1 && list[0].Connection == hub.ConnectionConnected
+		return len(list) == 1 && list[0].Connection == instanceapi.ConnectionConnected
 	}, 10*time.Second, 20*time.Millisecond)
 
 	// Forgetting it.
@@ -277,15 +279,15 @@ func TestHubWebhookSignature(t *testing.T) {
 	require.Len(t, list, 1)
 	assert.Equal(t, "http://127.0.0.1:1", list[0].URL)
 	require.Eventually(t, func() bool {
-		return instances(t, hubSrv.URL)[0].Connection == hub.ConnectionUnreachable
+		return instances(t, hubSrv.URL)[0].Connection == instanceapi.ConnectionUnreachable
 	}, 10*time.Second, 20*time.Millisecond, "nothing listens there")
 
 	// The same delivery again changes nothing; instance.stopped stops it.
 	stopped := event("e3", "instance.stopped")
 	assert.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, stopped, hubSecret, time.Now()))
-	assert.NotEqual(t, hub.ConnectionStopped, instances(t, hubSrv.URL)[0].Connection, "a replayed delivery")
+	assert.NotEqual(t, instanceapi.ConnectionStopped, instances(t, hubSrv.URL)[0].Connection, "a replayed delivery")
 	assert.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, event("e4", "instance.stopped"), hubSecret, time.Now()))
-	assert.Equal(t, hub.ConnectionStopped, instances(t, hubSrv.URL)[0].Connection)
+	assert.Equal(t, instanceapi.ConnectionStopped, instances(t, hubSrv.URL)[0].Connection)
 }
 
 // An event without a delivery ID can't be told from a copy of it, which
@@ -331,7 +333,7 @@ func TestHubConnectGrace(t *testing.T) {
 	// It starts a moment later; until then it is connecting.
 	deadline := time.Now().Add(1500 * time.Millisecond)
 	for time.Now().Before(deadline) {
-		assert.Equal(t, hub.ConnectionConnecting, instances(t, hubSrv.URL)[0].Connection)
+		assert.Equal(t, instanceapi.ConnectionConnecting, instances(t, hubSrv.URL)[0].Connection)
 		time.Sleep(50 * time.Millisecond)
 	}
 	listener, err := net.Listen("tcp", addr)
@@ -352,8 +354,8 @@ func TestHubConnectGrace(t *testing.T) {
 	})
 	require.Eventually(t, func() bool {
 		connection := instances(t, hubSrv.URL)[0].Connection
-		assert.NotEqual(t, hub.ConnectionUnreachable, connection)
-		return connection == hub.ConnectionConnected
+		assert.NotEqual(t, instanceapi.ConnectionUnreachable, connection)
+		return connection == instanceapi.ConnectionConnected
 	}, 10*time.Second, 50*time.Millisecond)
 
 	// One that never listens is unreachable after the grace.
@@ -362,7 +364,7 @@ func TestHubConnectGrace(t *testing.T) {
 		"instance": map[string]any{"id": "dev-2:3284", "server_id": "s2", "url": "http://127.0.0.1:1", "agent_type": "codex"},
 	}
 	require.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, other, hubSecret, time.Now()))
-	connection := func() hub.Connection {
+	connection := func() instanceapi.Connection {
 		for _, instance := range instances(t, hubSrv.URL) {
 			if instance.ID == "dev-2:3284" {
 				return instance.Connection
@@ -371,8 +373,8 @@ func TestHubConnectGrace(t *testing.T) {
 		return ""
 	}
 	time.Sleep(time.Second)
-	assert.Equal(t, hub.ConnectionConnecting, connection(), "within the grace")
-	require.Eventually(t, func() bool { return connection() == hub.ConnectionUnreachable }, 20*time.Second, 100*time.Millisecond)
+	assert.Equal(t, instanceapi.ConnectionConnecting, connection(), "within the grace")
+	require.Eventually(t, func() bool { return connection() == instanceapi.ConnectionUnreachable }, 20*time.Second, 100*time.Millisecond)
 }
 
 // joinInstance has a running AgentAPI join the hub, as agentapi hub join
@@ -387,7 +389,7 @@ func joinInstance(t *testing.T, hubURL, instanceURL string) hub.Instance {
 	var joined hub.Instance
 	require.Eventually(t, func() bool {
 		list := instances(t, hubURL)
-		if len(list) == 1 && list[0].Connection == hub.ConnectionConnected {
+		if len(list) == 1 && list[0].Connection == instanceapi.ConnectionConnected {
 			joined = list[0]
 			return true
 		}
@@ -410,7 +412,7 @@ func TestHubOtherInstanceAnswers(t *testing.T) {
 	var shown hub.Instance
 	require.Eventually(t, func() bool {
 		shown = instances(t, hubSrv.URL)[0]
-		return shown.Connection == hub.ConnectionUnreachable
+		return shown.Connection == instanceapi.ConnectionUnreachable
 	}, 10*time.Second, 20*time.Millisecond)
 	assert.Contains(t, shown.Error, "another AgentAPI answers at this URL")
 	assert.Nil(t, shown.Summary, "not the other one's summary")
@@ -437,7 +439,7 @@ func TestHubKeepsTheRunItFollows(t *testing.T) {
 	kept := instances(t, hubSrv.URL)[0]
 	assert.Equal(t, instSrv.URL, kept.URL)
 	assert.Equal(t, joined.ServerID, kept.ServerID)
-	assert.Equal(t, hub.ConnectionConnected, kept.Connection)
+	assert.Equal(t, instanceapi.ConnectionConnected, kept.Connection)
 
 	// Once the one it follows stopped, the other is the instance; but an
 	// instance.stopped is no sign its URL is dead (anyone with the secret
@@ -448,10 +450,10 @@ func TestHubKeepsTheRunItFollows(t *testing.T) {
 		"instance": map[string]any{"id": joined.ID, "server_id": joined.ServerID, "url": instSrv.URL},
 	}
 	require.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, stopped, hubSecret, time.Now()))
-	require.Equal(t, hub.ConnectionStopped, instances(t, hubSrv.URL)[0].Connection)
+	require.Equal(t, instanceapi.ConnectionStopped, instances(t, hubSrv.URL)[0].Connection)
 	require.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, twin("t3", "instance.heartbeat"), hubSecret, time.Now()))
 	require.Eventually(t, func() bool {
-		return instances(t, hubSrv.URL)[0].Connection == hub.ConnectionConnected
+		return instances(t, hubSrv.URL)[0].Connection == instanceapi.ConnectionConnected
 	}, 10*time.Second, 20*time.Millisecond, "it still answers")
 	kept = instances(t, hubSrv.URL)[0]
 	assert.Equal(t, instSrv.URL, kept.URL)
@@ -465,7 +467,7 @@ func TestHubKeepsTheRunItFollows(t *testing.T) {
 	instSrv.CloseClientConnections()
 	require.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, twin("t4", "instance.heartbeat"), hubSecret, time.Now()))
 	require.Eventually(t, func() bool {
-		return instances(t, hubSrv.URL)[0].Connection == hub.ConnectionUnreachable
+		return instances(t, hubSrv.URL)[0].Connection == instanceapi.ConnectionUnreachable
 	}, 10*time.Second, 20*time.Millisecond)
 	assert.Equal(t, instSrv.URL, instances(t, hubSrv.URL)[0].URL, "not before it failed there")
 	require.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, twin("t5", "instance.heartbeat"), hubSecret, time.Now()))
@@ -517,7 +519,7 @@ func TestHubEventsDontMoveAFollowedInstance(t *testing.T) {
 	kept := instances(t, hubSrv.URL)[0]
 	assert.Equal(t, instSrv.URL, kept.URL)
 	assert.Equal(t, joined.ServerID, kept.ServerID)
-	assert.Equal(t, hub.ConnectionConnected, kept.Connection)
+	assert.Equal(t, instanceapi.ConnectionConnected, kept.Connection)
 	assert.Equal(t, http.StatusOK, request(t, http.MethodGet, hubSrv.URL+"/i/"+joined.ID+"/status", hubToken, nil, nil))
 	assert.Never(t, func() bool { return got.Load() > 0 }, 300*time.Millisecond, 20*time.Millisecond, "nothing went to the other URL")
 }
@@ -551,20 +553,20 @@ func TestHubFollowsANewAddress(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, heartbeat("d1"), hubSecret, time.Now()))
 	kept := instances(t, hubSrv.URL)[0]
 	assert.Equal(t, oldSrv.URL, kept.URL)
-	assert.Equal(t, hub.ConnectionConnected, kept.Connection)
+	assert.Equal(t, instanceapi.ConnectionConnected, kept.Connection)
 
 	// The old address is gone.
 	_ = oldSrv.Listener.Close()
 	oldSrv.CloseClientConnections()
 	require.Eventually(t, func() bool {
-		return instances(t, hubSrv.URL)[0].Connection == hub.ConnectionUnreachable
+		return instances(t, hubSrv.URL)[0].Connection == instanceapi.ConnectionUnreachable
 	}, 10*time.Second, 20*time.Millisecond)
 
 	require.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, heartbeat("d2"), hubSecret, time.Now()))
 	var moved hub.Instance
 	require.Eventually(t, func() bool {
 		moved = instances(t, hubSrv.URL)[0]
-		return moved.Connection == hub.ConnectionConnected
+		return moved.Connection == instanceapi.ConnectionConnected
 	}, 10*time.Second, 20*time.Millisecond)
 	assert.Equal(t, newSrv.URL, moved.URL)
 	assert.Equal(t, joined.ServerID, moved.ServerID, "the same run")
@@ -626,16 +628,16 @@ func TestHubRestartRefusesAMove(t *testing.T) {
 
 	inst.hold.Store(true)
 	again := startHubGrace(t, statePath, 5*time.Second)
-	require.Equal(t, hub.ConnectionConnecting, instances(t, again.URL)[0].Connection)
+	require.Equal(t, instanceapi.ConnectionConnecting, instances(t, again.URL)[0].Connection)
 	assert.Equal(t, http.StatusNoContent, postEvent(t, again.URL, hijack("h1", joined, otherURL), hubSecret, time.Now()))
 	kept := instances(t, again.URL)[0]
 	assert.Equal(t, inst.URL, kept.URL)
-	assert.Equal(t, hub.ConnectionConnecting, kept.Connection)
+	assert.Equal(t, instanceapi.ConnectionConnecting, kept.Connection)
 	assert.Equal(t, http.StatusServiceUnavailable, request(t, http.MethodGet, again.URL+"/i/"+joined.ID+"/status", hubToken, nil, nil), "not connected yet")
 
 	close(inst.release)
 	require.Eventually(t, func() bool {
-		return instances(t, again.URL)[0].Connection == hub.ConnectionConnected
+		return instances(t, again.URL)[0].Connection == instanceapi.ConnectionConnected
 	}, 10*time.Second, 20*time.Millisecond)
 	assert.Equal(t, inst.URL, instances(t, again.URL)[0].URL)
 	assert.Equal(t, http.StatusOK, request(t, http.MethodGet, again.URL+"/i/"+joined.ID+"/status", hubToken, nil, nil))
@@ -653,7 +655,7 @@ func TestHubStreamDropRefusesAMove(t *testing.T) {
 	inst.hold.Store(true)
 	inst.CloseClientConnections()
 	require.Eventually(t, func() bool {
-		return instances(t, hubSrv.URL)[0].Connection == hub.ConnectionConnecting
+		return instances(t, hubSrv.URL)[0].Connection == instanceapi.ConnectionConnecting
 	}, 10*time.Second, 20*time.Millisecond)
 	assert.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, hijack("h1", joined, otherURL), hubSecret, time.Now()))
 	assert.Equal(t, inst.URL, instances(t, hubSrv.URL)[0].URL)
@@ -661,7 +663,7 @@ func TestHubStreamDropRefusesAMove(t *testing.T) {
 
 	close(inst.release)
 	require.Eventually(t, func() bool {
-		return instances(t, hubSrv.URL)[0].Connection == hub.ConnectionConnected
+		return instances(t, hubSrv.URL)[0].Connection == instanceapi.ConnectionConnected
 	}, 10*time.Second, 20*time.Millisecond)
 	assert.Equal(t, inst.URL, instances(t, hubSrv.URL)[0].URL)
 	assert.Never(t, func() bool { return got.Load() > 0 }, 300*time.Millisecond, 20*time.Millisecond, "nothing went to the other URL")
@@ -687,7 +689,7 @@ func TestHubProxyWaitsForAMovedInstance(t *testing.T) {
 	_ = inst.Listener.Close()
 	inst.CloseClientConnections()
 	require.Eventually(t, func() bool {
-		return instances(t, hubSrv.URL)[0].Connection == hub.ConnectionUnreachable
+		return instances(t, hubSrv.URL)[0].Connection == instanceapi.ConnectionUnreachable
 	}, 10*time.Second, 20*time.Millisecond)
 	require.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, hijack("m1", joined, other.URL), hubSecret, time.Now()))
 	assert.Equal(t, other.URL, instances(t, hubSrv.URL)[0].URL, "its URL is dead: it moves")
@@ -714,7 +716,7 @@ func TestHubAddedInstanceStays(t *testing.T) {
 	_ = instSrv.Listener.Close()
 	instSrv.CloseClientConnections()
 	require.Eventually(t, func() bool {
-		return instances(t, hubSrv.URL)[0].Connection == hub.ConnectionUnreachable
+		return instances(t, hubSrv.URL)[0].Connection == instanceapi.ConnectionUnreachable
 	}, 10*time.Second, 20*time.Millisecond)
 
 	heartbeat := map[string]any{
@@ -740,7 +742,7 @@ func TestHubAddInstance(t *testing.T) {
 	assert.Empty(t, added.Token)
 	require.Eventually(t, func() bool {
 		list := instances(t, hubSrv.URL)
-		return len(list) == 1 && list[0].Connection == hub.ConnectionConnected
+		return len(list) == 1 && list[0].Connection == instanceapi.ConnectionConnected
 	}, 10*time.Second, 20*time.Millisecond)
 }
 
@@ -1005,17 +1007,17 @@ func TestHubMissedHeartbeats(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, postEvent(t, hubURL, heartbeat("h1"), hubSecret, start))
 	passRetries(t, clock, retry, start, 2*time.Minute)
 	gone := instances(t, hubURL)[0]
-	assert.Equal(t, hub.ConnectionUnreachable, gone.Connection, "two heartbeats missed")
+	assert.Equal(t, instanceapi.ConnectionUnreachable, gone.Connection, "two heartbeats missed")
 	assert.Equal(t, 60, gone.HeartbeatSeconds)
 
 	passRetries(t, clock, retry, start, 3*time.Minute)
 	require.Eventually(t, func() bool {
-		return instances(t, hubURL)[0].Connection == hub.ConnectionStopped
+		return instances(t, hubURL)[0].Connection == instanceapi.ConnectionStopped
 	}, 5*time.Second, 10*time.Millisecond, "three missed")
 	assert.Equal(t, instanceapi.StateStopped, instances(t, hubURL)[0].State)
 
 	require.Equal(t, http.StatusNoContent, postEvent(t, hubURL, heartbeat("h2"), hubSecret, clock.Now()))
-	assert.Equal(t, hub.ConnectionConnecting, instances(t, hubURL)[0].Connection)
+	assert.Equal(t, instanceapi.ConnectionConnecting, instances(t, hubURL)[0].Connection)
 	retry.MustWait(t.Context()).Release()
 }
 
@@ -1031,7 +1033,7 @@ func TestHubNoHeartbeats(t *testing.T) {
 	start := clock.Now()
 	require.Equal(t, http.StatusNoContent, postEvent(t, hubURL, started, hubSecret, start))
 	passRetries(t, clock, retry, start, 10*time.Minute)
-	assert.Equal(t, hub.ConnectionUnreachable, instances(t, hubURL)[0].Connection)
+	assert.Equal(t, instanceapi.ConnectionUnreachable, instances(t, hubURL)[0].Connection)
 }
 
 // The API and the browser's stream say when each instance last changed what
@@ -1092,12 +1094,12 @@ func TestHubChangedAt(t *testing.T) {
 	}
 	retry.MustWait(t.Context()).Release()
 	gone := instances(t, hubURL)[0]
-	require.Equal(t, hub.ConnectionUnreachable, gone.Connection)
+	require.Equal(t, instanceapi.ConnectionUnreachable, gone.Connection)
 	assert.True(t, gone.ChangedAt.After(start))
 	for {
 		e := next(t, events)
 		var changed hub.Instance
-		if e.event != "instance" || json.Unmarshal([]byte(e.data), &changed) != nil || changed.Connection != hub.ConnectionUnreachable {
+		if e.event != "instance" || json.Unmarshal([]byte(e.data), &changed) != nil || changed.Connection != instanceapi.ConnectionUnreachable {
 			continue
 		}
 		assert.True(t, changed.ChangedAt.Equal(gone.ChangedAt))

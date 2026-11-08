@@ -3,10 +3,10 @@
 // events, its summary and its registry entry), its summary (GET /summary,
 // summary_update), the envelope and signature of its webhook events, and
 // what a hub shows of each one (StateOf). It holds types and small pure
-// functions only, so a client depends on it rather than on the server.
-//
-// lib/httpapi keeps aliases of these types under the same names: the
-// OpenAPI schema names them by their Go names.
+// functions only, so a client depends on it rather than on the server:
+// it imports lib/agentstate and lib/util, never lib/native or lib/httpapi.
+// The OpenAPI schema names a type by its Go name, whichever package holds
+// it.
 package instanceapi
 
 import (

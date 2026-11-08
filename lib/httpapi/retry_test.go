@@ -9,12 +9,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentstate"
+	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/httpapi"
 	"github.com/coder/agentapi/lib/native"
 )
 
-func (n *nativeServer) retryWait() *native.RetryWait {
-	var status httpapi.StatusChangeBody
+func (n *nativeServer) retryWait() *agentstate.RetryWait {
+	var status convstate.StatusChangeBody
 	n.do(http.MethodGet, "/status", nil, &status)
 	return status.RetryWait
 }

@@ -19,7 +19,7 @@ func TestMessageQueue(t *testing.T) {
 	b := q.Push("b", at, false)
 	first := q.Push("first", at, true)
 	assert.Equal(t, []int{1, 2, 3}, []int{a.ID, b.ID, first.ID})
-	assert.Equal(t, []QueuedMessage{first, a, b}, q.Messages())
+	assert.Equal(t, []convstate.QueuedMessage{first, a, b}, q.Messages())
 	head, ok := q.Head()
 	require.True(t, ok)
 	assert.Equal(t, first, head)
@@ -68,12 +68,12 @@ func TestQueueIDsGoOnAfterARestart(t *testing.T) {
 func TestQueueRestoreKeepsCounting(t *testing.T) {
 	t.Parallel()
 	var q messageQueue
-	q.Restore([]QueuedMessage{{ID: 7, Content: "x"}}, 5)
-	assert.Equal(t, 7, q.LastID(), "an ID stored with a message counts too")
+	q.Restore([]convstate.QueuedMessage{{ID: 7, Content: "x"}}, 5)
+	assert.Equal(t, 7, q.lastID, "an ID stored with a message counts too")
 	assert.Equal(t, 8, q.Push("y", time.Time{}, false).ID)
 }
 
-func ids(messages []QueuedMessage) []int {
+func ids(messages []convstate.QueuedMessage) []int {
 	out := make([]int, len(messages))
 	for i, m := range messages {
 		out[i] = m.ID
@@ -118,7 +118,7 @@ func TestEmitterQueueUpdates(t *testing.T) {
 	t.Parallel()
 	e := convstate.NewEventEmitter()
 	var q messageQueue
-	q.onChange = func(queue []QueuedMessage, _ int, version uint64) { e.SetQueue(queue, version) }
+	q.onChange = func(queue []convstate.QueuedMessage, _ int, version uint64) { e.SetQueue(queue, version) }
 	_, ch, _ := e.SubscribeTo(convstate.AllEvents, 0, "")
 	at := time.Now()
 	first := q.Push("one", at, false)
@@ -127,7 +127,7 @@ func TestEmitterQueueUpdates(t *testing.T) {
 	q.Remove(first.ID)
 	var queues [][]string
 	for _, event := range drain(ch) {
-		update, ok := event.Payload.(QueueUpdateBody)
+		update, ok := event.Payload.(convstate.QueueUpdateBody)
 		require.True(t, ok)
 		var contents []string
 		for _, m := range update.Queue {
@@ -143,9 +143,9 @@ func TestEmitterQueueUpdates(t *testing.T) {
 
 	// The replay holds the queue.
 	_, _, replay := e.SubscribeSince(0, "")
-	var replayed *QueueUpdateBody
+	var replayed *convstate.QueueUpdateBody
 	for _, event := range replay {
-		if update, ok := event.Payload.(QueueUpdateBody); ok {
+		if update, ok := event.Payload.(convstate.QueueUpdateBody); ok {
 			replayed = &update
 		}
 	}
@@ -155,8 +155,8 @@ func TestEmitterQueueUpdates(t *testing.T) {
 }
 
 // drain returns the events waiting in ch.
-func drain(ch <-chan Event) []Event {
-	var events []Event
+func drain(ch <-chan convstate.Event) []convstate.Event {
+	var events []convstate.Event
 	for {
 		select {
 		case event := <-ch:

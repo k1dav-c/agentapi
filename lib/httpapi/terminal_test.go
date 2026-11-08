@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/httpapi"
 	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/logctx"
@@ -109,7 +110,7 @@ func waitFor(t *testing.T, events <-chan string, want string) string {
 
 func TestTerminal(t *testing.T) {
 	n := terminalServer(t, true)
-	var status httpapi.StatusChangeBody
+	var status convstate.StatusChangeBody
 	n.do(http.MethodGet, "/status", nil, &status)
 	assert.True(t, status.Terminal)
 	assert.Equal(t, http.StatusConflict, n.do(http.MethodPost, "/terminal/input", map[string]any{"data": "x"}, nil), "no shell before someone watches")
@@ -133,7 +134,7 @@ func TestTerminal(t *testing.T) {
 
 func TestNoTerminal(t *testing.T) {
 	n := terminalServer(t, false)
-	var status httpapi.StatusChangeBody
+	var status convstate.StatusChangeBody
 	n.do(http.MethodGet, "/status", nil, &status)
 	assert.False(t, status.Terminal)
 	assert.Equal(t, http.StatusNotFound, n.do(http.MethodPost, "/terminal/input", map[string]any{"data": "x"}, nil))

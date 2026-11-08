@@ -10,16 +10,17 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/coder/agentapi/lib/httpapi"
+	"github.com/coder/agentapi/lib/convstate"
+	"github.com/coder/agentapi/lib/instanceapi"
 )
 
 // A client that watches many AgentAPIs follows each through
 // /events?only=summary: the summary and its changes, and nothing else.
 func TestEvents_OnlySummary(t *testing.T) {
 	n := newNativeServer(t, nil)
-	var summary httpapi.SummaryBody
+	var summary instanceapi.SummaryBody
 	require.Equal(t, http.StatusOK, n.do(http.MethodGet, "/summary", nil, &summary))
-	assert.Equal(t, httpapi.AttentionNone, summary.Attention)
+	assert.Equal(t, instanceapi.AttentionNone, summary.Attention)
 	assert.NotEmpty(t, summary.Instance.ID)
 	assert.NotEmpty(t, summary.Instance.ServerID)
 
@@ -31,15 +32,15 @@ func TestEvents_OnlySummary(t *testing.T) {
 	for {
 		event := nextEvent(t, events)
 		require.Equal(t, "summary_update", event.event)
-		var body httpapi.SummaryUpdateBody
+		var body convstate.SummaryUpdateBody
 		require.NoError(t, json.Unmarshal([]byte(event.data), &body))
-		if body.Attention == httpapi.AttentionRequest {
+		if body.Attention == instanceapi.AttentionRequest {
 			assert.Equal(t, 1, body.PendingRequests)
 			break
 		}
 	}
 	require.Equal(t, http.StatusOK, n.do(http.MethodGet, "/summary", nil, &summary))
-	assert.Equal(t, httpapi.AttentionRequest, summary.Attention)
+	assert.Equal(t, instanceapi.AttentionRequest, summary.Attention)
 
 	// Other clients don't get it.
 	assert.NotContains(t, eventNames(t, n.url+"/events?sync=1"), "summary_update")
@@ -54,7 +55,7 @@ func TestEvents_SummaryInstanceChange(t *testing.T) {
 	id := "build-box"
 	require.Equal(t, http.StatusOK, n.do(http.MethodPut, "/webhook", map[string]any{"url": "", "timeout_seconds": 10, "max_attempts": 3, "instance_id": id}, nil))
 	for {
-		var body httpapi.SummaryUpdateBody
+		var body convstate.SummaryUpdateBody
 		require.NoError(t, json.Unmarshal([]byte(nextEvent(t, events).data), &body))
 		if body.Instance.ID == id {
 			break

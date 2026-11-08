@@ -12,6 +12,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentstate"
+	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/handoff"
 	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/logctx"
@@ -46,13 +48,13 @@ func sendUserMessage(t *testing.T, srv *Server, content string) *MessageResponse
 	return resp
 }
 
-func errorMessages(e *EventEmitter) []string {
+func errorMessages(e *convstate.EventEmitter) []string {
 	// A subscription replays the stored errors.
-	id, _, replay := e.SubscribeTo(func(t EventType) bool { return t == EventTypeError }, 0, "")
+	id, _, replay := e.SubscribeTo(func(t convstate.EventType) bool { return t == convstate.EventTypeError }, 0, "")
 	e.Unsubscribe(id)
 	var messages []string
 	for _, event := range replay {
-		messages = append(messages, event.Payload.(ErrorBody).Message)
+		messages = append(messages, event.Payload.(convstate.ErrorBody).Message)
 	}
 	return messages
 }
@@ -189,13 +191,13 @@ func TestNativeHandoffReplyAnswersTheOfferedRequest(t *testing.T) {
 	a := factory.Last()
 	sendUserMessage(t, srv, "do it")
 	sink := a.Sink()
-	sink.RequestOpened(native.Request{
-		ID: "r1", Kind: native.RequestKindApproval, Title: "Run ls",
-		Options: []native.RequestOption{{ID: "allow", Label: "Allow", Kind: native.OptionKindAllow}},
+	sink.RequestOpened(agentstate.Request{
+		ID: "r1", Kind: agentstate.RequestKindApproval, Title: "Run ls",
+		Options: []agentstate.RequestOption{{ID: "allow", Label: "Allow", Kind: agentstate.OptionKindAllow}},
 	})
-	sink.RequestOpened(native.Request{
-		ID: "r2", Kind: native.RequestKindApproval, Title: "Run rm",
-		Options: []native.RequestOption{{ID: "allow", Label: "Allow", Kind: native.OptionKindAllow}},
+	sink.RequestOpened(agentstate.Request{
+		ID: "r2", Kind: agentstate.RequestKindApproval, Title: "Run rm",
+		Options: []agentstate.RequestOption{{ID: "allow", Label: "Allow", Kind: agentstate.OptionKindAllow}},
 	})
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
@@ -214,9 +216,9 @@ func TestNativeHandoffReplyAnswersTheOfferedRequest(t *testing.T) {
 	// A reply the request doesn't take is invalid, and as nothing was sent
 	// a corrected one may follow. (The reply answers the question, but an
 	// approval takes one of its options.)
-	sink.RequestOpened(native.Request{
-		ID: "r3", Kind: native.RequestKindApproval, Title: "Run make",
-		Questions: []native.Question{{ID: "why", Question: "Why?", Options: []native.QuestionOption{{Label: "To build"}}}},
+	sink.RequestOpened(agentstate.Request{
+		ID: "r3", Kind: agentstate.RequestKindApproval, Title: "Run make",
+		Questions: []agentstate.Question{{ID: "why", Question: "Why?", Options: []agentstate.QuestionOption{{Label: "To build"}}}},
 	})
 	r3, ok := srv.native.Request("r3")
 	require.True(t, ok)
@@ -228,7 +230,7 @@ func TestNativeHandoffReplyAnswersTheOfferedRequest(t *testing.T) {
 }
 
 // holdForUpdate puts the server's update in state, as runUpdate does.
-func holdForUpdate(srv *Server, state UpdateState) {
+func holdForUpdate(srv *Server, state instanceapi.UpdateState) {
 	srv.updater.mu.Lock()
 	defer srv.updater.mu.Unlock()
 	srv.updater.status.State = state
@@ -246,13 +248,13 @@ func TestNativeTickHoldsWhileAnUpdateWaits(t *testing.T) {
 	a.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonLimited, Error: "You've hit your limit", ResetsAt: &resets})
 	require.NoError(t, srv.native.ScheduleContinue(&resets))
 
-	holdForUpdate(srv, UpdateStateWaiting)
+	holdForUpdate(srv, instanceapi.UpdateStateWaiting)
 	srv.beforeQueue()
 	srv.dispatchNextQueuedMessage()
 	assert.Len(t, a.Turns(), 1, "the continuation waits for the new program")
 	assert.NotNil(t, srv.native.LimitStop())
 
-	holdForUpdate(srv, UpdateStateIdle)
+	holdForUpdate(srv, instanceapi.UpdateStateIdle)
 	srv.beforeQueue()
 	require.Len(t, a.Turns(), 2, "the update was cancelled")
 	assert.Equal(t, native.ContinuePrompt, a.Turns()[1].Text)

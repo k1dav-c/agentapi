@@ -128,7 +128,7 @@ func TestHubVersionFollowsRestartInPlace(t *testing.T) {
 	following := func(serverID string) func() bool {
 		return func() bool {
 			i := shown()
-			return i.Connection == hub.ConnectionConnected && i.Summary != nil && i.Summary.Instance.ServerID == serverID
+			return i.Connection == instanceapi.ConnectionConnected && i.Summary != nil && i.Summary.Instance.ServerID == serverID
 		}
 	}
 	require.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, started("v1", "run-1", "1.8.1"), hubSecret, time.Now()))
@@ -190,7 +190,7 @@ func TestHubShowsAnAgentAPI2(t *testing.T) {
 	var shown hub.Instance
 	require.Eventually(t, func() bool {
 		shown = instances(t, hubSrv.URL)[0]
-		return shown.Connection == hub.ConnectionConnected
+		return shown.Connection == instanceapi.ConnectionConnected
 	}, 10*time.Second, 20*time.Millisecond)
 	assert.Equal(t, instanceapi.StateIdle, shown.State)
 	assert.Equal(t, instanceapi.Transport("pty"), shown.Transport)

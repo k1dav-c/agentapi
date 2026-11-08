@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
+
+	"github.com/coder/agentapi/lib/instanceapi"
 )
 
 type DeleteMessagesResponse struct {
@@ -107,7 +109,7 @@ func (s *Server) beginRestart() agentRestart {
 	replacement := s.native.BeginRestart(func() {
 		// Once the old agent is retired, so that nothing it still reports
 		// changes it.
-		s.emitter.SetLifecycle(LifecycleRestarting)
+		s.emitter.SetLifecycle(instanceapi.LifecycleRestarting)
 		s.forgetConversationLocked()
 	})
 	return agentRestart{run: func(ctx context.Context) error {
@@ -146,7 +148,7 @@ func (s *Server) runRestartLocked(r agentRestart) error {
 		// started in time, and closes what did.
 		return errStopping
 	case err != nil:
-		s.emitter.SetLifecycle(LifecycleFailed)
+		s.emitter.SetLifecycle(instanceapi.LifecycleFailed)
 		return err
 	}
 	if r.done != nil {

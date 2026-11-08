@@ -8,12 +8,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/procutil"
 )
 
 // loginHint tells the user how to log Claude Code in.
-var loginHint = native.LoginRequired{
+var loginHint = agentstate.LoginRequired{
 	Agent:   "Claude Code",
 	Message: "Claude Code is not logged in.",
 	Command: "claude auth login",

@@ -11,31 +11,32 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/native"
 )
 
 func TestOptionKind(t *testing.T) {
 	t.Parallel()
-	for label, want := range map[string]native.OptionKind{
-		"Allow":                   native.OptionKindAllow,
-		"Yes, proceed anyway":     native.OptionKindAllow,
-		"OK":                      native.OptionKindAllow,
-		"Always allow":            native.OptionKindAllowAlways,
-		"Allow always":            native.OptionKindAllowAlways,
-		"Yes, always":             native.OptionKindAllowAlways,
-		"Always":                  native.OptionKindAllowAlways,
-		"Block":                   native.OptionKindDeny,
-		"No":                      native.OptionKindDeny,
-		"No, let me commit first": native.OptionKindDeny,
-		"Always deny":             native.OptionKindDeny,
-		"Deny always":             native.OptionKindDeny,
-		"Block always":            native.OptionKindDeny,
-		"Disallow":                native.OptionKindDeny,
-		"Cancel":                  native.OptionKindCancel,
-		"Stop the run":            native.OptionKindCancel,
-		"Normal mode":             native.OptionKindOther,
-		"Notify me":               native.OptionKindOther,
-		"Option A":                native.OptionKindOther,
+	for label, want := range map[string]agentstate.OptionKind{
+		"Allow":                   agentstate.OptionKindAllow,
+		"Yes, proceed anyway":     agentstate.OptionKindAllow,
+		"OK":                      agentstate.OptionKindAllow,
+		"Always allow":            agentstate.OptionKindAllowAlways,
+		"Allow always":            agentstate.OptionKindAllowAlways,
+		"Yes, always":             agentstate.OptionKindAllowAlways,
+		"Always":                  agentstate.OptionKindAllowAlways,
+		"Block":                   agentstate.OptionKindDeny,
+		"No":                      agentstate.OptionKindDeny,
+		"No, let me commit first": agentstate.OptionKindDeny,
+		"Always deny":             agentstate.OptionKindDeny,
+		"Deny always":             agentstate.OptionKindDeny,
+		"Block always":            agentstate.OptionKindDeny,
+		"Disallow":                agentstate.OptionKindDeny,
+		"Cancel":                  agentstate.OptionKindCancel,
+		"Stop the run":            agentstate.OptionKindCancel,
+		"Normal mode":             agentstate.OptionKindOther,
+		"Notify me":               agentstate.OptionKindOther,
+		"Option A":                agentstate.OptionKindOther,
 	} {
 		assert.Equal(t, want, optionKind(label), label)
 	}
@@ -54,14 +55,14 @@ func TestRespondAfterFailedWrite(t *testing.T) {
 	h.settle()
 
 	h.a.writer.Attach(failingStdin{})
-	err := h.a.Respond(h.ctx, "d1", native.Response{OptionID: optionNo})
+	err := h.a.Respond(h.ctx, "d1", agentstate.Response{OptionID: optionNo})
 	require.Error(t, err)
 	assert.NotErrorIs(t, err, native.ErrRequestNotFound)
 
 	h.a.writer.Attach(h.pi.Stdin())
-	require.NoError(t, h.a.Respond(h.ctx, "d1", native.Response{OptionID: optionNo}), "the dialog is still open")
+	require.NoError(t, h.a.Respond(h.ctx, "d1", agentstate.Response{OptionID: optionNo}), "the dialog is still open")
 	assert.Equal(t, false, h.pi.nextCmd()["confirmed"])
-	assert.ErrorIs(t, h.a.Respond(h.ctx, "d1", native.Response{OptionID: optionNo}), native.ErrRequestNotFound)
+	assert.ErrorIs(t, h.a.Respond(h.ctx, "d1", agentstate.Response{OptionID: optionNo}), native.ErrRequestNotFound)
 }
 
 // heldStdin holds writes until release is closed.
@@ -92,7 +93,7 @@ func TestTurnEndWhileAnswering(t *testing.T) {
 	stdin := &heldStdin{WriteCloser: h.pi.Stdin(), writing: make(chan struct{}), release: make(chan struct{})}
 	h.a.writer.Attach(stdin)
 	h.call("r", func() error {
-		return h.a.Respond(h.ctx, "d1", native.Response{Answers: map[string][]string{valueQuestion: {"typed"}}})
+		return h.a.Respond(h.ctx, "d1", agentstate.Response{Answers: map[string][]string{valueQuestion: {"typed"}}})
 	})
 	<-stdin.writing
 	h.write(`{"type":"agent_settled"}`)
@@ -119,8 +120,8 @@ func TestUnconfirmedAnswerIsNotSentTwice(t *testing.T) {
 	h.a.writer.Attach(stdin)
 	ctx, cancel := context.WithTimeout(h.ctx, 20*time.Millisecond)
 	defer cancel()
-	answer := func(value string) native.Response {
-		return native.Response{Answers: map[string][]string{valueQuestion: {value}}}
+	answer := func(value string) agentstate.Response {
+		return agentstate.Response{Answers: map[string][]string{valueQuestion: {value}}}
 	}
 	require.ErrorIs(t, h.a.Respond(ctx, "d1", answer("typed")), native.ErrUnconfirmed)
 	require.ErrorIs(t, h.a.Respond(h.ctx, "d1", answer("other")), native.ErrRequestNotFound,
@@ -145,7 +146,7 @@ func TestDialogTimersStop(t *testing.T) {
 		h := startedHarness(t)
 		h.write(dialog)
 		h.settle()
-		require.NoError(t, h.a.Respond(h.ctx, "d1", native.Response{Answers: map[string][]string{choiceQuestion: {"b"}}}))
+		require.NoError(t, h.a.Respond(h.ctx, "d1", agentstate.Response{Answers: map[string][]string{choiceQuestion: {"b"}}}))
 		assert.Equal(t, "b", h.pi.nextCmd()["value"])
 		_, timer := h.clock.Peek()
 		assert.False(t, timer)
@@ -186,7 +187,7 @@ func TestTurnEndLeavesDialogsToTheConversation(t *testing.T) {
 	assert.Equal(t, []native.TurnResult{{StopReason: native.StopReasonInterrupted}}, h.sink.State().Results)
 	assert.Empty(t, h.sink.State().Closed)
 	assert.Equal(t, map[string]any{"type": "extension_ui_response", "id": "d1", "cancelled": true}, h.pi.nextCmd())
-	assert.ErrorIs(t, h.a.Respond(h.ctx, "d1", native.Response{OptionID: "Allow"}), native.ErrRequestNotFound)
+	assert.ErrorIs(t, h.a.Respond(h.ctx, "d1", agentstate.Response{OptionID: "Allow"}), native.ErrRequestNotFound)
 }
 
 // TestInterruptCancelsCommandDialogs: abort doesn't reach an extension

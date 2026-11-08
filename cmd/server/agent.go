@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/coder/agentapi/lib/filelock"
+	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/procutil"
 	"github.com/coder/agentapi/lib/procenv"
@@ -50,12 +51,12 @@ const agentUpdateTimeout = 3 * time.Minute
 // update` or `pi update --self` to start the latest release. Claude Code
 // updates itself in the background, so restarting already starts its
 // latest version.
-func agentUpdater(agentType AgentType, program string, logger *slog.Logger) func(context.Context) {
+func agentUpdater(agentType instanceapi.AgentType, program string, logger *slog.Logger) func(context.Context) {
 	var args, env []string
 	switch {
-	case agentType == AgentTypeCodex && isCodexCLI(program):
+	case agentType == instanceapi.AgentTypeCodex && isCodexCLI(program):
 		args, env = []string{"update"}, []string{"CODEX_NON_INTERACTIVE=1"}
-	case agentType == AgentTypePi && isPiCLI(program):
+	case agentType == instanceapi.AgentTypePi && isPiCLI(program):
 		args = []string{"update", "--self"}
 	default:
 		return nil

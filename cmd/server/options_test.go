@@ -9,6 +9,9 @@ import (
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/coder/agentapi/lib/instanceapi"
+	"github.com/coder/agentapi/lib/native"
 )
 
 // flagsWith returns flags with values.
@@ -30,7 +33,7 @@ func TestLoadServerOptions(t *testing.T) {
 		"the program names the agent": {
 			args: []string{"claude", "--model", "opus"},
 			check: func(t *testing.T, opts serverOptions) {
-				assert.Equal(t, AgentTypeClaude, opts.agentType)
+				assert.Equal(t, instanceapi.AgentTypeClaude, opts.agentType)
 				assert.Equal(t, "claude", opts.agent)
 				assert.Equal(t, []string{"--model", "opus"}, opts.agentArgs)
 				assert.Empty(t, opts.stateFile)
@@ -41,8 +44,8 @@ func TestLoadServerOptions(t *testing.T) {
 			args:   []string{"native-demo"},
 			values: map[string]any{FlagType: "custom"},
 			check: func(t *testing.T, opts serverOptions) {
-				assert.Equal(t, AgentTypeCustom, opts.agentType)
-				for _, agent := range []AgentType{AgentTypeCodex, AgentTypePi} {
+				assert.Equal(t, instanceapi.AgentTypeCustom, opts.agentType)
+				for _, agent := range []instanceapi.AgentType{instanceapi.AgentTypeCodex, instanceapi.AgentTypePi} {
 					other, err := loadServerOptions(flagsWith(nil), []string{string(agent)})
 					require.NoError(t, err)
 					assert.Equal(t, agent, other.agentType)
@@ -57,7 +60,7 @@ func TestLoadServerOptions(t *testing.T) {
 			args:   []string{"my-wrapper"},
 			values: map[string]any{FlagType: "codex"},
 			check: func(t *testing.T, opts serverOptions) {
-				assert.Equal(t, AgentTypeCodex, opts.agentType)
+				assert.Equal(t, instanceapi.AgentTypeCodex, opts.agentType)
 			},
 		},
 		"a state file is imported into a state DB next to it": {
@@ -80,13 +83,17 @@ func TestLoadServerOptions(t *testing.T) {
 		},
 		"retries wait the default delays": {
 			check: func(t *testing.T, opts serverOptions) {
-				assert.Nil(t, opts.retryDelays, "the conversation's default: 30s, 1m, 2m, then 5m twelve times")
+				assert.Nil(t, opts.policy.RetryDelays, "the conversation's default: 30s, 1m, 2m, then 5m twelve times")
+				// --help shows the default as the flag takes it.
+				shown, err := parseRetryDelays(native.FormatDelays(native.DefaultRetryDelays()))
+				require.NoError(t, err)
+				assert.Equal(t, native.DefaultRetryDelays(), shown)
 			},
 		},
 		"--retry-delays, from a flag, a variable or the config file": {
 			values: map[string]any{FlagRetryDelays: []string{"10s", "1m"}},
 			check: func(t *testing.T, opts serverOptions) {
-				assert.Equal(t, []time.Duration{10 * time.Second, time.Minute}, opts.retryDelays)
+				assert.Equal(t, []time.Duration{10 * time.Second, time.Minute}, opts.policy.RetryDelays)
 				for value, want := range map[string][]time.Duration{
 					"20s,2m":   {20 * time.Second, 2 * time.Minute},
 					"20s 2m":   {20 * time.Second, 2 * time.Minute},
@@ -97,7 +104,7 @@ func TestLoadServerOptions(t *testing.T) {
 				} {
 					other, err := loadServerOptions(flagsWith(map[string]any{FlagRetryDelays: value}), []string{"claude"})
 					require.NoError(t, err)
-					assert.Equal(t, want, other.retryDelays, value)
+					assert.Equal(t, want, other.policy.RetryDelays, value)
 				}
 			},
 		},

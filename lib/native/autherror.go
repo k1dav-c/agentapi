@@ -54,7 +54,7 @@ var transientErrorPattern = regexp.MustCompile(`api error:? (?:429|5\d\d)\b|` +
 // IsTransientError reports whether an agent's error text says that an
 // upstream request failed in a way that may pass: worth trying again in a
 // while. A usage limit and a login problem say so too ("rate limit", a
-// 429); callers check IsLimitError and IsAuthError first.
+// 429), which ClassifyFailure puts first.
 func IsTransientError(text string) bool {
 	return transientErrorPattern.MatchString(strings.ToLower(text))
 }
@@ -78,4 +78,38 @@ func TransientStatus(text string) int {
 	}
 	status, _ := strconv.Atoi(m[1] + m[2])
 	return status
+}
+
+// FailureHints are what an adapter found out about a failed turn, from its
+// protocol's structured signals (status and error codes, rate limit
+// events) and the error's text (IsLimitError, IsAuthError,
+// IsTransientError).
+type FailureHints struct {
+	// Limit: the account reached a usage limit.
+	Limit bool
+	// Auth: the agent's login is missing or no longer works.
+	Auth bool
+	// Transient: the upstream failure may pass by itself.
+	Transient bool
+	// APIStatus is the HTTP status of a transient failure, or 0.
+	APIStatus int
+}
+
+// ClassifyFailure gives a failed turn (StopReasonError) the stop reason
+// hints call for. A usage limit comes first: it is StopReasonLimited even
+// when the error also reads as a login problem or a 429. A login problem
+// comes next and stays an error, as trying again can't help until the user
+// logs in. Only then is a transient failure StopReasonTransient, with its
+// APIStatus. A turn that didn't fail is left as it is.
+func ClassifyFailure(result *TurnResult, hints FailureHints) {
+	if result.StopReason != StopReasonError {
+		return
+	}
+	switch {
+	case hints.Limit:
+		result.StopReason = StopReasonLimited
+	case hints.Auth:
+	case hints.Transient:
+		result.StopReason, result.APIStatus = StopReasonTransient, hints.APIStatus
+	}
 }

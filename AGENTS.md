@@ -53,12 +53,14 @@ protocols (the native transport).
 
 - `main.go` - Entry point using the Cobra CLI framework
 - `cmd/` - CLI command definitions, including server, list, hub, restart (registered AgentAPIs restart in place, e.g. into an updated binary), and update
-- `lib/httpapi/` - HTTP server: routes, OpenAPI schema, auth, event streams, instance summaries for monitoring multiple AgentAPIs (`GET /summary`, `/events?only=summary`), the webhook's configuration, and updates through the API (`POST /update`, with `--allow-update`); it wires the three packages below and aliases their types under the schema's names
+- `lib/httpapi/` - HTTP server: routes, OpenAPI schema, auth, event streams, instance summaries for monitoring multiple AgentAPIs (`GET /summary`, `/events?only=summary`), the webhook's configuration, and updates through the API (`POST /update`, with `--allow-update`); it wires the three packages below and uses their types under their own names (huma names a schema after the Go type)
+- `lib/httpmw/` - The HTTP pieces the server and the hub share: the Host and cross-origin checks, gzip, the host/origin/bind flag parsing, and the file server of the chat UI embedded from `lib/httpmw/chat/`
 - `lib/convstate/` - The conversation state clients read, without HTTP: the `EventEmitter`, the tasks and summary it derives, the queue it reports, the `Persister` interface
 - `lib/webhook/` - Webhooks that push events (tasks, requests, messages, heartbeats) to a receiver: delivery, and the observer that reads the emitter
 - `lib/workspacefs/` - The file viewer's reads of the working directory: content, diff through git, HTML preview, images, find
 - `lib/conversation/` - Shared messages, status, and the `Emitter` interface (imported as `conv`)
-- `lib/native/` - Native transport: one adapter per agent (`claude/`, `codex/`, `pi/`, and the simulated `demo/`) driving its structured protocol, a conversation that starts an agent that exits on its own again and holds the queue for a usage limit stop or a failed turn it tries again (`hold.go`), `agentio/` for the process, its loop and the JSON-lines plumbing they share, `procutil/` for the child process, `nativetest/` for tests
+- `lib/native/` - Native transport: one adapter per agent (`claude/`, `codex/`, `pi/`, and the simulated `demo/`) driving its structured protocol, a conversation that starts an agent that exits on its own again and holds the queue for a usage limit stop or a failed turn it tries again (`hold.go`), `agentio/` for the process, its loop and the JSON-lines plumbing they share, `procutil/` for the child process, `nativetest/` for tests; `ClassifyFailure` orders a failed turn's signals (limit, login, transient) and `Policy` holds the continue, retry and restart settings
+- `lib/agentstate/` - The values native agents report (capabilities, login, settings, usage, requests, limit stop, retry wait), a leaf package so `lib/convstate`, `lib/instanceapi`, `lib/webhook` and `lib/statedb` don't depend on `lib/native`
 - `lib/procenv/` - The environment of the agent and the terminal's shell, without the variables of an agent session AgentAPI runs in and AgentAPI's secrets
 - `lib/transcript/` - The types of the structured transcript: rich messages and timeline events
 - `lib/agenthome/` - The directories the agents keep their state in (`$CLAUDE_CONFIG_DIR`, `$CODEX_HOME`, `$PI_CODING_AGENT_DIR` or their defaults)
@@ -66,8 +68,8 @@ protocols (the native transport).
 - `lib/sessions/` - Earlier sessions, subagents and their costs, read incrementally from the logs
 - `lib/pricing/` - Model prices per million tokens (built-in `prices.json`, `--prices` file) and per-call cost calculation; `scripts/prices.mjs` compares `prices.json` with Pi's model registry
 - `lib/statedb/` - SQLite persistence of conversations (`--state-db`; a deprecated `--state-file` is imported into it)
-- `lib/instanceapi/` - The contract with clients that watch many AgentAPIs: who an instance is (with its `AgentType`), its summary, the webhook envelope and signature, and the state a hub shows (aliased in `lib/httpapi` under the same names)
-- `lib/hub/` - `agentapi hub serve`: a server that watches many AgentAPIs (signed webhooks, summary streams, a proxy that opens any of them in the chat, the addresses machines join it by, the favorite prompts its page keeps)
+- `lib/instanceapi/` - The contract with clients that watch many AgentAPIs: who an instance is (with its `AgentType`), its summary, the webhook envelope and signature, and the state a hub shows; it imports only `lib/agentstate` and `lib/util`
+- `lib/hub/` - `agentapi hub serve`: a server that watches many AgentAPIs, built on `lib/instanceapi` and `lib/httpmw` rather than `lib/httpapi` (signed webhooks, summary streams, a proxy that opens any of them in the chat, the addresses machines join it by, the favorite prompts its page keeps)
 - `lib/sse/` - Server-sent events as the HTML standard defines them (`Reader`, `Write`), for the hub's streams
 - `lib/netaddr/` - The machine's IPv4 addresses: those other machines may reach (the hub's join URLs), and the one on the route to a host (`{ip}` in `--public-url`)
 - `lib/userconfig/` - The user's settings file (`~/.agentapi/config.yaml`), which `agentapi server` reads and `agentapi hub join` writes

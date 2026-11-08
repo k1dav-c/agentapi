@@ -31,9 +31,9 @@ const spendInterval = time.Minute
 
 // spendOf adds up the hours of hourly that end within the last day and
 // week before now: the cost to the cent, and the tokens.
-func spendOf(hourly []sessions.HourCost, now time.Time) SummarySpend {
+func spendOf(hourly []sessions.HourCost, now time.Time) instanceapi.SummarySpend {
 	day, week := now.Add(-24*time.Hour), now.Add(-7*24*time.Hour)
-	var spend SummarySpend
+	var spend instanceapi.SummarySpend
 	var dayTokens, weekTokens pricing.Tokens
 	for _, h := range hourly {
 		end := h.Hour.Add(time.Hour)
@@ -78,7 +78,7 @@ func spendScope(store *sessions.Store) string {
 // nextSpend is spend of scope, worked out at now after last: it keeps
 // last's time while the amounts and tokens stay, so the summary changes with them
 // only.
-func nextSpend(last, spend SummarySpend, scope string, now time.Time) SummarySpend {
+func nextSpend(last, spend instanceapi.SummarySpend, scope string, now time.Time) instanceapi.SummarySpend {
 	spend.Scope = scope
 	if last.UpdatedAt.IsZero() || spend.DayUSD != last.DayUSD || spend.WeekUSD != last.WeekUSD || spend.Scope != last.Scope || !spend.SameTokens(last) {
 		spend.UpdatedAt = now.UTC().Truncate(time.Second)
@@ -96,7 +96,7 @@ func (s *Server) startSpend() {
 		return
 	}
 	scope := spendScope(s.sessions)
-	var last SummarySpend
+	var last instanceapi.SummarySpend
 	update := func() {
 		costs, err := s.sessions.Costs()
 		if err != nil {

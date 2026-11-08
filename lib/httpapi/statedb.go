@@ -7,10 +7,10 @@ import (
 	"slices"
 	"time"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/instanceapi"
-	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/statedb"
 )
 
@@ -23,18 +23,18 @@ type restoredState struct {
 	// resumeRef resumes the native agent's session.
 	resumeRef string
 	// settings were chosen for the session.
-	settings native.Settings
+	settings agentstate.Settings
 	// limitStop is the turn a usage limit stopped.
-	limitStop *native.LimitStop
+	limitStop *agentstate.LimitStop
 	// retryWait is the failed turn that waits to be tried again.
-	retryWait *native.RetryWait
+	retryWait *agentstate.RetryWait
 }
 
 // restoreState connects the state database to emitter, which stores its
 // changes there: it restores the stored conversation, or records the
 // identity of a new one, and reports writes that fail as agent errors. It
 // does nothing without a state database.
-func restoreState(config ServerConfig, db *statedb.DB, emitter *EventEmitter, logger *slog.Logger) (restoredState, error) {
+func restoreState(config ServerConfig, db *statedb.DB, emitter *convstate.EventEmitter, logger *slog.Logger) (restoredState, error) {
 	if db == nil {
 		return restoredState{}, nil
 	}
@@ -75,9 +75,9 @@ func restoreState(config ServerConfig, db *statedb.DB, emitter *EventEmitter, lo
 	// The agent that asked is gone; its requests can't be answered.
 	now := config.Clock.Now()
 	for _, r := range emitter.Requests() {
-		if r.Status == native.RequestStatusPending {
-			r.Status = native.RequestStatusExpired
-			r.Capability = native.ResponseNotResumable
+		if r.Status == agentstate.RequestStatusPending {
+			r.Status = agentstate.RequestStatusExpired
+			r.Capability = agentstate.ResponseNotResumable
 			r.ClosedAt = &now
 			emitter.EmitRequest(r)
 		}
@@ -98,7 +98,7 @@ func restoreState(config ServerConfig, db *statedb.DB, emitter *EventEmitter, lo
 	if err != nil {
 		logger.Warn("Ignoring the stored retry wait", "error", err)
 	}
-	if len(config.Native.RetryDelays) == 0 && config.Native.RetryDelays != nil {
+	if config.Native.RetriesOff() {
 		// Retries were turned off since: the queue doesn't wait.
 		retryWait = nil
 		db.SetRetryWait(nil)
@@ -133,8 +133,8 @@ func checkRestoredIdentity(snap statedb.Snapshot, config ServerConfig) error {
 	return nil
 }
 
-func emitterStateFromSnapshot(snap statedb.Snapshot) EmitterState {
-	state := EmitterState{
+func emitterStateFromSnapshot(snap statedb.Snapshot) convstate.EmitterState {
+	state := convstate.EmitterState{
 		Epoch:         snap.Meta[statedb.MetaEpoch],
 		Seq:           snap.Seq(),
 		SessionEvents: snap.Events,
@@ -159,7 +159,7 @@ func emitterStateFromSnapshot(snap statedb.Snapshot) EmitterState {
 		state.Seq = max(state.Seq, r.Seq)
 	}
 	for _, t := range snap.Tasks {
-		var task Task
+		var task instanceapi.Task
 		if err := json.Unmarshal(t.Data, &task); err != nil {
 			// The task is derived again from its message.
 			continue
@@ -173,10 +173,10 @@ func emitterStateFromSnapshot(snap statedb.Snapshot) EmitterState {
 
 // restoreQueue puts the stored queue back. Called before the server runs.
 func (s *Server) restoreQueue(snap statedb.Snapshot) {
-	queued := make([]QueuedMessage, len(snap.Queue))
+	queued := make([]convstate.QueuedMessage, len(snap.Queue))
 	lastID := snap.NextQueueID()
 	for i, q := range snap.Queue {
-		queued[i] = QueuedMessage{ID: q.ID, Content: q.Content, Time: q.Time}
+		queued[i] = convstate.QueuedMessage{ID: q.ID, Content: q.Content, Time: q.Time}
 		lastID = max(lastID, q.ID)
 	}
 	// Stored already: the restore isn't written back.
@@ -190,7 +190,7 @@ func (s *Server) restoreQueue(snap statedb.Snapshot) {
 // stored already or a later change was. The queue's onChange calls it
 // after every change: the state database's write of the queue replaces
 // the one still pending, so changes in quick succession are written once.
-func (s *Server) storeQueue(queued []QueuedMessage, lastID int, version uint64) {
+func (s *Server) storeQueue(queued []convstate.QueuedMessage, lastID int, version uint64) {
 	if s.stateDB == nil {
 		return
 	}

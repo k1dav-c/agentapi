@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/transcript"
@@ -36,7 +37,7 @@ func newConvFixture(t *testing.T) *convFixture {
 		},
 		Logger: logger,
 		// The fake Pi runs once.
-		RestartDelays: []time.Duration{},
+		Policy: native.Policy{RestartDelays: []time.Duration{}},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(func() {
@@ -91,10 +92,10 @@ func TestConversation(t *testing.T) {
 
 	require.Eventually(t, func() bool { return len(conv.PendingRequests()) == 1 }, 5*time.Second, time.Millisecond)
 	req := conv.PendingRequests()[0]
-	assert.Equal(t, native.RequestKindApproval, req.Kind)
+	assert.Equal(t, agentstate.RequestKindApproval, req.Kind)
 	assert.Equal(t, "c1", req.ToolUseID)
-	assert.Equal(t, []native.OptionKind{native.OptionKindAllow, native.OptionKindAllowAlways, native.OptionKindDeny},
-		[]native.OptionKind{req.Options[0].Kind, req.Options[1].Kind, req.Options[2].Kind})
+	assert.Equal(t, []agentstate.OptionKind{agentstate.OptionKindAllow, agentstate.OptionKindAllowAlways, agentstate.OptionKindDeny},
+		[]agentstate.OptionKind{req.Options[0].Kind, req.Options[1].Kind, req.Options[2].Kind})
 	assert.Equal(t, conversation.StatusStable, conv.Status(), "waiting on the user")
 	msgs := conv.Messages()
 	require.Len(t, msgs, 2)
@@ -103,13 +104,13 @@ func TestConversation(t *testing.T) {
 	f.pi.exit(errors.New("exit status 1"))
 	require.Eventually(t, func() bool {
 		state, _ := conv.Request("d1")
-		return state.Status == native.RequestStatusExpired
+		return state.Status == agentstate.RequestStatusExpired
 	}, 5*time.Second, time.Millisecond, "the conversation didn't handle the exit")
 	state, ok := conv.Request("d1")
 	require.True(t, ok)
-	assert.Equal(t, native.RequestStatusExpired, state.Status)
-	assert.Equal(t, native.ResponseNotResumable, state.Capability)
-	_, err := conv.Respond(f.ctx, "d1", native.Response{OptionID: "Allow"})
+	assert.Equal(t, agentstate.RequestStatusExpired, state.Status)
+	assert.Equal(t, agentstate.ResponseNotResumable, state.Capability)
+	_, err := conv.Respond(f.ctx, "d1", agentstate.Response{OptionID: "Allow"})
 	assert.ErrorIs(t, err, native.ErrRequestNotFound)
 }
 
@@ -130,8 +131,8 @@ func TestConversationExpiresDialogsWithTheTurn(t *testing.T) {
 
 	state, ok := f.conv.Request("q1")
 	require.True(t, ok)
-	assert.Equal(t, native.RequestStatusExpired, state.Status)
-	assert.Equal(t, native.ResponseMessage, state.Capability)
+	assert.Equal(t, agentstate.RequestStatusExpired, state.Status)
+	assert.Equal(t, agentstate.ResponseMessage, state.Capability)
 	assert.Equal(t, map[string]any{"type": "extension_ui_response", "id": "q1", "cancelled": true}, f.pi.nextCmd(),
 		"the extension stops waiting too")
 }
@@ -140,31 +141,31 @@ func TestConversationExpiresDialogsWithTheTurn(t *testing.T) {
 // and capabilities.
 type settingsObserver struct {
 	mu       sync.Mutex
-	settings []native.Settings
-	caps     []native.Capabilities
+	settings []agentstate.Settings
+	caps     []agentstate.Capabilities
 }
 
-func (o *settingsObserver) Started(caps native.Capabilities) {
+func (o *settingsObserver) Started(caps agentstate.Capabilities) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.caps = append(o.caps, caps)
 }
 
-func (o *settingsObserver) Settings(s native.Settings) {
+func (o *settingsObserver) Settings(s agentstate.Settings) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.settings = append(o.settings, s)
 }
-func (*settingsObserver) LoginRequired(*native.LoginRequired)     {}
+func (*settingsObserver) LoginRequired(*agentstate.LoginRequired) {}
 func (*settingsObserver) RichMessage(transcript.RichMessage)      {}
 func (*settingsObserver) SessionEvents([]transcript.SessionEvent) {}
 func (*settingsObserver) SessionName(string)                      {}
 func (*settingsObserver) SessionRef(string)                       {}
-func (*settingsObserver) RequestUpdated(native.RequestState)      {}
-func (*settingsObserver) SettingsChosen(native.Settings)          {}
-func (*settingsObserver) Usage(native.AgentUsage)                 {}
-func (*settingsObserver) LimitStop(*native.LimitStop)             {}
-func (*settingsObserver) RetryWait(*native.RetryWait)             {}
+func (*settingsObserver) RequestUpdated(agentstate.RequestState)  {}
+func (*settingsObserver) SettingsChosen(agentstate.Settings)      {}
+func (*settingsObserver) Usage(agentstate.AgentUsage)             {}
+func (*settingsObserver) LimitStop(*agentstate.LimitStop)         {}
+func (*settingsObserver) RetryWait(*agentstate.RetryWait)         {}
 func (*settingsObserver) AgentExited(native.AgentExit)            {}
 
 func TestModelSwitchReportsNoMixedSettings(t *testing.T) {
@@ -193,7 +194,7 @@ func TestModelSwitchReportsNoMixedSettings(t *testing.T) {
 	assert.False(t, conv.Capabilities().Images)
 
 	applied := make(chan error, 1)
-	go func() { applied <- conv.ApplySettings(ctx, native.Settings{Model: "p/b", Effort: "high"}) }()
+	go func() { applied <- conv.ApplySettings(ctx, agentstate.Settings{Model: "p/b", Effort: "high"}) }()
 	f.reply(pi.nextCmd(), `{"models":[`+modelA+`,`+modelB+`]}`)
 	// As Pi does: the level changes, then the command is answered.
 	setModel := pi.nextCmd()
@@ -207,7 +208,7 @@ func TestModelSwitchReportsNoMixedSettings(t *testing.T) {
 	f.reply(pi.nextCmd(), `{"sessionId":"s1","thinkingLevel":"high","model":`+modelB+`}`)
 	require.NoError(t, <-applied)
 
-	assert.Equal(t, native.Settings{Model: "p/b", Effort: "high"}, conv.Settings())
+	assert.Equal(t, agentstate.Settings{Model: "p/b", Effort: "high"}, conv.Settings())
 	assert.True(t, conv.Capabilities().Images, "the new model takes images")
 	obs.mu.Lock()
 	defer obs.mu.Unlock()

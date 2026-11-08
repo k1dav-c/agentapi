@@ -16,7 +16,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/coder/agentapi/lib/httpapi"
+	"github.com/coder/agentapi/lib/httpmw"
 	"github.com/coder/agentapi/lib/hub"
 	"github.com/coder/agentapi/lib/logctx"
 )
@@ -62,7 +62,7 @@ func serveCmd() *cobra.Command {
 			}
 			if len(allowedHosts) > 0 {
 				var err error
-				if allowedHosts, err = httpapi.ParseAllowedHosts(allowedHosts); err != nil {
+				if allowedHosts, err = httpmw.ParseAllowedHosts(allowedHosts); err != nil {
 					return fmt.Errorf("--allowed-hosts: %w", err)
 				}
 			}

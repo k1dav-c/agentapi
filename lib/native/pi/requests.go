@@ -9,6 +9,7 @@ import (
 
 	"github.com/coder/quartz"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
 )
@@ -52,7 +53,7 @@ func (d *dialog) stopTimer() {
 }
 
 // reply translates a response into the extension_ui_response.
-func (d *dialog) reply(r native.Response) (uiResponse, error) {
+func (d *dialog) reply(r agentstate.Response) (uiResponse, error) {
 	out := uiResponse{Type: "extension_ui_response", ID: d.id}
 	if r.OptionID == optionCancel && !d.approval {
 		out.Cancelled = true
@@ -107,7 +108,7 @@ var (
 // label; "no" counts only as a word of its own ("Normal mode" isn't a
 // denial). A denial or a cancel wins ("Always deny"); otherwise "always"
 // makes the option an allow_always, with or without an allow word.
-func optionKind(label string) native.OptionKind {
+func optionKind(label string) agentstate.OptionKind {
 	words := strings.FieldsFunc(strings.ToLower(label), func(r rune) bool {
 		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 	})
@@ -118,15 +119,15 @@ func optionKind(label string) native.OptionKind {
 	}
 	switch {
 	case slices.Contains(words, "no") || has(denyWords):
-		return native.OptionKindDeny
+		return agentstate.OptionKindDeny
 	case has(cancelWords):
-		return native.OptionKindCancel
+		return agentstate.OptionKindCancel
 	case slices.Contains(words, "always"):
-		return native.OptionKindAllowAlways
+		return agentstate.OptionKindAllowAlways
 	case has(allowWords):
-		return native.OptionKindAllow
+		return agentstate.OptionKindAllow
 	}
-	return native.OptionKindOther
+	return agentstate.OptionKindOther
 }
 
 func (a *Adapter) handleUIRequest(req uiRequest) {
@@ -185,42 +186,42 @@ func (a *Adapter) openDialog(req uiRequest) {
 
 // dialogRequest is the request a dialog shows, and whether it is the
 // approval of tool, the tool call that runs, if any.
-func dialogRequest(req uiRequest, tool *runningTool) (r native.Request, approval bool) {
-	r = native.Request{ID: req.ID, Title: req.Title}
+func dialogRequest(req uiRequest, tool *runningTool) (r agentstate.Request, approval bool) {
+	r = agentstate.Request{ID: req.ID, Title: req.Title}
 	switch req.Method {
 	case "confirm":
 		approval = true
-		r.Kind = native.RequestKindApproval
+		r.Kind = agentstate.RequestKindApproval
 		r.Detail = req.Message
-		r.Options = []native.RequestOption{
-			{ID: optionYes, Label: "Yes", Kind: native.OptionKindAllow},
-			{ID: optionNo, Label: "No", Kind: native.OptionKindDeny},
+		r.Options = []agentstate.RequestOption{
+			{ID: optionYes, Label: "Yes", Kind: agentstate.OptionKindAllow},
+			{ID: optionNo, Label: "No", Kind: agentstate.OptionKindDeny},
 		}
 	case "select":
 		if tool != nil {
 			approval = true
-			r.Kind = native.RequestKindApproval
+			r.Kind = agentstate.RequestKindApproval
 			for _, o := range req.Options {
-				r.Options = append(r.Options, native.RequestOption{ID: o, Label: o, Kind: optionKind(o)})
+				r.Options = append(r.Options, agentstate.RequestOption{ID: o, Label: o, Kind: optionKind(o)})
 			}
 			break
 		}
-		r.Kind = native.RequestKindQuestion
-		q := native.Question{ID: choiceQuestion, Question: req.Title}
+		r.Kind = agentstate.RequestKindQuestion
+		q := agentstate.Question{ID: choiceQuestion, Question: req.Title}
 		for _, o := range req.Options {
-			q.Options = append(q.Options, native.QuestionOption{Label: o})
+			q.Options = append(q.Options, agentstate.QuestionOption{Label: o})
 		}
-		r.Questions = []native.Question{q}
+		r.Questions = []agentstate.Question{q}
 	case "input", "editor":
-		r.Kind = native.RequestKindQuestion
+		r.Kind = agentstate.RequestKindQuestion
 		r.Detail = req.Placeholder
 		if req.Method == "editor" {
 			r.Detail = req.Prefill
 		}
-		r.Questions = []native.Question{{ID: valueQuestion, Question: req.Title, FreeText: true}}
+		r.Questions = []agentstate.Question{{ID: valueQuestion, Question: req.Title, FreeText: true}}
 	}
-	if r.Kind == native.RequestKindQuestion {
-		r.Options = []native.RequestOption{{ID: optionCancel, Label: "Cancel", Kind: native.OptionKindCancel}}
+	if r.Kind == agentstate.RequestKindQuestion {
+		r.Options = []agentstate.RequestOption{{ID: optionCancel, Label: "Cancel", Kind: agentstate.OptionKindCancel}}
 	}
 	if approval && tool != nil {
 		r.ToolName, r.ToolUseID, r.Input = tool.name, tool.id, tool.args

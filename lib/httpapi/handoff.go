@@ -11,8 +11,10 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/handoff"
+	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/native"
 )
 
@@ -91,28 +93,28 @@ type (
 // s.mu, so GET /handoff answers while a call into the agent holds it; a
 // reply holds s.mu, so that what it answers stays offered until it is
 // delivered.
-func (s *Server) pendingHandoff() (*handoff.Request, native.RequestState) {
+func (s *Server) pendingHandoff() (*handoff.Request, agentstate.RequestState) {
 	if s.emitter == nil || s.native == nil || s.turnGateLocked(turnUser, s.clock.Now()) != nil {
 		// While the agent restarts, what it showed belongs to the old
 		// one, and a reply would reach no agent; AgentAPI stopping, or
 		// restarting for an update, would cut it short.
-		return nil, native.RequestState{}
+		return nil, agentstate.RequestState{}
 	}
 	view := s.emitter.HandoffView()
-	if view.Status.Lifecycle != LifecycleReady || s.native.Status() != conv.StatusStable {
-		return nil, native.RequestState{}
+	if view.Status.Lifecycle != instanceapi.LifecycleReady || s.native.Status() != conv.StatusStable {
+		return nil, agentstate.RequestState{}
 	}
 	kind := "request"
 	request, content, ok := s.pendingNativeHandoff()
 	if !ok {
 		if s.queue.Len() > 0 {
 			// The agent's last message isn't its last word.
-			return nil, native.RequestState{}
+			return nil, agentstate.RequestState{}
 		}
 		kind, content = "message", view.Reply
 	}
 	if strings.TrimSpace(content) == "" {
-		return nil, native.RequestState{}
+		return nil, agentstate.RequestState{}
 	}
 	status := view.Status
 	// The request ID is part of the hash: two identical approvals are
@@ -120,7 +122,7 @@ func (s *Server) pendingHandoff() (*handoff.Request, native.RequestState) {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%d:%d:%s:%q:%s", status.ServerID, view.Revision, status.Turn, kind, request.ID, content)))
 	id := hex.EncodeToString(sum[:])
 	if s.handoff.isSuppressed(id) {
-		return nil, native.RequestState{}
+		return nil, agentstate.RequestState{}
 	}
 	return &handoff.Request{
 		ID: id, ServerID: status.ServerID, Turn: status.Turn,
@@ -175,7 +177,7 @@ func (s *Server) replyHandoff(_ context.Context, input *HandoffReplyRequest) (*H
 // answerHandoff answers r, the request the handoff pending offered, with
 // content, records the outcome for the reply replyID, and returns it.
 // Caller holds s.mu, so no other reply is delivered meanwhile.
-func (s *Server) answerHandoff(pending *handoff.Request, r native.RequestState, replyID, content string) handoff.Result {
+func (s *Server) answerHandoff(pending *handoff.Request, r agentstate.RequestState, replyID, content string) handoff.Result {
 	response, ok := nativeHandoffResponse(r, content)
 	if !ok {
 		return handoff.Result{Outcome: "invalid"}

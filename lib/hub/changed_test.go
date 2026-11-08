@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/instanceapi"
-	"github.com/coder/agentapi/lib/native"
 )
 
 // ChangedAt moves when an instance changes what its row shows it does, and
@@ -47,7 +47,7 @@ func TestChangedAt(t *testing.T) {
 		}
 		summary = next
 		return func(i *Instance) {
-			i.Connection = ConnectionConnected
+			i.Connection = instanceapi.ConnectionConnected
 			i.Summary = &next
 			i.LastSeen = clock.Now()
 		}
@@ -64,11 +64,11 @@ func TestChangedAt(t *testing.T) {
 		{"a group", func(i *Instance) { i.Group = "Work" }, false},
 		{"pinned", func(i *Instance) { i.Pin = pinLast }, false},
 		{"unpinned", func(i *Instance) { i.Pin = 0 }, false},
-		{"the stream drops", func(i *Instance) { i.Connection = ConnectionConnecting; i.Error = "the stream ended" }, false},
+		{"the stream drops", func(i *Instance) { i.Connection = instanceapi.ConnectionConnecting; i.Error = "the stream ended" }, false},
 		{"and comes back", connected(nil), false},
 		{"spend, usage and reading it", connected(func(s *instanceapi.SummaryBody) {
 			s.Spend = &instanceapi.SummarySpend{DayUSD: 4.2, Scope: "x", UpdatedAt: clock.Now()}
-			s.Usage = &native.AgentUsage{}
+			s.Usage = &agentstate.AgentUsage{}
 			s.SeenAt = clock.Now()
 		}), false},
 		{"a task starts", connected(func(s *instanceapi.SummaryBody) {
@@ -86,7 +86,7 @@ func TestChangedAt(t *testing.T) {
 		{"it asks", connected(func(s *instanceapi.SummaryBody) {
 			s.Attention = instanceapi.AttentionRequest
 			s.PendingRequests = 1
-			s.Request = &instanceapi.SummaryRequest{ID: "r1", Kind: native.RequestKindApproval, Title: "make release"}
+			s.Request = &instanceapi.SummaryRequest{ID: "r1", Kind: agentstate.RequestKindApproval, Title: "make release"}
 		}), true},
 		{"muted", func(i *Instance) { i.Muted = instanceapi.AttentionKey(i.Summary) }, false},
 		{"it asks something else", connected(func(s *instanceapi.SummaryBody) {
@@ -103,7 +103,7 @@ func TestChangedAt(t *testing.T) {
 		}), true},
 		{"read", connected(func(s *instanceapi.SummaryBody) { s.Unread = false; s.SeenAt = clock.Now() }), false},
 		{"a new title", connected(func(s *instanceapi.SummaryBody) { s.Title = "Tax column" }), true},
-		{"unreachable", func(i *Instance) { i.Connection = ConnectionUnreachable; i.Error = "connection refused" }, true},
+		{"unreachable", func(i *Instance) { i.Connection = instanceapi.ConnectionUnreachable; i.Error = "connection refused" }, true},
 		{"heard of while unreachable", func(i *Instance) { i.LastSeen = clock.Now(); i.Error = "timed out" }, false},
 		{"back", connected(nil), true},
 		{"an update waits", connected(func(s *instanceapi.SummaryBody) {
@@ -113,7 +113,7 @@ func TestChangedAt(t *testing.T) {
 			s.Instance.ServerID, s.Instance.Version = "s2", "2.2.0"
 			s.Update = &instanceapi.UpdateStatus{Allowed: true, State: instanceapi.UpdateStateIdle}
 		}), true},
-		{"stopped", func(i *Instance) { i.Connection = ConnectionStopped }, true},
+		{"stopped", func(i *Instance) { i.Connection = instanceapi.ConnectionStopped }, true},
 		{"a group while stopped", func(i *Instance) { i.Group = "" }, false},
 	}
 	for _, step := range steps {
@@ -140,7 +140,7 @@ func TestChangedAtAfterARestart(t *testing.T) {
 	follow := func(s *store, id string, summary instanceapi.SummaryBody) Instance {
 		t.Helper()
 		instance, ok := s.update(id, false, func(i *Instance) {
-			i.Connection = ConnectionConnected
+			i.Connection = instanceapi.ConnectionConnected
 			i.Summary = &summary
 			i.LastSeen = clock.Now()
 		})
@@ -156,7 +156,7 @@ func TestChangedAtAfterARestart(t *testing.T) {
 		follow(s, id, idle)
 	}
 	clock.Advance(time.Hour)
-	_, _ = s.update("dev:2", false, func(i *Instance) { i.Connection = ConnectionStopped })
+	_, _ = s.update("dev:2", false, func(i *Instance) { i.Connection = instanceapi.ConnectionStopped })
 	stopped := clock.Now()
 
 	clock.Advance(time.Hour)

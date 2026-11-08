@@ -7,6 +7,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/sessions"
 )
@@ -154,7 +155,7 @@ func (s *Server) resumeSession(_ context.Context, input *ResumeSessionRequest) (
 	// step, before anything is cleared: a refused switch leaves the
 	// conversation as it was.
 	replacement, err := s.native.BeginSwitch(native.Resume{Ref: input.ID, Fork: input.Body.Fork}, history.Messages, func() {
-		s.emitter.SetLifecycle(LifecycleRestarting)
+		s.emitter.SetLifecycle(instanceapi.LifecycleRestarting)
 		// The conversation, its queue and its requests are the old
 		// session's.
 		s.forgetConversationLocked()

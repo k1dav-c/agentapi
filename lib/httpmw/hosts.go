@@ -1,4 +1,4 @@
-package httpapi
+package httpmw
 
 import (
 	"fmt"
@@ -10,10 +10,11 @@ import (
 	"unicode"
 )
 
-// Validate allowed hosts don't contain whitespace, commas, schemes, or ports.
-// Viper/Cobra use different separators (space for env vars, comma for flags),
-// so these characters likely indicate user error.
-func parseAllowedHosts(input []string) ([]string, error) {
+// ParseAllowedHosts checks a list of hostnames, as --allowed-hosts takes
+// it: no schemes, ports or separators; "*" anywhere makes it ["*"].
+// Viper/Cobra use different separators (space for env vars, comma for
+// flags), so whitespace and commas likely indicate user error.
+func ParseAllowedHosts(input []string) ([]string, error) {
 	if len(input) == 0 {
 		return nil, fmt.Errorf("the list must not be empty")
 	}
@@ -62,14 +63,9 @@ func parseAllowedHosts(input []string) ([]string, error) {
 	return hostStrings, nil
 }
 
-// ParseAllowedHosts checks a list of hostnames, as --allowed-hosts takes
-// it: no schemes, ports or separators; "*" anywhere makes it ["*"].
-func ParseAllowedHosts(input []string) ([]string, error) {
-	return parseAllowedHosts(input)
-}
-
-// Validate allowed origins
-func parseAllowedOrigins(input []string) ([]string, error) {
+// ParseAllowedOrigins checks a list of origins, as --allowed-origins takes
+// it, and reduces each to scheme://host; "*" anywhere makes it ["*"].
+func ParseAllowedOrigins(input []string) ([]string, error) {
 	if len(input) == 0 {
 		return nil, fmt.Errorf("the list must not be empty")
 	}
@@ -146,11 +142,11 @@ func isValidHostname(name string) bool {
 	return true
 }
 
-// hostAuthorizationMiddleware enforces that the request Host header matches one of the allowed
+// HostAuthorization enforces that the request Host header matches one of the allowed
 // hosts, ignoring any port in the comparison. If allowedHosts is empty, all hosts are allowed.
 // Always uses url.Parse("http://" + r.Host) to robustly extract the hostname (handles IPv6).
 // also, if set, allows a host the list doesn't name.
-func hostAuthorizationMiddleware(allowedHosts []string, also func(hostname string) bool, badHostHandler http.Handler) func(next http.Handler) http.Handler {
+func HostAuthorization(allowedHosts []string, also func(hostname string) bool, badHostHandler http.Handler) func(next http.Handler) http.Handler {
 	// Copy for safety; also build a map for O(1) lookups with case-insensitive keys.
 	allowed := make(map[string]struct{}, len(allowedHosts))
 	for _, h := range allowedHosts {

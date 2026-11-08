@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/nativetest"
 )
@@ -22,8 +23,8 @@ func TestSerialSink(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			sink.TurnStarted()
-			native.ReportUsage(sink, native.AgentUsage{})
-			native.ReportSettings(sink, native.Settings{PermissionMode: native.PermissionModeAsk})
+			native.ReportUsage(sink, agentstate.AgentUsage{})
+			native.ReportSettings(sink, agentstate.Settings{PermissionMode: agentstate.PermissionModeAsk})
 		}()
 	}
 	wg.Wait()

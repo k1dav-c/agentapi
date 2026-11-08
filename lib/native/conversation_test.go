@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/nativetest"
@@ -28,15 +29,15 @@ type recorded struct {
 	statuses     []conversation.Status
 	errors       []string
 	rich         []transcript.RichMessage
-	requests     []native.RequestState
+	requests     []agentstate.RequestState
 	refs         []string
 	names        []string
-	logins       []*native.LoginRequired
-	settings     []native.Settings
-	chosen       []native.Settings
-	usage        []native.AgentUsage
-	limitStops   []*native.LimitStop
-	retryWaits   []*native.RetryWait
+	logins       []*agentstate.LoginRequired
+	settings     []agentstate.Settings
+	chosen       []agentstate.Settings
+	usage        []agentstate.AgentUsage
+	limitStops   []*agentstate.LimitStop
+	retryWaits   []*agentstate.RetryWait
 	exits        []native.AgentExit
 }
 
@@ -72,9 +73,9 @@ func (r *recorder) EmitError(m string, _ conversation.ErrorLevel) {
 	r.errors = append(r.errors, m)
 }
 
-func (r *recorder) Started(native.Capabilities) {}
+func (r *recorder) Started(agentstate.Capabilities) {}
 
-func (r *recorder) LoginRequired(l *native.LoginRequired) {
+func (r *recorder) LoginRequired(l *agentstate.LoginRequired) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.logins = append(r.logins, l)
@@ -100,37 +101,37 @@ func (r *recorder) SessionRef(ref string) {
 	r.refs = append(r.refs, ref)
 }
 
-func (r *recorder) RequestUpdated(s native.RequestState) {
+func (r *recorder) RequestUpdated(s agentstate.RequestState) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.requests = append(r.requests, s)
 }
 
-func (r *recorder) Settings(s native.Settings) {
+func (r *recorder) Settings(s agentstate.Settings) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.settings = append(r.settings, s)
 }
 
-func (r *recorder) SettingsChosen(s native.Settings) {
+func (r *recorder) SettingsChosen(s agentstate.Settings) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.chosen = append(r.chosen, s)
 }
 
-func (r *recorder) Usage(u native.AgentUsage) {
+func (r *recorder) Usage(u agentstate.AgentUsage) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.usage = append(r.usage, u)
 }
 
-func (r *recorder) LimitStop(ls *native.LimitStop) {
+func (r *recorder) LimitStop(ls *agentstate.LimitStop) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.limitStops = append(r.limitStops, ls)
 }
 
-func (r *recorder) RetryWait(rw *native.RetryWait) {
+func (r *recorder) RetryWait(rw *agentstate.RetryWait) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.retryWaits = append(r.retryWaits, rw)
@@ -364,7 +365,7 @@ func TestFailedSteerLeavesTheReplyWhole(t *testing.T) {
 }
 
 func TestSteerUnsupported(t *testing.T) {
-	c, _, _ := start(t, func(a *nativetest.Adapter) { a.Caps = native.Capabilities{} }, native.Config{})
+	c, _, _ := start(t, func(a *nativetest.Adapter) { a.Caps = agentstate.Capabilities{} }, native.Config{})
 	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "one"}))
 	assert.ErrorIs(t, c.Steer(context.Background(), native.Input{Text: "x"}), native.ErrUnsupported)
 	assert.ErrorIs(t, c.Interrupt(context.Background()), native.ErrUnsupported)
@@ -381,18 +382,18 @@ func TestImagesNeedSupport(t *testing.T) {
 	assert.Equal(t, []native.Input{{Text: in.Text}}, a.Steers())
 }
 
-func approval(id string) native.Request {
-	return native.Request{
-		ID: id, Kind: native.RequestKindApproval, Title: "Run ls",
-		Options: []native.RequestOption{
-			{ID: "allow", Label: "Allow", Kind: native.OptionKindAllow},
-			{ID: "deny", Label: "Deny", Kind: native.OptionKindDeny},
+func approval(id string) agentstate.Request {
+	return agentstate.Request{
+		ID: id, Kind: agentstate.RequestKindApproval, Title: "Run ls",
+		Options: []agentstate.RequestOption{
+			{ID: "allow", Label: "Allow", Kind: agentstate.OptionKindAllow},
+			{ID: "deny", Label: "Deny", Kind: agentstate.OptionKindDeny},
 		},
 	}
 }
 
-func question(id string) native.Request {
-	return native.Request{ID: id, Kind: native.RequestKindQuestion, Questions: []native.Question{{ID: "a", Question: "?"}}}
+func question(id string) agentstate.Request {
+	return agentstate.Request{ID: id, Kind: agentstate.RequestKindQuestion, Questions: []agentstate.Question{{ID: "a", Question: "?"}}}
 }
 
 func TestInputFromText(t *testing.T) {
