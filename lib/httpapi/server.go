@@ -23,6 +23,7 @@ import (
 
 	"github.com/coder/agentapi/internal/version"
 	"github.com/coder/agentapi/lib/convstate"
+	"github.com/coder/agentapi/lib/httpmw"
 	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/logctx"
 	"github.com/coder/agentapi/lib/native"
@@ -172,13 +173,13 @@ func CheckConfig(config ServerConfig) error {
 // parseListenConfig parses the allowed hosts and origins and the bind
 // address of config.
 func parseListenConfig(config ServerConfig) (hosts, origins []string, bind string, err error) {
-	if hosts, err = parseAllowedHosts(config.AllowedHosts); err != nil {
+	if hosts, err = httpmw.ParseAllowedHosts(config.AllowedHosts); err != nil {
 		return nil, nil, "", fmt.Errorf("failed to parse allowed hosts: %w", err)
 	}
-	if origins, err = parseAllowedOrigins(config.AllowedOrigins); err != nil {
+	if origins, err = httpmw.ParseAllowedOrigins(config.AllowedOrigins); err != nil {
 		return nil, nil, "", fmt.Errorf("failed to parse allowed origins: %w", err)
 	}
-	if bind, err = ParseBindAddress(config.Bind); err != nil {
+	if bind, err = httpmw.ParseBindAddress(config.Bind); err != nil {
 		return nil, nil, "", fmt.Errorf("invalid bind address: %w", err)
 	}
 	return hosts, origins, bind, nil
@@ -348,10 +349,10 @@ func newRouter(config ServerConfig, logger *slog.Logger, allowedHosts, allowedOr
 	badHostHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid host header. Allowed hosts: "+strings.Join(allowedHosts, ", "), http.StatusBadRequest)
 	})
-	router.Use(hostAuthorizationMiddleware(allowedHosts, publicIP, badHostHandler))
+	router.Use(httpmw.HostAuthorization(allowedHosts, publicIP, badHostHandler))
 
 	router.Use(requestLogMiddleware(logger))
-	router.Use(Compress())
+	router.Use(httpmw.Compress())
 
 	corsMiddleware := cors.New(cors.Options{
 		AllowedOrigins:   allowedOrigins,
@@ -364,7 +365,7 @@ func newRouter(config ServerConfig, logger *slog.Logger, allowedHosts, allowedOr
 	router.Use(corsMiddleware.Handler)
 
 	// After CORS, so that a refused request's 403 has the CORS headers.
-	router.Use(CrossOriginProtection(allowedOrigins, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	router.Use(httpmw.CrossOriginProtection(allowedOrigins, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		logger.Warn("Refused a request a page of another origin sent", "method", r.Method, "path", r.URL.Path, "origin", r.Header.Get("Origin"))
 		http.Error(w, "A page of another origin sent this request. To let it, add its origin to --allowed-origins.", http.StatusForbidden)
 	})))

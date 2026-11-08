@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/coder/agentapi/lib/httpapi"
+	"github.com/coder/agentapi/lib/httpmw"
 	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/registry"
 )
@@ -155,7 +156,7 @@ func loadServerOptions(flags flagSource, args []string) (serverOptions, error) {
 			return serverOptions{}, fmt.Errorf("invalid --%s: %w", FlagRetryDelays, err)
 		}
 	}
-	if opts.bind, err = httpapi.ParseBindAddress(flags.GetString(FlagBind)); err != nil {
+	if opts.bind, err = httpmw.ParseBindAddress(flags.GetString(FlagBind)); err != nil {
 		return serverOptions{}, fmt.Errorf("invalid --%s: %w", FlagBind, err)
 	}
 	return opts, nil
