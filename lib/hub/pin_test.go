@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -17,19 +16,6 @@ import (
 
 	"github.com/coder/agentapi/lib/hub"
 )
-
-// startQuietHub runs a hub that keeps its instances in statePath and
-// follows none of them, so nothing changes but what a test does.
-func startQuietHub(t *testing.T, statePath string) string {
-	t.Helper()
-	h, err := hub.New(hub.Config{Token: hubToken, Secret: hubSecret, StatePath: statePath})
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = h.Close() })
-	srv := httptest.NewServer(h.Handler())
-	hubs.Store(srv.URL, h)
-	t.Cleanup(srv.Close)
-	return srv.URL
-}
 
 // heartbeat has the instance id join the hub, as its webhook does; delivery
 // is the event's ID.
@@ -81,7 +67,7 @@ func putPins(t *testing.T, hubURL string, body any) (int, []string) {
 // of what the instances do (changed_at).
 func TestHubPins(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "instances.json")
-	hubURL := startQuietHub(t, statePath)
+	hubURL := startHubWith(t, hub.Config{StatePath: statePath}, false).URL
 	for n, id := range []string{"dev-1:3284", "dev-2:3284", "dev-3:3284"} {
 		heartbeat(t, hubURL, id, fmt.Sprintf("p%d", n))
 	}
@@ -135,7 +121,7 @@ func TestHubPins(t *testing.T) {
 	heartbeat(t, hubURL, "dev-1:3284", "p9")
 	assert.Equal(t, reordered, pins(t, hubURL))
 	flushHub(t, hubURL)
-	again := startQuietHub(t, statePath)
+	again := startHubWith(t, hub.Config{StatePath: statePath}, false).URL
 	assert.Equal(t, reordered, pins(t, again))
 
 	assert.Equal(t, 3, pin(again, "dev-3:3284", true).Pin)
@@ -151,7 +137,7 @@ func TestHubPins(t *testing.T) {
 // instance a pin, an unpin or an order moves; none for an order that moves
 // none.
 func TestHubPinEvents(t *testing.T) {
-	hubURL := startQuietHub(t, "")
+	hubURL := startHubWith(t, hub.Config{}, false).URL
 	ids := []string{"dev-1:3284", "dev-2:3284", "dev-3:3284"}
 	for n, id := range ids {
 		heartbeat(t, hubURL, id, fmt.Sprintf("e%d", n))
@@ -211,13 +197,13 @@ func fromPage(t *testing.T, method, target, site, origin string, body any) int {
 // Only a signed-in browser changes pins, and only from the hub's own page:
 // another site's page can't, even on a hub without a token.
 func TestHubPinsRefused(t *testing.T) {
-	hubURL := startQuietHub(t, "")
+	hubURL := startHubWith(t, hub.Config{}, false).URL
 	heartbeat(t, hubURL, "dev-1:3284", "r1")
 	assert.Equal(t, http.StatusUnauthorized, request(t, http.MethodPatch, instancePath(hubURL, "dev-1:3284"), "", map[string]bool{"pinned": true}, nil))
 	assert.Equal(t, http.StatusUnauthorized, request(t, http.MethodPut, hubURL+"/api/pins", "", map[string][]string{"ids": {}}, nil))
 	assert.Equal(t, map[string]int{"dev-1:3284": 0}, pins(t, hubURL))
 
-	open := startNoTokenHub(t).URL
+	open := startHubWith(t, hub.Config{NoToken: true}, false).URL
 	for n, id := range []string{"dev-1:3284", "dev-2:3284"} {
 		heartbeat(t, open, id, fmt.Sprintf("o%d", n))
 		assert.Equal(t, http.StatusForbidden, fromPage(t, http.MethodPatch, instancePath(open, id), "cross-site", "https://evil.example", map[string]bool{"pinned": true}))
@@ -244,6 +230,6 @@ func TestHubPinsFromAnEditedFile(t *testing.T) {
 		{"id": "e", "url": "http://e", "source": "manual", "last_seen": "2026-11-01T09:00:00Z"}
 	]`
 	require.NoError(t, os.WriteFile(statePath, []byte(stored), 0o600))
-	hubURL := startQuietHub(t, statePath)
+	hubURL := startHubWith(t, hub.Config{StatePath: statePath}, false).URL
 	assert.Equal(t, map[string]int{"a": 3, "b": 1, "c": 2, "d": 0, "e": 0}, pins(t, hubURL))
 }

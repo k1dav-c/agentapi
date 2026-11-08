@@ -39,16 +39,53 @@ const (
 	instanceToken = "instance-token"
 )
 
-// startHub runs a hub keeping its instances in statePath.
-// startHub runs a hub that calls an instance unreachable soon after it
-// fails.
-func startHub(t *testing.T, statePath string) *httptest.Server {
-	t.Helper()
-	return startHubGrace(t, statePath, 200*time.Millisecond)
-}
-
 // hubs are the hubs the tests run, by URL, for flushHub.
 var hubs sync.Map
+
+// startHubWith runs a hub of config and serves it until the test ends,
+// when it closes the hub; flushHub writes its files. It signs in with
+// hubToken (or none, with NoToken) and checks hubSecret unless config says
+// otherwise. With run, it follows its instances' summaries (Run); without,
+// it follows none, so nothing changes but what the test does.
+func startHubWith(t *testing.T, config hub.Config, run bool) *httptest.Server {
+	t.Helper()
+	if config.Token == "" && !config.NoToken {
+		config.Token = hubToken
+	}
+	if config.Secret == "" {
+		config.Secret = hubSecret
+	}
+	h, err := hub.New(config)
+	require.NoError(t, err)
+	srv := httptest.NewServer(h.Handler())
+	hubs.Store(srv.URL, h)
+	stop := func() {}
+	if run {
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() {
+			h.Run(ctx)
+			close(done)
+		}()
+		stop = func() {
+			cancel()
+			<-done
+		}
+	}
+	t.Cleanup(func() {
+		srv.Close()
+		stop()
+		_ = h.Close()
+	})
+	return srv
+}
+
+// following is the config of a hub that keeps its instances in statePath
+// (none when empty), reaches them with instanceToken, and calls one
+// unreachable soon after it fails.
+func following(statePath string) hub.Config {
+	return hub.Config{InstanceToken: instanceToken, StatePath: statePath, ConnectGrace: 200 * time.Millisecond}
+}
 
 // flushHub has the hub at hubURL write its files now: it writes a change
 // within a second.
@@ -57,27 +94,6 @@ func flushHub(t *testing.T, hubURL string) {
 	h, ok := hubs.Load(hubURL)
 	require.True(t, ok)
 	require.NoError(t, h.(*hub.Hub).Flush())
-}
-
-func startHubGrace(t *testing.T, statePath string, grace time.Duration) *httptest.Server {
-	t.Helper()
-	h, err := hub.New(hub.Config{Token: hubToken, Secret: hubSecret, InstanceToken: instanceToken, StatePath: statePath, ConnectGrace: grace})
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = h.Close() })
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		h.Run(ctx)
-		close(done)
-	}()
-	srv := httptest.NewServer(h.Handler())
-	hubs.Store(srv.URL, h)
-	t.Cleanup(func() {
-		srv.Close()
-		cancel()
-		<-done
-	})
-	return srv
 }
 
 // startInstance runs an AgentAPI with a fake native agent that needs
@@ -158,7 +174,7 @@ func TestHub(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "hub", "instances.json")
 	// Started first, stopped last: the hubs' summary streams end first.
 	instSrv, _ := startInstance(t)
-	hubSrv := startHub(t, statePath)
+	hubSrv := startHubWith(t, following(statePath), true)
 
 	// What agentapi hub join does to a running instance.
 	webhook := map[string]any{
@@ -228,7 +244,7 @@ func TestHub(t *testing.T) {
 
 	// A hub that starts again knows the instance.
 	flushHub(t, hubSrv.URL)
-	again := startHub(t, statePath)
+	again := startHubWith(t, following(statePath), true)
 	require.Eventually(t, func() bool {
 		list := instances(t, again.URL)
 		return len(list) == 1 && list[0].Connection == instanceapi.ConnectionConnected
@@ -263,7 +279,7 @@ func postEvent(t *testing.T, hubURL string, event map[string]any, secret string,
 // Only signed, recent events count: an event names the URL the hub sends
 // an instance token to.
 func TestHubWebhookSignature(t *testing.T) {
-	hubSrv := startHub(t, "")
+	hubSrv := startHubWith(t, following(""), true)
 	event := func(id, typ string) map[string]any {
 		return map[string]any{
 			"id": id, "type": typ, "created_at": time.Now(),
@@ -318,7 +334,7 @@ func TestHubRefusesEventsWithoutDeliveryID(t *testing.T) {
 // starting) is connecting, not unreachable, until it does; one that never
 // does is unreachable once the connect grace is over.
 func TestHubConnectGrace(t *testing.T) {
-	hubSrv := startHubGrace(t, "", 3*time.Second)
+	hubSrv := startHubWith(t, hub.Config{InstanceToken: instanceToken, ConnectGrace: 3 * time.Second}, true)
 	// A port nothing listens on yet.
 	reserved, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
@@ -403,7 +419,7 @@ func joinInstance(t *testing.T, hubURL, instanceURL string) hub.Instance {
 // it the instance's requests.
 func TestHubOtherInstanceAnswers(t *testing.T) {
 	instSrv, _ := startInstance(t)
-	hubSrv := startHub(t, "")
+	hubSrv := startHubWith(t, following(""), true)
 	started := map[string]any{
 		"id": "o1", "type": "instance.started", "created_at": time.Now(),
 		"instance": map[string]any{"id": "dev-1:3284", "server_id": "s1", "url": instSrv.URL, "agent_type": "claude"},
@@ -425,7 +441,7 @@ func TestHubOtherInstanceAnswers(t *testing.T) {
 // the hub keeps the one it follows instead of switching at each heartbeat.
 func TestHubKeepsTheRunItFollows(t *testing.T) {
 	instSrv, _ := startInstance(t)
-	hubSrv := startHub(t, "")
+	hubSrv := startHubWith(t, following(""), true)
 	joined := joinInstance(t, hubSrv.URL, instSrv.URL)
 
 	twin := func(id, typ string) map[string]any {
@@ -495,7 +511,7 @@ func elsewhere(t *testing.T) (string, *atomic.Int32) {
 // refused; AgentAPI has named it since 1.0.
 func TestHubEventsDontMoveAFollowedInstance(t *testing.T) {
 	instSrv, _ := startInstance(t)
-	hubSrv := startHub(t, "")
+	hubSrv := startHubWith(t, following(""), true)
 	joined := joinInstance(t, hubSrv.URL, instSrv.URL)
 	otherURL, got := elsewhere(t)
 
@@ -530,7 +546,7 @@ func TestHubEventsDontMoveAFollowedInstance(t *testing.T) {
 // stopped answering, the heartbeat moves the instance to the new one.
 func TestHubFollowsANewAddress(t *testing.T) {
 	oldSrv, inst := startInstanceOn(t, nil, "dev-1:3285")
-	hubSrv := startHub(t, "")
+	hubSrv := startHubWith(t, following(""), true)
 	joined := joinInstance(t, hubSrv.URL, oldSrv.URL)
 	// The same AgentAPI at its new address.
 	newSrv := httptest.NewServer(inst.Handler())
@@ -621,13 +637,13 @@ func hijack(id string, joined hub.Instance, url string) map[string]any {
 func TestHubRestartRefusesAMove(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "instances.json")
 	inst := startGatedInstance(t)
-	first := startHub(t, statePath)
+	first := startHubWith(t, following(statePath), true)
 	joined := joinInstance(t, first.URL, inst.URL)
 	otherURL, got := elsewhere(t)
 	flushHub(t, first.URL)
 
 	inst.hold.Store(true)
-	again := startHubGrace(t, statePath, 5*time.Second)
+	again := startHubWith(t, hub.Config{InstanceToken: instanceToken, StatePath: statePath, ConnectGrace: 5 * time.Second}, true)
 	require.Equal(t, instanceapi.ConnectionConnecting, instances(t, again.URL)[0].Connection)
 	assert.Equal(t, http.StatusNoContent, postEvent(t, again.URL, hijack("h1", joined, otherURL), hubSecret, time.Now()))
 	kept := instances(t, again.URL)[0]
@@ -648,7 +664,7 @@ func TestHubRestartRefusesAMove(t *testing.T) {
 // the connect grace.
 func TestHubStreamDropRefusesAMove(t *testing.T) {
 	inst := startGatedInstance(t)
-	hubSrv := startHubGrace(t, "", 5*time.Second)
+	hubSrv := startHubWith(t, hub.Config{InstanceToken: instanceToken, ConnectGrace: 5 * time.Second}, true)
 	joined := joinInstance(t, hubSrv.URL, inst.URL)
 	otherURL, got := elsewhere(t)
 
@@ -674,7 +690,7 @@ func TestHubStreamDropRefusesAMove(t *testing.T) {
 // summary.
 func TestHubProxyWaitsForAMovedInstance(t *testing.T) {
 	inst, _ := startInstanceOn(t, nil, "dev-1:3285")
-	hubSrv := startHub(t, "")
+	hubSrv := startHubWith(t, following(""), true)
 	joined := joinInstance(t, hubSrv.URL, inst.URL)
 	var mu sync.Mutex
 	var paths []string
@@ -707,7 +723,7 @@ func TestHubProxyWaitsForAMovedInstance(t *testing.T) {
 // while the hub can't reach it.
 func TestHubAddedInstanceStays(t *testing.T) {
 	instSrv, _ := startInstance(t)
-	hubSrv := startHub(t, "")
+	hubSrv := startHubWith(t, following(""), true)
 	var added hub.Instance
 	require.Equal(t, http.StatusOK, request(t, http.MethodPost, hubSrv.URL+"/api/instances", hubToken, map[string]string{"url": instSrv.URL, "token": instanceToken}, &added))
 	otherURL, got := elsewhere(t)
@@ -733,7 +749,7 @@ func TestHubAddedInstanceStays(t *testing.T) {
 // An instance added by its URL, with its own token.
 func TestHubAddInstance(t *testing.T) {
 	instSrv, _ := startInstance(t)
-	hubSrv := startHub(t, "")
+	hubSrv := startHubWith(t, following(""), true)
 	assert.Equal(t, http.StatusBadRequest, request(t, http.MethodPost, hubSrv.URL+"/api/instances", hubToken, map[string]string{"url": "ftp://x"}, nil))
 	var added hub.Instance
 	require.Equal(t, http.StatusOK, request(t, http.MethodPost, hubSrv.URL+"/api/instances", hubToken, map[string]string{"url": instSrv.URL + "/", "token": instanceToken}, &added))
@@ -749,7 +765,7 @@ func TestHubAddInstance(t *testing.T) {
 // Signing in trades the hub token for a cookie, which the hub's pages and
 // the proxy accept.
 func TestHubSession(t *testing.T) {
-	hubSrv := startHub(t, "")
+	hubSrv := startHubWith(t, following(""), true)
 	var session map[string]bool
 	require.Equal(t, http.StatusOK, request(t, http.MethodGet, hubSrv.URL+"/api/session", "", nil, &session))
 	assert.False(t, session["authenticated"])
@@ -855,7 +871,7 @@ func next(t *testing.T, events <-chan sseEvent) sseEvent {
 // and a restart of the hub.
 func TestHubGroups(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "instances.json")
-	hubSrv := startHub(t, statePath)
+	hubSrv := startHubWith(t, following(statePath), true)
 	event := func(id string) map[string]any {
 		return map[string]any{
 			"id": id, "type": "instance.heartbeat", "created_at": time.Now(),
@@ -879,7 +895,7 @@ func TestHubGroups(t *testing.T) {
 
 	// A hub that starts again knows it.
 	flushHub(t, hubSrv.URL)
-	again := startHub(t, statePath)
+	again := startHubWith(t, following(statePath), true)
 	assert.Equal(t, "Client work", instances(t, again.URL)[0].Group)
 	var ungrouped hub.Instance
 	require.Equal(t, http.StatusOK, request(t, http.MethodPatch, again.URL+"/api/instances/"+url.PathEscape("dev-1:3284"), hubToken, map[string]string{"group": ""}, &ungrouped))
@@ -954,24 +970,12 @@ func TestHubDamagedState(t *testing.T) {
 	}
 }
 
-// startHubClock runs a hub on clock and returns its URL; retry traps the
-// waits between its attempts to reach an instance, until the test ends.
-func startHubClock(t *testing.T, clock *quartz.Mock) (string, *quartz.Trap) {
+// startHubOnClock runs a hub on clock that follows its instances and
+// returns its URL; retry traps the waits between its attempts to reach an
+// instance, until the test ends.
+func startHubOnClock(t *testing.T, clock *quartz.Mock) (string, *quartz.Trap) {
 	t.Helper()
-	h, err := hub.New(hub.Config{Token: hubToken, Secret: hubSecret, ConnectGrace: 10 * time.Second, Clock: clock})
-	require.NoError(t, err)
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		h.Run(ctx)
-		close(done)
-	}()
-	srv := httptest.NewServer(h.Handler())
-	t.Cleanup(func() {
-		srv.Close()
-		cancel()
-		<-done
-	})
+	srv := startHubWith(t, hub.Config{ConnectGrace: 10 * time.Second, Clock: clock}, true)
 	retry := clock.Trap().NewTimer("hub", "retry")
 	// Closed first: a watch waits in it.
 	t.Cleanup(retry.Close)
@@ -995,7 +999,7 @@ func passRetries(t *testing.T, clock *quartz.Mock, retry *quartz.Trap, start tim
 // follows it again.
 func TestHubMissedHeartbeats(t *testing.T) {
 	clock := quartz.NewMock(t)
-	hubURL, retry := startHubClock(t, clock)
+	hubURL, retry := startHubOnClock(t, clock)
 	heartbeat := func(id string) map[string]any {
 		return map[string]any{
 			"id": id, "type": "instance.heartbeat", "created_at": clock.Now(),
@@ -1025,7 +1029,7 @@ func TestHubMissedHeartbeats(t *testing.T) {
 // one, or one with them off) isn't taken as stopped for missing them.
 func TestHubNoHeartbeats(t *testing.T) {
 	clock := quartz.NewMock(t)
-	hubURL, retry := startHubClock(t, clock)
+	hubURL, retry := startHubOnClock(t, clock)
 	started := map[string]any{
 		"id": "o1", "type": "instance.started", "created_at": clock.Now(),
 		"instance": map[string]any{"id": "dev-1:3284", "server_id": "s1", "url": "http://127.0.0.1:1", "agent_type": "claude"},
@@ -1041,7 +1045,7 @@ func TestHubNoHeartbeats(t *testing.T) {
 // for a heartbeat, and when the hub can't reach it any more.
 func TestHubChangedAt(t *testing.T) {
 	clock := quartz.NewMock(t)
-	hubURL, retry := startHubClock(t, clock)
+	hubURL, retry := startHubOnClock(t, clock)
 	heartbeat := func(id string) map[string]any {
 		return map[string]any{
 			"id": id, "type": "instance.heartbeat", "created_at": clock.Now(),
@@ -1113,7 +1117,7 @@ func TestHubChangedAt(t *testing.T) {
 // an event replayed just after it restarts is refused, as before it.
 func TestHubRefusesAReplayAfterARestart(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "instances.json")
-	first := startQuietHub(t, statePath)
+	first := startHubWith(t, hub.Config{StatePath: statePath}, false).URL
 	event := map[string]any{
 		"id": "r1", "type": "instance.heartbeat", "created_at": time.Now(),
 		"instance": map[string]any{"id": "dev-1:3284", "server_id": "s1", "url": "http://127.0.0.1:1", "agent_type": "claude"},
@@ -1125,7 +1129,7 @@ func TestHubRefusesAReplayAfterARestart(t *testing.T) {
 	_, err := os.Stat(strings.TrimSuffix(statePath, ".json") + ".deliveries.json")
 	require.NoError(t, err)
 
-	again := startQuietHub(t, statePath)
+	again := startHubWith(t, hub.Config{StatePath: statePath}, false).URL
 	require.Equal(t, http.StatusNoContent, postEvent(t, again, event, hubSecret, signedAt))
 	assert.Empty(t, instances(t, again), "the copy is refused")
 	event["id"] = "r2"

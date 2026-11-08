@@ -22,7 +22,7 @@ func TestHubSpendTokens(t *testing.T) {
 		DayTokens:  &instanceapi.SummaryTokens{Input: 1, Output: 2, CacheWrite: 3, CacheRead: 4, Total: 10},
 		WeekTokens: &instanceapi.SummaryTokens{Input: 10, Output: 20, CacheWrite: 30, CacheRead: 40, Total: 100},
 	}
-	hubSrv := startHub(t, "")
+	hubSrv := startHubWith(t, following(""), true)
 	require.Equal(t, http.StatusOK, request(t, http.MethodPost, hubSrv.URL+"/api/instances", hubToken, map[string]string{"url": instance.URL}, nil))
 	require.Eventually(t, func() bool {
 		list := instances(t, hubSrv.URL)

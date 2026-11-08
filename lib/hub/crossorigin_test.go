@@ -50,15 +50,6 @@ func (f *fakeInstance) last(t *testing.T) http.Header {
 	return f.headers[len(f.headers)-1]
 }
 
-func startNoTokenHub(t *testing.T, allowedHosts ...string) *httptest.Server {
-	t.Helper()
-	h, err := hub.New(hub.Config{NoToken: true, Secret: hubSecret, AllowedHosts: allowedHosts})
-	require.NoError(t, err)
-	srv := httptest.NewServer(h.Handler())
-	t.Cleanup(srv.Close)
-	return srv
-}
-
 // send sends method url with the headers a browser adds: Sec-Fetch-Site
 // site and Origin origin (none when empty).
 func send(t *testing.T, method, url, site, origin string) *http.Response {
@@ -81,7 +72,7 @@ func send(t *testing.T, method, url, site, origin string) *http.Response {
 // instances anything; the hub's own page can.
 func TestHubRefusesCrossOriginRequests(t *testing.T) {
 	inst := startFakeInstance(t, "dev:3284")
-	hubSrv := startNoTokenHub(t)
+	hubSrv := startHubWith(t, hub.Config{NoToken: true}, false)
 	require.Equal(t, http.StatusOK, request(t, http.MethodPost, hubSrv.URL+"/api/instances", "", map[string]string{"url": inst.URL}, nil))
 	message := hubSrv.URL + "/i/" + url.PathEscape("dev:3284") + "/message"
 
@@ -103,7 +94,7 @@ func TestHubRefusesCrossOriginRequests(t *testing.T) {
 // Nothing an instance answers runs as a page of the hub's.
 func TestHubProxySandboxesAnswers(t *testing.T) {
 	inst := startFakeInstance(t, "dev:3284")
-	hubSrv := startNoTokenHub(t)
+	hubSrv := startHubWith(t, hub.Config{NoToken: true}, false)
 	require.Equal(t, http.StatusOK, request(t, http.MethodPost, hubSrv.URL+"/api/instances", "", map[string]string{"url": inst.URL}, nil))
 	resp, err := http.Get(hubSrv.URL + "/i/" + url.PathEscape("dev:3284") + "/chat/")
 	require.NoError(t, err)
@@ -116,7 +107,7 @@ func TestHubProxySandboxesAnswers(t *testing.T) {
 // path is written.
 func TestHubProxyKeepsWebhooks(t *testing.T) {
 	inst := startFakeInstance(t, "dev:3284")
-	hubSrv := startNoTokenHub(t)
+	hubSrv := startHubWith(t, hub.Config{NoToken: true}, false)
 	require.Equal(t, http.StatusOK, request(t, http.MethodPost, hubSrv.URL+"/api/instances", "", map[string]string{"url": inst.URL}, nil))
 	base := hubSrv.URL + "/i/" + url.PathEscape("dev:3284")
 	for _, path := range []string{"/webhook", "/webhook/", "//webhook", "/x/../webhook", "/%77ebhook", "/webhook/test"} {
@@ -132,7 +123,7 @@ func TestHubProxyKeepsWebhooks(t *testing.T) {
 func TestHubAddInstanceKeepsItsURL(t *testing.T) {
 	first := startFakeInstance(t, "dev:3284")
 	second := startFakeInstance(t, "dev:3284")
-	hubSrv := startNoTokenHub(t)
+	hubSrv := startHubWith(t, hub.Config{NoToken: true}, false)
 	require.Equal(t, http.StatusOK, request(t, http.MethodPost, hubSrv.URL+"/api/instances", "", map[string]string{"url": first.URL}, nil))
 	assert.Equal(t, http.StatusConflict, request(t, http.MethodPost, hubSrv.URL+"/api/instances", "", map[string]string{"url": second.URL}, nil))
 	assert.Equal(t, http.StatusOK, request(t, http.MethodPost, hubSrv.URL+"/api/instances", "", map[string]string{"url": first.URL + "/"}, nil))
@@ -144,7 +135,7 @@ func TestHubAddInstanceKeepsItsURL(t *testing.T) {
 // With --allowed-hosts, the hub answers browsers only by those names and
 // by address; the instances' signed events come by any name.
 func TestHubAllowedHosts(t *testing.T) {
-	hubSrv := startNoTokenHub(t, "hub.example")
+	hubSrv := startHubWith(t, hub.Config{NoToken: true, AllowedHosts: []string{"hub.example"}}, false)
 	get := func(host, path string) int {
 		req, err := http.NewRequest(http.MethodGet, hubSrv.URL+path, nil)
 		require.NoError(t, err)
@@ -171,7 +162,7 @@ func TestHubAllowedHosts(t *testing.T) {
 	assert.NotEqual(t, http.StatusMisdirectedRequest, resp.StatusCode, "the signature decides")
 
 	// Without --allowed-hosts, any name.
-	open := startNoTokenHub(t)
+	open := startHubWith(t, hub.Config{NoToken: true}, false)
 	req, err = http.NewRequest(http.MethodGet, open.URL+"/api/instances", nil)
 	require.NoError(t, err)
 	req.Host = "any.example"

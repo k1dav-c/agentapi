@@ -38,7 +38,7 @@ func putFavorites(t *testing.T, hubURL string, list any) (int, []hub.Favorite) {
 // them through a restart.
 func TestHubFavorites(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "instances.json")
-	hubURL := startQuietHub(t, statePath)
+	hubURL := startHubWith(t, hub.Config{StatePath: statePath}, false).URL
 	assert.Empty(t, getFavorites(t, hubURL))
 
 	events := openEvents(t, hubURL+"/api/events")
@@ -94,7 +94,7 @@ func TestHubFavorites(t *testing.T) {
 	assert.Equal(t, 1, file.Version, "an older hub still reads it")
 	assert.Equal(t, reordered, file.Favorites)
 
-	again := startQuietHub(t, statePath)
+	again := startHubWith(t, hub.Config{StatePath: statePath}, false).URL
 	assert.Equal(t, reordered, getFavorites(t, again), "kept through a restart")
 
 	// Signed in only.
@@ -109,7 +109,7 @@ func TestHubFavorites(t *testing.T) {
 
 // A list the hub refuses is 400, and changes nothing.
 func TestHubRefusesFavorites(t *testing.T) {
-	hubURL := startQuietHub(t, "")
+	hubURL := startHubWith(t, hub.Config{}, false).URL
 	kept := []hub.Favorite{{ID: "a", Text: "keep me"}}
 	code, _ := putFavorites(t, hubURL, kept)
 	require.Equal(t, http.StatusOK, code)
