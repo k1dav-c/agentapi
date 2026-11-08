@@ -481,7 +481,7 @@ func TestReplayModelError(t *testing.T) {
 
 	results := h.sink.State().Results
 	require.Len(t, results, 1)
-	assert.Equal(t, "error", results[0].StopReason)
+	assert.Equal(t, native.StopReasonError, results[0].StopReason)
 	assert.Contains(t, results[0].Error, "Codex error: The 'gpt-5.3-codex-spark' model is not supported")
 	final := h.sink.Final()
 	last := final[len(final)-1]

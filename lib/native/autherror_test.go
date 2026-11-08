@@ -134,7 +134,7 @@ func TestClassifyFailure(t *testing.T) {
 	all := native.FailureHints{Limit: true, Auth: true, Transient: true, APIStatus: 429}
 	for _, tc := range []struct {
 		name   string
-		reason string
+		reason native.StopReason
 		hints  native.FailureHints
 		want   native.TurnResult
 	}{

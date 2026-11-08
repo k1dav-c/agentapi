@@ -136,7 +136,7 @@ func TestTurn(t *testing.T) {
 	require.Eventually(t, c.Idle, 5*time.Second, time.Millisecond)
 
 	reply := obs.reply(1)
-	assert.Equal(t, native.StopReasonEndTurn, reply.StopReason)
+	assert.Equal(t, string(native.StopReasonEndTurn), reply.StopReason)
 	assert.Contains(t, reply.Content[0].Text, "Listed the workspace")
 	require.Len(t, obs.toolResults(), 1)
 	msgs := c.Messages()
@@ -206,7 +206,7 @@ func TestSteerAndInterrupt(t *testing.T) {
 
 	require.NoError(t, c.Interrupt(context.Background()))
 	require.Eventually(t, c.Idle, 5*time.Second, time.Millisecond)
-	assert.Equal(t, native.StopReasonInterrupted, obs.reply(1).StopReason)
+	assert.Equal(t, string(native.StopReasonInterrupted), obs.reply(1).StopReason)
 	assert.ErrorIs(t, c.Interrupt(context.Background()), native.ErrNoActiveTurn)
 }
 

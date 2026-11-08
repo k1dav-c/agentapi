@@ -713,7 +713,7 @@ func (s *loopState) completeTurn(tr turn) {
 	s.closeTurnRequests()
 
 	last := t.lastVisible()
-	last.stop = result.StopReason
+	last.stop = string(result.StopReason)
 	s.emit(&last.msgState)
 	s.flush(true)
 	// The turn's messages are final.
@@ -811,7 +811,7 @@ func (s *loopState) exited() {
 	if t := s.turn; t != nil {
 		s.closeOpenItems(t, "failed")
 		last := t.lastVisible()
-		last.stop = native.StopReasonError
+		last.stop = string(native.StopReasonError)
 		s.emit(&last.msgState)
 		s.turn = nil
 	}

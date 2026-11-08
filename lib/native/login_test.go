@@ -155,8 +155,8 @@ func TestLoginClearedByAWorkingTurn(t *testing.T) {
 	require.NotNil(t, c.LoginRequired())
 
 	// Turns that didn't need the model prove nothing.
-	for _, reason := range []string{native.StopReasonInterrupted, native.StopReasonHandled} {
-		require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: reason}))
+	for _, reason := range []native.StopReason{native.StopReasonInterrupted, native.StopReasonHandled} {
+		require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: string(reason)}))
 		a.Sink().TurnCompleted(native.TurnResult{StopReason: reason})
 		assert.NotNil(t, c.LoginRequired(), reason)
 	}

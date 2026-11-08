@@ -242,7 +242,7 @@ func (c *Conversation) limitStoppedLocked(result TurnResult, again bool) {
 func reachedLimitReset(u agentstate.AgentUsage) *time.Time {
 	var latest *time.Time
 	for _, l := range u.RateLimits {
-		reached := l.Status == "rejected" || (l.UsedPercent != nil && *l.UsedPercent >= 100)
+		reached := l.Status == agentstate.RateLimitRejected || (l.UsedPercent != nil && *l.UsedPercent >= 100)
 		if reached && l.ResetsAt != nil && (latest == nil || l.ResetsAt.After(*latest)) {
 			at := *l.ResetsAt
 			latest = &at

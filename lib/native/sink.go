@@ -75,6 +75,7 @@ func provesLogin(result TurnResult) bool {
 	switch result.StopReason {
 	case StopReasonEndTurn, StopReasonMaxTokens:
 		return true
+	case StopReasonInterrupted, StopReasonHandled, StopReasonError, StopReasonLimited, StopReasonTransient:
 	}
 	return false
 }

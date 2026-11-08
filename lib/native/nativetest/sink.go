@@ -117,7 +117,7 @@ func (s *Sink) TurnStarted() {
 func (s *Sink) TurnCompleted(r native.TurnResult) {
 	defer s.enter()()
 	s.state.Results = append(s.state.Results, r)
-	s.state.Log = append(s.state.Log, "turn_completed:"+r.StopReason)
+	s.state.Log = append(s.state.Log, "turn_completed:"+string(r.StopReason))
 }
 
 func (s *Sink) RichMessage(m transcript.RichMessage) {

@@ -902,7 +902,7 @@ func turnResult(f *frame, interrupted bool) native.TurnResult {
 	case f.TerminalReason == "aborted_streaming" || f.TerminalReason == "aborted_tools":
 		return native.TurnResult{StopReason: native.StopReasonInterrupted}
 	case f.Subtype == "success" && !f.IsError:
-		if f.StopReason != nil && *f.StopReason == native.StopReasonMaxTokens {
+		if f.StopReason != nil && native.StopReason(*f.StopReason) == native.StopReasonMaxTokens {
 			return native.TurnResult{StopReason: native.StopReasonMaxTokens}
 		}
 		return native.TurnResult{StopReason: native.StopReasonEndTurn}

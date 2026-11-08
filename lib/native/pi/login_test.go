@@ -133,7 +133,7 @@ func TestLoginLostMidSession(t *testing.T) {
 		h.settle()
 		assert.Equal(t, []agentstate.LoginRequired{loginHint}, h.sink.State().Logins)
 		require.Len(t, h.sink.State().Results, 1)
-		assert.Equal(t, "error", h.sink.State().Results[0].StopReason)
+		assert.Equal(t, native.StopReasonError, h.sink.State().Results[0].StopReason)
 		assert.Less(t, slices.Index(h.sink.State().Log, "login_required"), slices.Index(h.sink.State().Log, "turn_completed:error"))
 	})
 }

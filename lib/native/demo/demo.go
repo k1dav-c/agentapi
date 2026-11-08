@@ -419,7 +419,7 @@ func (a *Adapter) finish(t *turn, result native.TurnResult) {
 	if a.limited.Swap(false) {
 		// The limit that stopped the turn, as Claude Code reports it.
 		full := 100.0
-		usage.RateLimits[0].UsedPercent, usage.RateLimits[0].Status = &full, "rejected"
+		usage.RateLimits[0].UsedPercent, usage.RateLimits[0].Status = &full, agentstate.RateLimitRejected
 	}
 	if a.cold.Swap(false) {
 		usage.Context.Used = max(usage.Context.Used, 120000)
@@ -434,9 +434,9 @@ func (a *Adapter) finish(t *turn, result native.TurnResult) {
 func demoUsage(n int, now time.Time) agentstate.AgentUsage {
 	fiveHour, weekly := min(float64(n)*7, 100), min(20+float64(n)*2, 100)
 	fiveHourReset, weeklyReset := now.Add(3*time.Hour).Truncate(time.Minute), now.Add(4*24*time.Hour).Truncate(time.Hour)
-	status := "allowed"
+	status := agentstate.RateLimitAllowed
 	if fiveHour >= 80 {
-		status = "allowed_warning"
+		status = agentstate.RateLimitAllowedWarning
 	}
 	return agentstate.AgentUsage{
 		Context:     &agentstate.ContextUsage{Used: min(18000+n*9500, 200000), Size: 200000},
@@ -867,8 +867,8 @@ func (s *script) reply(long bool) error {
 	for _, o := range s.outcomes {
 		sb.WriteString("- " + o + "\n")
 	}
-	finish := func(stop string) {
-		m.stop = stop
+	finish := func(stop native.StopReason) {
+		m.stop = string(stop)
 		m.usage = &transcript.Usage{InputTokens: 1200 + 40*len(s.text), OutputTokens: 4 * len(m.blocks[0].Text) / 3}
 		s.send(m)
 	}

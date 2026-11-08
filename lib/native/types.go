@@ -102,23 +102,25 @@ type Input struct {
 	Images []Image
 }
 
-// Stop reasons adapters report in TurnResult.StopReason.
+// StopReason is why a turn ended, as an adapter reports it in TurnResult.
+type StopReason string
+
 const (
-	StopReasonEndTurn     = "end_turn"
-	StopReasonInterrupted = "interrupted"
-	StopReasonError       = "error"
-	StopReasonMaxTokens   = "max_tokens"
+	StopReasonEndTurn     StopReason = "end_turn"
+	StopReasonInterrupted StopReason = "interrupted"
+	StopReasonError       StopReason = "error"
+	StopReasonMaxTokens   StopReason = "max_tokens"
 	// StopReasonHandled: the agent handled the message without a model
 	// turn, e.g. a Pi extension command.
-	StopReasonHandled = "handled"
+	StopReasonHandled StopReason = "handled"
 	// StopReasonLimited: the account reached a usage limit; TurnResult.Error
 	// is what the agent said.
-	StopReasonLimited = "limited"
+	StopReasonLimited StopReason = "limited"
 	// StopReasonTransient: the turn failed on an upstream error that may
 	// pass (an HTTP 5xx or 429, an overloaded API, a dropped connection)
 	// after the agent's own retries; TurnResult.Error is what the agent
 	// said. The conversation tries the turn again later (Policy.RetryDelays).
-	StopReasonTransient = "transient"
+	StopReasonTransient StopReason = "transient"
 )
 
 // RedactedAnswer replaces the answers to secret questions everywhere but
@@ -128,7 +130,7 @@ const RedactedAnswer = "[redacted]"
 // TurnResult describes how a turn ended.
 type TurnResult struct {
 	// StopReason is the agent's reason, one of the StopReason constants.
-	StopReason string
+	StopReason StopReason
 	// Error is set when the turn failed.
 	Error string
 	// ResetsAt is when the limit that stopped a limited turn resets, if

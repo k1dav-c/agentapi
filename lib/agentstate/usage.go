@@ -34,6 +34,16 @@ type RateLimit struct {
 	// UsedPercent is nil when the agent doesn't say how much is used.
 	UsedPercent *float64   `json:"used_percent,omitempty" doc:"How much of the limit is used, from 0 to 100."`
 	ResetsAt    *time.Time `json:"resets_at,omitempty" doc:"When the limit resets."`
-	// Status is Claude Code's: allowed, allowed_warning or rejected.
+	// Status is Claude Code's: RateLimitAllowed, RateLimitAllowedWarning
+	// or RateLimitRejected.
 	Status string `json:"status,omitempty" doc:"allowed, allowed_warning (close to the limit) or rejected (reached). Claude Code only."`
 }
+
+// RateLimit.Status values.
+const (
+	RateLimitAllowed = "allowed"
+	// RateLimitAllowedWarning: close to the limit.
+	RateLimitAllowedWarning = "allowed_warning"
+	// RateLimitRejected: the limit is reached.
+	RateLimitRejected = "rejected"
+)

@@ -169,7 +169,7 @@ func TestInterruptWithoutCompletion(t *testing.T) {
 	h.settle()
 	require.NoError(t, h.err("interrupt"))
 	h.eventually(func() bool { return len(snapshot(h.rec).completions) == 1 }, "the turn to end")
-	assert.Equal(t, "interrupted", snapshot(h.rec).completions[0].StopReason)
+	assert.Equal(t, native.StopReasonInterrupted, snapshot(h.rec).completions[0].StopReason)
 	// A turn/completed arriving late is ignored.
 	h.completeTurn("turn-1", "interrupted", "")
 	assert.Len(t, snapshot(h.rec).completions, 1)
@@ -703,7 +703,7 @@ func TestStopReasonAfterSteer(t *testing.T) {
 
 	msg, ok := h.rec.Message("turn-1", "assistant")
 	require.True(t, ok)
-	assert.Equal(t, native.StopReasonInterrupted, msg.StopReason)
+	assert.Equal(t, string(native.StopReasonInterrupted), msg.StopReason)
 	_, ok = h.rec.Message("turn-1-1", "assistant")
 	assert.False(t, ok, "the steer's message has no content")
 }

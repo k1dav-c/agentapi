@@ -204,7 +204,7 @@ func TestLoginLostMidSession(t *testing.T) {
 		proc.barrier(t)
 		require.Equal(t, []agentstate.LoginRequired{loginHint}, sink.State().Logins)
 		require.Len(t, sink.State().Results, 1)
-		assert.Equal(t, "error", sink.State().Results[0].StopReason)
+		assert.Equal(t, native.StopReasonError, sink.State().Results[0].StopReason)
 		// The result says "success" with is_error; the terminal reason
 		// says what failed.
 		assert.Equal(t, "Claude Code: the turn failed (api_error): Not logged in · Please run /login", sink.State().Results[0].Error)

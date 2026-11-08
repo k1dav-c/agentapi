@@ -100,7 +100,7 @@ func (a *Adapter) handleRateLimit(raw json.RawMessage) {
 func (a *Adapter) limitReached() bool {
 	now := a.cfg.Clock.Now()
 	for _, l := range a.usage.RateLimits {
-		if l.Status == "rejected" && (l.ResetsAt == nil || l.ResetsAt.After(now)) {
+		if l.Status == agentstate.RateLimitRejected && (l.ResetsAt == nil || l.ResetsAt.After(now)) {
 			return true
 		}
 	}
