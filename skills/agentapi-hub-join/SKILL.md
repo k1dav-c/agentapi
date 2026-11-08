@@ -114,7 +114,8 @@ answers 401.
    the command as `join` printed it, and ask the user before you run it. If they agree but `sudo`
    asks for a password you can't give, have them run it.
 
-   An update restarts the AgentAPI. Only one with a state DB keeps its conversation across the
+   An update restarts the AgentAPI. Without a state DB the agent resumes its session, but only
+   one with a state DB keeps its whole conversation, queued messages included, across the
    restart. If `~/.agentapi/config.yaml` has no `state-db`, suggest this line, which gives each
    AgentAPI a file of its own, and ask before you add it; it applies when they next start:
 

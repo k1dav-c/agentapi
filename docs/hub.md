@@ -337,7 +337,7 @@ version.
 
 On the **Versions** card, **Update the older ones** does this for every connected agent that runs an
 older version than the hub and can update this way, all at once; the AgentAPIs of one machine take
-turns on their own. It asks first, and says how many will start a fresh conversation. Then the card
+turns on their own. It asks first, and says how many will start a new session. Then the card
 says how many it asked, which agents it can't update, and why.
 
 Each machine needs:
@@ -358,9 +358,11 @@ Each machine needs:
     && sudo ln -sf ~/.local/bin/agentapi /usr/local/bin/agentapi
   ```
 
-- **A state DB, to keep the conversation.** Only an AgentAPI with a state DB keeps its conversation
+- **A state DB, to keep the whole conversation.** An AgentAPI with a state DB keeps its conversation
   and the agent's session across the restart, and sends its queued messages after it. Without one
-  the conversation starts fresh, and the confirmation says so. Add
+  the agent resumes its session (Claude Code, Codex and Pi), and its conversation is read back from
+  the session's log, but queued messages and the settings chosen in the chat start fresh; the dialog
+  says so. An AgentAPI of an earlier release starts a new session, and the confirmation says so. Add
   `state-db: ~/.agentapi/state/{port}.db` to the config file ([step 3](#3-join-each-machines-agentapis)).
 
 #### Updating by hand

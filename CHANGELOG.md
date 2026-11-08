@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- A restart in place (`agentapi update --restart`, an update from the hub or `POST /update`,
+  `agentapi restart`, SIGUSR2) of an AgentAPI without `--state-db` keeps the agent's session. It
+  started a new one, and the conversation was gone. The restart now hands the session to the new
+  program, which resumes it and reads the conversation back from the session's log, as opening it
+  from the Sessions does; Claude Code, Codex and Pi only. The queue, open requests, chosen settings
+  and a usage-limit stop or retry wait still start anew; `--state-db` keeps those too. A session
+  whose log is gone starts anew, with a warning in the chat. The summary's `update` says so in
+  `keeps_session`, and the hub's update dialog warns only about agents that start a new session.
+  The restart that updates from an earlier release still starts a new session, since the earlier
+  release doesn't hand it over.
+
 ## v3.10.0
 
 ### Features

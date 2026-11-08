@@ -793,7 +793,8 @@ settings changed through the API. When AgentAPI starts again with the same file,
 conversation as it was and queued messages are still queued. The agent resumes its session, so it
 remembers the conversation too. After a clean shutdown, browser caches
 stay valid because the conversation keeps its epoch. Without `--state-db`, every start of AgentAPI
-is a new conversation.
+is a new conversation, except a [restart in place](#agentapi-restart), which resumes the agent's
+session.
 
 ```bash
 agentapi server --state-db ~/.agentapi/myproject.db -- claude
@@ -851,7 +852,9 @@ state-db: ~/.agentapi/state/{port}.db
   SIGUSR1 writes what the state database hasn't written yet.
 - [`agentapi restart`](#agentapi-restart) (SIGUSR2) and
   `agentapi update --restart` keep the conversation, and the agent's
-  session, of an AgentAPI with `--state-db`.
+  session, of an AgentAPI with `--state-db`. Without it they keep the
+  agent's session, and the conversation is read back from its log; the
+  queue, open requests and chosen settings start anew.
 
 ### Earlier sessions
 
@@ -1143,7 +1146,8 @@ AgentAPI runs Pi in its RPC mode (`pi --mode rpc`, JSON over stdin and stdout).
   still open become `not_resumable`. The `--initial-prompt` is sent to the new
   session again, and Codex and Pi are updated first.
 - Without `--state-db`, the next start of AgentAPI is a new session; the
-  agent's earlier session isn't resumed.
+  agent's earlier session isn't resumed. A [restart in place](#agentapi-restart)
+  is the exception: it resumes the session.
 - Images reach the agent only as `@"<path>"` attachments of a message, not as
   command-line flags (`codex -i` and Pi's `@file` are refused).
 
@@ -1418,7 +1422,9 @@ curl -X POST localhost:3284/update -H 'Content-Type: application/json' -d '{"whe
   continuation after a usage limit or a retry of a failed turn that falls due meanwhile. `"now"`
   restarts at once and interrupts the agent.
 - With [`--state-db`](#persistent-sessions), the conversation and the agent's session carry over
-  the restart. Without it, the conversation starts anew.
+  the restart. Without it, the agent resumes its session and the chat reads the conversation back
+  from the session's log, as when you open it from the [earlier sessions](#earlier-sessions); the
+  queue, open requests and chosen settings start anew.
 - It answers 200 with `"up_to_date": true` when AgentAPI runs the latest release already, else 202
   with the `state` and the `target` version. While an update is under way it answers its state,
   and `"now"` hurries it. `DELETE /update` cancels it until it restarts; what it installed stays.
@@ -1426,7 +1432,8 @@ curl -X POST localhost:3284/update -H 'Content-Type: application/json' -d '{"whe
   502 that GitHub didn't answer.
 - The [summary](#watching-many-instances)'s `update` follows it: `allowed`, `blocked`, the `state`
   (`idle`, `checking`, `downloading`, `waiting`, `restarting`, or `failed` with an `error`), the
-  `target`, and `keeps_conversation` (it runs with `--state-db`). Every change sends
+  `target`, `keeps_conversation` (it runs with `--state-db`), and `keeps_session` (the agent resumes
+  its session after the restart; earlier releases don't send it). Every change sends
   `summary_update`. Earlier releases have no `update`.
 - AgentAPIs that share a binary replace it one at a time, under a lock file next to it
   (`.agentapi.lock`). One that finds the binary on disk newer than the one it runs, because another
@@ -1928,8 +1935,15 @@ script, stay valid, and its output goes to the same place. The command waits unt
 answers on its port again with a new `server_id`, and prints its new version.
 
 - With `--state-db`, the conversation stays and the agent resumes its
-  session. Without it, the AgentAPI starts a new conversation, as after any
-  restart, without the `--initial-prompt` it sent before.
+  session. Without it, the agent resumes its session too: the restart
+  carries the session's ID to the new program, which reads the conversation
+  back from the session's log, as when you open it from the
+  [earlier sessions](#earlier-sessions). Claude Code, Codex and Pi only. The
+  queue, open requests, chosen settings and a usage-limit stop or retry wait
+  start anew, and the `--initial-prompt` isn't sent again. A session whose
+  log is gone starts anew, with a warning in the chat. The restart that
+  updates from an earlier release starts a new session: the earlier release
+  doesn't carry it.
 - Only your own AgentAPIs restart, and only when the registry entry names a
   running `agentapi server`. Under `sudo`, they are those of the user who ran
   `sudo`. An AgentAPI of an earlier release can't restart in place:
