@@ -1,9 +1,6 @@
 "use client";
 
-import {useState, FormEvent, KeyboardEvent, MouseEvent, useEffect, useRef, ChangeEvent} from "react";
-import {Button} from "./ui/button";
-import {Tooltip, TooltipTrigger, TooltipContent} from "./ui/tooltip";
-import {Square, Paperclip, Mic, MicOff, LoaderCircle, MoreHorizontal, SlidersHorizontal} from "lucide-react";
+import {useState, FormEvent, KeyboardEvent, useEffect, useRef, ChangeEvent} from "react";
 import type {SendResult} from "@/lib/chat-api";
 import type {ServerStatus} from "@/lib/agent-status";
 import TextareaAutosize from "react-textarea-autosize";
@@ -16,16 +13,15 @@ import {DragDrop} from "./drag-drop";
 import {filesToUploadFromPaste, pastedFileName} from "@/lib/uploads";
 import {toast} from "sonner";
 import {usePersisted} from "@/lib/use-persisted";
-import {DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger} from "./ui/dropdown-menu";
-import {canSteer, dispatchModeForKey, dispatchModes, sendNotice, turnActive, type DispatchMode} from "@/lib/dispatch";
+import {canSteer, composerPlaceholder, dispatchModeForKey, dispatchModes, sendNotice, type DispatchMode} from "@/lib/dispatch";
 import {AttachmentList, useAttachments} from "./message-input/attachments";
-import {FavoritesMenu} from "./message-input/favorites-menu";
+import {ComposerActions} from "./message-input/composer-actions";
 import {QueuedTasks} from "./message-input/queued-tasks";
-import {SendButtonGroup} from "./message-input/send-button";
+import {SlashSuggestions} from "./message-input/slash-suggestions";
 import {useSpeechInput} from "./message-input/speech";
+import {useInsertFavorite} from "./message-input/use-insert-favorite";
 import {cn} from "@/lib/utils";
 import {useMediaQuery} from "@/lib/use-media-query";
-import {favoriteInsertion} from "@/lib/hub-favorites";
 
 interface MessageInputProps {
   onSendMessage: (message: string, mode?: DispatchMode) => Promise<SendResult>;
@@ -47,7 +43,6 @@ export default function MessageInput({
 }: MessageInputProps) {
   const [message, setMessage] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [isStopping, setIsStopping] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // Selected one by one: the composer renders again when one of these
   // changes, not as messages stream (TextareaAutosize measures the text
@@ -57,13 +52,11 @@ export default function MessageInput({
   const features = useChatSelector((chat) => chat.features);
   const waitingFor = useChatSelector((chat) => chat.waitingFor);
   const dispatch = useChatSelector((chat) => chat.dispatch);
-  const canStop = useChatSelector((chat) => chat.canStop);
   const limitStop = useChatSelector((chat) => chat.limitStop);
   const retryWait = useChatSelector((chat) => chat.retryWait);
-  const {uploadFiles, stop} = useChatActions();
+  const {uploadFiles} = useChatActions();
   const modes = dispatchModes(dispatch);
   const steerable = canSteer(dispatch);
-  const active = turnActive(dispatch);
   // Nothing queued runs until the agent has its answer, or its login. After
   // a usage limit, or a failed turn AgentAPI tries again, the queue waits
   // too, but a task sent now goes out.
@@ -85,10 +78,6 @@ export default function MessageInput({
   );
   const attachments = useAttachments({storageKey: `agentapi.chat.attachments:${storageScope}`, uploadFiles, setMessage});
   const speech = useSpeechInput(message, setMessage, focusComposer);
-
-  useEffect(() => {
-    if (!active) setIsStopping(false);
-  }, [active]);
 
   useEffect(() => {
     if (!suggestedPrompt) return;
@@ -117,33 +106,7 @@ export default function MessageInput({
     textareaRef.current?.focus();
   };
 
-  // A favorite from the hub (☆) joins the draft: the draft, or a paragraph
-  // after it, with the caret at its end. Typed in as an edit (insertText),
-  // so the browser's undo takes it back; set as the message where that
-  // fails, or while the composer is disabled (the draft is kept).
-  const insertFavorite = (text: string) => {
-    const {from, insert} = favoriteInsertion(message, text);
-    const next = message.slice(0, from) + insert;
-    const textarea = textareaRef.current;
-    if (!textarea || textarea.disabled) {
-      setMessage(next);
-      return;
-    }
-    textarea.focus({preventScroll: true});
-    textarea.setSelectionRange(from, textarea.value.length);
-    let typed = false;
-    try {
-      typed = document.execCommand("insertText", false, insert);
-    } catch {
-      // Not supported.
-    }
-    if (!typed || textarea.value !== next) setMessage(next);
-    requestAnimationFrame(() => {
-      const end = textarea.value.length;
-      textarea.setSelectionRange(end, end);
-      textarea.scrollTop = textarea.scrollHeight;
-    });
-  };
+  const insertFavorite = useInsertFavorite(textareaRef, message, setMessage);
 
   // On a phone the composer is one row: the message, ⋯ (attach, voice, the
   // agent's settings) and send, with stop while the agent works. The
@@ -219,10 +182,7 @@ export default function MessageInput({
     }
   };
 
-  const handleUploadClick = (e?: MouseEvent<HTMLButtonElement>) => {
-    e?.preventDefault();
-    fileInputRef.current?.click();
-  };
+  const handleUploadClick = () => fileInputRef.current?.click();
 
   const handleFileInputChange = (e: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -230,13 +190,21 @@ export default function MessageInput({
     e.target.value = '';
   };
 
-  const handleStop = () => {
-    if (isStopping) return;
-    setIsStopping(true);
-    void stop().then((stopped) => {
-      if (!stopped) setIsStopping(false);
-    });
-  };
+  const actions = (layout: "phone" | "desktop") => (
+    <ComposerActions
+      layout={layout}
+      disabled={disabled}
+      serverStatus={serverStatus}
+      modes={modes}
+      sendBlocked={sendBlocked}
+      modKey={modKey}
+      onSubmit={(mode) => void submit(mode)}
+      onAttach={handleUploadClick}
+      onInsertFavorite={insertFavorite}
+      speech={speech}
+      settings={hasSettings && !usageAlert ? {asked: settingsAsked, toggle: () => setSettingsAsked((asked) => !asked)} : undefined}
+    />
+  );
 
   return (
     // It gives way when the page is short (a phone's keyboard is up): after
@@ -265,24 +233,7 @@ export default function MessageInput({
             className="overflow-hidden rounded-2xl border bg-card shadow-lg shadow-black/5 transition focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20"
           >
             <div className="flex flex-col">
-              {slashSuggestions.length > 0 && (
-                <div className="border-b bg-muted/30 px-2 py-1.5" role="group" aria-label="Chat commands" data-slash-suggestions>
-                  {slashSuggestions.map((command) => (
-                    <button
-                      key={command.name}
-                      type="button"
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => completeSlashCommand(completion(command))}
-                      className="flex w-full items-baseline gap-2 rounded-md px-2 py-1 text-left text-xs hover:bg-muted"
-                    >
-                      <code className="shrink-0 font-mono text-foreground">/{command.name}</code>
-                      {command.args && <span className="shrink-0 font-mono text-muted-foreground max-sm:hidden">{command.args}</span>}
-                      <span className="min-w-0 truncate text-muted-foreground">{command.description}</span>
-                    </button>
-                  ))}
-                  <p className="px-2 pt-0.5 text-[11px] text-muted-foreground">Tab completes; other commands go to the agent.</p>
-                </div>
-              )}
+              <SlashSuggestions commands={slashSuggestions} onComplete={completeSlashCommand} />
               <div className={cn("flex min-w-0", phone && "items-end")}>
                   <TextareaAutosize
                     ref={textareaRef}
@@ -301,20 +252,7 @@ export default function MessageInput({
                       handleFilesAdded(files.map((file) => new File([file], pastedFileName(file.name, file.type, now), {type: file.type})));
                     }}
                     aria-label="Task message"
-                    placeholder={
-                      // Short on a phone, to fit its one row.
-                      phone
-                        ? serverStatus === "stable" ? (waitingForLogin || waitingForAnswer ? "Queue a task…" : "Describe a task…") : serverStatus === "running" ? "Queue a follow-up…" : "Reconnecting…"
-                        : waitingForLogin
-                        ? "Queue a task (runs after the agent is logged in)…"
-                        : waitingForAnswer
-                          ? "Queue a task (runs after you answer)…"
-                          : serverStatus === "running"
-                            ? steerable ? "Queue a follow-up, or steer the agent…" : "Queue a follow-up…"
-                            : serverStatus === "stable"
-                              ? "Describe a task…"
-                              : "Reconnecting… Your draft is saved."
-                    }
+                    placeholder={composerPlaceholder({phone, serverStatus, waitingFor, steerable})}
                     className={cn(
                       "min-h-14 max-h-32 w-full resize-none overflow-y-auto bg-transparent px-4 py-3 text-sm leading-6 outline-none sm:min-h-16 sm:px-5",
                       phone && "min-h-12 py-3 pr-1",
@@ -324,73 +262,7 @@ export default function MessageInput({
                       (serverStatus !== "stable" && serverStatus !== "running")
                     }
                   />
-                {phone && (
-                  <div className="flex shrink-0 items-center gap-1 py-1 pr-1">
-                    <FavoritesMenu onInsert={insertFavorite} />
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          type="button"
-                          size="icon"
-                          variant={speech.listening ? "secondary" : "ghost"}
-                          className="size-10 shrink-0 rounded-full text-muted-foreground hover:text-foreground"
-                          title="More input options"
-                        >
-                          <MoreHorizontal />
-                          <span className="sr-only">More input options</span>
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="min-w-48">
-                        {phone && (
-                          <DropdownMenuItem onSelect={() => handleUploadClick()} disabled={disabled} className="min-h-10">
-                            <Paperclip /> Attach files
-                          </DropdownMenuItem>
-                        )}
-                        <DropdownMenuItem
-                          onSelect={speech.toggle}
-                          disabled={disabled || !speech.supported}
-                          className="min-h-10"
-                        >
-                          {speech.listening ? <MicOff /> : <Mic />}
-                          {speech.listening ? "Stop voice input" : "Start voice input"}
-                        </DropdownMenuItem>
-                        {phone && hasSettings && !usageAlert && (
-                          <DropdownMenuItem onSelect={() => setSettingsAsked((asked) => !asked)} className="min-h-10">
-                            <SlidersHorizontal /> {settingsAsked ? "Hide settings and usage" : "Settings and usage"}
-                          </DropdownMenuItem>
-                        )}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  {(serverStatus === "stable" || serverStatus === "running") && (
-                    <SendButtonGroup
-                      serverStatus={serverStatus}
-                      modes={modes}
-                      sendBlocked={sendBlocked}
-                      queuedCount={queuedMessages.length}
-                      modKey={modKey}
-                      onSubmit={(mode) => void submit(mode)}
-                    />
-                  )}
-                  {canStop && (
-                    <Button
-                      size="icon"
-                      type="button"
-                      variant="destructive"
-                      className="size-10 rounded-full shadow-sm"
-                      disabled={disabled || isStopping}
-                      onClick={handleStop}
-                      title={isStopping ? "Stopping agent" : "Stop agent"}
-                    >
-                      {isStopping
-                        ? <LoaderCircle className="animate-spin" />
-                        : <Square />}
-                      <span className="sr-only">
-                        {isStopping ? "Stopping" : "Stop"}
-                      </span>
-                    </Button>
-                  )}
-                  </div>
-                )}
+                {phone && actions("phone")}
               </div>
 
               {attachments.attachments.length > 0 && (
@@ -425,92 +297,7 @@ export default function MessageInput({
                   <UsageMeter />
                 </div>
 
-                {!phone && (
-                <div className="flex min-w-0 flex-row items-center gap-2">
-                    <FavoritesMenu onInsert={insertFavorite} />
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="button"
-                          size="icon"
-                          variant="ghost"
-                          className="size-10 rounded-full text-muted-foreground hover:text-foreground"
-                          onClick={(e) => handleUploadClick(e)}
-                          disabled={disabled}
-                        >
-                          <Paperclip />
-                          <span className="sr-only">Attach files</span>
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>Attach files</TooltipContent>
-                    </Tooltip>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          type="button"
-                          size="icon"
-                          variant={speech.listening ? "secondary" : "ghost"}
-                          className="size-10 shrink-0 rounded-full text-muted-foreground hover:text-foreground"
-                          title="More input options"
-                        >
-                          <MoreHorizontal />
-                          <span className="sr-only">More input options</span>
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="min-w-48">
-                        {phone && (
-                          <DropdownMenuItem onSelect={() => handleUploadClick()} disabled={disabled} className="min-h-10">
-                            <Paperclip /> Attach files
-                          </DropdownMenuItem>
-                        )}
-                        <DropdownMenuItem
-                          onSelect={speech.toggle}
-                          disabled={disabled || !speech.supported}
-                          className="min-h-10"
-                        >
-                          {speech.listening ? <MicOff /> : <Mic />}
-                          {speech.listening ? "Stop voice input" : "Start voice input"}
-                        </DropdownMenuItem>
-                        {phone && hasSettings && !usageAlert && (
-                          <DropdownMenuItem onSelect={() => setSettingsAsked((asked) => !asked)} className="min-h-10">
-                            <SlidersHorizontal /> {settingsAsked ? "Hide settings and usage" : "Settings and usage"}
-                          </DropdownMenuItem>
-                        )}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-
-                  {(serverStatus === "stable" || serverStatus === "running") && (
-                    <SendButtonGroup
-                      serverStatus={serverStatus}
-                      modes={modes}
-                      sendBlocked={sendBlocked}
-                      queuedCount={queuedMessages.length}
-                      modKey={modKey}
-                      onSubmit={(mode) => void submit(mode)}
-                    />
-                  )}
-
-                  {canStop && (
-                    <Button
-                      size="icon"
-                      type="button"
-                      variant="destructive"
-                      className="size-10 rounded-full shadow-sm"
-                      disabled={disabled || isStopping}
-                      onClick={handleStop}
-                      title={isStopping ? "Stopping agent" : "Stop agent"}
-                    >
-                      {isStopping
-                        ? <LoaderCircle className="animate-spin" />
-                        : <Square />}
-                      <span className="sr-only">
-                        {isStopping ? "Stopping" : "Stop"}
-                      </span>
-                    </Button>
-                  )}
-
-                </div>
-                )}
+                {!phone && actions("desktop")}
               </div>
             </div>
           </form>
