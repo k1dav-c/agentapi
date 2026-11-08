@@ -47,7 +47,7 @@ func TestTransientFailureIsTriedAgain(t *testing.T) {
 
 	sent, err := c.ContinueIfDue(context.Background(), stopped.Add(29*time.Second))
 	require.NoError(t, err)
-	assert.False(t, sent, "not due yet")
+	assert.Equal(t, native.HoldNone, sent, "not due yet")
 
 	// Each failure of a retry waits the next delay.
 	for i, delay := range []time.Duration{2 * time.Minute, 5 * time.Minute} {
@@ -55,7 +55,7 @@ func TestTransientFailureIsTriedAgain(t *testing.T) {
 		clock.Set(due)
 		sent, err = c.ContinueIfDue(context.Background(), due)
 		require.NoError(t, err)
-		require.True(t, sent)
+		require.Equal(t, native.HoldRetry, sent)
 		assert.Nil(t, c.RetryWait(), "the retry runs")
 		assert.False(t, c.HoldsQueue(due))
 		turns := a.Turns()
@@ -74,7 +74,7 @@ func TestTransientFailureIsTriedAgain(t *testing.T) {
 	due := c.RetryWait().RetryAt
 	sent, err = c.ContinueIfDue(context.Background(), due)
 	require.NoError(t, err)
-	require.True(t, sent)
+	require.Equal(t, native.HoldRetry, sent)
 	a.Sink().TurnCompleted(transientResult())
 	assert.Nil(t, c.RetryWait())
 	assert.False(t, c.HoldsQueue(due))
@@ -91,7 +91,7 @@ func TestRetryThatWorksStartsTheCountAgain(t *testing.T) {
 	a.Sink().TurnCompleted(transientResult())
 	sent, err := c.ContinueIfDue(context.Background(), c.RetryWait().RetryAt)
 	require.NoError(t, err)
-	require.True(t, sent)
+	require.Equal(t, native.HoldRetry, sent)
 	a.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonEndTurn})
 	assert.Nil(t, c.RetryWait())
 
@@ -142,7 +142,7 @@ func TestRetryNowAndCancel(t *testing.T) {
 	assert.False(t, c.HoldsQueue(clock.Now()))
 	sent, err := c.ContinueIfDue(context.Background(), clock.Now().Add(time.Hour))
 	require.NoError(t, err)
-	assert.False(t, sent)
+	assert.Equal(t, native.HoldNone, sent)
 	assert.Len(t, a.Turns(), 2)
 }
 
@@ -169,7 +169,7 @@ func TestRestoredRetryWaitGoesOn(t *testing.T) {
 
 	sent, err := c.ContinueIfDue(context.Background(), clock.Now())
 	require.NoError(t, err)
-	require.True(t, sent, "overdue after the restart")
+	require.Equal(t, native.HoldRetry, sent, "overdue after the restart")
 	factory.Last().Sink().TurnCompleted(transientResult())
 	require.NotNil(t, c.RetryWait())
 	assert.Equal(t, 3, c.RetryWait().Attempt, "the count goes on")

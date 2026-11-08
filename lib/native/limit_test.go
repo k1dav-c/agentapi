@@ -98,11 +98,11 @@ func TestAutoContinueAfterTheReset(t *testing.T) {
 
 	sent, err := c.ContinueIfDue(context.Background(), resets)
 	require.NoError(t, err)
-	assert.False(t, sent, "not due yet")
+	assert.Equal(t, native.HoldNone, sent, "not due yet")
 
 	sent, err = c.ContinueIfDue(context.Background(), resets.Add(time.Minute))
 	require.NoError(t, err)
-	assert.True(t, sent)
+	assert.Equal(t, native.HoldLimit, sent)
 	assert.Nil(t, c.LimitStop())
 	turns := a.Turns()
 	require.Len(t, turns, 2)
@@ -133,7 +133,7 @@ func TestScheduledContinueCanBeCancelled(t *testing.T) {
 	assert.Nil(t, c.LimitStop().ContinueAt)
 	sent, err := c.ContinueIfDue(context.Background(), resets.Add(time.Hour))
 	require.NoError(t, err)
-	assert.False(t, sent)
+	assert.Equal(t, native.HoldNone, sent)
 	assert.Len(t, a.Turns(), 1)
 	assert.False(t, c.HoldsQueue(resets), "the queue still waits only for the reset")
 }
