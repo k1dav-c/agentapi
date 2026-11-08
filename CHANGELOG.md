@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- A message that doesn't reach the agent (the agent refused it, or the connection failed) no longer
+  ends a usage limit stop or a wait to retry a failed turn: the stop or the retry shows again, and the
+  queued messages still wait for it. The same goes for a `POST /retry` that fails.
+- While an update waits for the agent to be idle, a continuation after a usage limit or a retry that
+  falls due waits too, like the queued messages, and goes out after the restart. It could start a
+  turn that kept the update waiting.
+- An update no longer waits forever for an agent that exited in the middle of a turn and isn't
+  started again: it waited for the agent to report that the turn ended.
+- When the agent restarted or exited while it worked on a continuation or a retry, the next turn no
+  longer counts as one: a usage limit that stopped it scheduled a continuation without
+  `--auto-continue`, and a transient failure counted as the next retry rather than the first.
+
 ## v3.7.0
 
 ### Features
