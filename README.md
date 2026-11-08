@@ -1342,7 +1342,8 @@ one to open it in the chat. On a phone the list and the chat take turns.
   connection. `+` has the join command for a machine, with the hub's address and secret filled in,
   and a prompt for an agent there; it also adds an instance by its URL (and token). Each row's `⋯`
   menu pins the instance to the top, puts it in a group of your own, mutes what it waits for until
-  that changes (a login you won't do), or forgets a stopped or unreachable one.
+  that changes (a login you won't do), or forgets a stopped or unreachable one. The Offline tile
+  and filter forget every stopped one at once.
 - The gear opens the hub's settings. There you keep [favorite prompts](docs/hub.md#favorites),
   which ☆ in the composer of a chat the hub opens inserts in the message.
 - The hub opens an instance through itself (`/i/<id>/...`), sending the instance's API token

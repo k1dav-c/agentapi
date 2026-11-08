@@ -580,6 +580,11 @@ AgentAPI 1.1 以上。在這裡輸入的 token 會為這個實例保存，取代
 已停止或連不到的那一列，**⋯** 選單裡有 **Forget**，可以把它從 hub 移除。用 webhook 加入的實例，
 下次啟動時會再出現。
 
+要一次移除所有已停止的 agent（例如測試跑完留下的 AgentAPI），可以按總覽「Offline」格下方的
+**Forget N stopped**；在手機上則選 Offline 篩選，清單最上方會寫出目前顯示的 agent 中有幾個已停止，並有
+**Forget all**。hub 移除前會先開對話框，列出每個 agent 的名稱和主機。只會移除已停止的 agent；連不到的
+可能自己恢復，所以會留著，這段期間又啟動的也會保留。右側開著的 agent 若被移除，會一併關閉。
+
 ## Token 與安全性
 
 | 值 | 誰持有 | 用途 |
@@ -737,6 +742,7 @@ hub 透過環境變數中的 proxy（`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`�
 | `POST /api/instances` | `{"url": …, "token": …}` 以網址加入實例 |
 | `PATCH /api/instances/{id}` | `{"group": …}` 把實例放進群組，`""` 為不分組；`{"muted": true}` 把它目前在等的事靜音到改變為止（沒有在等時回 409），`false` 結束靜音；`{"pinned": true}` 把它釘選在已釘選的實例後面，`false` 取消釘選 |
 | `DELETE /api/instances/{id}` | 移除實例，釘選也一併刪除 |
+| `POST /api/instances/forget` | `{"ids": […]}` 一次移除清單中此刻 `state` 為 `stopped` 的實例，釘選也一併刪除；回應列出實際移除的實例（`{"ids": […]}`）。沒有停止或 hub 沒有的實例維持原狀。每移除一個就送出一次 `removed` 事件 |
 | `PUT /api/pins` | `{"ids": […]}` 由上而下排定釘選實例的順序。必須列出每個釘選的實例各一次，不能有其他實例；不符合時回 409，並在 `ids` 附上目前釘選實例的順序，例如這段期間有人釘選、取消釘選或移除了實例；hub 沒有的實例回 404 |
 | `GET /api/favorites` | [我的最愛](#我的最愛)，依排列順序：`{"favorites": [{"id", "title", "text"}, …]}`；沒有標題的項目沒有 `title` |
 | `PUT /api/favorites` | `{"favorites": […]}` 依這個順序整份取代。最多 100 項；標題最多 100 字、只能一行；內容不能空白，最多 20,000 字；ID 為 1 到 64 個英文字母、數字、`-` 或 `_`，不能重複。沒有 ID 的項目由 hub 指定一個；回應是 hub 保存後的清單。hub 不接受的清單回 400，什麼都不改 |

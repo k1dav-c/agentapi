@@ -670,6 +670,13 @@ or stopping; the hub just finds it reachable or not.
 The **⋯** menu of a stopped or unreachable row has **Forget**, which removes it from the hub. An
 instance that joined with its webhook comes back the next time it starts.
 
+To forget every stopped agent at once, such as the test AgentAPIs a run left behind, use **Forget N
+stopped** under the overview's Offline tile, or, on a phone, pick the Offline filter: the top of the
+list says how many of the agents it shows stopped, with **Forget all**. A dialog lists them by name
+and machine before the hub forgets them. Only stopped agents go; unreachable ones stay, since they
+may come back on their own, and one that started again meanwhile is kept. If the agent open on the
+right is forgotten, it closes.
+
 ## Tokens and security
 
 | Value | Who holds it | What it does |
@@ -843,6 +850,7 @@ running AgentAPIs, which then no longer follow their conversation for the webhoo
 | `POST /api/instances` | `{"url": …, "token": …}` adds an instance by its URL |
 | `PATCH /api/instances/{id}` | `{"group": …}` puts an instance in a group, `""` in none; `{"muted": true}` mutes what it waits for now, until that changes (409 when it waits for nothing), `false` ends the mute; `{"pinned": true}` pins it below the pinned ones, `false` unpins it |
 | `DELETE /api/instances/{id}` | Forgets an instance, and its pin |
+| `POST /api/instances/forget` | `{"ids": […]}` forgets, at once, those of the instances listed whose `state` is `stopped` now, and their pins; the answer lists those it forgot (`{"ids": […]}`). One that isn't stopped, or that the hub doesn't have, stays as it is. Each one forgotten is a `removed` event |
 | `PUT /api/pins` | `{"ids": […]}` orders the pinned instances, from the top. It lists each pinned instance once and no other; 409, with the pinned ones in their order (`ids`), when it doesn't, such as after one was pinned, unpinned or forgotten; 404 for an instance the hub doesn't have |
 | `GET /api/favorites` | The [favorites](#favorites), in their order: `{"favorites": [{"id", "title", "text"}, …]}`; a favorite without a title has none |
 | `PUT /api/favorites` | `{"favorites": […]}` replaces them, in that order. At most 100; a title has at most 100 characters, on one line; a text isn't blank and has at most 20,000; an ID has 1 to 64 letters, digits, `-` or `_`, once. A favorite sent without an ID gets one; the answer is the list as the hub keeps it. 400, changing nothing, for a list it refuses |
