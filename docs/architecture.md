@@ -185,8 +185,19 @@ The internal imports point one way, from the commands to the leaves:
    which the new program takes instead of generating one and removes from
    its environment, so clients stay signed in. Without a state DB, an
    initial prompt that went out is marked in `AGENTAPI_INITIAL_PROMPT_SENT`,
-   so the new session doesn't get it again; with one, the restored
-   conversation has it. A shutdown signal
+   so the agent doesn't get it again; with one, the restored
+   conversation has it. Without a state DB, the session the conversation is
+   in (`native.Conversation.SessionRef`, read as the program runs again) goes
+   along in `AGENTAPI_RESUME_SESSION` as `<agent type>:<session>`. The new
+   program takes it out of its environment before it starts the agent, and
+   ignores it with a state DB or for another agent type
+   (`carriedSession`). `httpapi.NewServer` gets it as
+   `ServerConfig.ResumeSession`: it reads the session's log as
+   `POST /sessions/{id}/resume` does (`resumeCarriedSession`), reports its
+   messages, rich messages and name, and starts the agent resuming it. A
+   session whose log it can't read (gone, or an agent without session
+   logs) isn't resumed: the agent starts a new session and the chat gets a
+   warning. The queue, requests, chosen settings and holds aren't carried. A shutdown signal
    during the stop wins. Each registry entry says the server restarts in
    place (`restarts_in_place`), for `agentapi restart`.
 
@@ -724,8 +735,9 @@ the agent starts a new session below it. SIGUSR1 flushes the state database.
 - AgentAPI itself restarts in place on SIGUSR2 (see
   [Startup and shutdown](#startup-and-shutdown)), into the binary an update
   put where it was started from. With `--state-db` the conversation is
-  restored and the agent resumes its session; without it the
-  conversation starts anew. `agentapi restart [port…|--all]`
+  restored and the agent resumes its session; without it the agent
+  resumes its session (`AGENTAPI_RESUME_SESSION`), and the conversation is
+  read back from the session's log. `agentapi restart [port…|--all]`
   (`cmd/restart`) reads the registry (the invoking user's, also under
   `sudo`: `SUDO_USER`'s home) and keeps the entries of this machine that
   restart in place and whose process is the user's and runs

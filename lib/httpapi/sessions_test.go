@@ -38,9 +38,21 @@ func newSessionServer(t *testing.T) *nativeServer {
 // configure.
 func newSessionServerWith(t *testing.T, configure func(*nativetest.Adapter)) *nativeServer {
 	t.Helper()
-	config := t.TempDir()
-	t.Setenv("CLAUDE_CONFIG_DIR", config)
-	dir := filepath.Join(config, "projects", "-work-app")
+	return newSessionServerConfig(t, func(a *nativetest.Adapter) {
+		a.Ref = "current"
+		if configure != nil {
+			configure(a)
+		}
+	}, nil)
+}
+
+// newSessionServerConfig is newSessionServer with the adapters set up by
+// configure and change applied to the server's config.
+func newSessionServerConfig(t *testing.T, configure func(*nativetest.Adapter), change func(*httpapi.ServerConfig)) *nativeServer {
+	t.Helper()
+	configDir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", configDir)
+	dir := filepath.Join(configDir, "projects", "-work-app")
 	require.NoError(t, os.MkdirAll(dir, 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "earlier.jsonl"), []byte(
 		`{"type":"user","timestamp":"2026-10-17T14:10:12.000Z","sessionId":"earlier","message":{"role":"user","content":"Fix the bug"}}`+"\n"+
@@ -48,20 +60,19 @@ func newSessionServerWith(t *testing.T, configure func(*nativetest.Adapter)) *na
 			`{"type":"custom-title","customTitle":"Bug hunt","sessionId":"earlier"}`+"\n"), 0o600))
 
 	ctx, cancel := context.WithCancel(logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil))))
-	factory := &nativetest.Factory{Configure: func(a *nativetest.Adapter) {
-		a.Ref = "current"
-		if configure != nil {
-			configure(a)
-		}
-	}}
-	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
+	factory := &nativetest.Factory{Configure: configure}
+	config := httpapi.ServerConfig{
 		AgentType:      instanceapi.AgentTypeClaude,
 		Native:         httpapi.NativeConfig{Factory: factory.New},
 		CWD:            "/work/app",
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},
 		AllowedOrigins: []string{"*"},
-	})
+	}
+	if change != nil {
+		change(&config)
+	}
+	srv, err := httpapi.NewServer(ctx, config)
 	require.NoError(t, err)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(func() {
@@ -141,6 +152,67 @@ func TestNative_ResumeSession(t *testing.T) {
 	fork := n.factory.Last()
 	assert.Equal(t, "earlier", fork.ResumeRef)
 	assert.True(t, fork.Fork)
+}
+
+// Without a state database, a server that a restart in place started with
+// the session the agent had open (ResumeSession) resumes it, with its
+// conversation read from the session's log, as a resume from the Sessions
+// does.
+func TestNative_ResumeCarriedSession(t *testing.T) {
+	n := newSessionServerConfig(t, nil, func(config *httpapi.ServerConfig) {
+		config.ResumeSession = "earlier"
+	})
+	first := n.factory.Last()
+	assert.Equal(t, "earlier", first.ResumeRef)
+	assert.False(t, first.Fork)
+
+	var msgs struct {
+		Messages []struct {
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	n.do(http.MethodGet, "/messages", nil, &msgs)
+	require.Len(t, msgs.Messages, 2)
+	assert.Equal(t, "Fix the bug", msgs.Messages[0].Content)
+	assert.Equal(t, "Fixed.", msgs.Messages[1].Content)
+	var rich struct {
+		Messages []struct {
+			MessageID string `json:"message_id"`
+		} `json:"messages"`
+	}
+	n.do(http.MethodGet, "/rich-messages", nil, &rich)
+	require.Len(t, rich.Messages, 1)
+	assert.Equal(t, "history-msg_2", rich.Messages[0].MessageID)
+	var status convstate.StatusChangeBody
+	n.do(http.MethodGet, "/status", nil, &status)
+	assert.Equal(t, "earlier", status.AgentSessionID)
+	assert.Equal(t, "Bug hunt", status.SessionName)
+
+	// The agent goes on in the session.
+	n.send("go on", "")
+	first.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonEndTurn})
+	n.do(http.MethodGet, "/messages", nil, &msgs)
+	require.Len(t, msgs.Messages, 3)
+	assert.Equal(t, "go on", msgs.Messages[2].Content)
+}
+
+// A carried session whose log is gone isn't resumed: the agent starts a
+// new session, and the chat is warned, rather than an agent that fails to
+// start on a session it can't open.
+func TestNative_ResumeCarriedSessionGone(t *testing.T) {
+	n := newSessionServerConfig(t, func(a *nativetest.Adapter) { a.Ref = "fresh" }, func(config *httpapi.ServerConfig) {
+		config.ResumeSession = "gone"
+	})
+	first := n.factory.Last()
+	assert.Empty(t, first.ResumeRef)
+	var msgs struct {
+		Messages []struct{} `json:"messages"`
+	}
+	n.do(http.MethodGet, "/messages", nil, &msgs)
+	assert.Empty(t, msgs.Messages)
+	var status convstate.StatusChangeBody
+	n.do(http.MethodGet, "/status", nil, &status)
+	assert.Equal(t, "fresh", status.AgentSessionID)
 }
 
 // A session can't be opened while the agent compacts its context either,

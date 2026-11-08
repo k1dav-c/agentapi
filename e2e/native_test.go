@@ -25,16 +25,52 @@ import (
 
 // TestNativeClaude drives the native transport through the agentapi binary,
 // with fakeclaude (fakeclaude/) as Claude Code: a turn, then a restart in
-// place (SIGUSR2) that keeps the conversation in the state database.
+// place (SIGUSR2) that keeps the conversation, from the state database or,
+// without one, from the session the agent resumes.
 func TestNativeClaude(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
 
-	t.Run("restart_keeps_conversation", func(t *testing.T) {
+	// With a state database, the conversation is restored from it; without
+	// one, the restarted program resumes the agent's session and reads the
+	// conversation from the session's log.
+	for _, tc := range []struct {
+		name  string
+		flags []string
+	}{
+		{"restart_keeps_conversation/state_db", nil},
+		{"restart_keeps_conversation/no_state_db", []string{"--state-db="}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+			defer cancel()
+			s := startNative(ctx, t, tc.flags...)
+			firstID := s.waitStable(ctx, "")
+
+			s.post(ctx, "/message", `{"content":"hello native","type":"user"}`)
+			s.waitStable(ctx, "")
+			before := s.messages(ctx)
+			require.Equal(t, []string{"hello native", "Echo: hello native"}, before)
+			session := s.sessionID(ctx)
+			require.NotEmpty(t, session)
+
+			require.NoError(t, s.cmd.Process.Signal(syscall.SIGUSR2))
+			s.waitStable(ctx, firstID)
+			require.Equal(t, before, s.messages(ctx), "the conversation survives the restart")
+			require.Equal(t, session, s.sessionID(ctx), "the agent resumes its session")
+
+			// The restarted agent takes another turn in the session.
+			s.post(ctx, "/message", `{"content":"after restart","type":"user"}`)
+			s.waitStable(ctx, "")
+			require.Equal(t, append(before, "after restart", "Echo: after restart"), s.messages(ctx))
+		})
+	}
+
+	t.Run("restart_twice_keeps_conversation/no_state_db", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 		defer cancel()
-		s := startNative(ctx, t)
+		s := startNative(ctx, t, "--state-db=")
 		firstID := s.waitStable(ctx, "")
 
 		s.post(ctx, "/message", `{"content":"hello native","type":"user"}`)
@@ -43,25 +79,25 @@ func TestNativeClaude(t *testing.T) {
 		require.Equal(t, []string{"hello native", "Echo: hello native"}, before)
 
 		require.NoError(t, s.cmd.Process.Signal(syscall.SIGUSR2))
-		s.waitStable(ctx, firstID)
-		require.Equal(t, before, s.messages(ctx), "the conversation survives the restart")
-
-		// The restarted agent resumes the session and takes another turn.
+		secondID := s.waitStable(ctx, firstID)
 		s.post(ctx, "/message", `{"content":"after restart","type":"user"}`)
 		s.waitStable(ctx, "")
+		// A second restart carries the session again.
+		require.NoError(t, s.cmd.Process.Signal(syscall.SIGUSR2))
+		s.waitStable(ctx, secondID)
 		require.Equal(t, append(before, "after restart", "Echo: after restart"), s.messages(ctx))
 	})
 
-	// The restarted program gets the same --initial-prompt. Without a state
-	// database it starts a new conversation, which doesn't get it again;
-	// with one, the restored conversation has it already.
+	// The restarted program gets the same --initial-prompt, which it
+	// doesn't send again: with a state database the restored conversation
+	// has it already; without one, the resumed session does.
 	for _, tc := range []struct {
 		name  string
 		flags []string
 		after []string
 	}{
 		{"initial_prompt_once/state_db", nil, []string{"first prompt", "Echo: first prompt"}},
-		{"initial_prompt_once/no_state_db", []string{"--state-db="}, []string{}},
+		{"initial_prompt_once/no_state_db", []string{"--state-db="}, []string{"first prompt", "Echo: first prompt"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
@@ -264,6 +300,18 @@ func (s *nativeServer) messages(ctx context.Context) []string {
 		contents = append(contents, strings.TrimSpace(m.Content))
 	}
 	return contents
+}
+
+// sessionID is the agent's session, as /status reports it.
+func (s *nativeServer) sessionID(ctx context.Context) string {
+	s.t.Helper()
+	code, data := s.do(ctx, http.MethodGet, "/status", "")
+	require.Equal(s.t, http.StatusOK, code, "GET /status: %s", data)
+	var status struct {
+		AgentSessionID string `json:"agent_session_id"`
+	}
+	require.NoError(s.t, json.Unmarshal(data, &status))
+	return status.AgentSessionID
 }
 
 // waitMessages waits until the conversation's messages are want.

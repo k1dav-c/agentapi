@@ -90,7 +90,7 @@ describe("the hub's messages to the chat (FrameBar)", () => {
     const full: FrameInstance = {
       ...told,
       lastKnown: true,
-      update: {allowed: true, state: "failed", keeps_conversation: true, error: "no network"},
+      update: {allowed: true, state: "failed", keeps_conversation: true, keeps_session: true, error: "no network"},
       machine: [
         {id: "a", name: "home", state: "working", label: "Working", ran: true, agentType: "claude", agent: "Claude Code"},
         {id: "b", name: "home", state: "idle", label: "Idle"},

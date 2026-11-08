@@ -188,7 +188,10 @@ type UpdateStatus struct {
 	Error   string      `json:"error,omitempty" doc:"Why the last update failed (state failed)."`
 	// KeepsConversation: the state database carries the conversation over
 	// the restart.
-	KeepsConversation bool `json:"keeps_conversation" doc:"It runs with --state-db, so the conversation and the agent's session carry over the restart; without it the conversation starts anew."`
+	KeepsConversation bool `json:"keeps_conversation" doc:"It runs with --state-db, so the conversation (its queue, open requests and chosen settings included) and the agent's session carry over the restart."`
+	// KeepsSession: the agent resumes its session after the restart, with
+	// a state database or from the session's log without one.
+	KeepsSession bool `json:"keeps_session" doc:"The agent resumes its session after the restart: with --state-db, and without it for Claude Code, Codex and Pi, whose conversation is then read back from the agent's session log while the queue, the open requests and the settings chosen start anew. Earlier releases don't send it; without --state-db they start a new session."`
 }
 
 // SummaryRequest is what a summary says of a pending request.

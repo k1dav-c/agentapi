@@ -128,6 +128,7 @@ function parseUpdate(value: unknown): InstanceUpdate | undefined {
     allowed: update.allowed,
     state: update.state,
     keeps_conversation: update.keeps_conversation === true,
+    keeps_session: update.keeps_session === true,
     ...(text(update.target) !== undefined ? {target: text(update.target)} : {}),
     ...(text(update.error) !== undefined ? {error: text(update.error)} : {}),
     ...(text(update.blocked) !== undefined ? {blocked: text(update.blocked)} : {}),

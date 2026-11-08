@@ -23,7 +23,7 @@ export function summary(overrides: Partial<Summary> = {}): Summary {
 
 // update is a summary's update: allowed, none under way.
 export function update(overrides: Partial<InstanceUpdate> = {}): InstanceUpdate {
-  return {allowed: true, state: "idle", keeps_conversation: true, ...overrides};
+  return {allowed: true, state: "idle", keeps_conversation: true, keeps_session: true, ...overrides};
 }
 
 // hubInstance is an instance as the hub sends it: connected and idle, with

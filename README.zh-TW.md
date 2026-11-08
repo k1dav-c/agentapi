@@ -677,7 +677,8 @@ Claude Code 則用 `/compact` 訊息壓縮，聊天介面會把這則訊息送�
 思考）、時間軸、請求和佇列，以及 agent 的工作階段 ID 和透過 API 修改的 webhook 設定。AgentAPI
 用同一個檔案再次啟動時，聊天介面會顯示原本的對話，排隊中的訊息仍在佇列裡。agent 會接續自己的
 工作階段，所以也記得先前的對話。正常關閉後再啟動時，對話的 epoch 不變，瀏覽器的快取也仍然
-有效。沒有 `--state-db` 時，AgentAPI 每次啟動都是新的對話。
+有效。沒有 `--state-db` 時，AgentAPI 每次啟動都是新的對話；只有[原地重新啟動](#agentapi-restart)
+例外，它會接續 agent 的工作階段。
 
 ```bash
 agentapi server --state-db ~/.agentapi/myproject.db -- claude
@@ -718,7 +719,8 @@ state-db: ~/.agentapi/state/{port}.db
   對話，agent 則在它下方開始新的工作階段；不會再寫入這個檔案。`--load-state=false` 會略過匯入，`--save-state` 已沒有作用。SIGUSR1 會
   寫入狀態資料庫尚未寫入的變更。
 - 使用 `--state-db` 的 AgentAPI 經 [`agentapi restart`](#agentapi-restart)（SIGUSR2）或
-  `agentapi update --restart` 重新啟動後，對話和 agent 的工作階段都會保留。
+  `agentapi update --restart` 重新啟動後，對話和 agent 的工作階段都會保留。沒有 `--state-db`
+  時會保留 agent 的工作階段，對話則從它的紀錄讀回；佇列、待回覆的請求和選擇的設定會重新開始。
 
 ### 先前的工作階段
 
@@ -958,6 +960,7 @@ AgentAPI 會以 RPC 模式執行 Pi（`pi --mode rpc`，經由 stdin 與 stdout 
   同時清除對話和佇列；尚未回覆的請求會變成 `not_resumable`。`--initial-prompt` 會再送給新的
   工作階段，Codex 和 Pi 也會先更新。
 - 沒有 `--state-db` 時，AgentAPI 下次啟動就是新的工作階段，不會接續 agent 先前的工作階段。
+  [原地重新啟動](#agentapi-restart)是例外：它會接續工作階段。
 - 圖片只能以訊息附件（`@"<路徑>"`）的形式交給 agent，不能用命令列旗標（`codex -i` 和 Pi
   的 `@file` 都會被拒絕）。
 
@@ -1187,14 +1190,16 @@ curl -X POST localhost:3284/update -H 'Content-Type: application/json' -d '{"whe
   啟動後再送出；這段期間到期的用量限制後繼續或失敗回合的重試也一樣。`"now"` 會立刻
   重新啟動，中斷 agent 手上的工作。
 - 使用 [`--state-db`](#持久保存的工作階段) 時，對話和 agent 的工作階段會延續到重新啟動之後；
-  沒有的話，對話會重新開始。
+  沒有的話，agent 會接續自己的工作階段，聊天介面從工作階段的紀錄讀回對話，就像從
+  [先前的工作階段](#先前的工作階段)開啟它一樣；佇列、待回覆的請求和選擇的設定會重新開始。
 - 已經是最新發行版時回應 200 和 `"up_to_date": true`，否則回應 202，附上 `state` 和目標版本 `target`。
   更新進行中再送一次，會回應目前的狀態，`"now"` 則讓它不再等待。`DELETE /update` 在重新啟動前都能
   取消更新，已經安裝的執行檔會留著。403 表示沒有開放更新；409 表示 AgentAPI 無法取代自己的程式
   （見下方）或正在關閉；502 表示 GitHub 沒有回應。
 - [摘要](#監看多個實例)的 `update` 會跟著更新變化：`allowed`、`blocked`、`state`（`idle`、`checking`、
   `downloading`、`waiting`、`restarting`，或附上 `error` 的 `failed`）、`target`，以及
-  `keeps_conversation`（有使用 `--state-db`）。每次變化都會送出 `summary_update`。較早的版本沒有 `update`。
+  `keeps_conversation`（有使用 `--state-db`），以及 `keeps_session`（agent 重新啟動後會接續自己的
+  工作階段；較早的版本不會送出）。每次變化都會送出 `summary_update`。較早的版本沒有 `update`。
 - 共用同一個執行檔的多個 AgentAPI，會以執行檔旁的鎖定檔（`.agentapi.lock`）輪流取代它。發現磁碟上的
   執行檔比自己正在執行的版本新（另一個 AgentAPI 已經更新過）時，就只重新啟動。
 
@@ -1649,8 +1654,12 @@ agentapi restart --all      # 你在這台主機上的所有 AgentAPI
 workspace 的啟動腳本）仍然有效，輸出也照舊寫到原本的地方。這個指令會等到每個 AgentAPI 以新的
 `server_id` 在原連接埠上回應，並印出新版本。
 
-- 使用 `--state-db` 時，對話會保留，agent 也會接續原本的工作階段；沒有時，AgentAPI 會和
-  其他重新啟動一樣開始新的對話，但不會再送出先前送過的 `--initial-prompt`。
+- 使用 `--state-db` 時，對話會保留，agent 也會接續原本的工作階段。沒有時，agent 同樣會接續
+  工作階段：重新啟動會把工作階段的 ID 交給新程式，新程式再從工作階段的紀錄讀回對話，就像從
+  [先前的工作階段](#先前的工作階段)開啟它一樣。僅限 Claude Code、Codex 和 Pi。佇列、待回覆的
+  請求、選擇的設定，以及用量限制的停止或重試等待都會重新開始，先前送過的 `--initial-prompt`
+  也不會再送出。紀錄已經不在的工作階段會重新開始，聊天介面會顯示警告。從較早的版本更新時，
+  那一次重新啟動仍是新的工作階段：較早的版本不會交出工作階段。
 - 只會重新啟動你自己的 AgentAPI，而且登記檔必須對應到執行中的 `agentapi server`。透過 `sudo`
   執行時，指的是執行 `sudo` 那位使用者的 AgentAPI。較早的版本無法原地重新啟動，
   `agentapi restart` 會指出來：這一次請自行重新啟動。

@@ -78,9 +78,19 @@ describe("UpdateDialogBody", () => {
   });
 
   test("warns that the conversation starts fresh without a state DB, with the line that keeps it", () => {
-    const shown = text(body(instance({keeps_conversation: false})));
+    // An AgentAPI from before keeps_session starts a new session.
+    const shown = text(body(instance({keeps_conversation: false, keeps_session: undefined})));
     expect(shown).toContain("It runs without a state DB, so the conversation starts fresh after the restart.");
     expect(shown).toContain("~/.agentapi/config.yaml on dev-1:");
+    expect(shown).toContain("state-db: ~/.agentapi/state/{port}.db");
+  });
+
+  test("says that the session carries over without a state DB, but not the queue", () => {
+    const shown = text(body(instance({keeps_conversation: false, keeps_session: true})));
+    expect(shown).not.toContain("starts fresh after the restart");
+    expect(shown).toContain(
+      "It runs without a state DB: the agent resumes its session after the restart, but queued messages and the settings chosen in the chat start fresh.",
+    );
     expect(shown).toContain("state-db: ~/.agentapi/state/{port}.db");
   });
 

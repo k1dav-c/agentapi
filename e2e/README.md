@@ -12,12 +12,14 @@ go test ./e2e
 
 ## How they work
 
-`native_test.go` runs `agentapi server -- claude` with a state database and `fakeclaude/` first on
-`PATH` as Claude Code. `fakeclaude` reports a login for `claude auth status`, answers the control
-requests AgentAPI sends, and answers each user message with one turn, `Echo: <message>`, in the
-stream-json frames a real CLI writes. The tests take a turn, restart the server in place with
-`SIGUSR2`, and check that a new run (`server_id`) keeps the conversation and the API token. They
-need a Unix system.
+`native_test.go` runs `agentapi server -- claude`, with a state database and without one, and
+`fakeclaude/` first on `PATH` as Claude Code. `fakeclaude` reports a login for
+`claude auth status`, answers the control requests AgentAPI sends, and answers each user message
+with one turn, `Echo: <message>`, in the stream-json frames a real CLI writes. It also writes each
+turn, and the session's title, to the session's log under the test's `HOME`, as Claude Code does.
+The tests take a turn, restart the server in place with `SIGUSR2`, and check that a new run
+(`server_id`) keeps the conversation, the agent's session and the API token. They need a Unix
+system.
 
 ## Adding a test
 

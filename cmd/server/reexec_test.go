@@ -14,6 +14,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/coder/agentapi/lib/instanceapi"
 )
 
 // program writes an executable file at dir/name that runs script.
@@ -291,4 +293,56 @@ func TestInitialPromptNotSentAgainAfterRestart(t *testing.T) {
 	none := &selfExec{}
 	assert.Empty(t, initialPromptOnce("", false, logger, none))
 	assert.Empty(t, none.env)
+}
+
+// Without a state database, the program a restart in place runs resumes
+// the agent's session: resumeSessionEnv carries the session then open, and
+// the new program takes it out of its environment, so that neither the
+// agent nor a later restart gets a stale one.
+func TestSessionCarriedOverRestart(t *testing.T) {
+	logger := slog.New(slog.DiscardHandler)
+	t.Setenv(resumeSessionEnv, "")
+	require.NoError(t, os.Unsetenv(resumeSessionEnv))
+	claude := serverOptions{agentType: instanceapi.AgentTypeClaude}
+
+	self := &selfExec{env: []string{"PATH=/usr/bin"}}
+	assert.Empty(t, carriedSession(claude, logger, self), "a first start resumes nothing")
+	ref := ""
+	self.sessionRef = func() string { return carrySession(claude.agentType, ref) }
+	_, ok := envValue(self.execEnv(), resumeSessionEnv)
+	require.False(t, ok, "an agent that opened no session carries none")
+	ref = "abc-123"
+	carried, ok := envValue(self.execEnv(), resumeSessionEnv)
+	require.True(t, ok)
+	assert.Equal(t, "claude:abc-123", carried)
+
+	// The program runs again with self.execEnv().
+	t.Setenv(resumeSessionEnv, carried)
+	again := &selfExec{env: self.execEnv()}
+	assert.Equal(t, "abc-123", carriedSession(claude, logger, again))
+	_, set := os.LookupEnv(resumeSessionEnv)
+	assert.False(t, set, "the agent's environment doesn't get it")
+	_, ok = envValue(again.execEnv(), resumeSessionEnv)
+	assert.False(t, ok, "a further restart carries the session open then, not this one")
+	again.sessionRef = func() string { return carrySession(claude.agentType, "def-456") }
+	carried, _ = envValue(again.execEnv(), resumeSessionEnv)
+	assert.Equal(t, "claude:def-456", carried)
+
+	for name, tc := range map[string]struct {
+		opts    serverOptions
+		carried string
+	}{
+		"state database restores it": {serverOptions{agentType: instanceapi.AgentTypeClaude, stateDB: "/tmp/state.db"}, "claude:abc-123"},
+		"another agent's":            {serverOptions{agentType: instanceapi.AgentTypeCodex}, "claude:abc-123"},
+		"no session":                 {claude, "claude:"},
+		"--print-openapi":            {serverOptions{agentType: instanceapi.AgentTypeClaude, printOpenAPI: true}, "claude:abc-123"},
+	} {
+		t.Setenv(resumeSessionEnv, tc.carried)
+		self := &selfExec{env: []string{resumeSessionEnv + "=" + tc.carried}}
+		assert.Empty(t, carriedSession(tc.opts, logger, self), name)
+		_, set := os.LookupEnv(resumeSessionEnv)
+		assert.False(t, set, name)
+		_, ok := envValue(self.env, resumeSessionEnv)
+		assert.False(t, ok, name)
+	}
 }

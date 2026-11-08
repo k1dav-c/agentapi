@@ -2,7 +2,10 @@
 // tests: `auth status --json` reports a login, and the stream-json mode
 // (-p --input-format stream-json) answers the control requests AgentAPI
 // sends and each user message with one turn, "Echo: <message>", in the
-// frames a real CLI writes (see lib/native/claude/testdata).
+// frames a real CLI writes (see lib/native/claude/testdata). Each turn goes
+// to the session's log too, as Claude Code keeps it (projects/ in
+// $CLAUDE_CONFIG_DIR or ~/.claude), so that AgentAPI can read the session
+// back.
 package main
 
 import (
@@ -11,10 +14,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
+
+	"github.com/coder/agentapi/lib/agentlog/claudelog"
 )
 
 const version = "2.1.299"
+
+// sessionTitle is the title fakeclaude gives every session.
+const sessionTitle = "Fake session"
 
 func main() {
 	args := os.Args[1:]
@@ -57,11 +67,21 @@ func serve(session string) error {
 		switch msg["type"] {
 		case "control_request":
 			request, _ := msg["request"].(map[string]any)
+			if request["subtype"] == "generate_session_title" && request["persist"] == true {
+				if err := appendLog(session, cwd, map[string]any{"type": "ai-title", "aiTitle": sessionTitle, "sessionId": session}); err != nil {
+					return err
+				}
+			}
 			if err := out.Encode(controlResponse(msg["request_id"], request["subtype"])); err != nil {
 				return err
 			}
 		case "user":
-			for _, frame := range turn(session, cwd, userText(msg)) {
+			text := userText(msg)
+			frames := turn(session, cwd, text)
+			if err := logTurn(session, cwd, text, frames[1]); err != nil {
+				return err
+			}
+			for _, frame := range frames {
 				if err := out.Encode(frame); err != nil {
 					return err
 				}
@@ -81,7 +101,7 @@ func controlResponse(id, subtype any) map[string]any {
 	case "get_settings":
 		response = map[string]any{"effective": map[string]any{}, "applied": map[string]any{}}
 	case "generate_session_title":
-		response = map[string]any{"title": "Fake session"}
+		response = map[string]any{"title": sessionTitle}
 	case "interrupt", "set_permission_mode", "set_model", "set_max_thinking_tokens", "apply_flag_settings":
 		response = map[string]any{}
 	default:
@@ -111,6 +131,39 @@ func turn(session, cwd, text string) []map[string]any {
 			"result": reply, "stop_reason": "end_turn", "session_id": session, "total_cost_usd": 0.0001, "usage": usage, "uuid": newID(),
 		},
 	}
+}
+
+// logTurn appends a turn, the user's text and the agent's assistant frame,
+// to the session's log.
+func logTurn(session, cwd, text string, assistant map[string]any) error {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	return appendLog(session, cwd,
+		map[string]any{"type": "user", "timestamp": now, "sessionId": session, "cwd": cwd, "uuid": newID(), "message": map[string]any{"role": "user", "content": text}},
+		map[string]any{"type": "assistant", "timestamp": now, "sessionId": session, "cwd": cwd, "uuid": newID(), "message": assistant["message"]},
+	)
+}
+
+// appendLog appends entries to the session's log.
+func appendLog(session, cwd string, entries ...map[string]any) error {
+	dirs, err := claudelog.ProjectDirs(cwd)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dirs[0], 0o700); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(filepath.Join(dirs[0], session+".jsonl"), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
+	if err != nil {
+		return err
+	}
+	enc := json.NewEncoder(f)
+	for _, entry := range entries {
+		if err := enc.Encode(entry); err != nil {
+			_ = f.Close()
+			return err
+		}
+	}
+	return f.Close()
 }
 
 // userText is the text of a user frame, whose content is a string or a

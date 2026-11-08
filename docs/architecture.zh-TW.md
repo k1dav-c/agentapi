@@ -154,8 +154,15 @@ flowchart TB
    `syscall.Exec` 重新執行程式，沿用 stdin、stdout 和 stderr；Go 開啟的其他檔案都會在 exec 時關閉。
    不帶值的 `--api-token` 產生的 token 會透過 `AGENTAPI_GENERATED_API_TOKEN` 傳下去，新程式直接
    採用它而不另外產生，並從自己的環境變數移除，用戶端因此不必重新登入。沒有狀態資料庫時，送出過的
-   初始提示會以 `AGENTAPI_INITIAL_PROMPT_SENT` 標記，新的工作階段不會再收到；有狀態資料庫時，
-   還原的對話已經有它了。
+   初始提示會以 `AGENTAPI_INITIAL_PROMPT_SENT` 標記，agent 不會再收到；有狀態資料庫時，
+   還原的對話已經有它了。沒有狀態資料庫時，對話所在的工作階段（`native.Conversation.SessionRef`，
+   在程式重新執行時讀取）會以 `<agent 類型>:<工作階段>` 的形式透過 `AGENTAPI_RESUME_SESSION`
+   傳下去。新程式在啟動 agent 之前就把它從環境變數移除；有狀態資料庫或 agent 類型不同時則忽略它
+   （`carriedSession`）。`httpapi.NewServer` 從 `ServerConfig.ResumeSession` 取得它，像
+   `POST /sessions/{id}/resume` 那樣讀取工作階段的紀錄（`resumeCarriedSession`），回報其中的訊息、
+   結構化訊息和名稱，再讓 agent 接續這個工作階段啟動。讀不到紀錄的工作階段（已經刪除，或 agent
+   沒有工作階段紀錄）不會接續：agent 開始新的工作階段，聊天介面會收到警告。佇列、請求、選擇的
+   設定和暫停狀態都不會傳下去。
    停止期間收到關閉訊號時，以關閉為準。每個登記檔都會註明伺服器能原地重新啟動
    （`restarts_in_place`），供 `agentapi restart` 判斷。
 
@@ -544,8 +551,8 @@ webhook 事件的 delivery ID 也以同樣方式寫入 `instances.deliveries.jso
   agent，所以訊息會在佇列中等待。最後一次嘗試失敗後，伺服器繼續提供服務，生命週期為 `failed`，
   直到重新啟動或切換工作階段啟動新的 agent。
 - AgentAPI 本身收到 SIGUSR2 時會原地重新啟動（見[啟動與關閉](#啟動與關閉)），改用更新放在原啟動
-  路徑上的執行檔。使用 `--state-db` 時會還原對話，agent 也會接續原本的工作階段；沒有時對話會
-  重新開始。`agentapi restart [port…|--all]`（`cmd/restart`）讀取登記目錄（呼叫者的；透過 `sudo`
+  路徑上的執行檔。使用 `--state-db` 時會還原對話，agent 也會接續原本的工作階段；沒有時 agent
+  同樣會接續工作階段（`AGENTAPI_RESUME_SESSION`），對話則從工作階段的紀錄讀回。`agentapi restart [port…|--all]`（`cmd/restart`）讀取登記目錄（呼叫者的；透過 `sudo`
   執行時是 `SUDO_USER` 的家目錄），挑出這台主機上、行程屬於該使用者、執行的是 `agentapi server`
   （`/proc/<pid>`，其他系統用 `ps`）且能原地重新啟動的登記檔，逐一送出訊號（自己所在的那個最後），
   並等每個 AgentAPI 以新的 server ID 重新登記、在原連接埠回應 `GET /status`。新執行檔沒通過停止
