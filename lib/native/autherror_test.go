@@ -126,3 +126,27 @@ func TestTransientStatus(t *testing.T) {
 	assert.False(t, native.IsTransientStatus(401))
 	assert.False(t, native.IsTransientStatus(400))
 }
+
+// A usage limit comes before a login problem, which comes before a
+// transient failure; a turn that didn't fail keeps its stop reason.
+func TestClassifyFailure(t *testing.T) {
+	t.Parallel()
+	all := native.FailureHints{Limit: true, Auth: true, Transient: true, APIStatus: 429}
+	for _, tc := range []struct {
+		name   string
+		reason string
+		hints  native.FailureHints
+		want   native.TurnResult
+	}{
+		{"limit first", native.StopReasonError, all, native.TurnResult{StopReason: native.StopReasonLimited}},
+		{"auth before transient", native.StopReasonError, native.FailureHints{Auth: true, Transient: true, APIStatus: 502}, native.TurnResult{StopReason: native.StopReasonError}},
+		{"transient", native.StopReasonError, native.FailureHints{Transient: true, APIStatus: 502}, native.TurnResult{StopReason: native.StopReasonTransient, APIStatus: 502}},
+		{"no hint", native.StopReasonError, native.FailureHints{APIStatus: 400}, native.TurnResult{StopReason: native.StopReasonError}},
+		{"not a failure", native.StopReasonEndTurn, all, native.TurnResult{StopReason: native.StopReasonEndTurn}},
+		{"interrupted", native.StopReasonInterrupted, all, native.TurnResult{StopReason: native.StopReasonInterrupted}},
+	} {
+		result := native.TurnResult{StopReason: tc.reason}
+		native.ClassifyFailure(&result, tc.hints)
+		assert.Equal(t, tc.want, result, tc.name)
+	}
+}

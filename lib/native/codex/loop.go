@@ -762,14 +762,14 @@ func (s *loopState) turnResult(t *turnState, tr turn, status string) native.Turn
 		if cause == nil {
 			cause = t.lastErrorInfo
 		}
-		switch {
-		case isLimitError(tr.Error) || (tr.Error == nil && native.IsLimitError(result.Error)):
-			result.StopReason = native.StopReasonLimited
-		case cause != nil && !isAuthError(cause):
-			if status, ok := transientError(cause); ok {
-				result.StopReason, result.APIStatus = native.StopReasonTransient, status
-			}
+		hints := native.FailureHints{
+			Limit: isLimitError(tr.Error) || (tr.Error == nil && native.IsLimitError(result.Error)),
 		}
+		if cause != nil {
+			hints.Auth = isAuthError(cause)
+			hints.APIStatus, hints.Transient = transientError(cause)
+		}
+		native.ClassifyFailure(&result, hints)
 	}
 	return result
 }

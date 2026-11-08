@@ -63,7 +63,7 @@ func isLimitError(e *turnError) bool {
 // serverOverloaded, internalServerError and rateLimitExceeded codes, a
 // connection or stream failure with no HTTP status or a 5xx or 429, or an
 // error worded as one. status is the upstream HTTP status, 0 when the error
-// doesn't say. Callers check isLimitError and isAuthError first.
+// doesn't say. ClassifyFailure puts isLimitError and isAuthError first.
 func transientError(e *turnError) (status int, ok bool) {
 	text := turnErrorText(e)
 	if code, isCode := errorCode(e); isCode {
