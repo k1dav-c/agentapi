@@ -149,14 +149,19 @@ type EventEmitter struct {
 	// message, rich message and request change so a reconnecting client can
 	// ask for only what it hasn't seen. messageSeq, richSeq and requestSeq
 	// hold the seq of each entry's latest change.
-	epoch              string
-	seq                uint64
-	messageSeq         []uint64
-	richSeq            []uint64
-	richMessages       []transcript.RichMessage
-	richIndex          map[richKey]int // a rich message's position, by its key
-	requests           []agentstate.RequestState
-	requestSeq         []uint64
+	epoch        string
+	seq          uint64
+	messageSeq   []uint64
+	richSeq      []uint64
+	richMessages []transcript.RichMessage
+	richIndex    map[richKey]int // a rich message's position, by its key
+	requests     []agentstate.RequestState
+	requestSeq   []uint64
+	// agent is the conversation's state as lib/native last reported it
+	// (SetState), stored what of it was stored last. The status updates
+	// show the parts below, each nil until the agent reported it.
+	agent              agentstate.ConversationState
+	stored             agentstate.StoredState
 	capabilities       *agentstate.Capabilities
 	loginRequired      *agentstate.LoginRequired
 	settings           *agentstate.Settings
@@ -226,13 +231,10 @@ type Persister interface {
 	SetSessionName(name string)
 	// SetSessionRef stores what resumes the agent's session.
 	SetSessionRef(ref string)
-	// SetSettings stores the settings chosen for the session.
-	SetSettings(settings agentstate.Settings)
-	// SetLimitStop stores the turn a usage limit stopped; nil removes it.
-	SetLimitStop(ls *agentstate.LimitStop)
-	// SetRetryWait stores the failed turn that waits to be tried again; nil
-	// removes it.
-	SetRetryWait(rw *agentstate.RetryWait)
+	// SetStoredState stores the part of the conversation's state that
+	// survives a restart (agentstate.StoredState) whenever it changes. It
+	// may keep state: the emitter doesn't change it.
+	SetStoredState(state agentstate.StoredState)
 	// SetSeenAt stores when a client last showed the conversation.
 	SetSeenAt(at time.Time)
 	// PutTask stores the task the user's message id started, encoded as
@@ -258,6 +260,13 @@ type EmitterState struct {
 	Tasks         []instanceapi.Task
 	TaskSeqs      []uint64
 	SessionName   string
+	// SessionRef is what resumes the agent's session, shown as its
+	// session ID until the agent reports one.
+	SessionRef string
+	// Stored is the part of the conversation's state that survived the
+	// restart (a limit stop, a retry wait), which status updates show
+	// until the conversation reports its state.
+	Stored agentstate.StoredState
 	// SeenAt is when a client last showed the conversation; zero takes
 	// the restored tasks as seen.
 	SeenAt time.Time
@@ -341,6 +350,11 @@ func (e *EventEmitter) Restore(state EmitterState) {
 	e.requests = slices.Clone(state.Requests)
 	e.requestSeq = slices.Clone(state.RequestSeqs)
 	e.sessionName = state.SessionName
+	e.agentSessionID = state.SessionRef
+	e.stored = state.Stored.Clone()
+	e.agent.Stored = e.stored
+	e.limitStop = e.stored.LimitStop
+	e.retryWait = e.stored.RetryWait
 	e.seenAt = state.SeenAt
 	if e.seenAt.IsZero() {
 		e.seenAt = e.clock.Now()

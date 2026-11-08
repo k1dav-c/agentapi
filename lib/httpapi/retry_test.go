@@ -1,6 +1,7 @@
 package httpapi_test
 
 import (
+	"database/sql"
 	"net/http"
 	"path/filepath"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/httpapi"
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/statedb"
 )
 
 func (n *nativeServer) retryWait() *agentstate.RetryWait {
@@ -133,4 +135,35 @@ func TestStateDB_KeepsTheRetryWait(t *testing.T) {
 	require.NoError(t, err)
 	defer stop(t, srv, db)
 	assert.Nil(t, n.retryWait())
+}
+
+// A state database AgentAPI 3.7.2 wrote, with the retry wait and the
+// settings in keys of their own, comes back the same.
+func TestStateDB_RestoresTheStateOfAnOlderAgentAPI(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	n, srv, db, err := persistentServer(t, path, "/work")
+	require.NoError(t, err)
+	n.send("first", "")
+	n.factory.Last().Sink().TurnCompleted(badGateway)
+	before := n.retryWait()
+	require.NotNil(t, before)
+	stop(t, srv, db)
+
+	// As 3.7.2 left it: no conversation_state.
+	raw, err := sql.Open("sqlite", path)
+	require.NoError(t, err)
+	_, err = raw.Exec("DELETE FROM meta WHERE key = ?", statedb.MetaState)
+	require.NoError(t, err)
+	var legacy string
+	require.NoError(t, raw.QueryRow("SELECT value FROM meta WHERE key = 'retry_wait'").Scan(&legacy))
+	require.NoError(t, raw.Close())
+	require.Contains(t, legacy, "Bad Gateway")
+
+	n, srv, db, err = persistentServer(t, path, "/work")
+	require.NoError(t, err)
+	defer stop(t, srv, db)
+	after := n.retryWait()
+	require.NotNil(t, after, "the retry still waits")
+	assert.True(t, before.RetryAt.Equal(after.RetryAt))
+	assert.Equal(t, before.Attempt, after.Attempt)
 }

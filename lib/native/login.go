@@ -46,7 +46,7 @@ func (c *Conversation) setLoginLocked(login agentstate.LoginRequired) bool {
 		return false
 	}
 	c.login = &login
-	c.cfg.Observer.LoginRequired(&login)
+	c.stateChangedLocked()
 	return true
 }
 
@@ -55,7 +55,7 @@ func (c *Conversation) setLoginLocked(login agentstate.LoginRequired) bool {
 func (c *Conversation) clearLoginLocked() {
 	if c.login != nil {
 		c.login = nil
-		c.cfg.Observer.LoginRequired(nil)
+		c.stateChangedLocked()
 	}
 }
 

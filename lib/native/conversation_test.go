@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -39,6 +40,9 @@ type recorded struct {
 	limitStops   []*agentstate.LimitStop
 	retryWaits   []*agentstate.RetryWait
 	exits        []native.AgentExit
+	// state is the state last reported, states how often it was.
+	state  agentstate.ConversationState
+	states int
 }
 
 // recorder records what a conversation emits and reports.
@@ -73,12 +77,34 @@ func (r *recorder) EmitError(m string, _ conversation.ErrorLevel) {
 	r.errors = append(r.errors, m)
 }
 
-func (r *recorder) Started(agentstate.Capabilities) {}
+func (r *recorder) Started() {}
 
-func (r *recorder) LoginRequired(l *agentstate.LoginRequired) {
+// StateChanged records each part of the state that changed, as the
+// observer's methods for each part did before they were one.
+func (r *recorder) StateChanged(state agentstate.ConversationState) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.logins = append(r.logins, l)
+	last := r.state
+	r.state = state
+	r.states++
+	if !reflect.DeepEqual(last.LoginRequired, state.LoginRequired) {
+		r.logins = append(r.logins, state.LoginRequired)
+	}
+	if last.Settings != state.Settings {
+		r.settings = append(r.settings, state.Settings)
+	}
+	if last.Stored.Settings != state.Stored.Settings {
+		r.chosen = append(r.chosen, state.Stored.Settings)
+	}
+	if state.Usage != nil && !reflect.DeepEqual(last.Usage, state.Usage) {
+		r.usage = append(r.usage, *state.Usage)
+	}
+	if !reflect.DeepEqual(last.Stored.LimitStop, state.Stored.LimitStop) {
+		r.limitStops = append(r.limitStops, state.Stored.LimitStop)
+	}
+	if !reflect.DeepEqual(last.Stored.RetryWait, state.Stored.RetryWait) {
+		r.retryWaits = append(r.retryWaits, state.Stored.RetryWait)
+	}
 }
 
 func (r *recorder) RichMessage(m transcript.RichMessage) {
@@ -105,36 +131,6 @@ func (r *recorder) RequestUpdated(s agentstate.RequestState) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.requests = append(r.requests, s)
-}
-
-func (r *recorder) Settings(s agentstate.Settings) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.settings = append(r.settings, s)
-}
-
-func (r *recorder) SettingsChosen(s agentstate.Settings) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.chosen = append(r.chosen, s)
-}
-
-func (r *recorder) Usage(u agentstate.AgentUsage) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.usage = append(r.usage, u)
-}
-
-func (r *recorder) LimitStop(ls *agentstate.LimitStop) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.limitStops = append(r.limitStops, ls)
-}
-
-func (r *recorder) RetryWait(rw *agentstate.RetryWait) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.retryWaits = append(r.retryWaits, rw)
 }
 
 func (r *recorder) AgentExited(exit native.AgentExit) {
@@ -170,7 +166,10 @@ func (h *logRecorder) logged(message string) bool {
 // starts it.
 func run(t *testing.T, factory *nativetest.Factory, cfg native.Config) (*native.Conversation, *recorder) {
 	t.Helper()
+	// The observer knows the restored state already, as the server's
+	// emitter does: what the conversation reports of it isn't a change.
 	rec := &recorder{}
+	rec.state.Stored = cfg.State
 	cfg.Factory = factory.New
 	cfg.Emitter = rec
 	cfg.Observer = rec
@@ -448,4 +447,16 @@ func TestPrepareRichMessageRunsUnlocked(t *testing.T) {
 	require.Len(t, got, 1)
 	assert.Equal(t, "/uploads/x/image.png", got[0].Content[0].Images[0].URL)
 	assert.Nil(t, got[0].Content[0].Images[0].Data)
+}
+
+// The state comes whole: a start reports what the agent supports, its
+// settings and the end of a wait for a login at once, before the agent
+// counts as started.
+func TestStateComesWhole(t *testing.T) {
+	_, _, rec := start(t, nil, native.Config{})
+	got := rec.get()
+	assert.Equal(t, 1, got.states)
+	require.NotNil(t, got.state.Capabilities)
+	assert.Nil(t, got.state.LoginRequired)
+	assert.Nil(t, got.state.Usage, "no usage until the agent reports it")
 }

@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Internal
+
+- A native conversation reports its state (capabilities, login, settings, usage, the settings
+  chosen, a limit stop or retry wait) whole through one observer method,
+  `Observer.StateChanged(agentstate.ConversationState)`, instead of one method for each part, and
+  the state reaches the state database only through the emitter. `native.Config.State` restores
+  it. Adding a piece of state takes the files the checklist in
+  [docs/architecture.md](docs/architecture.md#adding-a-piece-of-conversation-state) lists.
+- The state database keeps the settings chosen, the limit stop and the retry wait in one
+  versioned JSON value, `conversation_state`. The first open of a database an earlier AgentAPI
+  wrote moves its `settings`, `limit_stop` and `retry_wait` keys there. This release writes those
+  keys too, so going back to an earlier AgentAPI keeps the limit stop, retry wait and settings, and
+  what it changes there wins when this one opens the file again.
+
 ## v3.7.2
 
 ### Internal

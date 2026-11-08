@@ -22,12 +22,9 @@ type restoredState struct {
 	messages []conv.Message
 	// resumeRef resumes the native agent's session.
 	resumeRef string
-	// settings were chosen for the session.
-	settings agentstate.Settings
-	// limitStop is the turn a usage limit stopped.
-	limitStop *agentstate.LimitStop
-	// retryWait is the failed turn that waits to be tried again.
-	retryWait *agentstate.RetryWait
+	// state is the conversation's state that survived: the settings
+	// chosen, a limit stop or a retry wait.
+	state agentstate.StoredState
 }
 
 // restoreState connects the state database to emitter, which stores its
@@ -62,7 +59,12 @@ func restoreState(config ServerConfig, db *statedb.DB, emitter *convstate.EventE
 		db.SetSeq(emitter.Epoch(), 0)
 		return restoredState{snapshot: snap}, nil
 	}
-	state := emitterStateFromSnapshot(snap)
+	state := emitterStateFromSnapshot(snap, logger)
+	if config.Native.RetriesOff() && state.Stored.RetryWait != nil {
+		// Retries were turned off since: the queue doesn't wait.
+		state.Stored.RetryWait = nil
+		db.SetStoredState(state.Stored)
+	}
 	if !snap.Clean {
 		// The changes AgentAPI made just before it crashed may be missing,
 		// and the next ones would reuse their seqs: clients that saw them
@@ -82,30 +84,8 @@ func restoreState(config ServerConfig, db *statedb.DB, emitter *convstate.EventE
 			emitter.EmitRequest(r)
 		}
 	}
-	resumeRef := snap.Meta[statedb.MetaSessionRef]
-	emitter.SetAgentSessionID(resumeRef)
-	settings, err := snap.Settings()
-	if err != nil {
-		// The agent starts with its own settings.
-		logger.Warn("Ignoring the stored settings", "error", err)
-	}
-	limitStop, err := snap.LimitStop()
-	if err != nil {
-		logger.Warn("Ignoring the stored limit stop", "error", err)
-	}
-	emitter.SetLimitStop(limitStop)
-	retryWait, err := snap.RetryWait()
-	if err != nil {
-		logger.Warn("Ignoring the stored retry wait", "error", err)
-	}
-	if config.Native.RetriesOff() {
-		// Retries were turned off since: the queue doesn't wait.
-		retryWait = nil
-		db.SetRetryWait(nil)
-	}
-	emitter.SetRetryWait(retryWait)
-	logger.Info("Restored conversation from the state database", "messages", len(state.Messages), "resume", resumeRef != "")
-	return restoredState{snapshot: snap, messages: state.Messages, resumeRef: resumeRef, settings: settings, limitStop: limitStop, retryWait: retryWait}, nil
+	logger.Info("Restored conversation from the state database", "messages", len(state.Messages), "resume", state.SessionRef != "")
+	return restoredState{snapshot: snap, messages: state.Messages, resumeRef: state.SessionRef, state: state.Stored}, nil
 }
 
 // transportPTY is the transport AgentAPI 2 kept in the state database of a
@@ -133,13 +113,21 @@ func checkRestoredIdentity(snap statedb.Snapshot, config ServerConfig) error {
 	return nil
 }
 
-func emitterStateFromSnapshot(snap statedb.Snapshot) convstate.EmitterState {
+func emitterStateFromSnapshot(snap statedb.Snapshot, logger *slog.Logger) convstate.EmitterState {
 	state := convstate.EmitterState{
 		Epoch:         snap.Meta[statedb.MetaEpoch],
 		Seq:           snap.Seq(),
 		SessionEvents: snap.Events,
 		SessionName:   snap.Meta[statedb.MetaSessionName],
+		SessionRef:    snap.Meta[statedb.MetaSessionRef],
 	}
+	stored, err := snap.StoredState()
+	if err != nil {
+		// What can't be read is left out: the agent starts with its own
+		// settings, and nothing holds the queue.
+		logger.Warn("Ignoring part of the stored conversation state", "error", err)
+	}
+	state.Stored = stored
 	if seen, err := time.Parse(time.RFC3339Nano, snap.Meta[statedb.MetaSeenAt]); err == nil {
 		state.SeenAt = seen
 	}

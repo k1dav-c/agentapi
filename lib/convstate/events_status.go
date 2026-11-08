@@ -115,89 +115,70 @@ func (e *EventEmitter) statusChangeBody() StatusChangeBody {
 	}
 }
 
-// SetAgentSessionID records the agent's own session, which a restart or a
-// resume changes.
-func (e *EventEmitter) SetAgentSessionID(id string) {
+// SetSessionRef records the session the agent resumes, which a restart or
+// a switch changes: it is stored, every time, to resume the session after
+// AgentAPI restarts, and shown as the agent's session ID. The session ID
+// clients use is AgentAPI's own.
+func (e *EventEmitter) SetSessionRef(ref string) {
 	e.mu.Lock()
 	defer e.unlock()
-	if e.agentSessionID == id {
+	if e.persister != nil {
+		e.persister.SetSessionRef(ref)
+	}
+	if e.agentSessionID == ref {
 		return
 	}
-	e.agentSessionID = id
+	e.agentSessionID = ref
 	e.notifyStatusLocked()
 }
 
-// SetCapabilities records the optional operations the agent supports.
-func (e *EventEmitter) SetCapabilities(caps agentstate.Capabilities) {
+// SetState records the conversation's state, as lib/native reports it
+// (native.Observer.StateChanged). What changed of it in status updates is
+// sent as one, and its stored part is stored if that changed.
+func (e *EventEmitter) SetState(state agentstate.ConversationState) {
 	e.mu.Lock()
 	defer e.unlock()
-	if e.capabilities != nil && *e.capabilities == caps {
-		return
+	state = state.Clone()
+	previous := e.agent
+	e.agent = state
+	if !reflect.DeepEqual(e.stored, state.Stored) {
+		e.stored = state.Stored
+		if e.persister != nil {
+			e.persister.SetStoredState(state.Stored)
+		}
 	}
-	e.capabilities = &caps
-	e.notifyStatusLocked()
-}
-
-// SetSettings records the agent's settings.
-func (e *EventEmitter) SetSettings(settings agentstate.Settings) {
-	e.mu.Lock()
-	defer e.unlock()
-	if e.settings != nil && *e.settings == settings {
-		return
+	changed := false
+	// Status updates carry a part once the agent reported it; the
+	// capabilities and the usage stay while no agent runs.
+	if state.Capabilities != nil && !reflect.DeepEqual(e.capabilities, state.Capabilities) {
+		e.capabilities = state.Capabilities
+		changed = true
 	}
-	e.settings = &settings
-	e.notifyStatusLocked()
-}
-
-// SetUsage records the agent's usage of its limits.
-func (e *EventEmitter) SetUsage(usage agentstate.AgentUsage) {
-	e.mu.Lock()
-	defer e.unlock()
-	if e.usage != nil && reflect.DeepEqual(*e.usage, usage) {
-		return
+	if !reflect.DeepEqual(e.loginRequired, state.LoginRequired) {
+		e.loginRequired = state.LoginRequired
+		e.handoffRevision++
+		changed = true
 	}
-	e.usage = &usage
-	e.notifyStatusLocked()
-}
-
-// SetLimitStop records the turn a usage limit stopped (nil: none).
-func (e *EventEmitter) SetLimitStop(ls *agentstate.LimitStop) {
-	e.mu.Lock()
-	defer e.unlock()
-	if reflect.DeepEqual(e.limitStop, ls) {
-		return
+	if state.Settings != previous.Settings {
+		settings := state.Settings
+		e.settings = &settings
+		changed = true
 	}
-	e.limitStop = ls
-	e.notifyStatusLocked()
-}
-
-// SetRetryWait records the failed turn that waits to be tried again (nil:
-// none).
-func (e *EventEmitter) SetRetryWait(rw *agentstate.RetryWait) {
-	e.mu.Lock()
-	defer e.unlock()
-	if reflect.DeepEqual(e.retryWait, rw) {
-		return
+	if state.Usage != nil && !reflect.DeepEqual(e.usage, state.Usage) {
+		e.usage = state.Usage
+		changed = true
 	}
-	e.retryWait = rw
-	e.notifyStatusLocked()
-}
-
-// SetLoginRequired records that the agent waits for a login (nil: it no
-// longer does).
-func (e *EventEmitter) SetLoginRequired(login *agentstate.LoginRequired) {
-	e.mu.Lock()
-	defer e.unlock()
-	if login == nil && e.loginRequired == nil {
-		return
+	if !reflect.DeepEqual(e.limitStop, state.Stored.LimitStop) {
+		e.limitStop = state.Stored.LimitStop
+		changed = true
 	}
-	if login != nil {
-		copied := *login
-		login = &copied
+	if !reflect.DeepEqual(e.retryWait, state.Stored.RetryWait) {
+		e.retryWait = state.Stored.RetryWait
+		changed = true
 	}
-	e.loginRequired = login
-	e.handoffRevision++
-	e.notifyStatusLocked()
+	if changed {
+		e.notifyStatusLocked()
+	}
 }
 
 func (e *EventEmitter) EmitError(message string, level conv.ErrorLevel) {

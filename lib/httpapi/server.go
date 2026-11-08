@@ -379,22 +379,16 @@ func newRouter(config ServerConfig, logger *slog.Logger, allowedHosts, allowedOr
 // newNativeConversation returns the conversation of a native agent, which
 // continues the restored one.
 func newNativeConversation(config ServerConfig, restored restoredState, emitter *convstate.EventEmitter, uploads *uploadStore, logger *slog.Logger) *native.Conversation {
-	observer := &nativeObserver{emitter: emitter}
-	if config.StateDB != nil {
-		observer.persister = config.StateDB
-	}
 	return native.NewConversation(native.Config{
 		Factory:           config.Native.Factory,
 		ResumeRef:         restored.resumeRef,
-		Settings:          restored.settings,
-		LimitStop:         restored.limitStop,
-		RetryWait:         restored.retryWait,
+		State:             restored.state,
 		Policy:            config.Native.Policy,
 		InitialMessages:   restored.messages,
 		InitialPrompt:     config.InitialPrompt,
 		InitialPromptSent: config.InitialPromptSent,
 		Emitter:           emitter,
-		Observer:          observer,
+		Observer:          &nativeObserver{emitter: emitter},
 		Logger:            logger,
 		Clock:             config.Clock,
 		PrepareRichMessage: func(msg *transcript.RichMessage) {

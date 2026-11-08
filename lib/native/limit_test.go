@@ -142,7 +142,7 @@ func TestScheduledContinueCanBeCancelled(t *testing.T) {
 func TestRestartClearsTheLimitStop(t *testing.T) {
 	clock := quartz.NewMock(t)
 	resets := clock.Now().Add(time.Hour)
-	c, _, _ := start(t, nil, native.Config{Clock: clock, LimitStop: &agentstate.LimitStop{Message: "limit", ResetsAt: &resets}})
+	c, _, _ := start(t, nil, native.Config{Clock: clock, State: agentstate.StoredState{LimitStop: &agentstate.LimitStop{Message: "limit", ResetsAt: &resets}}})
 	require.NotNil(t, c.LimitStop(), "restored from the state database")
 	require.NoError(t, c.Restart(context.Background()))
 	assert.Nil(t, c.LimitStop())

@@ -72,7 +72,7 @@ flowchart TB
 | `lib/sessions/` | 伺服器持有的 `Store` 讀取目錄中先前的工作階段與對話（`history.go`）、sub agent（`subagents.go`）及花費（`cost.go`） |
 | `lib/pricing/` | 每百萬 tokens 的模型價格（內建 `prices.json` 與 `--prices` 檔案），以及單次呼叫的花費計算 |
 | `lib/native/` | Native transport：`Conversation`、`Adapter` 與 `Sink` 的約定、請求、設定、用量、登入、暫停佇列的狀態（`hold.go`：用量限制停下的回合或等待重試的失敗回合）、它的 `Policy`（`policy.go`：繼續、重試與重新啟動的間隔），以及 `ClassifyFailure`（失敗回合的停止原因） |
-| `lib/agentstate/` | Native agent 回報、API 提供的值：功能、登入、設定、用量、請求、用量限制停止與重試等待。它是末端套件（只用 huma 和 `lib/util`），提供這些值的套件因此不必依賴 `lib/native` |
+| `lib/agentstate/` | Native agent 回報、API 提供的值：功能、登入、設定、用量、請求、用量限制停止與重試等待，以及 `ConversationState`（observer 整份收到的對話狀態），連同重新啟動後保留的 `StoredState`。它是末端套件（只用 huma 和 `lib/util`），提供這些值的套件因此不必依賴 `lib/native` |
 | `lib/native/claude`、`codex`、`pi` | 每種 agent 協定各一個 adapter |
 | `lib/native/agentio` | 這些 adapter 執行 agent 時共用的部分：行程與它的迴圈（`Host`）、寫入 stdin、把回應對應到等待中的請求、寬鬆解碼與協定變動警告、快照節流 |
 | `lib/native/demo` | `native-demo`，開發聊天介面用的模擬 agent |
@@ -236,9 +236,9 @@ flowchart LR
   proc -- "stdout" --> adapter
   adapter -- "Sink 事件" --> conv
   conv -- "Emitter：訊息、狀態" --> emitter["EventEmitter"]
-  conv -- "Observer：結構化訊息、請求、<br/>設定、用量、登入" --> observer["nativeObserver"]
+  conv -- "Observer：狀態、結構化訊息、<br/>請求、工作階段" --> observer["nativeObserver"]
   observer --> emitter
-  observer --> db[("狀態資料庫")]
+  emitter -- "Persister" --> db[("狀態資料庫")]
 ```
 
 `native.Conversation` 以 `Adapter` 為基礎執行對話，每種 agent 協定各一個：
@@ -338,9 +338,13 @@ type Factory func(resume Resume) (Adapter, error)
   一個回答最多只會送到 adapter 一次，回合結束時仍待處理的請求會過期。agent 沒有確認的回答仍可能
   送達，所以這個請求不再接受其他回答，會維持待處理，直到 agent 關閉它或回合結束。祕密問題的答案除了送給
   agent 的那份之外，一律遮蔽。
-- **Observer。** 訊息與狀態以外的變更（結構化訊息、請求、設定、用量、工作階段參照、登入）會
-  送到 `Observer`，由伺服器實作，用來更新 emitter 和狀態資料庫。呼叫時仍持有對話的鎖，
-  因此 Observer 不能反向呼叫對話介面，以免死鎖。
+- **Observer。** 訊息與狀態以外的變更會送到 `Observer`，由伺服器實作，用來更新 emitter。
+  對話的狀態（`agentstate.ConversationState`：功能、登入、agent 的設定、用量，以及它的
+  `StoredState`：選擇的設定、用量限制停止、重試等待）整份透過 `StateChanged` 送出：在某個部分
+  改變的地方送，而且只在真的有變時送；一起改變的部分合成一次。其餘都是事件：agent 開始接受回合
+  （`Started`）、結構化訊息、時間軸、請求、工作階段的名稱與參照、agent 結束。呼叫時仍持有對話的鎖，
+  因此 Observer 不能反向呼叫對話介面，以免死鎖。重新啟動後，保存的狀態透過 `native.Config.State`
+  還原。
 - **行程。** `procutil` 會在 agent 自己的 process group 中啟動它，使用 adapter 透過
   `lib/procenv` 建立的環境變數，其中不含上層 agent 工作階段的變數。`agentio.Host` 替 adapter
   執行這個行程：adapter 已關閉就不再啟動，並把輸出逐行交給同一個迴圈 goroutine。這個 goroutine
@@ -413,8 +417,30 @@ type Factory func(resume Resume) (Adapter, error)
   observer 會像用戶端以 `since` 接續那樣，從它處理到的 seq 重新訂閱。它只記得訊息和任務處理到哪裡、
   還在等結果的工具呼叫（最多 64 個）、最近 64 則帶有結果的訊息中已回傳的呼叫，以及尚未關閉的請求，
   對話重設時全部忘掉。傳送器從佇列依序一次送一個事件，失敗會重試，並以 `--webhook-secret` 簽章。
+- `SetState` 接收整份對話狀態，和上一份比較：有變的部分合成一個 `status_change` 送出；每個部分
+  在 agent 回報之前都不會出現（沒有設定的 agent 就不顯示設定），沒有 agent 執行時，功能和用量
+  維持原樣。
 - 有狀態資料庫時，emitter 會把每次變更交給它的 `Persister`，它在自己的寫入 goroutine 上從副本
-  編碼訊息與結構化訊息，所以串流中的長訊息不會拖慢 emitter。
+  編碼訊息與結構化訊息，所以串流中的長訊息不會拖慢 emitter。這是通往狀態資料庫的唯一路徑：
+  native → observer → emitter → `Persister`。保存的狀態在改變時交出（`SetStoredState`），
+  工作階段參照則每次回報都交出（重設會刪掉它，參照不變時也一樣）。
+
+### 新增一項對話狀態
+
+agent 回報或對話保存的值（訊息與請求以外）會當成狀態的一部分經過 observer：
+
+1. 在 `agentstate.ConversationState`（`lib/agentstate/conversation.go`）加一個欄位；若它要在
+   AgentAPI 重新啟動後保留，就加在 `StoredState`，並給它 JSON 名稱。`Clone` 要複製它指向的內容。
+2. 在 `lib/native` 裡改變它的地方設定它並呼叫 `stateChangedLocked`；`stateLocked` 把它放進狀態。
+3. 在狀態更新中顯示：在 `convstate.StatusChangeBody`（`lib/convstate/events.go`）加欄位（可能
+   不存在時加 `omitempty`），並在 `EventEmitter.SetState`（`events_status.go`）比較它。
+4. 若同時監看多個實例的用戶端需要它，就加到 `instanceapi.SummaryBody`（`lib/convstate/summary.go`
+   的 `summaryLocked`）和 `instanceapi.WebhookInstanceState`，也就是 `instance.*` webhook 事件的
+   資料（`lib/httpapi/webhook_api.go` 的 `webhookInstanceState`）。
+5. 執行 `make gen`，再到 `chat/` 執行 `bun run gen:api`，並補上文件。
+
+`StoredState` 的欄位不必再改其他地方，就會在 `conversation_state` 的第 1 版裡保存、還原並交回
+對話（見下文）。
 
 ## 訊息佇列
 
@@ -443,8 +469,8 @@ context 結束，避免不再讀取的 agent 佔住 `s.mu`。
 
 - 資料表有 `messages`、`rich_messages`、`session_events`、`requests`、`queue`、`tasks`（每個
   任務以伺服器編碼後的形式、依開始它的訊息 ID 保存），以及
-  `meta`：保存 agent 類型、transport 和工作目錄、epoch 與 seq、工作階段參照與名稱、為
-  工作階段選擇的設定、用量限制造成的停止、等待重試的失敗回合、透過 API 修改的 webhook 設定（附啟動參數的指紋，
+  `meta`：保存 agent 類型、transport 和工作目錄、epoch 與 seq、工作階段參照與名稱、對話保存的
+  狀態（`conversation_state`，見下文）、透過 API 修改的 webhook 設定（附啟動參數的指紋，
   參數改變時以參數為準）、用戶端上次顯示對話的時間
   （`seen_at`），以及哪些 AgentAPI 可以寫入這個檔案、最後由哪個寫入（見下文）。
 - 寫入會先排隊，每 200 毫秒在一個交易中寫入，所以串流不必等待磁碟。正常關閉時會將檔案標示為
@@ -462,6 +488,14 @@ context 結束，避免不再讀取的 agent 佔住 `s.mu`。
   附上帶來它的版本）；較舊的 AgentAPI 遇到這種檔案會拒絕啟動，並指出需要的版本。`meta` 也記錄
   最後關閉檔案的 AgentAPI（`writer_version`）。1.9.0 以前的版本不讀這些值，遇到結構比自己新的
   檔案一律拒絕；結構從 1.0 起就沒有改變。
+- `conversation_state` 把為工作階段選擇的設定、用量限制造成的停止和等待重試的失敗回合存成一個
+  JSON 物件：`{"version": 1, "settings": {...}, "limit_stop": {...}, "retry_wait": {...}}`；
+  重設時保留。新增欄位不改版本，較舊的 AgentAPI 讀它認得的部分；會誤導舊版的改變才提高版本，
+  遇到更高版本的 AgentAPI 不動這個物件，改讀舊的 key。3.7.2 以前這三項各有一個 key（`settings`、
+  `limit_stop`、`retry_wait`），第一次開啟這種檔案時會搬進 `conversation_state`。接下來一個版本
+  仍會在同一次寫入中一併寫舊的 key，所以用較舊的 AgentAPI 開啟檔案，仍讀得到用量限制停止、重試
+  等待和設定；它在舊 key 上做的改變，下次由較新的 AgentAPI 開啟時會以舊 key 為準（舊 key 和物件
+  不一致）。之後的版本會停止寫入舊的 key。
 - 較舊的 AgentAPI 不認得的資料，它重設或移除訊息時也不會清掉。還原時，訊息已不存在或已換成
   另一則的任務會被丟棄；訊息資料列無法讀取的任務也一樣。
 - 上傳的檔案放在 `<state-db>.uploads`，與資料庫一起保留（沒有狀態資料庫時放在暫存目錄，停止時

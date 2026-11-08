@@ -73,7 +73,7 @@ emitter. Handlers call the conversation and read state from the emitter.
 | `lib/sessions/` | A server-held `Store` reads earlier sessions and their conversations (`history.go`), subagents (`subagents.go`) and costs (`cost.go`) for a directory |
 | `lib/pricing/` | Model prices per million tokens (built-in `prices.json` and a `--prices` file), and per-call cost calculation |
 | `lib/native/` | The native transport: `Conversation`, the `Adapter` and `Sink` contracts, requests, settings, usage, logins, the queue's hold (`hold.go`: a usage limit stop or a failed turn that waits to be tried again), its `Policy` (`policy.go`: continue, retry and restart delays) and `ClassifyFailure` (a failed turn's stop reason) |
-| `lib/agentstate/` | The values a native agent reports and the API serves: capabilities, login, settings, usage, requests, the limit stop and the retry wait. A leaf package (huma and `lib/util` only), so the packages that serve them don't depend on `lib/native` |
+| `lib/agentstate/` | The values a native agent reports and the API serves: capabilities, login, settings, usage, requests, the limit stop and the retry wait, and `ConversationState`, the conversation's state the observer gets whole, with the `StoredState` that survives a restart. A leaf package (huma and `lib/util` only), so the packages that serve them don't depend on `lib/native` |
 | `lib/native/claude`, `codex`, `pi` | One adapter per agent protocol |
 | `lib/native/agentio` | What those adapters share to run their agent: the process and its loop (`Host`), writing to its stdin, matching its responses to the requests waiting for them, lenient decoding with drift warnings, the snapshot throttle |
 | `lib/native/demo` | `native-demo`, a simulated agent for working on the chat |
@@ -280,9 +280,9 @@ flowchart LR
   proc -- "stdout" --> adapter
   adapter -- "Sink events" --> conv
   conv -- "Emitter: messages, status" --> emitter["EventEmitter"]
-  conv -- "Observer: rich messages, requests,<br/>settings, usage, logins" --> observer["nativeObserver"]
+  conv -- "Observer: state, rich messages,<br/>requests, session" --> observer["nativeObserver"]
   observer --> emitter
-  observer --> db[("State DB")]
+  emitter -- "Persister" --> db[("State DB")]
 ```
 
 `native.Conversation` runs the conversation on top of an `Adapter`, one per agent protocol:
@@ -427,11 +427,17 @@ type Factory func(resume Resume) (Adapter, error)
   expire. An answer the agent didn't confirm may still reach it, so the
   request takes no other answer: it stays pending until the agent closes it
   or the turn ends. Secret answers are redacted everywhere except the input sent to the agent.
-- **Observer.** Changes besides messages and status (rich messages, requests,
-  settings, usage, the session reference, logins) go to an `Observer`, which
-  the server implements to update the emitter and the state DB. It is called
-  with the conversation's lock held, so it must not call back into the
-  conversation.
+- **Observer.** Changes besides messages and status go to an `Observer`,
+  which the server implements to update the emitter. The conversation's
+  state (`agentstate.ConversationState`: capabilities, login, the agent's
+  settings, usage, and its `StoredState`: the settings chosen, a limit stop,
+  a retry wait) comes whole through `StateChanged`, where a part changes and
+  only if something did; what changes together comes as one. The rest are
+  events: an agent accepts turns (`Started`), rich messages, the timeline,
+  requests, the session's name and reference, an exit. It is called with
+  the conversation's lock held, so it must not call back into the
+  conversation. A restart restores the stored state through
+  `native.Config.State`.
 - **Processes.** `procutil` starts the agent in its own process group, with the
   environment the adapter builds with `lib/procenv`, which leaves out the
   variables of a parent agent session. `agentio.Host` runs the process for
@@ -543,9 +549,38 @@ usage limit stop, a retry wait, login).
   with results, and the open requests, and forgets the conversation on a
   reset. The dispatcher delivers the events one at a time from a queue, with
   retries, and signs them with `--webhook-secret`.
+- `SetState` takes the conversation's state whole and diffs it against the
+  last: what changed of it goes out as one `status_change`, each part absent
+  until the agent reported it (an agent without settings shows none), and the
+  capabilities and usage stay while no agent runs.
 - With a state DB, the emitter hands every change to its `Persister`, which
   encodes messages and rich messages on its writer goroutine from a copy, so
-  a long message streaming in doesn't hold up the emitter.
+  a long message streaming in doesn't hold up the emitter. That is the one
+  path to the state DB: native → observer → emitter → `Persister`. The
+  stored state is handed over when it changed (`SetStoredState`), the session
+  reference every time it is reported (a reset deleted it, also when it stays
+  the same).
+
+### Adding a piece of conversation state
+
+A value the agent reports or the conversation keeps (beyond messages and requests) goes through
+the observer as part of the state:
+
+1. Add a field to `agentstate.ConversationState` (`lib/agentstate/conversation.go`), or to
+   `StoredState` if it survives an AgentAPI restart, with its JSON name. `Clone` copies what it
+   points to.
+2. Set it in `lib/native` where it changes and call `stateChangedLocked`; `stateLocked` puts it in
+   the state.
+3. Show it in status updates: a field in `convstate.StatusChangeBody` (`lib/convstate/events.go`,
+   with `omitempty` if it may be absent) and its diff in `EventEmitter.SetState`
+   (`events_status.go`).
+4. If clients that watch many need it, add it to `instanceapi.SummaryBody` (`summaryLocked` in
+   `lib/convstate/summary.go`) and `instanceapi.WebhookInstanceState`, the data of the
+   `instance.*` webhook events (`webhookInstanceState` in `lib/httpapi/webhook_api.go`).
+5. Run `make gen` and `bun run gen:api` in `chat/`, and document it.
+
+A field of `StoredState` is stored, restored and given back to the conversation without other
+changes, inside version 1 of `conversation_state` (below).
 
 ## The message queue
 
@@ -581,7 +616,7 @@ The queue is persisted with the conversation, on every change (`storeQueue`, fro
   `queue`, `tasks` (each as the server encoded it, by the ID of the message
   that started it), and `meta`, which holds the agent type, transport and working
   directory, the epoch and seq, the session reference and name, the
-  settings chosen for the session, a usage limit stop, a retry wait, the webhook settings
+  conversation's stored state (`conversation_state`, below), the webhook settings
   changed through the API (with a fingerprint of the startup flags, which win
   when they change) and when a
   client last showed the conversation (`seen_at`), and which AgentAPI may
@@ -609,6 +644,19 @@ The queue is persisted with the conversation, on every change (`storeQueue`, fro
   version it needs. `meta` also records the AgentAPI that last closed the
   file (`writer_version`). Releases up to 1.9.0 read neither and refuse any
   schema newer than theirs; the schema hasn't changed since 1.0.
+- `conversation_state` holds the settings chosen for the session, a usage
+  limit stop and a retry wait as one JSON object,
+  `{"version": 1, "settings": {...}, "limit_stop": {...}, "retry_wait": {...}}`;
+  a reset keeps it. A field added to it keeps the version, which an older
+  AgentAPI reads as far as it knows; one that would mislead it raises the
+  version, and an AgentAPI that finds a higher one leaves the object alone
+  and reads the old keys. Up to 3.7.2 the three had a key each (`settings`,
+  `limit_stop`, `retry_wait`). The first open of such a file moves them into
+  `conversation_state`. For one release the old keys are written too, in the
+  same write, so an older AgentAPI opened on the file still finds the
+  limit stop, retry wait and settings; what it changes there wins when a
+  newer one opens the file again (the keys differ from the object). A later
+  release stops writing them.
 - What an older AgentAPI doesn't know, its resets and truncations don't
   clear. A restored task whose message is gone or is another one now is
   dropped, as is one whose message row couldn't be read.

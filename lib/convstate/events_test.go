@@ -391,6 +391,8 @@ type recordingPersister struct {
 	deleted   []string
 	epoch     string
 	seq       uint64
+	refs      []string
+	stored    []agentstate.StoredState
 }
 
 func newRecordingPersister() *recordingPersister {
@@ -421,13 +423,13 @@ func (p *recordingPersister) DeleteRequest(id string) {
 	delete(p.requests, id)
 }
 
-func (p *recordingPersister) SetSeq(epoch string, seq uint64)    { p.epoch, p.seq = epoch, seq }
-func (p *recordingPersister) SetSessionName(string)              {}
-func (p *recordingPersister) SetSessionRef(string)               {}
-func (p *recordingPersister) SetSettings(agentstate.Settings)    {}
-func (p *recordingPersister) SetLimitStop(*agentstate.LimitStop) {}
-func (p *recordingPersister) SetRetryWait(*agentstate.RetryWait) {}
-func (p *recordingPersister) SetSeenAt(time.Time)                {}
+func (p *recordingPersister) SetSeq(epoch string, seq uint64) { p.epoch, p.seq = epoch, seq }
+func (p *recordingPersister) SetSessionName(string)           {}
+func (p *recordingPersister) SetSessionRef(ref string)        { p.refs = append(p.refs, ref) }
+func (p *recordingPersister) SetStoredState(state agentstate.StoredState) {
+	p.stored = append(p.stored, state)
+}
+func (p *recordingPersister) SetSeenAt(time.Time) {}
 func (p *recordingPersister) PutTask(id int, data []byte, _ uint64) {
 	if p.tasks == nil {
 		p.tasks = map[int]string{}
@@ -816,4 +818,99 @@ func TestEventEmitterHoldsServerLifecycle(t *testing.T) {
 	emitter.SetLifecycle(instanceapi.LifecycleStarting)
 	emitter.EmitStatus(conv.StatusStable)
 	assert.Equal(t, instanceapi.LifecycleReady, emitter.StatusSnapshot().Lifecycle)
+}
+
+// The conversation's state comes whole; status updates show what of it
+// changed, once per change, and its stored part is stored when it changes.
+func TestEventEmitterSetState(t *testing.T) {
+	persister := newRecordingPersister()
+	e := NewEventEmitter(WithPersister(persister))
+	_, ch, _ := e.Subscribe()
+	statuses := func() []StatusChangeBody {
+		var out []StatusChangeBody
+		for {
+			select {
+			case event := <-ch:
+				if body, ok := event.Payload.(StatusChangeBody); ok {
+					out = append(out, body)
+				}
+			default:
+				return out
+			}
+		}
+	}
+
+	// Nothing the agent reported yet: no settings, usage or capabilities.
+	e.SetState(agentstate.ConversationState{})
+	assert.Empty(t, statuses())
+	assert.Empty(t, persister.stored)
+	snapshot := e.StatusSnapshot()
+	assert.Nil(t, snapshot.Settings)
+	assert.Nil(t, snapshot.Usage)
+	assert.Nil(t, snapshot.Capabilities)
+
+	state := agentstate.ConversationState{
+		Capabilities: &agentstate.Capabilities{Steer: true},
+		Settings:     agentstate.Settings{Model: "opus"},
+		Usage:        &agentstate.AgentUsage{},
+	}
+	e.SetState(state)
+	got := statuses()
+	require.Len(t, got, 1, "the changes come as one")
+	assert.Equal(t, &agentstate.Capabilities{Steer: true}, got[0].Capabilities)
+	assert.Equal(t, &agentstate.Settings{Model: "opus"}, got[0].Settings)
+	assert.Equal(t, &agentstate.AgentUsage{}, got[0].Usage, "a usage reported empty shows")
+	assert.Empty(t, persister.stored, "none of it is stored")
+
+	// The settings chosen are stored, and don't show.
+	state.Stored.Settings = agentstate.Settings{Model: "opus"}
+	e.SetState(state)
+	assert.Empty(t, statuses())
+	assert.Equal(t, []agentstate.StoredState{{Settings: agentstate.Settings{Model: "opus"}}}, persister.stored)
+
+	// A limit stop shows and is stored; the same state again does neither.
+	state.Stored.LimitStop = &agentstate.LimitStop{Message: "limit"}
+	e.SetState(state)
+	e.SetState(state)
+	got = statuses()
+	require.Len(t, got, 1)
+	assert.Equal(t, "limit", got[0].LimitStop.Message)
+	assert.Len(t, persister.stored, 2)
+
+	// The capabilities and usage stay while no agent runs; the settings
+	// show once they changed, empty too.
+	state.Capabilities, state.Usage, state.Settings = nil, nil, agentstate.Settings{}
+	e.SetState(state)
+	got = statuses()
+	require.Len(t, got, 1)
+	assert.Equal(t, &agentstate.Capabilities{Steer: true}, got[0].Capabilities)
+	assert.NotNil(t, got[0].Usage)
+	assert.Equal(t, &agentstate.Settings{}, got[0].Settings)
+}
+
+// The session ref is stored every time it is reported: a reset removed it
+// from the database, also when it stays the same.
+func TestEventEmitterSetSessionRef(t *testing.T) {
+	persister := newRecordingPersister()
+	e := NewEventEmitter(WithPersister(persister))
+	e.SetSessionRef("s1")
+	e.Reset()
+	e.SetSessionRef("s1")
+	assert.Equal(t, []string{"s1", "s1"}, persister.refs)
+	assert.Equal(t, "s1", e.StatusSnapshot().AgentSessionID)
+}
+
+// A restored stored state shows until the conversation reports its own,
+// and isn't stored again.
+func TestEventEmitterRestoresTheStoredState(t *testing.T) {
+	persister := newRecordingPersister()
+	e := NewEventEmitter(WithPersister(persister))
+	stored := agentstate.StoredState{Settings: agentstate.Settings{Model: "opus"}, RetryWait: &agentstate.RetryWait{Message: "502", Attempt: 1}}
+	e.Restore(EmitterState{SessionRef: "s1", Stored: stored})
+	snapshot := e.StatusSnapshot()
+	assert.Equal(t, "s1", snapshot.AgentSessionID)
+	assert.Equal(t, stored.RetryWait, snapshot.RetryWait)
+	e.SetState(agentstate.ConversationState{Stored: stored})
+	assert.Empty(t, persister.stored)
+	assert.Empty(t, persister.refs)
 }
