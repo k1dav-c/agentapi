@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v3.7.4
 
 ### Internal
 
