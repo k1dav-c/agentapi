@@ -1,10 +1,9 @@
 "use client";
 
-import {useState} from "react";
 import {Check, Copy, ExternalLink} from "lucide-react";
 import type {IBufferLine, ILink, ILinkProvider, Terminal} from "@xterm/xterm";
 import {findTerminalLinks, shortLink, type TerminalLine} from "@/lib/terminal-links";
-import {copyText} from "@/lib/clipboard";
+import {useCopy} from "@/lib/use-copy";
 
 // How many lines around a line are read to find a link that runs over it.
 const AROUND = 20;
@@ -79,17 +78,9 @@ export function latestLink(term: Terminal, lines = 40): string | null {
 // open or copy with one tap: a long link wraps over lines and is hard to hit
 // in the terminal, above all on a phone.
 export function LatestLinkChip({url}: {url: string | null}) {
-  const [copied, setCopied] = useState(false);
+  // A link that can't be copied stays there to open.
+  const {copied, copy} = useCopy(1500);
   if (!url) return null;
-  const copy = async () => {
-    try {
-      await copyText(url);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // The link stays there to open.
-    }
-  };
   return (
     // On a phone it takes a row of its own under the title and Back to chat.
     <span className="order-last flex min-w-0 basis-full items-center gap-1 rounded-md border bg-muted/50 py-0.5 pr-0.5 pl-2 sm:order-none sm:basis-auto" data-terminal-link>
@@ -105,7 +96,7 @@ export function LatestLinkChip({url}: {url: string | null}) {
       </a>
       <button
         type="button"
-        onClick={() => void copy()}
+        onClick={() => void copy(url)}
         className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-background hover:text-foreground"
         title="Copy the link"
         aria-label="Copy the link"

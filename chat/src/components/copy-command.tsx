@@ -1,8 +1,7 @@
 "use client";
 
-import {useState} from "react";
 import {Check, Copy} from "lucide-react";
-import {copyText} from "@/lib/clipboard";
+import {useCopy} from "@/lib/use-copy";
 import {cn} from "@/lib/utils";
 
 // CopyCommand is a shell command to copy and run, with its copy button;
@@ -10,7 +9,7 @@ import {cn} from "@/lib/utils";
 // the button copies when it differs from what shows, such as a command
 // whose secret is masked on screen.
 export function CopyCommand({text, copy = text, wrap = false}: {text: string; copy?: string; wrap?: boolean}) {
-  const [copied, setCopied] = useState(false);
+  const {copied, copy: copyCommand} = useCopy();
   return (
     <div className="mt-2 flex items-stretch overflow-hidden rounded-lg border bg-term text-term-foreground">
       <code
@@ -23,16 +22,8 @@ export function CopyCommand({text, copy = text, wrap = false}: {text: string; co
       </code>
       <button
         type="button"
-        onClick={() => {
-          // copyText works on a plain-http page too, as a hub on a VPN is.
-          copyText(copy).then(
-            () => {
-              setCopied(true);
-              setTimeout(() => setCopied(false), 1600);
-            },
-            () => {},
-          );
-        }}
+        // copyText works on a plain-http page too, as a hub on a VPN is.
+        onClick={() => void copyCommand(copy)}
         className="flex w-11 shrink-0 items-center justify-center border-l border-white/10 text-term-dim outline-none hover:text-term-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
         aria-label={copied ? "Copied" : "Copy the command"}
       >

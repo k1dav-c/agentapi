@@ -15,15 +15,8 @@ import { useFileViewer, type FileViewer, type FileViewerTab } from "../file-view
 import { DiffView } from "../diff-view";
 import { PathLabel } from "../file-path";
 import { CopyButton } from "./message-item";
+import {formatMilliseconds} from "@/lib/clock";
 import {isSubagentTool, openLineage} from "@/lib/subagents";
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return "< 1s";
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  const minutes = Math.floor(ms / 60_000);
-  const seconds = Math.round((ms % 60_000) / 1000);
-  return `${minutes}m ${seconds}s`;
-}
 
 export function ToolDetail({
   label,
@@ -295,7 +288,7 @@ export const ToolCallCard = React.memo(function ToolCallCard({
           ) : isFailed ? (
             <ToolChip tone="fault">error</ToolChip>
           ) : null}
-          {durationMs > 0 && <ToolChip>{formatDuration(durationMs)}</ToolChip>}
+          {durationMs > 0 && <ToolChip>{formatMilliseconds(durationMs)}</ToolChip>}
           <ArrowDown className="size-3 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
         </span>
         {preview && (

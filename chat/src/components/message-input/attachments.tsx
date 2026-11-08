@@ -8,6 +8,7 @@ import type {FileUploadResponse, UploadOptions} from "@/lib/chat-api";
 import {isImageFile, uploadedImageURL} from "@/lib/uploads";
 import {parsePersistedAttachments, removeAttachmentToken} from "@/lib/attachment-state";
 import {usePersisted} from "@/lib/use-persisted";
+import {formatSize} from "@/lib/format-size";
 
 export const MAX_UPLOAD_SIZE = 100 * 1024 * 1024;
 
@@ -154,7 +155,7 @@ export function AttachmentList({
                 {attachment.name}
               </span>
               <span className="shrink-0 text-[10px] text-muted-foreground">
-                {formatFileSize(attachment.size)}
+                {formatSize(attachment.size)}
               </span>
             </div>
             {attachment.status === "uploading" ? (
@@ -224,12 +225,6 @@ export function AttachmentList({
       </p>
     </div>
   );
-}
-
-function formatFileSize(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 // An image attachment shows a thumbnail: from the browser while it uploads

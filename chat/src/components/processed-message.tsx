@@ -7,7 +7,7 @@ import rehypeHighlight from "rehype-highlight";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import {common} from "@/lib/highlight-langs";
-import {copyText} from "@/lib/clipboard";
+import {useCopy} from "@/lib/use-copy";
 import {fileLinkRef, parseFilePathRef, type FilePathRef} from "@/lib/file-refs";
 import {FilePathCode, inlineCodeClass} from "./file-path";
 import {useFileViewer} from "./file-viewer-context";
@@ -153,7 +153,7 @@ function linkifyTerminalText(content: string) {
 }
 
 function CodeBlockCopy({ children }: { children: React.ReactNode }) {
-  const [copied, setCopied] = React.useState(false);
+  const {copied, copy} = useCopy();
 
   const getCodeString = (node: React.ReactNode): string => {
     if (typeof node === "string") return node;
@@ -164,15 +164,8 @@ function CodeBlockCopy({ children }: { children: React.ReactNode }) {
     return "";
   };
 
-  const handleCopy = async () => {
-    try {
-      await copyText(getCodeString(children));
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1600);
-    } catch {
-      // Clipboard access may be blocked
-    }
-  };
+  // Clipboard access may be blocked: the button stays as it is.
+  const handleCopy = () => copy(getCodeString(children));
 
   return (
     <div className="group/code relative my-3">

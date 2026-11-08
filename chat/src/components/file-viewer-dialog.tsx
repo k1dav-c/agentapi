@@ -17,6 +17,7 @@ import {isRelativeRef, previewKind, resolveRelativeRef, withPreviewCSP, type Pre
 import {highlightCode, languageForPath, type CodeToken} from "@/lib/code-highlight";
 import {cn} from "@/lib/utils";
 import {useLoaded, type Loaded} from "@/lib/use-loaded";
+import {formatBytes} from "@/lib/format-size";
 
 // The file viewer: a file the agent works on, with its contents (File), a
 // preview of an HTML, Markdown or SVG file (Preview), and its changes
@@ -446,16 +447,3 @@ function SectionHeading({title, note, badge, copy}: {title: string; note?: strin
   );
 }
 
-// "12,345 bytes (12.1 KB)".
-function formatBytes(bytes: number): string {
-  const exact = `${bytes.toLocaleString("en-US")} ${bytes === 1 ? "byte" : "bytes"}`;
-  if (bytes < 1024) return exact;
-  const units = ["KB", "MB", "GB"];
-  let value = bytes / 1024;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit++;
-  }
-  return `${exact} (${value.toFixed(value < 10 ? 1 : 0)} ${units[unit]})`;
-}
