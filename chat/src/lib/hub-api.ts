@@ -1,5 +1,5 @@
 // The hub's API for the changes its page makes: an instance's pin, group
-// and mute, forgetting one, the order of the pinned ones, and the
+// and mute, forgetting one or the stopped ones, the order of the pinned ones, and the
 // favorites. Each change comes back on the event stream (/api/events),
 // like any other; a call throws HubAPIError when the hub refuses it or
 // doesn't answer.
@@ -47,6 +47,15 @@ export function createHubAPI(root: string, fetcher: Fetcher = (url, init) => fet
     changeInstance: (id: string, change: InstanceChange) => done(call(instance(id), json("PATCH", change))),
     // Forgets an instance the hub doesn't follow now.
     forgetInstance: (id: string) => done(call(instance(id), {method: "DELETE"})),
+    // Forgets those of ids that are stopped (POST /api/instances/forget),
+    // at once, and returns those the hub forgot: one that started again
+    // since stays.
+    forgetStopped: async (ids: string[]): Promise<string[]> => {
+      const response = await call("/api/instances/forget", json("POST", {ids} satisfies HubWire["ForgetBody"]));
+      const body = (await response?.json().catch(() => null)) as Partial<Record<keyof HubWire["ForgetBody"], unknown>> | null;
+      if (!Array.isArray(body?.ids)) throw new HubAPIError("The hub's answer doesn't say which it forgot.", response?.status ?? 0);
+      return body.ids.filter((id): id is string => typeof id === "string");
+    },
     // The order of all the pinned instances (PUT /api/pins).
     setPins: (ids: string[]) => done(call("/api/pins", json("PUT", {ids} satisfies HubWire["PinsBody"]))),
     // Replaces the favorites (PUT /api/favorites), and returns them as the

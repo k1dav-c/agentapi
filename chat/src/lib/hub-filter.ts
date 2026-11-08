@@ -19,6 +19,31 @@ export function matchesFilter(instance: HubInstance, filter: HubFilter): boolean
   }
 }
 
+// stoppedOf are the instances that stopped, which Forget all stopped
+// forgets; not those unreachable, which may come back by themselves.
+export function stoppedOf(instances: Iterable<HubInstance>): HubInstance[] {
+  return [...instances].filter((instance) => instanceState(instance) === "stopped");
+}
+
+// stoppedShown are the stopped ones of those the list shows, which the
+// Offline filter offers to forget; none under another filter.
+export function stoppedShown(filter: HubFilter, shown: Iterable<HubInstance>): HubInstance[] {
+  return filter === "offline" ? stoppedOf(shown) : [];
+}
+
+// forgotText is the toast once the hub forgot forgot of the asked stopped
+// agents: all, some (the others started again), or none.
+export function forgotText(asked: number, forgot: number): {ok: boolean; title: string; description?: string} {
+  const agents = (n: number) => `${n} ${n === 1 ? "agent" : "agents"}`;
+  if (forgot === asked) return {ok: true, title: `Forgot ${agents(forgot)}`};
+  const left = asked - forgot;
+  return {
+    ok: forgot > 0,
+    title: forgot > 0 ? `Forgot ${forgot} of ${agents(asked)}` : `Couldn't forget ${agents(asked)}`,
+    description: `${agents(left)} ${left === 1 ? "isn't" : "aren't"} stopped now, so the hub kept ${left === 1 ? "it" : "them"}.`,
+  };
+}
+
 export function countFilters(instances: Iterable<HubInstance>): Record<HubFilter, number> {
   const counts: Record<HubFilter, number> = {all: 0, "needs-you": 0, working: 0, unread: 0, offline: 0};
   for (const instance of instances) {

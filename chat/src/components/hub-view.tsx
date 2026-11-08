@@ -2,7 +2,8 @@
 
 import {useMemo, useRef, useState} from "react";
 import {Button} from "@/components/ui/button";
-import {chatURL, displayName, hubRoot} from "@/lib/hub";
+import {chatURL, displayName, hubRoot, type HubInstance} from "@/lib/hub";
+import {stoppedOf} from "@/lib/hub-filter";
 import {groupNames, groupOf} from "@/lib/hub-groups";
 import {hostPrefix, machineOf} from "@/lib/hub-machines";
 import {movePin, pinOf, sortPinned} from "@/lib/hub-order";
@@ -10,7 +11,7 @@ import {spendTotals} from "@/lib/hub-spend";
 import {useStableCallback} from "@/lib/use-stable-callback";
 import {cn} from "@/lib/utils";
 import {HubMark} from "./hub/brand";
-import {AddInstance, GroupName, type Naming} from "./hub/dialogs";
+import {AddInstance, ForgetStopped, GroupName, type Naming} from "./hub/dialogs";
 import {HubClock} from "./hub/clock";
 import {HubList} from "./hub/hub-list";
 import {basePath, FrameFavorites, FrameInfo, InstanceBar} from "./hub/instance-bar";
@@ -44,6 +45,8 @@ export function HubView() {
   const [adding, setAdding] = useState(false);
   const [naming, setNaming] = useState<Naming | null>(null);
   const [settings, setSettings] = useState<SettingsSection | null>(null);
+  // The stopped agents the dialog asks to forget.
+  const [forgetting, setForgetting] = useState<HubInstance[] | null>(null);
   const search = useRef<HTMLInputElement>(null);
   const listWidth = useListWidth();
   const view = useListView();
@@ -54,6 +57,7 @@ export function HubView() {
   const filters = useListFilters(all, view);
   const {counts, sections} = filters;
   const spend = useMemo(() => spendTotals(all), [all]);
+  const stopped = useMemo(() => stoppedOf(all), [all]);
   // The same list while the names are the same, so the rows don't render
   // again for it.
   const nameList = groupNames(all).join("\n");
@@ -98,6 +102,12 @@ export function HubView() {
   const forget = useStableCallback(async (id: string) => {
     if ((await actions.forget(id)) && selected === id) select(undefined);
   });
+  // Forget all stopped closes the agent too, when the hub forgot it.
+  const forgetStopped = async (ids: string[]) => {
+    const forgot = await actions.forgetStopped(ids);
+    if (selected && forgot.includes(selected)) select(undefined);
+    setForgetting(null);
+  };
   // Moves a pinned instance past the next pinned row the list shows; the hub
   // keeps the order of all of them.
   const movePinned = useStableCallback(async (id: string, step: -1 | 1) => {
@@ -181,6 +191,7 @@ export function HubView() {
               onRename={(from) => setNaming({mode: "rename", from})}
               selected={selected}
               onAdd={() => setAdding(true)}
+              onForgetStopped={setForgetting}
             />
           </HubListContext.Provider>
           <p className="hidden border-t px-4 py-2 text-[11px] text-muted-foreground md:block" aria-hidden="true">
@@ -216,7 +227,17 @@ export function HubView() {
               />
             </>
           ) : (
-            <Overview root={root} instances={all} hubVersion={hubVersion} counts={counts} onOpen={select} onFilter={filters.setFilter} onAdd={() => setAdding(true)} />
+            <Overview
+              root={root}
+              instances={all}
+              hubVersion={hubVersion}
+              counts={counts}
+              stopped={stopped.length}
+              onOpen={select}
+              onFilter={filters.setFilter}
+              onAdd={() => setAdding(true)}
+              onForgetStopped={() => setForgetting(stopped)}
+            />
           )}
         </section>
 
@@ -226,6 +247,7 @@ export function HubView() {
         </div>
         <AddInstance root={root} open={adding} onOpenChange={setAdding} onAdded={(id) => select(id)} />
         <HubSettings root={root} section={settings} onClose={() => setSettings(null)} favorites={favorites} onFavoritesSaved={setFavorites} />
+        <ForgetStopped instances={forgetting} onClose={() => setForgetting(null)} onForget={forgetStopped} />
         <GroupName
           naming={naming}
           onClose={() => setNaming(null)}

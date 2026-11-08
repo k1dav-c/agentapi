@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -1135,4 +1136,58 @@ func TestHubRefusesAReplayAfterARestart(t *testing.T) {
 	event["id"] = "r2"
 	require.Equal(t, http.StatusNoContent, postEvent(t, again, event, hubSecret, time.Now()))
 	assert.Len(t, instances(t, again), 1, "a new event counts")
+}
+
+// POST /api/instances/forget forgets those listed that are stopped, at
+// once: one that runs, or that the hub doesn't have, stays as it is.
+func TestHubForgetStopped(t *testing.T) {
+	hubSrv := startHubWith(t, following(""), false)
+	n := 0
+	post := func(id, typ string) {
+		n++
+		event := map[string]any{
+			"id": fmt.Sprintf("e%d", n), "type": typ, "created_at": time.Now(),
+			"instance": map[string]any{"id": id, "server_id": "s-" + id, "url": "http://127.0.0.1:1", "agent_type": "claude"},
+		}
+		require.Equal(t, http.StatusNoContent, postEvent(t, hubSrv.URL, event, hubSecret, time.Now()))
+	}
+	for _, id := range []string{"dev:1", "dev:2", "dev:3"} {
+		post(id, "instance.started")
+	}
+	post("dev:1", "instance.stopped")
+	post("dev:3", "instance.stopped")
+	require.Equal(t, http.StatusOK, request(t, http.MethodPatch, hubSrv.URL+"/api/instances/dev:3", hubToken, map[string]any{"pinned": true}, nil))
+
+	events := openEvents(t, hubSrv.URL+"/api/events")
+	require.Equal(t, "instances", next(t, events).event)
+
+	var forgot struct {
+		IDs []string `json:"ids"`
+	}
+	require.Equal(t, http.StatusOK, request(t, http.MethodPost, hubSrv.URL+"/api/instances/forget", hubToken, map[string]any{"ids": []string{"dev:3", "dev:2", "nope", "dev:1"}}, &forgot))
+	assert.Equal(t, []string{"dev:3", "dev:1"}, forgot.IDs, "the stopped ones, in the order sent")
+	list := instances(t, hubSrv.URL)
+	require.Len(t, list, 1)
+	assert.Equal(t, "dev:2", list[0].ID)
+	var removed []string
+	for len(removed) < 2 {
+		e := next(t, events)
+		if e.event == "removed" {
+			var body struct {
+				ID string `json:"id"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(e.data), &body))
+			removed = append(removed, body.ID)
+		}
+	}
+	assert.ElementsMatch(t, []string{"dev:1", "dev:3"}, removed)
+
+	// None stopped: none forgotten, and an empty list back.
+	forgot.IDs = nil
+	require.Equal(t, http.StatusOK, request(t, http.MethodPost, hubSrv.URL+"/api/instances/forget", hubToken, map[string]any{"ids": []string{"dev:2"}}, &forgot))
+	assert.Equal(t, []string{}, forgot.IDs)
+	assert.Len(t, instances(t, hubSrv.URL), 1)
+
+	assert.Equal(t, http.StatusBadRequest, request(t, http.MethodPost, hubSrv.URL+"/api/instances/forget", hubToken, map[string]any{}, nil))
+	assert.Equal(t, http.StatusUnauthorized, request(t, http.MethodPost, hubSrv.URL+"/api/instances/forget", "", map[string]any{"ids": []string{"dev:2"}}, nil))
 }

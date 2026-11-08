@@ -1,10 +1,10 @@
 "use client";
 
 import {useEffect, useState} from "react";
-import {Plus, RefreshCw, TriangleAlert} from "lucide-react";
+import {Plus, RefreshCw, Trash2, TriangleAlert} from "lucide-react";
 import {Button} from "@/components/ui/button";
 import {Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle} from "@/components/ui/dialog";
-import type {HubWire} from "@/lib/hub";
+import {displayName, type HubInstance, type HubWire} from "@/lib/hub";
 import {hubLimits} from "@/lib/hub-schema";
 import {JoinMachine} from "./join-machine";
 
@@ -150,6 +150,71 @@ export function GroupName({naming, onClose, onSave}: {naming: Naming | null; onC
             </Button>
           </DialogFooter>
         </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// forgetStoppedTitle is the title of the dialog that forgets n stopped
+// agents.
+export function forgetStoppedTitle(n: number): string {
+  return `Forget ${n} stopped ${n === 1 ? "agent" : "agents"}?`;
+}
+
+// StoppedAgents lists the agents Forget all stopped forgets: each one's
+// name and machine, scrolling when they are many.
+export function StoppedAgents({instances}: {instances: readonly HubInstance[]}) {
+  return (
+    <ul aria-label="Stopped agents" className="max-h-60 divide-y overflow-y-auto rounded-lg border bg-card text-sm">
+      {instances.map((instance) => (
+        <li key={instance.id} className="flex items-baseline justify-between gap-3 px-3 py-2">
+          <span className="min-w-0 truncate font-medium">{displayName(instance)}</span>
+          {instance.hostname && <span className="max-w-[45%] shrink-0 truncate text-xs text-muted-foreground">{instance.hostname}</span>}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+// ForgetStopped asks before it forgets the stopped agents (instances);
+// null is closed. The list stays as it was asked: one that stops meanwhile
+// isn't added under the reader's hand.
+export function ForgetStopped({
+  instances,
+  onClose,
+  onForget,
+}: {
+  instances: readonly HubInstance[] | null;
+  onClose: () => void;
+  onForget: (ids: string[]) => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const n = instances?.length ?? 0;
+  const forget = async () => {
+    if (!instances) return;
+    setBusy(true);
+    try {
+      await onForget(instances.map((instance) => instance.id));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Dialog open={instances !== null} onOpenChange={(open) => !open && !busy && onClose()}>
+      <DialogContent className="grid-cols-[minmax(0,1fr)] sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{forgetStoppedTitle(n)}</DialogTitle>
+          <DialogDescription>The hub stops listing {n === 1 ? "it" : "them"}. One that reports to the hub again comes back by itself.</DialogDescription>
+        </DialogHeader>
+        {instances && <StoppedAgents instances={instances} />}
+        <DialogFooter>
+          <Button variant="outline" className="h-10" onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button variant="destructive" className="h-10" onClick={() => void forget()} disabled={busy || n === 0}>
+            {busy ? <RefreshCw className="animate-spin" /> : <Trash2 />} Forget
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

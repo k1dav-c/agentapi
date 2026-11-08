@@ -207,6 +207,7 @@ func (h *Hub) routes(r chi.Router) {
 		r.Post("/api/instances", h.addInstance)
 		r.Patch("/api/instances/{id}", h.updateInstance)
 		r.Delete("/api/instances/{id}", h.removeInstance)
+		r.Post("/api/instances/forget", h.forgetStopped)
 		r.Put("/api/pins", h.setPins)
 		r.Get("/api/favorites", h.getFavorites)
 		r.Put("/api/favorites", h.setFavorites)
@@ -490,6 +491,34 @@ func (h *Hub) removeInstance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// forgetBody is POST /api/instances/forget and its answer: the instances
+// to forget, and those the hub forgot.
+type forgetBody struct {
+	IDs []string `json:"ids" nullable:"false"`
+}
+
+// forgetStopped forgets, at once, the instances listed that are stopped
+// (POST /api/instances/forget): {"ids": [...]} lists them, and the answer
+// lists those the hub forgot. One that isn't stopped now (it started
+// again since the page listed it), or that the hub doesn't have, stays as
+// it is. Each one forgotten is a removed event, as with DELETE.
+func (h *Hub) forgetStopped(w http.ResponseWriter, r *http.Request) {
+	var body forgetBody
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil || body.IDs == nil {
+		writeError(w, http.StatusBadRequest, "send {\"ids\": [...]}: the stopped instances to forget")
+		return
+	}
+	// Under watchMu, so that a run of one that starts meanwhile keeps the
+	// watch it gets.
+	h.watchMu.Lock()
+	forgot := h.store.removeStopped(body.IDs)
+	for _, id := range forgot {
+		h.cancelWatchLocked(id)
+	}
+	h.watchMu.Unlock()
+	writeJSON(w, http.StatusOK, forgetBody{IDs: forgot})
 }
 
 // hubHeartbeat is how often the browser's stream gets a heartbeat.

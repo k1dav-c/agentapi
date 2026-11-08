@@ -1,6 +1,21 @@
 import {describe, expect, test} from "bun:test";
 import {idleInstance as instance, summary} from "./hub-fixtures";
-import {agentLabel, agentOf, agentsIn, countAgents, countFilters, matchesAgents, matchesSearch, nothingMatches, parseAgents, shownAgents, toggleAgent} from "./hub-filter";
+import {
+  agentLabel,
+  agentOf,
+  agentsIn,
+  countAgents,
+  countFilters,
+  forgotText,
+  matchesAgents,
+  matchesSearch,
+  nothingMatches,
+  parseAgents,
+  shownAgents,
+  stoppedOf,
+  stoppedShown,
+  toggleAgent,
+} from "./hub-filter";
 
 describe("filters", () => {
   test("filters count what needs you, works, finished unseen and can't be reached", () => {
@@ -90,5 +105,33 @@ describe("agent filter", () => {
     expect(nothingMatches("", "working", new Set(["pi", "claude"]))).toBe("No Claude Code or Pi agent is in this state right now");
     expect(nothingMatches("", "unread", new Set(["other", "codex", "claude"]))).toBe("No Claude Code, Codex or other agent is in this state right now");
     expect(nothingMatches("", "all", new Set(["pi"]))).toBe("No Pi agent is here right now");
+  });
+});
+
+describe("forget all stopped", () => {
+  const rows = [
+    instance("a", {state: "stopped", connection: "stopped"}),
+    instance("b", {state: "unreachable", connection: "unreachable"}),
+    instance("c", {state: "muted", summary: summary({attention: "request"})}),
+    instance("d", {state: "stopped", summary: summary({attention: "exited"})}),
+    instance("e", {state: "idle"}),
+    instance("f", {state: "something new"}),
+  ];
+
+  test("counts the stopped ones only: not those unreachable, muted or others", () => {
+    expect(stoppedOf(rows).map((row) => row.id)).toEqual(["a", "d"]);
+  });
+
+  test("the list offers them under the Offline filter only", () => {
+    expect(stoppedShown("offline", rows).map((row) => row.id)).toEqual(["a", "d"]);
+    expect(stoppedShown("offline", [rows[1]])).toEqual([]);
+    expect(stoppedShown("all", rows)).toEqual([]);
+  });
+
+  test("the toast says how many the hub forgot, and why it kept the others", () => {
+    expect(forgotText(3, 3)).toEqual({ok: true, title: "Forgot 3 agents"});
+    expect(forgotText(1, 1)).toEqual({ok: true, title: "Forgot 1 agent"});
+    expect(forgotText(3, 2)).toEqual({ok: true, title: "Forgot 2 of 3 agents", description: "1 agent isn't stopped now, so the hub kept it."});
+    expect(forgotText(2, 0)).toEqual({ok: false, title: "Couldn't forget 2 agents", description: "2 agents aren't stopped now, so the hub kept them."});
   });
 });

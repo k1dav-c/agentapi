@@ -4,6 +4,7 @@ import {useCallback, useMemo, useRef} from "react";
 import {toast} from "sonner";
 import {displayName, type HubInstance} from "@/lib/hub";
 import {createHubAPI, hubErrorText} from "@/lib/hub-api";
+import {forgotText} from "@/lib/hub-filter";
 
 // useHubActions makes the changes the hub page asks for (lib/hub-api.ts).
 // Each comes back on the event stream, like any other; one the hub
@@ -36,6 +37,22 @@ export function useHubActions(root: string, instances: ReadonlyMap<string, HubIn
       // ends the mute then), or ends the mute.
       setMuted: (id: string, muted: boolean) => attempt((name) => `Couldn't ${muted ? "mute" : "unmute"} ${name}`, id, () => api.changeInstance(id, {muted})),
       forget: (id: string) => attempt((name) => `Couldn't forget ${name}`, id, () => api.forgetInstance(id)),
+      // Forgets the stopped ones of ids at once, with one toast, and
+      // returns those the hub forgot.
+      forgetStopped: async (ids: string[]): Promise<string[]> => {
+        let forgot: string[];
+        try {
+          forgot = await api.forgetStopped(ids);
+        } catch (error) {
+          toast.error(`Couldn't forget ${ids.length} stopped ${ids.length === 1 ? "agent" : "agents"}`, {description: hubErrorText(error)});
+          return [];
+        }
+        const {ok, title, description} = forgotText(ids.length, forgot.length);
+        if (ok && !description) toast.success(title);
+        else if (ok) toast.warning(title, {description});
+        else toast.error(title, {description});
+        return forgot;
+      },
       // The order of the pinned ones, after id moved.
       setPins: (ids: string[], id: string) => attempt((name) => `Couldn't move ${name}`, id, () => api.setPins(ids)),
       // Moves the members of a group to another, with one toast for those

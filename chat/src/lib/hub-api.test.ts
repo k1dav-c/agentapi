@@ -55,4 +55,12 @@ describe("the hub's API", () => {
       status: 400,
     });
   });
+
+  test("forgetting the stopped ones posts their IDs, and returns those the hub forgot", async () => {
+    const answers = fetcher(json(200, {ids: ["dev-1:3284"]}));
+    expect(await createHubAPI("/hub", answers).forgetStopped(["dev-1:3284", "dev-2:3284"])).toEqual(["dev-1:3284"]);
+    expect(answers.calls.map(({url, init}) => [init.method, url, init.body])).toEqual([["POST", "/hub/api/instances/forget", '{"ids":["dev-1:3284","dev-2:3284"]}']]);
+    await expect(createHubAPI("", fetcher(json(200, {}))).forgetStopped(["x"])).rejects.toMatchObject({message: "The hub's answer doesn't say which it forgot."});
+    await expect(createHubAPI("", fetcher(json(400, {error: "send ids"}))).forgetStopped([])).rejects.toMatchObject({message: "send ids", status: 400});
+  });
 });

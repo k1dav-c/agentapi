@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- The hub forgets every stopped agent in one go: **Forget N stopped** under the overview's Offline
+  tile, or **Forget all** atop the list under the Offline filter (on a phone too). A dialog lists
+  them by name and machine first. Unreachable agents stay. The new `POST /api/instances/forget`
+  forgets those of the IDs sent that are stopped at that moment, and answers with those it forgot.
+
 ## v3.9.0
 
 ### Features

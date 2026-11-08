@@ -28,6 +28,9 @@ export interface components {
         FavoritesBody: {
             favorites: components["schemas"]["Favorite"][];
         };
+        ForgetBody: {
+            ids: string[];
+        };
         HeartbeatEvent: {
             /** Format: date-time */
             time: string;
