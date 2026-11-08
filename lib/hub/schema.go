@@ -40,6 +40,7 @@ var wireTypes = []reflect.Type{
 	reflect.TypeFor[addInstanceBody](),
 	reflect.TypeFor[pinsBody](),
 	reflect.TypeFor[pinsConflict](),
+	reflect.TypeFor[forgetBody](),
 	reflect.TypeFor[sessionBody](),
 	reflect.TypeFor[signInBody](),
 	reflect.TypeFor[joinInfo](),

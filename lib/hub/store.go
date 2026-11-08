@@ -498,6 +498,37 @@ func (s *store) remove(id string) bool {
 	return true
 }
 
+// removeStopped forgets those of ids whose state is stopped, as remove
+// does, at once, and returns them in the order of ids.
+func (s *store) removeStopped(ids []string) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	forgot := []string{}
+	repin := false
+	for _, id := range ids {
+		i, ok := s.instances[id]
+		if !ok || i.State != instanceapi.StateStopped {
+			continue
+		}
+		delete(s.instances, id)
+		forgot = append(forgot, id)
+		repin = repin || i.Pin > 0
+	}
+	if len(forgot) == 0 {
+		return forgot
+	}
+	var renumbered []*Instance
+	if repin {
+		renumbered = s.numberPinsLocked()
+	}
+	s.changedLocked()
+	for _, id := range forgot {
+		s.notifyLocked(storeEvent{Kind: eventRemoved, Removed: id})
+	}
+	s.notifyEachLocked(renumbered, nil)
+	return forgot
+}
+
 // pinnedLocked returns the pinned instances from the top: by Pin, then by
 // ID. Caller holds s.mu.
 func (s *store) pinnedLocked() []*Instance {

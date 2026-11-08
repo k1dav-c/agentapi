@@ -75,6 +75,21 @@
         ],
         "type": "object"
       },
+      "ForgetBody": {
+        "additionalProperties": false,
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "type": "object"
+      },
       "HeartbeatEvent": {
         "additionalProperties": false,
         "properties": {
