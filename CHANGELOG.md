@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Internal
+
+- The values a native agent reports (capabilities, login, settings, usage, requests, limit stop,
+  retry wait) move to the leaf package `lib/agentstate`: `lib/instanceapi`, `lib/convstate`,
+  `lib/webhook` and `lib/statedb` no longer depend on `lib/native`.
+- The HTTP pieces the hub shares with the server (host and cross-origin checks, compression, the
+  chat's file server and its embedded build, now in `lib/httpmw/chat/`) move to `lib/httpmw`, so
+  `lib/hub` and `cmd/hub` no longer build `lib/httpapi`. A checkout from before keeps an untracked
+  `lib/httpapi/chat/` that can be deleted; `make embed` builds the chat into the new place.
+- The 118 type, constant and variable re-exports in `lib/httpapi`, `lib/convstate`, `lib/hub`,
+  `lib/webhook` and `cmd/server` are gone: huma names a schema after the Go type, so
+  `openapi.json` is unchanged.
+- `native.ClassifyFailure` holds the order of a failed turn's signals (usage limit, then login,
+  then transient) for all three adapters; `native.Policy` holds `--auto-continue`,
+  `--retry-delays` and the restart delays, and `--retry-delays`' default comes from it.
+- `TurnResult.StopReason` is a named type the exhaustive linter checks, and the rate limit
+  statuses are constants. Code only tests reached is removed or moved into test files.
+
 ## v3.7.1
 
 ### Fixes

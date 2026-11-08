@@ -61,7 +61,8 @@ flowchart TB
 | 路徑 | 內容 |
 | --- | --- |
 | `main.go`、`cmd/` | Cobra CLI：`server`（旗標、agent 類型、啟動 agent、訊號、原地重新啟動）、`list`（已登記的 AgentAPI 和它們的摘要）、`hub`（`serve`：hub；`join`、`leave`、`status`：設定檔和執行中 AgentAPI 的 hub webhook）、`restart`（讓已登記的 AgentAPI 原地重新啟動），以及 `update`（會驗證 checksum 的自我更新） |
-| `lib/httpapi/` | HTTP 伺服器：路由與處理常式、佇列、token 驗證、CORS 與跨來源檢查、事件串流、檔案／終端機／webhook 端點，以及嵌入的聊天介面；由它把下面三個套件接起來 |
+| `lib/httpapi/` | HTTP 伺服器：路由與處理常式、佇列、token 驗證、CORS、事件串流、檔案／終端機／webhook 端點；由它把下面三個套件接起來 |
+| `lib/httpmw/` | 伺服器和 hub 共用的 HTTP 元件：`Host` 檢查與 `--allowed-hosts`、`--allowed-origins`、`--bind` 的解析、跨來源防護、壓縮，以及嵌入的聊天介面的檔案伺服器（`lib/httpmw/chat/`） |
 | `lib/convstate/` | 用戶端讀取的對話狀態，不碰 HTTP：`EventEmitter`（變更以 epoch 和 seq 編號、訂閱與重播）、它推導出的任務和摘要、伺服器最後回報的佇列，以及它把每個變更交給的 `Persister` |
 | `lib/webhook/` | Webhook 傳送（`Dispatcher`：佇列、重試、簽章、心跳、public URL 中的 `{ip}`），以及把 emitter 的事件轉成 webhook 事件的 observer（`Observe`，透過 `Source`） |
 | `lib/workspacefs/` | 檔案檢視器從工作目錄讀取的內容（`Dir`）：檔案文字、透過 git 取得的 diff、HTML 預覽、要提供的檔案、路徑搜尋；拒絕的請求是 `Error`，由 `lib/httpapi` 依它的種類轉成狀態碼 |
@@ -70,15 +71,16 @@ flowchart TB
 | `lib/agentlog/` | 各 agent 工作階段紀錄的格式，一種 agent 一個套件（`claudelog`、`codexlog`、`pilog`）：紀錄型別、解析成結構化訊息與時間軸事件的 parser（adapter 也使用）、prompt 與注入內容的辨識、模型呼叫與檔案配置；另有逐行讀取、增量檔案索引和格式變動警告 |
 | `lib/sessions/` | 伺服器持有的 `Store` 讀取目錄中先前的工作階段與對話（`history.go`）、sub agent（`subagents.go`）及花費（`cost.go`） |
 | `lib/pricing/` | 每百萬 tokens 的模型價格（內建 `prices.json` 與 `--prices` 檔案），以及單次呼叫的花費計算 |
-| `lib/native/` | Native transport：`Conversation`、`Adapter` 與 `Sink` 的約定、請求、設定、用量、登入，以及暫停佇列的狀態（`hold.go`：用量限制停下的回合或等待重試的失敗回合） |
+| `lib/native/` | Native transport：`Conversation`、`Adapter` 與 `Sink` 的約定、請求、設定、用量、登入、暫停佇列的狀態（`hold.go`：用量限制停下的回合或等待重試的失敗回合）、它的 `Policy`（`policy.go`：繼續、重試與重新啟動的間隔），以及 `ClassifyFailure`（失敗回合的停止原因） |
+| `lib/agentstate/` | Native agent 回報、API 提供的值：功能、登入、設定、用量、請求、用量限制停止與重試等待。它是末端套件（只用 huma 和 `lib/util`），提供這些值的套件因此不必依賴 `lib/native` |
 | `lib/native/claude`、`codex`、`pi` | 每種 agent 協定各一個 adapter |
 | `lib/native/agentio` | 這些 adapter 執行 agent 時共用的部分：行程與它的迴圈（`Host`）、寫入 stdin、把回應對應到等待中的請求、寬鬆解碼與協定變動警告、快照節流 |
 | `lib/native/demo` | `native-demo`，開發聊天介面用的模擬 agent |
 | `lib/native/nativetest` | 測試用、可以寫腳本控制的假 adapter |
 | `lib/native/procutil` | 子行程：行程群組（process group）與正常關閉流程 |
 | `lib/statedb/` | `--state-db` 的 SQLite 持久保存，以及 `--state-file` 的匯入 |
-| `lib/instanceapi/` | AgentAPI 和同時監看多個 AgentAPI 的客戶端之間的約定：它是誰（`WebhookInstance`，出現在 webhook 事件、摘要和登記檔中，含它的 `AgentType`）、它的摘要、webhook 的外層格式和簽章（`Sign`、`Verify`），以及 hub 對每個實例顯示的狀態（`StateOf`）。`lib/httpapi` 以同樣的名稱保留別名，OpenAPI schema 用的就是這些名稱 |
-| `lib/hub/` | `agentapi hub serve`：實例、頁面上設定的群組和釘選、每個實例這一列顯示的內容最近一次變動的時間，以及 hub 看到它工作的區段（`store.go`、`work.go`，由 `persist.go` 保存在檔案中）、我的最愛提示（`favorites.go`，`GET`／`PUT /api/favorites`，保存在同一個檔案）、有簽章的 webhook 接收端（`webhook.go`）、每個實例的摘要串流（`watch.go`）、登入、瀏覽器的事件串流，以及到實例的代理（`hub.go`、`proxy.go`），還有主機怎麼加入（`join.go`：`GET /api/join` 和啟動 log 列出的位址）；使用說明見 [hub.zh-TW.md](hub.zh-TW.md) |
+| `lib/instanceapi/` | AgentAPI 和同時監看多個 AgentAPI 的客戶端之間的約定：它是誰（`WebhookInstance`，出現在 webhook 事件、摘要和登記檔中，含它的 `AgentType`）、它的摘要、webhook 的外層格式和簽章（`Sign`、`Verify`），以及 hub 對每個實例顯示的狀態（`StateOf`）。它只匯入 `lib/agentstate` 和 `lib/util` |
+| `lib/hub/` | `agentapi hub serve`，建立在 `lib/instanceapi` 和 `lib/httpmw` 上，不經過伺服器：實例、頁面上設定的群組和釘選、每個實例這一列顯示的內容最近一次變動的時間，以及 hub 看到它工作的區段（`store.go`、`work.go`，由 `persist.go` 保存在檔案中）、我的最愛提示（`favorites.go`，`GET`／`PUT /api/favorites`，保存在同一個檔案）、有簽章的 webhook 接收端（`webhook.go`）、每個實例的摘要串流（`watch.go`）、登入、瀏覽器的事件串流，以及到實例的代理（`hub.go`、`proxy.go`），還有主機怎麼加入（`join.go`：`GET /api/join` 和啟動 log 列出的位址）；使用說明見 [hub.zh-TW.md](hub.zh-TW.md) |
 | `lib/sse/` | 依 HTML 標準讀寫 server-sent events：讀取端（合併多行 data:、略過註解、行尾可為 CR、LF 或 CRLF）和寫入端，hub 用它讀實例的摘要串流、寫給瀏覽器的串流。`lib/httpapi` 則用 huma 的 `sse` 寫它的串流 |
 | `lib/netaddr/` | 這台主機的 IPv4 位址：其他主機連得到的位址（hub 的加入網址），以及連到某台主機時使用的位址（`Resolver`，供 `--public-url` 的 `{ip}` 使用） |
 | `lib/userconfig/` | 使用者的設定檔 `~/.agentapi/config.yaml`：以旗標名稱設定，`agentapi server` 讀取、`agentapi hub` 寫入 |
@@ -95,6 +97,15 @@ flowchart TB
 | `internal/version/` | 版本號，建置時寫入 |
 | `chat/` | 聊天介面（Next.js） |
 | `e2e/` | 以腳本化 Claude Code（`e2e/fakeclaude`）進行的端對端測試 |
+
+內部的匯入只有一個方向，從指令往末端套件：
+
+- `cmd/server` → `lib/httpapi` → `lib/convstate`、`lib/webhook`、`lib/native`、`lib/statedb`、
+  `lib/httpmw`
+- `lib/convstate`、`lib/webhook` → `lib/instanceapi` → `lib/agentstate` → `lib/util`
+- `lib/native` 與各 adapter、`lib/statedb` → `lib/agentstate`：只有伺服器會用到 `lib/native`
+- `cmd/hub`、`lib/hub` → `lib/instanceapi`、`lib/httpmw`（它不匯入本儲存庫的任何套件）：hub
+  不會連同伺服器一起編譯
 
 ## 啟動與關閉
 
@@ -157,7 +168,7 @@ flowchart TB
 2. 請求紀錄，會略過靜態檔案、事件串流和終端機。成功的讀取（狀態碼低於 400 的 `GET`、`HEAD`、
    `OPTIONS`）記為 Debug，只有 `--log-level debug` 才會輸出：不然每幾秒輪詢一次 `GET /status` 的
    用戶端會塞滿紀錄。變更和被拒絕的請求記為 Info，伺服器錯誤記為 Warn。
-3. 壓縮（`compress.go`）：對接受 gzip 的用戶端，文字、JSON、事件串流（每個事件都會 flush）和聊天介面
+3. 壓縮（`lib/httpmw` 的 `Compress`）：對接受 gzip 的用戶端，文字、JSON、事件串流（每個事件都會 flush）和聊天介面
    的檔案都會壓縮；圖片則照原樣傳送。hub 使用同一個中介層，它的代理會把實例已壓縮的回應原樣轉送。
 4. 允許來源的 CORS，並允許憑證，讓聊天介面的 cookie 在其他來源也能使用。
 5. 使用 `--api-token` 時的 token 驗證：Bearer token 或聊天介面的 session cookie。它在 CORS
@@ -167,7 +178,7 @@ flowchart TB
 
 | 檔案 | 處理 |
 | --- | --- |
-| `server.go`、`routes.go`、`hosts.go`、`middleware.go`、`compress.go` | 伺服器的設定、啟動與停止；各功能自行註冊的路由；允許的主機與來源；請求記錄；壓縮 |
+| `server.go`、`routes.go`、`middleware.go` | 伺服器的設定、啟動與停止，以及 `lib/httpmw` 的主機、跨來源與壓縮中介層；各功能自行註冊的路由；請求記錄 |
 | `conversation_api.go`、`queue.go`、`turngate.go`、`sse.go` | 訊息、狀態與時間軸；佇列、派送（先送出到期的繼續，`beforeQueue`）與 `queue_update`；現在能不能開始回合（`turnGateLocked`）；`GET /events` |
 | `tasks_api.go` | `GET /tasks`：emitter 推導出的任務（`lib/convstate`） |
 | `summary_api.go`、`spend.go`、`registry.go` | `GET /summary` 與 `POST /tasks/seen`，也就是 emitter 為監看多個 AgentAPI 的用戶端保存的摘要；每分鐘計算的花費；伺服器的登記檔（`instanceRegistry`） |
@@ -178,8 +189,8 @@ flowchart TB
 | `auth.go` | Token 驗證與聊天介面登入（`authAPI`） |
 | `restart.go`、`statedb.go` | 重新啟動（`beginRestart`）；還原與保存狀態 |
 | `update.go` | 透過 API 更新 AgentAPI（`POST /update`、`DELETE /update`、`updater`）與摘要的 `update`；見[重新啟動與更新](#重新啟動與更新) |
-| `convstate.go`、`models.go` | `lib/convstate` 型別的別名；API 的型別 |
-| `embed.go`、`uploads.go` | 嵌入的聊天介面；上傳的檔案（`uploadAPI`，它從操作的 middleware 處理 `POST /upload`：huma v2.32 每次處理 multipart 請求都會改動共用的操作） |
+| `models.go` | API 的型別 |
+| `uploads.go` | 上傳的檔案（`uploadAPI`，它從操作的 middleware 處理 `POST /upload`：huma v2.32 每次處理 multipart 請求都會改動共用的操作） |
 
 huma 以外的 chi 路由提供聊天介面（`/chat/*`，`/` 會重新導向到這裡）、上傳圖片
 （`/uploads/{checksum}/{name}`）與工作目錄圖片（`/files/image`）。
@@ -199,8 +210,8 @@ huma 以外的 chi 路由提供聊天介面（`/chat/*`，`/` 會重新導向到
   goroutine 上執行。
 - `lib/workspacefs` 讀取工作目錄；`fileAPI` 把它拒絕的請求轉成 400、403 和 404。
 
-huma 依 Go 型別名稱為 OpenAPI schema 命名，所以 `lib/httpapi` 為搬走的型別保留別名
-（`convstate.go`、`FileMatch`、`WebhookConfig`），讓 schema 和這個套件的 API 沿用原本的名稱。
+huma 依 Go 型別的名稱為 OpenAPI schema 命名，不管型別宣告在哪個套件，所以處理常式直接使用
+`convstate.StatusChangeBody`、`instanceapi.SummaryBody`、`webhook.Config` 等型別，不需要別名。
 
 ## Native transport
 
@@ -312,8 +323,8 @@ type Factory func(resume Resume) (Adapter, error)
 - **暫時性錯誤。** agent 自己重試後，回合仍因可能自行恢復的上游錯誤失敗時，會以 `transient`
   停止原因結束：HTTP 5xx 或 429（Claude Code 的 `api_error_status`、Codex `codexErrorInfo` 的
   `httpStatusCode`）、Codex 的 `serverOverloaded`、連線失敗、Pi 沒有成功的 `auto_retry_end`，或
-  `IsTransientError` 比對到的文字。用量限制和登入問題會先判斷。對話會記下一個 `RetryWait`，含下次
-  重試的時間（`Policy.RetryDelays`、`--retry-delays`），以警告而不是錯誤回報，並讓佇列等待
+  `IsTransientError` 比對到的文字。用量限制和登入問題會先判斷（三個 adapter 都呼叫
+  `ClassifyFailure`）。對話會記下一個 `RetryWait`，含下次重試的時間（`Policy.RetryDelays`、`--retry-delays`），以警告而不是錯誤回報，並讓佇列等待
   （`HoldsQueue`）。時間到了，`ContinueIfDue` 會在佇列的派送迴圈中送出 `ContinuePrompt`；這個回合又
   以同樣方式失敗時，改等下一個間隔（從它接續的暫停計數），最後一次也失敗就當成錯誤。新回合開始時
   等待結束；`RetryNow` 和 `CancelRetry` 對應 `POST` 和 `DELETE /retry`。
@@ -565,7 +576,7 @@ Content-Security-Policy。
 - `--bind` 限制誰能連線，`--allowed-hosts` 決定接受哪些 `Host` 標頭（預設為 `localhost`、
   `127.0.0.1` 和 `[::1]`，用來防範 DNS rebinding），`--allowed-origins` 決定哪些來源可以從
   瀏覽器呼叫 API。其他來源的網頁送出會造成改動的請求（GET、HEAD、OPTIONS 以外）時，除非那個來源
-  列在清單上，否則一律拒絕；`*` 不信任任何來源（`crossorigin.go`，規則同 Go 1.25 的
+  列在清單上，否則一律拒絕；`*` 不信任任何來源（`lib/httpmw/crossorigin.go`，規則同 Go 1.25 的
   `http.CrossOriginProtection`）。
 - 上傳的檔案存放在私有目錄，只回傳圖片。工作目錄以外的檔案無法開啟。
 - webhook 會把設定要送的內容（包括對話）送到它的網址，而 `PUT /webhook` 可以修改網址；它的
@@ -647,7 +658,7 @@ AgentAPI 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
 ## 聊天介面
 
 `chat/` 是 Next.js 15 與 React 19 的應用程式，用 bun 建置成靜態輸出。`make embed` 會把建置
-結果複製到 `lib/httpapi/chat/`，再由 `embed.go` 以 `go:embed` 嵌入。建置時使用一個佔位的基礎
+結果複製到 `lib/httpmw/chat/`，再由 `fileserver.go` 以 `go:embed` 嵌入。建置時使用一個佔位的基礎
 路徑，由伺服器改寫成 `--chat-base-path`（預設為 `/chat`）。聊天介面也能以開發伺服器獨立執行
 （`bun run dev`，加上 `?url=<伺服器>`），`/chat/embed` 則是嵌入其他頁面用的版本（`hub=1`：在 hub
 的框架裡，它依 hub 用視窗訊息送來的內容畫出 hub 的實例列，見 `lib/hub-frame.ts`）。頁面和框架都會檢查
