@@ -1,6 +1,6 @@
 import {describe, expect, test} from "bun:test";
 import {hubInstance, summary as baseSummary} from "./hub-fixtures";
-import {activity, agentLabel, agentOf, agentsIn, countAgents, matchesAgents, nothingMatches, parseAgents, shownAgents, toggleAgent, compareVersions, countedSpends, countedTokens, currentSpend, formatTokens, formatUSD, tokenTotals, tokensTitle, instanceVersion, olderThanHub, parseVersion, spendTitle, spendTotals, shortError, applyHubEvent, chatURL, countFilters, formatAgo, formatElapsed, matchesSearch, activeAgent, groupByMachine, groupInstances, hasRun, hostPrefix, sameMachine, tabOrder, groupNames, hubRoot, machineOf, machineSubtotals, sharedVersion, instanceState, needsYou, sortInstances, stateLabel, usagePercent, versionTitle, versionTotals, formatWork, workSeconds, workTitle, workTotals, type HubInstance, type Spend, type Summary} from "./hub";
+import {activity, agentLabel, agentOf, agentsIn, countAgents, matchesAgents, nothingMatches, parseAgents, shownAgents, toggleAgent, compareVersions, countedSpends, countedTokens, currentSpend, formatTokens, formatUSD, tokenTotals, tokensTitle, instanceVersion, olderThanHub, parseVersion, spendTitle, spendTotals, shortError, applyHubEvent, parseHubEvent, chatURL, countFilters, formatAgo, formatElapsed, matchesSearch, activeAgent, groupByMachine, groupInstances, hasRun, hostPrefix, sameMachine, tabOrder, groupNames, hubRoot, machineOf, machineSubtotals, sharedVersion, instanceState, needsYou, sortInstances, stateLabel, usagePercent, versionTitle, versionTotals, formatWork, workSeconds, workTitle, workTotals, type HubInstance, type Spend, type Summary} from "./hub";
 
 // Seen on 26 October, with an idle summary.
 const summary = (overrides: Partial<Summary> = {}): Summary => baseSummary({seen_at: "2026-10-26T00:00:00Z", ...overrides});
@@ -14,7 +14,7 @@ describe("hub", () => {
     expect(stateLabel(instance("a", {state: "needs-you", summary: summary({attention: "login"})}))).toBe("Needs login");
     expect(stateLabel(instance("a", {state: "working"}))).toBe("Working");
     expect(stateLabel(instance("a", {state: "unread"}))).toBe("Finished");
-    expect(stateLabel(instance("a", {state: "connecting", summary: null, connection: "connecting"}))).toBe("Connecting");
+    expect(stateLabel(instance("a", {state: "connecting", summary: undefined, connection: "connecting"}))).toBe("Connecting");
     expect(stateLabel(instance("a", {state: "stopped", connection: "stopped"}))).toBe("Stopped");
     expect(stateLabel(instance("a", {state: "stopped", summary: summary({attention: "exited"})}))).toBe("Agent exited");
   });
@@ -42,10 +42,29 @@ describe("hub", () => {
   });
 
   test("events replace, change and remove instances", () => {
-    let map = applyHubEvent(new Map(), {type: "instances", instances: [instance("a"), instance("b")]});
+    let map = applyHubEvent(new Map(), {type: "instances", instances: [instance("a"), instance("b")], hubVersion: ""});
     map = applyHubEvent(map, {type: "instance", instance: instance("a", {name: "renamed"})});
     map = applyHubEvent(map, {type: "removed", id: "b"});
     expect([...map.values()].map((i) => i.name ?? i.id)).toEqual(["renamed"]);
+  });
+
+  test("the stream's events read as their names say, and others not at all", () => {
+    const a = instance("a");
+    expect(parseHubEvent("instances", JSON.stringify({instances: [a, {name: "no id"}], hub_version: "3.7.3"}))).toEqual({type: "instances", instances: [a], hubVersion: "3.7.3"});
+    expect(parseHubEvent("instances", JSON.stringify({instances: []}))).toEqual({type: "instances", instances: [], hubVersion: ""});
+    expect(parseHubEvent("instance", JSON.stringify(a))).toEqual({type: "instance", instance: a});
+    expect(parseHubEvent("removed", JSON.stringify({id: "a"}))).toEqual({type: "removed", id: "a"});
+    expect(parseHubEvent("favorites", JSON.stringify({favorites: [{id: "f", text: "Hi"}, {text: "no id"}]}))).toEqual({type: "favorites", favorites: [{id: "f", text: "Hi"}]});
+    for (const [type, data] of [
+      ["instances", "{}"],
+      ["instances", "not json"],
+      ["instance", JSON.stringify({name: "no id"})],
+      ["instance", "null"],
+      ["removed", JSON.stringify({id: 7})],
+      ["favorites", JSON.stringify({favorites: "all"})],
+    ] as const) {
+      expect(parseHubEvent(type, data)).toBeUndefined();
+    }
   });
 
   test("the chat opens an instance through the hub", () => {
@@ -232,7 +251,7 @@ describe("hub", () => {
     // Restarted in place: the new run's event came, its first summary not yet.
     const restarted = running("a", "2.0.0", {server_id: "s2", agentapi_version: "2.1.0", connection: "connecting", state: "idle"});
     expect(instanceVersion(restarted)).toBe("2.1.0");
-    expect(instanceVersion(instance("b", {agentapi_version: "1.6.1", summary: null, connection: "connecting", state: "connecting"}))).toBe("1.6.1");
+    expect(instanceVersion(instance("b", {agentapi_version: "1.6.1", summary: undefined, connection: "connecting", state: "connecting"}))).toBe("1.6.1");
     expect(instanceVersion(running("c", "1.8.1", {server_id: undefined, agentapi_version: undefined}))).toBe("1.8.1");
     expect(instanceVersion(instance("d"))).toBe("");
   });

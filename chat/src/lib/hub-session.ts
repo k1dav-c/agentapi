@@ -2,6 +2,8 @@
 // that doesn't answer, or a proxy before it that answers for it (a 502
 // page), is unreachable: the page says so and tries again, rather than ask
 // for the token as if the session had ended.
+import type {HubWire} from "./hub";
+
 export type HubSession = "signed-in" | "signed-out" | "unreachable";
 
 export async function checkHubSession(root: string, fetcher: typeof fetch = fetch): Promise<HubSession> {
@@ -9,7 +11,7 @@ export async function checkHubSession(root: string, fetcher: typeof fetch = fetc
     const response = await fetcher(`${root}/api/session`, {credentials: "same-origin"});
     if (response.status === 401) return "signed-out";
     if (!response.ok) return "unreachable";
-    const body = (await response.json()) as {authenticated?: unknown};
+    const body = (await response.json()) as Partial<Record<keyof HubWire["SessionBody"], unknown>>;
     return body.authenticated === true ? "signed-in" : "signed-out";
   } catch {
     return "unreachable";

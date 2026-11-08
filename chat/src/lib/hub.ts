@@ -4,6 +4,12 @@
 
 import type {components} from "./api-schema";
 import {secondsBetween} from "./clock";
+import {parseFavorites, type Favorite} from "./hub-favorites";
+import type {components as hubSchema} from "./hub-schema";
+
+// HubWire are the hub's wire types, generated from its schema
+// (lib/hub/hub-schema.json, by make gen and bun run gen:api).
+export type HubWire = hubSchema["schemas"];
 
 // InstanceUpdate is the summary's update: whether the AgentAPI takes updates
 // through its API (POST /update) and how far one got; AgentAPIs that can't
@@ -12,51 +18,24 @@ import {secondsBetween} from "./clock";
 export type InstanceUpdate = Omit<components["schemas"]["UpdateStatus"], "state"> & {state: string};
 
 export type Summary = Omit<components["schemas"]["SummaryBody"], "update"> & {update?: InstanceUpdate};
-export type HubConnection = "connecting" | "connected" | "unreachable" | "stopped";
+export type HubConnection = HubWire["Connection"];
 
 // InstanceState is what a row says of an instance, the most pressing
 // first: it needs you, works, finished a task you haven't seen, waits,
 // waits for what you muted, or can't be reached. The hub works it out
 // (instanceapi.StateOf); unknown is one this page doesn't know, from a
 // newer hub than the page a browser kept.
-export type InstanceState = "needs-you" | "working" | "unread" | "idle" | "muted" | "connecting" | "unreachable" | "stopped" | "unknown";
+export type InstanceState = HubWire["State"] | "unknown";
 
-export interface HubInstance {
-  id: string;
-  name?: string;
-  url: string;
-  server_id?: string;
-  hostname?: string;
-  port?: number;
-  pid?: number;
-  cwd?: string;
-  agent_type?: string;
-  transport?: string;
-  agentapi_version?: string;
-  workspace_url?: string;
-  source: "webhook" | "manual";
-  last_seen: string;
-  // changed_at is when the hub last saw it change what its row shows it
-  // does, or first saw it; none from a hub that doesn't record it, or for
-  // one it kept before it did, until its next change.
-  changed_at?: string;
-  connection: HubConnection;
-  error?: string;
-  // group is the group someone put it in on the hub's page; none when empty.
-  group?: string;
-  // muted is what it waited for when someone muted it; the hub ends the
-  // mute once that changes.
-  muted?: string;
-  // pin is its place among the instances pinned to the top of the list,
-  // from 1; none when it isn't pinned. The hub keeps them, numbered without
-  // gaps.
-  pin?: number;
-  summary?: Summary | null;
-  // state is as the hub sends it; instanceState reads it.
+// HubInstance is an instance as the hub sends it (Instance in its schema),
+// with its summary in the AgentAPI's own types. Its state and transport
+// stay open: a newer hub may send a state this page doesn't know
+// (instanceState reads it), an AgentAPI 2 the transport "pty".
+export type HubInstance = Omit<HubWire["Instance"], "summary" | "state" | "transport"> & {
+  summary?: Summary;
   state: string;
-  // work is how long the hub saw it working; none from an older hub.
-  work?: HubWork;
-}
+  transport: string;
+};
 
 // hasRun says whether an instance has run: a task in its conversation, or
 // work the hub saw this week.
@@ -69,11 +48,7 @@ export function hasRun(instance: HubInstance): boolean {
 // it: the seconds of the last 24 hours and 7 days from the spans that
 // ended, and since when it works now. The page adds the time since then
 // (workSeconds), so the hub doesn't send it every second.
-export interface HubWork {
-  last_24h_seconds: number;
-  last_7d_seconds: number;
-  working_since?: string;
-}
+export type HubWork = HubWire["WorkTime"];
 
 const stateRank: Record<InstanceState, number> = {
   "needs-you": 0,
@@ -146,15 +121,58 @@ export function needsYou(instances: Iterable<HubInstance>): number {
   return count;
 }
 
-// The first event, instances, also has the hub's own version (hubVersion),
-// which the page compares the instances' with.
+// HubEventName is an event of the hub's stream (/api/events); the page
+// listens for these, not the heartbeat.
+export type HubEventName = Exclude<keyof HubWire["HubEvents"], "heartbeat">;
+export const hubEventNames = ["instances", "instance", "removed", "favorites"] as const satisfies readonly HubEventName[];
+
+// HubEvent is an event of the stream as the page reads it. The first,
+// instances, also has the hub's own version (hubVersion), which the page
+// compares the instances' with; favorites has all of them, on every change
+// (a hub before 3.5 sends none).
 export type HubEvent =
-  | {type: "instances"; instances: HubInstance[]; hubVersion?: string}
+  | {type: "instances"; instances: HubInstance[]; hubVersion: string}
   | {type: "instance"; instance: HubInstance}
-  | {type: "removed"; id: string};
+  | {type: "removed"; id: string}
+  | {type: "favorites"; favorites: Favorite[]};
+
+// isInstance tells what the hub sent for an instance from anything else:
+// an object with an ID.
+function isInstance(value: unknown): value is HubInstance {
+  return !!value && typeof value === "object" && typeof (value as {id?: unknown}).id === "string" && (value as {id: string}).id !== "";
+}
+
+// parseHubEvent reads the data of the stream's event type: undefined when
+// it isn't what that event has (it doesn't parse, or misses its fields).
+export function parseHubEvent(type: HubEventName, data: string): HubEvent | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(data);
+  } catch {
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== "object") return undefined;
+  switch (type) {
+    case "instances": {
+      const body = parsed as Partial<Record<keyof HubWire["InstanceList"], unknown>>;
+      if (!Array.isArray(body.instances)) return undefined;
+      return {type, instances: body.instances.filter(isInstance), hubVersion: typeof body.hub_version === "string" ? body.hub_version : ""};
+    }
+    case "instance":
+      return isInstance(parsed) ? {type, instance: parsed} : undefined;
+    case "removed": {
+      const {id} = parsed as Partial<Record<keyof HubWire["RemovedEvent"], unknown>>;
+      return typeof id === "string" && id ? {type, id} : undefined;
+    }
+    case "favorites": {
+      const favorites = parseFavorites((parsed as Partial<Record<keyof HubWire["FavoritesBody"], unknown>>).favorites);
+      return favorites ? {type, favorites} : undefined;
+    }
+  }
+}
 
 // applyHubEvent returns the instances by ID after event.
-export function applyHubEvent(instances: ReadonlyMap<string, HubInstance>, event: HubEvent): Map<string, HubInstance> {
+export function applyHubEvent(instances: ReadonlyMap<string, HubInstance>, event: Exclude<HubEvent, {type: "favorites"}>): Map<string, HubInstance> {
   switch (event.type) {
     case "instances":
       return new Map(event.instances.map((instance) => [instance.id, instance]));

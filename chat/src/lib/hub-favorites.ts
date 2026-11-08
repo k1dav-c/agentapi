@@ -3,20 +3,19 @@
 // inserts one in its composer. The hub tells the chat in its frame of them
 // (lib/hub-frame.ts).
 
-export type Favorite = {
-  id: string;
-  // Optional: without one the text's first line names it.
-  title?: string;
-  text: string;
-};
+import {hubLimits, type components} from "./hub-schema";
+
+// A favorite's title is optional: without one the text's first line names
+// it.
+export type Favorite = components["schemas"]["Favorite"];
 
 // A favorite being added has no ID until the hub gives it one.
 export type FavoriteDraft = Omit<Favorite, "id"> & {id?: string};
 
 // The hub's limits.
-export const maxFavorites = 100;
-export const maxFavoriteTitle = 100;
-export const maxFavoriteText = 20_000;
+export const maxFavorites = hubLimits.max_favorites;
+export const maxFavoriteTitle = hubLimits.max_favorite_title;
+export const maxFavoriteText = hubLimits.max_favorite_text;
 
 // The chat's menu of favorites gets a search box past this many.
 export const favoritesSearchAfter = 7;

@@ -37,7 +37,7 @@ const COMMAND = "mkdir -p ~/.local/bin && cp /usr/local/bin/agentapi ~/.local/bi
 describe("the row's menu", () => {
   test("an AgentAPI from before updates through the API offers nothing new", () => {
     expect(updateAction(instance("a", null))).toBeUndefined();
-    expect(updateAction(instance("a", null, {summary: null}))).toBeUndefined();
+    expect(updateAction(instance("a", null, {summary: undefined}))).toBeUndefined();
   });
 
   test("updates off on its machine: why, in place of the update", () => {

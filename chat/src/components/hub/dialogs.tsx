@@ -4,6 +4,8 @@ import {useEffect, useState} from "react";
 import {Plus, RefreshCw, TriangleAlert} from "lucide-react";
 import {Button} from "@/components/ui/button";
 import {Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle} from "@/components/ui/dialog";
+import type {HubWire} from "@/lib/hub";
+import {hubLimits} from "@/lib/hub-schema";
 import {JoinMachine} from "./join-machine";
 
 export const fieldClass =
@@ -11,7 +13,7 @@ export const fieldClass =
 export const sectionClass = "text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase";
 
 // The longest group name the hub takes.
-export const maxGroupName = 40;
+export const maxGroupName = hubLimits.max_group_name;
 
 // A group being named: a new one for an instance, or a rename.
 export type Naming = {mode: "new"; id: string} | {mode: "rename"; from: string};
@@ -32,9 +34,10 @@ export function AddInstance({root, open, onOpenChange, onAdded}: {root: string; 
         method: "POST",
         credentials: "same-origin",
         headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({url: url.trim(), token: token.trim()}),
+        body: JSON.stringify({url: url.trim(), token: token.trim()} satisfies HubWire["AddInstanceBody"]),
       });
-      const body = await response.json().catch(() => ({}));
+      // The instance added, or why not.
+      const body = (await response.json().catch(() => ({}))) as Partial<HubWire["Instance"] & HubWire["ErrorBody"]>;
       if (!response.ok) {
         setError(body.error ?? `The hub answered ${response.status}.`);
         return;
@@ -42,7 +45,7 @@ export function AddInstance({root, open, onOpenChange, onAdded}: {root: string; 
       setURL("");
       setToken("");
       onOpenChange(false);
-      onAdded(body.id);
+      onAdded((body as HubWire["Instance"]).id);
     } catch {
       setError("The hub didn't answer.");
     } finally {
