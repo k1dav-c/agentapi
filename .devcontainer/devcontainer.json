@@ -17,16 +17,13 @@
 	"containerUser": "root",
 	// safe.directory: running as root, git refuses the host-owned repo without it
 	"postCreateCommand": "git config --global --add safe.directory ${containerWorkspaceFolder} && cd chat && bun install",
-	"forwardPorts": [3284, 3000, 6006, 2345],
+	"forwardPorts": [3284, 3000, 2345],
 	"portsAttributes": {
 		"3284": {
 			"label": "agentapi server"
 		},
 		"3000": {
 			"label": "chat UI (next dev)"
-		},
-		"6006": {
-			"label": "storybook"
 		},
 		"2345": {
 			"label": "delve debugger"
