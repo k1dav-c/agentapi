@@ -799,7 +799,7 @@ export interface paths {
         put?: never;
         /**
          * Update AgentAPI
-         * @description Installs the latest official release of AgentAPI (k1dav-c/agentapi on GitHub) for this machine's OS and architecture, checked against the release's checksums.txt, in place of the program AgentAPI runs, and restarts AgentAPI in place into it: the same process, a new server_id and version. The request can't choose a version or a URL. AgentAPIs that share the program replace it under a lock file next to it, and one that finds the program on disk newer than the one it runs only restarts. `when` is `idle` (the default: once the agent is stable, with no request open) or `now`. Returns 200 with `up_to_date` when AgentAPI runs the latest release already, else 202 with the state and the version it updates to; while an update is under way it returns its state, and `now` has it restart without waiting. 403 unless AgentAPI runs with --allow-update; 409 when it can't replace its program (the message and the summary's update.blocked say why and how to fix it) or stops; 502 when the latest release can't be looked up. Every change of the state sends summary_update. With --state-db the conversation and the agent's session carry over the restart; without it the conversation starts anew.
+         * @description Installs the latest official release of AgentAPI (k1dav-c/agentapi on GitHub) for this machine's OS and architecture, checked against the release's checksums.txt, in place of the program AgentAPI runs, and restarts AgentAPI in place into it: the same process, a new server_id and version. The request can't choose a version or a URL. AgentAPIs that share the program replace it under a lock file next to it, and one that finds the program on disk newer than the one it runs only restarts. `when` is `idle` (the default: once no turn runs and no request is open) or `now`. Returns 200 with `up_to_date` when AgentAPI runs the latest release already, else 202 with the state and the version it updates to; while an update is under way it returns its state, and `now` has it restart without waiting. 403 unless AgentAPI runs with --allow-update; 409 when it can't replace its program (the message and the summary's update.blocked say why and how to fix it) or stops; 502 when the latest release can't be looked up. Every change of the state sends summary_update. With --state-db the conversation and the agent's session carry over the restart; without it the conversation starts anew.
          */
         post: operations["post-update"];
         /**
@@ -2461,7 +2461,7 @@ export interface components {
              */
             readonly $schema?: string;
             /**
-             * @description When AgentAPI restarts into the new version. idle (the default): once the agent is idle, that is stable with no request (approval, question, plan) open; queued messages stay queued and go out after the restart. now: at once, interrupting the agent.
+             * @description When AgentAPI restarts into the new version. idle (the default): once the agent is idle, that is no turn runs and no request (approval, question, plan) is open; queued messages stay queued and go out after the restart. now: at once, interrupting the agent.
              * @enum {string}
              */
             when?: "idle" | "now";

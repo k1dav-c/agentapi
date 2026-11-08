@@ -67,16 +67,14 @@ func (s *Server) forgetConversationLocked() {
 
 // restartRefusedLocked returns why the agent can't be replaced now, or
 // nil: AgentAPI stops (or restarts for an update), or another replacement
-// is under way. Caller holds s.mu.
+// is under way (turnGateLocked). Caller holds s.mu.
 func (s *Server) restartRefusedLocked() error {
-	switch {
-	case s.stopping, s.updating.Load():
-		// Stop closed the agent, or will: don't start another one.
+	err := s.turnGateLocked(turnUser, s.clock.Now())
+	if errors.Is(err, errUpdateRestarts) {
+		// Stop closes the agent: don't start another one.
 		return errStopping
-	case s.restarting.Load():
-		return errRestarting
 	}
-	return nil
+	return err
 }
 
 // restartLocked replaces the agent with a new one, in a new session: the

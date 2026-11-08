@@ -70,7 +70,7 @@ flowchart TB
 | `lib/agentlog/` | 各 agent 工作階段紀錄的格式，一種 agent 一個套件（`claudelog`、`codexlog`、`pilog`）：紀錄型別、解析成結構化訊息與時間軸事件的 parser（adapter 也使用）、prompt 與注入內容的辨識、模型呼叫與檔案配置；另有逐行讀取、增量檔案索引和格式變動警告 |
 | `lib/sessions/` | 伺服器持有的 `Store` 讀取目錄中先前的工作階段與對話（`history.go`）、sub agent（`subagents.go`）及花費（`cost.go`） |
 | `lib/pricing/` | 每百萬 tokens 的模型價格（內建 `prices.json` 與 `--prices` 檔案），以及單次呼叫的花費計算 |
-| `lib/native/` | Native transport：`Conversation`、`Adapter` 與 `Sink` 的約定、請求、設定、用量、登入 |
+| `lib/native/` | Native transport：`Conversation`、`Adapter` 與 `Sink` 的約定、請求、設定、用量、登入，以及暫停佇列的狀態（`hold.go`：用量限制停下的回合或等待重試的失敗回合） |
 | `lib/native/claude`、`codex`、`pi` | 每種 agent 協定各一個 adapter |
 | `lib/native/agentio` | 這些 adapter 執行 agent 時共用的部分：行程與它的迴圈（`Host`）、寫入 stdin、把回應對應到等待中的請求、寬鬆解碼與協定變動警告、快照節流 |
 | `lib/native/demo` | `native-demo`，開發聊天介面用的模擬 agent |
@@ -168,7 +168,7 @@ flowchart TB
 | 檔案 | 處理 |
 | --- | --- |
 | `server.go`、`routes.go`、`hosts.go`、`middleware.go`、`compress.go` | 伺服器的設定、啟動與停止；各功能自行註冊的路由；允許的主機與來源；請求記錄；壓縮 |
-| `conversation_api.go`、`queue.go`、`sse.go` | 訊息、狀態與時間軸；佇列、派送（先送出到期的繼續，`beforeQueue`）與 `queue_update`；`GET /events` |
+| `conversation_api.go`、`queue.go`、`turngate.go`、`sse.go` | 訊息、狀態與時間軸；佇列、派送（先送出到期的繼續，`beforeQueue`）與 `queue_update`；現在能不能開始回合（`turnGateLocked`）；`GET /events` |
 | `tasks_api.go` | `GET /tasks`：emitter 推導出的任務（`lib/convstate`） |
 | `summary_api.go`、`spend.go`、`registry.go` | `GET /summary` 與 `POST /tasks/seen`，也就是 emitter 為監看多個 AgentAPI 的用戶端保存的摘要；每分鐘計算的花費；伺服器的登記檔（`instanceRegistry`） |
 | `native.go` | 送出訊息、請求、設定、中斷、壓縮、重試登入；observer（`nativeObserver`） |
@@ -304,14 +304,18 @@ type Factory func(resume Resume) (Adapter, error)
   的限制訊息與 `rejected` 的 rate limit 事件、Codex 的 `usageLimitExceeded`、Pi 模型供應商的
   額度錯誤）。對話會把它記成帶有重置時間的 `LimitStop`，直到下一個回合開始：期間伺服器的佇列
   會等待（`HoldsQueue`），而排定在重置時的繼續（`ScheduleContinue`、`--auto-continue`）會在佇列
-  的派送迴圈中、排隊的訊息之前送出。
+  的派送迴圈中、排隊的訊息之前送出。用量限制停下的回合和等待重試的失敗回合（見下一項）在
+  `hold.go` 裡是同一種暫停，一個對話最多只有一個：新回合開始時結束，訊息沒送到 agent 的回合會
+  把它還回去。`ContinueIfDue` 在對話的鎖底下一次決定並開始要送的繼續或重試；回合會記下它接續的
+  暫停，所以又被限制停下的繼續會再排一次。重新啟動、切換工作階段或 agent 結束時，這筆紀錄跟著
+  那個 agent 一起清掉。
 - **暫時性錯誤。** agent 自己重試後，回合仍因可能自行恢復的上游錯誤失敗時，會以 `transient`
   停止原因結束：HTTP 5xx 或 429（Claude Code 的 `api_error_status`、Codex `codexErrorInfo` 的
   `httpStatusCode`）、Codex 的 `serverOverloaded`、連線失敗、Pi 沒有成功的 `auto_retry_end`，或
   `IsTransientError` 比對到的文字。用量限制和登入問題會先判斷。對話會記下一個 `RetryWait`，含下次
   重試的時間（`Config.RetryDelays`、`--retry-delays`），以警告而不是錯誤回報，並讓佇列等待
   （`HoldsQueue`）。時間到了，`ContinueIfDue` 會在佇列的派送迴圈中送出 `ContinuePrompt`；這個回合又
-  以同樣方式失敗時，改等下一個間隔（由 `retrying` 計數），最後一次也失敗就當成錯誤。新回合開始時
+  以同樣方式失敗時，改等下一個間隔（從它接續的暫停計數），最後一次也失敗就當成錯誤。新回合開始時
   等待結束；`RetryNow` 和 `CancelRetry` 對應 `POST` 和 `DELETE /retry`。
 - **回合。** 只有 agent 閒置時訊息才會開始新的回合；否則 `StartTurn` 會回傳
   `ErrMessageValidationChanging`，由伺服器把訊息排入佇列。agent 壓縮 context 期間，回合也會
@@ -405,8 +409,13 @@ type Factory func(resume Resume) (Adapter, error)
 
 agent 忙碌時，訊息會在 `s.queue` 等待；對 agent 最後一則訊息的人工回覆（`POST /handoff/reply`）
 也以同樣的方式送出，同樣會在這裡等待。佇列有獨立的鎖，讀取不必等待伺服器的鎖；變更時也會
-持有 `s.mu`。派送迴圈每 500 毫秒檢查第一則訊息：agent 必須閒置、沒有用量限制或等待重試的失敗回合暫停佇列，
-也不在重新啟動中。到期的繼續或重試會先送出（`beforeQueue`）。
+持有 `s.mu`。派送迴圈每 500 毫秒檢查第一則訊息能不能送出。到期的繼續或重試會先送出
+（`beforeQueue`）。
+
+能不能開始回合，所有呼叫端都問 `turnGateLocked`（`turngate.go`）。AgentAPI 停止、為了更新重新
+啟動，或 agent 重新啟動時，什麼都不會開始：`POST /message` 把訊息排入佇列，人工回覆協定不提供
+內容，重新啟動會被拒絕。更新等 agent 閒置期間，繼續、重試和排隊的訊息也一起等；使用者自己送的
+訊息照樣送給 agent。佇列的第一則訊息還要等到 agent 閒置，而且沒有用量限制或失敗回合暫停佇列。
 
 被拒絕的訊息最多嘗試 5 次。可能重複送達的訊息會立即丟棄：已寫出但未確認的訊息
 （`native.ErrUnconfirmed`，原因可能是逾時、取消或 agent 結束）。寫入 stdin 的動作會隨呼叫的
@@ -498,8 +507,9 @@ webhook 事件的 delivery ID 也以同樣方式寫入 `instances.deliveries.jso
 - 開啟 `--allow-update` 時，`POST /update`（`update.go`）會把 AgentAPI 更新到最新發行版並原地重新
   啟動，由一個跟著伺服器生命週期的 goroutine 執行。`checking` 查詢發行版，並以 `--version` 執行
   磁碟上的程式。`downloading` 把發行版安裝到程式的位置（`lib/selfupdate`）；共用程式的另一個
-  AgentAPI 已經更新過、磁碟上的程式夠新時就略過。`waiting` 會暫停佇列，等到 agent 處於 stable、
-  沒有待回覆的請求，每次狀態變化時檢查一次。`restarting` 在 `s.mu` 底下開始：從此
+  AgentAPI 已經更新過、磁碟上的程式夠新時就略過。`waiting` 會暫停佇列，到期的繼續和重試也一起等，
+  直到 agent 沒有進行中的回合、壓縮或待回覆的請求（`native.Conversation.Busy`；已經結束的 agent
+  沒有這些），每次狀態變化時檢查一次。`restarting` 在 `s.mu` 底下開始：從此
   訊息留在佇列、不會開始重新啟動 agent，人工回覆協定也不提供內容。接著呼叫和 SIGUSR2 相同的
   重新啟動。`"now"` 會略過等待，`DELETE /update` 在重新啟動前都能取消更新。失敗時（包括重新
   啟動前的檢查：新發行版無法以目前的設定或狀態資料庫啟動），狀態變成 `failed` 並附上錯誤，伺服器

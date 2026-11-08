@@ -201,17 +201,15 @@ type Conversation struct {
 	// are the account's, so they stay for the next agent; the context
 	// belongs to the session.
 	usage AgentUsage
-	// limitStop is the turn a usage limit stopped, until a turn starts.
-	limitStop *LimitStop
-	// continueAgain: the turn running is a scheduled continuation, so if
-	// the limit stops it again, it is scheduled again.
-	continueAgain bool
-	// retryWait is the failed turn that waits to be tried again, until a
-	// turn starts.
-	retryWait *RetryWait
-	// retrying is the retry (from 1) the turn running is, 0 for a turn that
-	// isn't one: if it fails again the next retry is scheduled.
-	retrying int
+	// hold is what holds the queue (see hold.go): a turn a usage limit
+	// stopped or a failed turn that waits to be tried again, until a turn
+	// starts.
+	hold hold
+	// continues is the hold the running turn continues (ContinueIfDue,
+	// RetryNow): if the turn stops the same way, the continuation is
+	// scheduled again, or the next retry. It is empty for any other turn,
+	// and once the turn ended or its agent is gone.
+	continues hold
 }
 
 // NewConversation creates a conversation. Nothing runs until Start.
@@ -251,8 +249,7 @@ func NewConversation(cfg Config) *Conversation {
 		sessionRef: cfg.ResumeRef,
 		promptSent: len(cfg.InitialMessages) > 0,
 		chosen:     cfg.Settings,
-		limitStop:  cfg.LimitStop.clone(),
-		retryWait:  cfg.RetryWait.clone(),
+		hold:       restoredHold(cfg.LimitStop, cfg.RetryWait),
 	}
 }
 
@@ -448,7 +445,20 @@ func (c *Conversation) SessionRef() string {
 func (c *Conversation) Idle() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.started && !c.turnActive && !c.compacting
+	return c.readyLocked()
+}
+
+func (c *Conversation) readyLocked() bool {
+	return c.started && c.adapter != nil && !c.turnActive && !c.compacting
+}
+
+// Busy reports whether the agent has work a restart would cut short: a
+// turn, a compaction, a request that waits for an answer. An agent that
+// isn't running has none.
+func (c *Conversation) Busy() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.turnActive || c.compacting || c.requests.waitingOnUser()
 }
 
 // TurnActive reports whether the agent is working on a turn.
@@ -492,7 +502,7 @@ func (c *Conversation) statusLocked() conv.Status {
 // message.
 func (c *Conversation) StartTurn(ctx context.Context, input Input) error {
 	c.mu.Lock()
-	turn, err := c.beginTurnLocked(input)
+	turn, err := c.beginTurnLocked(input, hold{})
 	c.mu.Unlock()
 	if err != nil {
 		return err
@@ -507,11 +517,15 @@ type pendingTurn struct {
 	input   Input
 	// msg is the Id of the turn's user message.
 	msg int
+	// restore is the hold the turn ended, which a turn taken back gives
+	// back.
+	restore hold
 }
 
 // beginTurnLocked begins a turn with input as its user message, if the
-// agent can take one now.
-func (c *Conversation) beginTurnLocked(input Input) (pendingTurn, error) {
+// agent can take one now; it continues the hold continues, if that isn't
+// empty (see Conversation.continues). The turn ends the hold.
+func (c *Conversation) beginTurnLocked(input Input, continues hold) (pendingTurn, error) {
 	text := strings.TrimSpace(input.Text)
 	if text == "" {
 		return pendingTurn{}, conv.ErrMessageValidationEmpty
@@ -521,21 +535,23 @@ func (c *Conversation) beginTurnLocked(input Input) (pendingTurn, error) {
 	}
 	c.turnActive = true
 	c.unconfirmedTurn = false
-	c.setLimitStopLocked(nil)
-	c.setRetryWaitLocked(nil)
+	c.continues = continues
 	turn := pendingTurn{
 		adapter: c.adapter,
 		gen:     c.generation,
 		input:   c.inputForAgentLocked(input),
 		msg:     c.messages.appendUser(text),
+		restore: c.hold,
 	}
+	c.setHoldLocked(hold{})
 	c.cfg.Emitter.EmitMessages(c.messages.snapshot())
 	c.cfg.Emitter.EmitStatus(conv.StatusChanging)
 	return turn, nil
 }
 
 // deliverTurn sends a turn that began to its adapter. If that fails, the
-// turn is taken back, unless the message went out unconfirmed: the agent
+// turn is taken back, with the hold it ended, unless the message went out
+// unconfirmed: the agent
 // may be working on it, so the message stays and the turn stays active
 // until the agent's events end it (Interrupt ends it if the agent never
 // starts it).
@@ -552,6 +568,12 @@ func (c *Conversation) deliverTurn(ctx context.Context, turn pendingTurn) error 
 		c.unconfirmedTurn = c.turnActive
 	default:
 		c.turnActive = false
+		c.continues = hold{}
+		if c.hold.kind() == HoldNone {
+			// Unless the agent ended the turn meanwhile with one of its
+			// own.
+			c.setHoldLocked(turn.restore)
+		}
 		c.messages.remove(turn.msg)
 		c.cfg.Emitter.EmitMessages(c.messages.snapshot())
 		c.cfg.Emitter.EmitStatus(c.statusLocked())

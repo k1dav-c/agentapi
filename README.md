@@ -1411,9 +1411,11 @@ curl -X POST localhost:3284/update -H 'Content-Type: application/json' -d '{"whe
   `checksums.txt` and run as that version. The request can't choose a version or a URL. A release
   that wouldn't start with this AgentAPI's settings or state database fails the update before the
   restart, and AgentAPI goes on serving.
-- `"when": "idle"`, the default, installs at once and restarts once the agent is idle: stable, with
-  no request (approval, question or plan) open. Queued messages stay queued and
-  go out after the restart. `"now"` restarts at once and interrupts the agent.
+- `"when": "idle"`, the default, installs at once and restarts once the agent is idle: no turn
+  runs and no request (approval, question or plan) is open. An agent that exited and isn't started
+  again counts as idle. Queued messages stay queued and go out after the restart, and so does a
+  continuation after a usage limit or a retry of a failed turn that falls due meanwhile. `"now"`
+  restarts at once and interrupts the agent.
 - With [`--state-db`](#persistent-sessions), the conversation and the agent's session carry over
   the restart. Without it, the conversation starts anew.
 - It answers 200 with `"up_to_date": true` when AgentAPI runs the latest release already, else 202

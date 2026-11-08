@@ -149,10 +149,9 @@ func (s *Server) createNativeMessageLocked(content string, mode DispatchMode, re
 	case DispatchQueue:
 	}
 
-	// Queued messages that a usage limit holds don't hold up one the user
-	// sends now: it may be what continues the work.
-	held := s.native.HoldsQueue(s.clock.Now())
-	if (s.queue.Len() > 0 && !held) || !s.native.Idle() {
+	// The message goes after the queued ones, unless a usage limit stop
+	// or a failed turn holds them: it may be what continues the work.
+	if err := s.agentGateLocked(s.clock.Now()); errors.Is(err, errAgentBusy) || (err == nil && s.queue.Len() > 0) {
 		s.queueMessageLocked(resp, content, false)
 		return nil
 	}

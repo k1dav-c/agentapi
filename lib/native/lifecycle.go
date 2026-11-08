@@ -122,7 +122,7 @@ func (c *Conversation) beginInitialPromptLocked(prompt Input) *pendingTurn {
 		return nil
 	}
 	c.promptSent = true
-	t, err := c.beginTurnLocked(prompt)
+	t, err := c.beginTurnLocked(prompt, hold{})
 	if err != nil {
 		c.cfg.Emitter.EmitError(fmt.Sprintf("Failed to send the initial prompt: %v", err), conv.ErrorLevelError)
 		return nil
@@ -280,6 +280,8 @@ func (c *Conversation) downLocked() {
 	c.started = false
 	c.turnActive = false
 	c.unconfirmedTurn = false
+	// The turn that ran, a continuation or not, is gone with its agent.
+	c.continues = hold{}
 	c.compacting = false
 	c.expireRequestsLocked(true)
 	c.messages.forgetRich()
@@ -448,9 +450,7 @@ func (c *Conversation) BeginRestart(reset func()) *Replacement {
 	c.forking = false
 	c.promptSent = false
 	c.messages.reset()
-	c.setLimitStopLocked(nil)
-	c.setRetryWaitLocked(nil)
-	c.retrying = 0
+	c.setHoldLocked(hold{})
 	c.clearSessionUsageLocked()
 	c.cfg.Emitter.EmitMessages(nil)
 	return r
@@ -486,9 +486,7 @@ func (c *Conversation) BeginSwitch(resume Resume, messages []conv.Message, reset
 	c.sessionRef, c.forking = resume.Ref, resume.Fork
 	c.promptSent = true
 	c.messages = newMessageLog(c.cfg.Clock, messages)
-	c.setLimitStopLocked(nil)
-	c.setRetryWaitLocked(nil)
-	c.retrying = 0
+	c.setHoldLocked(hold{})
 	// The agent reports the session's usage once it ran a turn.
 	c.clearSessionUsageLocked()
 	// Until the agent reports a fork's own ref, AgentAPI would resume the

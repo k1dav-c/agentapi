@@ -142,15 +142,6 @@ func (e *EventEmitter) SetUpdate(update instanceapi.UpdateStatus) {
 	e.summary.changed = true
 }
 
-// AgentIdle reports whether the agent waits with nothing open: it is
-// stable, and no request waits for an answer.
-func (e *EventEmitter) AgentIdle() bool {
-	e.mu.Lock()
-	defer e.unlock()
-	status := e.statusChangeBody()
-	return status.Status == AgentStatusStable && status.PendingRequests == 0
-}
-
 // SummaryChanged sends the summary if it changed by something outside the
 // conversation (the instance's settings).
 func (e *EventEmitter) SummaryChanged() {

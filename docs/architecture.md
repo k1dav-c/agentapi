@@ -71,7 +71,7 @@ emitter. Handlers call the conversation and read state from the emitter.
 | `lib/agentlog/` | The agents' session-log formats, one package each (`claudelog`, `codexlog`, `pilog`): their records, the parsers into rich messages and timeline events (the adapters use them too), prompts and injected context, model calls and file layout; plus line reading, the incremental file index and format-drift warnings |
 | `lib/sessions/` | A server-held `Store` reads earlier sessions and their conversations (`history.go`), subagents (`subagents.go`) and costs (`cost.go`) for a directory |
 | `lib/pricing/` | Model prices per million tokens (built-in `prices.json` and a `--prices` file), and per-call cost calculation |
-| `lib/native/` | The native transport: `Conversation`, the `Adapter` and `Sink` contracts, requests, settings, usage, logins |
+| `lib/native/` | The native transport: `Conversation`, the `Adapter` and `Sink` contracts, requests, settings, usage, logins, and the queue's hold (`hold.go`: a usage limit stop or a failed turn that waits to be tried again) |
 | `lib/native/claude`, `codex`, `pi` | One adapter per agent protocol |
 | `lib/native/agentio` | What those adapters share to run their agent: the process and its loop (`Host`), writing to its stdin, matching its responses to the requests waiting for them, lenient decoding with drift warnings, the snapshot throttle |
 | `lib/native/demo` | `native-demo`, a simulated agent for working on the chat |
@@ -206,7 +206,7 @@ The handlers are grouped by file:
 | File | Handles |
 | --- | --- |
 | `server.go`, `routes.go`, `hosts.go`, `middleware.go`, `compress.go` | The server's setup, start and stop; the routes, which each feature registers; allowed hosts and origins; request logging; compression |
-| `conversation_api.go`, `queue.go`, `sse.go` | Messages, status and timeline; the queue, its dispatch (with a continuation that is due first, `beforeQueue`) and `queue_update`; `GET /events` |
+| `conversation_api.go`, `queue.go`, `turngate.go`, `sse.go` | Messages, status and timeline; the queue, its dispatch (with a continuation that is due first, `beforeQueue`) and `queue_update`; whether a turn may start now (`turnGateLocked`); `GET /events` |
 | `tasks_api.go` | `GET /tasks`: the tasks the emitter derives (`lib/convstate`) |
 | `summary_api.go`, `spend.go`, `registry.go` | `GET /summary` and `POST /tasks/seen`, the summary the emitter keeps for clients that watch many AgentAPIs; the spend worked out once a minute; the server's registry entry (`instanceRegistry`) |
 | `native.go` | Delivering a message, requests, settings, interrupt, compaction, login retry; the observer (`nativeObserver`) |
@@ -380,7 +380,13 @@ type Factory func(resume Resume) (Adapter, error)
   time until a turn starts: the server's queue waits while it holds
   (`HoldsQueue`), and a continuation scheduled for the reset
   (`ScheduleContinue`, `--auto-continue`) goes out on the queue's tick before
-  the queued messages.
+  the queued messages. A limit stop and a retry wait (below) are one hold
+  (`hold.go`), of which a conversation has at most one: a turn ends it, and
+  a turn whose message doesn't reach the agent gives it back. A continuation
+  or retry that `ContinueIfDue` sends is decided and begun under the
+  conversation's lock; the turn records the hold it continues, so a
+  continuation the limit stops again is scheduled again, and the record goes
+  with the turn's agent on a restart, a switch or an exit.
 - **Transient errors.** A turn that fails on an upstream error that may pass,
   after the agent's own retries, ends with the `transient` stop reason: an
   HTTP 5xx or 429 (Claude Code's `api_error_status`, the `httpStatusCode` of
@@ -391,7 +397,7 @@ type Factory func(resume Resume) (Adapter, error)
   (`Config.RetryDelays`, `--retry-delays`), warns instead of reporting an
   error, and holds the queue (`HoldsQueue`). `ContinueIfDue` sends
   `ContinuePrompt` on the queue's tick once it is due; if that turn fails the
-  same way, the next delay follows (`retrying` counts them), and after the
+  same way, the next delay follows (the hold it continued counts them), and after the
   last the failure is an error. A turn that starts ends the wait; `RetryNow`
   and `CancelRetry` back `POST` and `DELETE /retry`.
 - **Turns.** A message starts a turn only while the agent is idle; otherwise
@@ -533,9 +539,15 @@ usage limit stop, a retry wait, login).
 Messages sent while the agent is busy wait in `s.queue`, and so does a human reply to the agent's
 last message (`POST /handoff/reply`), which goes out the same way. The queue has its
 own lock so reads don't wait on the server lock; mutations also hold `s.mu`. Every 500 ms, a loop
-checks whether the first message can be delivered: the agent must be idle without a usage limit
-or a failed turn that waits to be tried again holding the queue, and not restarting. A continuation
-or retry that is due goes out first (`beforeQueue`).
+checks whether the first message can be delivered. A continuation or retry that is due goes out
+first (`beforeQueue`).
+
+`turnGateLocked` (`turngate.go`) decides whether a turn may start, for every caller. Nothing starts
+while AgentAPI stops, restarts for an update or restarts the agent: `POST /message` queues the
+message, the human-reply protocol offers nothing, and a restart is refused. While an update waits for
+the agent, a continuation, a retry and the queued messages wait too; a message the user sends goes
+to the agent. The head of the queue also waits until the agent is idle and no usage limit stop or
+failed turn holds the queue.
 
 Rejected messages get up to 5 attempts. Messages that might be delivered twice are dropped
 immediately: a write without confirmation (`native.ErrUnconfirmed`, caused by timeout,
@@ -666,8 +678,10 @@ the agent starts a new session below it. SIGUSR1 flushes the state database.
   disk with `--version`. `downloading` installs the release in the
   program's place (`lib/selfupdate`), unless the program on disk is that
   new already because another AgentAPI that shares it updated it.
-  `waiting` holds the queue until the agent is stable with no request
-  open, checked at each status change. `restarting` begins
+  `waiting` holds the queue, and continuations and retries that fall due,
+  until the agent has no turn, compaction or open request
+  (`native.Conversation.Busy`; an agent that exited has none), checked at
+  each status change. `restarting` begins
   under `s.mu`: from then on messages wait in the queue, no agent restart
   begins and the human-reply protocol offers nothing. It calls the restart
   SIGUSR2 uses. `"now"` skips the wait, and `DELETE /update` cancels the

@@ -80,7 +80,7 @@ const (
 
 // UpdateRequestBody is the body of POST /update.
 type UpdateRequestBody struct {
-	When UpdateWhen `json:"when,omitempty" enum:"idle,now" doc:"When AgentAPI restarts into the new version. idle (the default): once the agent is idle, that is stable with no request (approval, question, plan) open; queued messages stay queued and go out after the restart. now: at once, interrupting the agent."`
+	When UpdateWhen `json:"when,omitempty" enum:"idle,now" doc:"When AgentAPI restarts into the new version. idle (the default): once the agent is idle, that is no turn runs and no request (approval, question, plan) is open; queued messages stay queued and go out after the restart. now: at once, interrupting the agent."`
 }
 
 // UpdateRequest asks to update AgentAPI; the body is optional.
@@ -472,7 +472,10 @@ func (s *Server) awaitUpdateRestart(run *updateRun, version string, moved func()
 func (s *Server) beginUpdateRestart(run *updateRun, version string) (began, current bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !run.isNow() && (s.restarting.Load() || !s.emitter.AgentIdle()) {
+	// The agent's own view, not the emitter's: an agent that exited in the
+	// middle of a turn has no work left, though its last status said it
+	// worked.
+	if !run.isNow() && (s.turnGateLocked(turnUser, s.clock.Now()) != nil || s.native.Busy()) {
 		return false, true
 	}
 	if !s.updater.advance(run, UpdateStateRestarting, version) {
@@ -511,7 +514,7 @@ func (s *Server) registerUpdateRoutes() {
 			"AgentAPI runs, and restarts AgentAPI in place into it: the same process, a new server_id and version. " +
 			"The request can't choose a version or a URL. AgentAPIs that share the program replace it under a lock " +
 			"file next to it, and one that finds the program on disk newer than the one it runs only restarts. " +
-			"`when` is `idle` (the default: once the agent is stable, with no request open) or " +
+			"`when` is `idle` (the default: once no turn runs and no request is open) or " +
 			"`now`. Returns 200 with `up_to_date` when AgentAPI runs the latest release already, else 202 with " +
 			"the state and the version it updates to; while an update is under way it returns its state, and " +
 			"`now` has it restart without waiting. 403 unless AgentAPI runs with --allow-update; 409 when it " +

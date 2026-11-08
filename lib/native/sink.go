@@ -45,20 +45,19 @@ func (c *Conversation) turnCompletedLocked(result TurnResult) {
 	c.unconfirmedTurn = false
 	c.messages.endAgentMessage()
 	c.expireRequestsLocked(false)
-	retried := c.retrying
-	c.retrying = 0
+	continued := c.continues
+	c.continues = hold{}
 	switch {
 	case result.StopReason == StopReasonLimited:
 		// The limit stop shows what the agent said.
-		c.limitStoppedLocked(result)
-	case result.StopReason == StopReasonTransient && c.retryLocked(result, retried+1):
+		c.limitStoppedLocked(result, continued.kind() == HoldLimit)
+	case result.StopReason == StopReasonTransient && c.retryLocked(result, continued.retried()+1):
 		// The retry wait warns of the failure.
 	case result.StopReason == StopReasonTransient:
-		c.cfg.Emitter.EmitError(retriesOutText(result, retried), conv.ErrorLevelError)
+		c.cfg.Emitter.EmitError(retriesOutText(result, continued.retried()), conv.ErrorLevelError)
 	case result.Error != "":
 		c.cfg.Emitter.EmitError(result.Error, conv.ErrorLevelError)
 	}
-	c.continueAgain = false
 	if provesLogin(result) {
 		c.clearLoginLocked()
 	}
