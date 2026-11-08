@@ -60,14 +60,14 @@ protocols (the native transport).
 - `lib/workspacefs/` - The file viewer's reads of the working directory: content, diff through git, HTML preview, images, find
 - `lib/conversation/` - Shared messages, status, and the `Emitter` interface (imported as `conv`)
 - `lib/native/` - Native transport: one adapter per agent (`claude/`, `codex/`, `pi/`, and the simulated `demo/`) driving its structured protocol, a conversation that starts an agent that exits on its own again and holds the queue for a usage limit stop or a failed turn it tries again (`hold.go`), `agentio/` for the process, its loop and the JSON-lines plumbing they share, `procutil/` for the child process, `nativetest/` for tests; `ClassifyFailure` orders a failed turn's signals (limit, login, transient) and `Policy` holds the continue, retry and restart settings
-- `lib/agentstate/` - The values native agents report (capabilities, login, settings, usage, requests, limit stop, retry wait), a leaf package so `lib/convstate`, `lib/instanceapi`, `lib/webhook` and `lib/statedb` don't depend on `lib/native`
+- `lib/agentstate/` - The values native agents report (capabilities, login, settings, usage, requests, limit stop, retry wait) and `ConversationState`, the conversation's state the native `Observer` gets whole (`StateChanged`), with the `StoredState` that survives a restart; a leaf package so `lib/convstate`, `lib/instanceapi`, `lib/webhook` and `lib/statedb` don't depend on `lib/native`
 - `lib/procenv/` - The environment of the agent and the terminal's shell, without the variables of an agent session AgentAPI runs in and AgentAPI's secrets
 - `lib/transcript/` - The types of the structured transcript: rich messages and timeline events
 - `lib/agenthome/` - The directories the agents keep their state in (`$CLAUDE_CONFIG_DIR`, `$CODEX_HOME`, `$PI_CODING_AGENT_DIR` or their defaults)
 - `lib/agentlog/` - The agents' session-log formats, one package per agent (`claudelog`, `codexlog`, `pilog`), shared by the native adapters and `lib/sessions`
 - `lib/sessions/` - Earlier sessions, subagents and their costs, read incrementally from the logs
 - `lib/pricing/` - Model prices per million tokens (built-in `prices.json`, `--prices` file) and per-call cost calculation; `scripts/prices.mjs` compares `prices.json` with Pi's model registry
-- `lib/statedb/` - SQLite persistence of conversations (`--state-db`; a deprecated `--state-file` is imported into it)
+- `lib/statedb/` - SQLite persistence of conversations (`--state-db`; a deprecated `--state-file` is imported into it); the stored state is one versioned meta value, `conversation_state` (`state.go`)
 - `lib/instanceapi/` - The contract with clients that watch many AgentAPIs: who an instance is (with its `AgentType`), its summary, the webhook envelope and signature, and the state a hub shows; it imports only `lib/agentstate` and `lib/util`
 - `lib/hub/` - `agentapi hub serve`: a server that watches many AgentAPIs, built on `lib/instanceapi` and `lib/httpmw` rather than `lib/httpapi` (signed webhooks, summary streams, a proxy that opens any of them in the chat, the addresses machines join it by, the favorite prompts its page keeps)
 - `lib/sse/` - Server-sent events as the HTML standard defines them (`Reader`, `Write`), for the hub's streams
