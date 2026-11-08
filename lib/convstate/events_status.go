@@ -115,6 +115,72 @@ func (e *EventEmitter) statusChangeBody() StatusChangeBody {
 	}
 }
 
+// SetSessionRef records the session the agent resumes, which a restart or
+// a switch changes: it is stored, every time, to resume the session after
+// AgentAPI restarts, and shown as the agent's session ID. The session ID
+// clients use is AgentAPI's own.
+func (e *EventEmitter) SetSessionRef(ref string) {
+	e.mu.Lock()
+	defer e.unlock()
+	if e.persister != nil {
+		e.persister.SetSessionRef(ref)
+	}
+	if e.agentSessionID == ref {
+		return
+	}
+	e.agentSessionID = ref
+	e.notifyStatusLocked()
+}
+
+// SetState records the conversation's state, as lib/native reports it
+// (native.Observer.StateChanged). What changed of it in status updates is
+// sent as one, and its stored part is stored if that changed.
+func (e *EventEmitter) SetState(state agentstate.ConversationState) {
+	e.mu.Lock()
+	defer e.unlock()
+	state = state.Clone()
+	previous := e.agent
+	e.agent = state
+	if !reflect.DeepEqual(e.stored, state.Stored) {
+		e.stored = state.Stored
+		if e.persister != nil {
+			e.persister.SetStoredState(state.Stored)
+		}
+	}
+	changed := false
+	// Status updates carry a part once the agent reported it; the
+	// capabilities and the usage stay while no agent runs.
+	if state.Capabilities != nil && !reflect.DeepEqual(e.capabilities, state.Capabilities) {
+		e.capabilities = state.Capabilities
+		changed = true
+	}
+	if !reflect.DeepEqual(e.loginRequired, state.LoginRequired) {
+		e.loginRequired = state.LoginRequired
+		e.handoffRevision++
+		changed = true
+	}
+	if state.Settings != previous.Settings {
+		settings := state.Settings
+		e.settings = &settings
+		changed = true
+	}
+	if state.Usage != nil && !reflect.DeepEqual(e.usage, state.Usage) {
+		e.usage = state.Usage
+		changed = true
+	}
+	if !reflect.DeepEqual(e.limitStop, state.Stored.LimitStop) {
+		e.limitStop = state.Stored.LimitStop
+		changed = true
+	}
+	if !reflect.DeepEqual(e.retryWait, state.Stored.RetryWait) {
+		e.retryWait = state.Stored.RetryWait
+		changed = true
+	}
+	if changed {
+		e.notifyStatusLocked()
+	}
+}
+
 // SetAgentSessionID records the agent's own session, which a restart or a
 // resume changes.
 func (e *EventEmitter) SetAgentSessionID(id string) {
