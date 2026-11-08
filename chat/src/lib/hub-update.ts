@@ -288,9 +288,16 @@ export function cantUpdateText(older: OlderUpdates): string {
   return `Can't update from here: ${named.join("; ")}.${fix ? ` ${fix}` : ""}`;
 }
 
+// startsFresh: the instance's agent starts a new session after a restart.
+// Without a state DB, AgentAPIs that keep the session say so
+// (keeps_session); earlier ones don't.
+export function startsFresh(update: InstanceUpdate | null | undefined): boolean {
+  return !update?.keeps_conversation && !update?.keeps_session;
+}
+
 // confirmText asks before the hub asks targets to update.
 export function confirmText(targets: HubInstance[]): string {
-  const fresh = targets.filter((instance) => instance.summary?.update?.keeps_conversation === false).length;
+  const fresh = targets.filter((instance) => instance.summary?.update && startsFresh(instance.summary.update)).length;
   const ask = `Update ${count(targets.length, "agent", "agents")} once each one's task ends?`;
   if (fresh === 0) return ask;
   return `${ask} ${count(fresh, "runs", "run")} without a state DB, so ${fresh === 1 ? "its conversation starts" : "their conversations start"} fresh after the restart.`;

@@ -18,6 +18,7 @@ import {
   requestUpdate,
   requestUpdates,
   resultsText,
+  startsFresh,
   updateAction,
   updateBadge,
   type OlderUpdates,
@@ -133,7 +134,7 @@ export function UpdateDialogBody({
             <Hourglass className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
             <span>{busyWith(instance)}The update waits for the current task to finish, and for any approval or question to be answered.</span>
           </p>
-          {!instance.summary?.update?.keeps_conversation && (
+          {startsFresh(instance.summary?.update) ? (
             <div className="rounded-lg border border-state-needs/35 bg-state-needs/6 p-3 text-sm">
               <p className="flex items-start gap-2">
                 <TriangleAlert className="mt-0.5 size-4 shrink-0 text-state-needs" aria-hidden="true" />
@@ -144,6 +145,16 @@ export function UpdateDialogBody({
               </p>
               <CopyCommand text={STATE_DB_LINE} />
             </div>
+          ) : (
+            !instance.summary?.update?.keeps_conversation && (
+              <div className="rounded-lg border p-3 text-sm">
+                <p className="text-muted-foreground">
+                  It runs without a state DB: the agent resumes its session after the restart, but queued messages and the settings chosen in the chat
+                  start fresh. To keep them too, add this line to <Path>~/.agentapi/config.yaml</Path> on {host}:
+                </p>
+                <CopyCommand text={STATE_DB_LINE} />
+              </div>
+            )
           )}
           {action.failed && <p className="text-sm text-muted-foreground [overflow-wrap:anywhere]">The last attempt failed: {action.failed}</p>}
           {error && <Alert>{error}</Alert>}

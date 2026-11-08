@@ -198,7 +198,7 @@ describe("update the older ones", () => {
   const rows = [
     instance("ready", {}, {hostname: "dev-1"}),
     instance("failed", {state: "failed", error: "x"}, {hostname: "dev-1"}),
-    instance("fresh", {keeps_conversation: false}, {hostname: "dev-2"}),
+    instance("fresh", {keeps_conversation: false, keeps_session: false}, {hostname: "dev-2"}),
     instance("waits", {state: "waiting"}, {hostname: "dev-2"}),
     instance("downloads", {state: "downloading"}, {hostname: "dev-2"}),
     instance("blocked", {blocked: BLOCKED}, {hostname: "dev-3"}),
@@ -235,6 +235,8 @@ describe("update the older ones", () => {
   test("the confirm step says which start a fresh conversation", () => {
     const targets = olderUpdates(rows, "2.1.0").targets;
     expect(confirmText(targets)).toBe("Update 3 agents once each one's task ends? 1 runs without a state DB, so its conversation starts fresh after the restart.");
+    // Without a state DB, an agent that resumes its session doesn't start fresh.
+    expect(confirmText([...targets.slice(0, 1), instance("session", {keeps_conversation: false})])).toBe("Update 2 agents once each one's task ends?");
     expect(confirmText(targets.slice(0, 1))).toBe("Update 1 agent once each one's task ends?");
   });
 
