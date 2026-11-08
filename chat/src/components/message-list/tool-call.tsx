@@ -7,7 +7,7 @@ import { Button } from "../ui/button";
 import { uiCopy } from "@/lib/ui-copy";
 import { describeToolCall } from "@/lib/tool-call-view";
 import type { ToolCall } from "@/lib/task-timeline";
-import {useChatSelector} from "../chat-provider";
+import {useChatSelector, type ChatState} from "../chat-provider";
 import { ImageThumb } from "../image-preview";
 import { toolRequestBadge, type Tone } from "@/lib/native-requests";
 import { fileName, viewerTab, type FileTarget, type FileTargetKind } from "@/lib/file-refs";
@@ -189,8 +189,12 @@ export const ToolCallCard = React.memo(function ToolCallCard({
   const isPending = view.pending;
   const storageScope = useChatSelector((chat) => chat.storageScope);
   const subagentsShown = useChatSelector((chat) => chat.features.subagents);
-  const requests = useChatSelector((chat) => chat.requests);
-  const request = requests.findLast((candidate) => candidate.tool_use_id === toolCall.id);
+  // Only the request for this tool call: the card renders again when that
+  // one changes, not whenever any request does (a request keeps its object
+  // until it changes).
+  const request = useChatSelector(
+    useCallback((chat: ChatState) => chat.requests.findLast((candidate) => candidate.tool_use_id === toolCall.id), [toolCall.id]),
+  );
   const requestBadge = request ? toolRequestBadge(request) : null;
   const [localIsOpen, setLocalIsOpen] = useState(Boolean(searchQuery));
   const isOpen = open ?? localIsOpen;
