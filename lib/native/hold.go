@@ -154,23 +154,10 @@ func (h hold) retried() int {
 	return h.retry.Attempt
 }
 
-// setHoldLocked replaces the hold with h, and reports what changed.
+// setHoldLocked replaces the hold with h, and reports the change.
 func (c *Conversation) setHoldLocked(h hold) {
-	old := c.hold
 	c.hold = h
-	// What ended is reported before what began.
-	if old.limit != h.limit && h.limit == nil {
-		c.cfg.Observer.LimitStop(nil)
-	}
-	if old.retry != h.retry && h.retry == nil {
-		c.cfg.Observer.RetryWait(nil)
-	}
-	if old.limit != h.limit && h.limit != nil {
-		c.cfg.Observer.LimitStop(clone(h.limit))
-	}
-	if old.retry != h.retry && h.retry != nil {
-		c.cfg.Observer.RetryWait(clone(h.retry))
-	}
+	c.stateChangedLocked()
 }
 
 // LimitStop reports the turn a usage limit stopped, if no turn started

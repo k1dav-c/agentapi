@@ -137,7 +137,7 @@ func TestChosenSettingsOutliveTheAgent(t *testing.T) {
 
 func TestRestoredSettingsAreApplied(t *testing.T) {
 	c, factory, rec := start(t, configurable(agentstate.Settings{PermissionMode: agentstate.PermissionModeBypass, Model: "fast", Effort: "low"}),
-		native.Config{Settings: agentstate.Settings{Model: "plain", PermissionMode: agentstate.PermissionModeAsk}})
+		native.Config{State: agentstate.StoredState{Settings: agentstate.Settings{Model: "plain", PermissionMode: agentstate.PermissionModeAsk}}})
 	assert.Equal(t, []agentstate.Settings{{Model: "plain"}, {PermissionMode: agentstate.PermissionModeAsk}}, factory.Last().Applied())
 	// The model has no efforts.
 	assert.Equal(t, agentstate.Settings{PermissionMode: agentstate.PermissionModeAsk, Model: "plain"}, c.Settings())
@@ -146,7 +146,7 @@ func TestRestoredSettingsAreApplied(t *testing.T) {
 
 func TestRestoredSettingTheAgentRefuses(t *testing.T) {
 	c, factory, rec := start(t, configurable(agentstate.Settings{PermissionMode: agentstate.PermissionModeBypass, Model: "fast"}),
-		native.Config{Settings: agentstate.Settings{Model: "gone", PermissionMode: agentstate.PermissionModeAsk}})
+		native.Config{State: agentstate.StoredState{Settings: agentstate.Settings{Model: "gone", PermissionMode: agentstate.PermissionModeAsk}}})
 	// The model is gone; the mode is still applied.
 	assert.Equal(t, []agentstate.Settings{{PermissionMode: agentstate.PermissionModeAsk}}, factory.Last().Applied())
 	assert.Equal(t, agentstate.Settings{PermissionMode: agentstate.PermissionModeAsk, Model: "fast"}, c.Settings())

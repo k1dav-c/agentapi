@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -23,30 +24,31 @@ import (
 const nativeCallTimeout = 30 * time.Second
 
 // nativeObserver passes a native conversation's structured state to the
-// event emitter. The images of a rich message were stored before (see
-// native.Config.PrepareRichMessage).
+// event emitter, which stores what survives a restart. The images of a
+// rich message were stored before (see native.Config.PrepareRichMessage).
 type nativeObserver struct {
 	emitter *convstate.EventEmitter
-	// persister stores the session ref, if state is persisted.
-	persister convstate.Persister
+	// login is the login the agent waited for, as last reported.
+	login *agentstate.LoginRequired
 }
 
 var _ native.Observer = (*nativeObserver)(nil)
 
-// Started: an agent the conversation started again by itself after it
-// exited (AgentExited) is back.
-func (o *nativeObserver) Started(caps agentstate.Capabilities) {
-	o.emitter.SetCapabilities(caps)
-	o.emitter.ReleaseLifecycle()
-}
-
-// LoginRequired: an agent waiting for a login is up too.
-func (o *nativeObserver) LoginRequired(login *agentstate.LoginRequired) {
-	o.emitter.SetLoginRequired(login)
-	if login != nil {
+// StateChanged: an agent that starts waiting for a login is up too, which
+// ends a restart the server reports (see Started).
+func (o *nativeObserver) StateChanged(state agentstate.ConversationState) {
+	login := state.LoginRequired
+	o.emitter.SetState(state)
+	waits := login != nil && !reflect.DeepEqual(login, o.login)
+	o.login = login
+	if waits {
 		o.emitter.ReleaseLifecycle()
 	}
 }
+
+// Started: an agent the conversation started again by itself after it
+// exited (AgentExited) is back.
+func (o *nativeObserver) Started() { o.emitter.ReleaseLifecycle() }
 
 func (o *nativeObserver) RichMessage(msg transcript.RichMessage) {
 	o.emitter.EmitRichMessageSnapshot(msg)
@@ -58,46 +60,9 @@ func (o *nativeObserver) SessionEvents(events []transcript.SessionEvent) {
 
 func (o *nativeObserver) SessionName(name string) { o.emitter.SetSessionName(name) }
 
-// SessionRef is not published; the session ID shown to clients is
-// AgentAPI's own. It is stored to resume the session after a restart.
-func (o *nativeObserver) SessionRef(ref string) {
-	if o.persister != nil {
-		o.persister.SetSessionRef(ref)
-	}
-	o.emitter.SetAgentSessionID(ref)
-}
+func (o *nativeObserver) SessionRef(ref string) { o.emitter.SetSessionRef(ref) }
 
 func (o *nativeObserver) RequestUpdated(state agentstate.RequestState) { o.emitter.EmitRequest(state) }
-
-func (o *nativeObserver) Settings(settings agentstate.Settings) { o.emitter.SetSettings(settings) }
-
-func (o *nativeObserver) Usage(usage agentstate.AgentUsage) { o.emitter.SetUsage(usage) }
-
-// LimitStop is stored so that the queue still waits for the limit, and a
-// scheduled continuation still goes out, after AgentAPI restarts.
-func (o *nativeObserver) LimitStop(ls *agentstate.LimitStop) {
-	o.emitter.SetLimitStop(ls)
-	if o.persister != nil {
-		o.persister.SetLimitStop(ls)
-	}
-}
-
-// RetryWait is stored so that the queue still waits for the retry, which
-// still goes out, after AgentAPI restarts.
-func (o *nativeObserver) RetryWait(rw *agentstate.RetryWait) {
-	o.emitter.SetRetryWait(rw)
-	if o.persister != nil {
-		o.persister.SetRetryWait(rw)
-	}
-}
-
-// SettingsChosen is stored so that the agent gets the settings again after
-// AgentAPI restarts.
-func (o *nativeObserver) SettingsChosen(settings agentstate.Settings) {
-	if o.persister != nil {
-		o.persister.SetSettings(settings)
-	}
-}
 
 // AgentExited: the agent restarts while the conversation starts it again,
 // and has failed once it gave up. The server goes on serving either way; a

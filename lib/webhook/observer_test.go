@@ -220,14 +220,14 @@ func TestWebhookObserverNeedsYou(t *testing.T) {
 	e.EmitStatus(conv.StatusChanging)
 	e.EmitStatus(conv.StatusStable)
 
-	e.SetLoginRequired(&agentstate.LoginRequired{Agent: "Claude Code", Command: "claude auth login"})
-	e.SetLoginRequired(nil)
+	e.SetState(agentstate.ConversationState{LoginRequired: &agentstate.LoginRequired{Agent: "Claude Code", Command: "claude auth login"}})
+	e.SetState(agentstate.ConversationState{})
 
 	goOn := conv.Message{Id: 1, Role: conv.RoleUser, Message: "Go on", Time: start}
 	e.EmitMessages([]conv.Message{deploy, goOn})
 	e.EmitStatus(conv.StatusChanging)
 	e.EmitError("warned", conv.ErrorLevelWarning)
-	e.SetLimitStop(&agentstate.LimitStop{Message: "You've hit your limit", StoppedAt: start})
+	e.SetState(agentstate.ConversationState{Stored: agentstate.StoredState{LimitStop: &agentstate.LimitStop{Message: "You've hit your limit", StoppedAt: start}}})
 	e.EmitStatus(conv.StatusStable)
 	x.pump()
 

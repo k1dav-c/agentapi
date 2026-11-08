@@ -50,23 +50,30 @@ func TestSummary(t *testing.T) {
 
 	// What the agent waits for, the most pressing first.
 	e.EmitStatus(conv.StatusStable)
-	e.SetLimitStop(&agentstate.LimitStop{Message: "limit", StoppedAt: start})
+	var state agentstate.ConversationState
+	state.Stored.LimitStop = &agentstate.LimitStop{Message: "limit", StoppedAt: start}
+	e.SetState(state)
 	assert.Equal(t, instanceapi.AttentionLimit, e.Summary().Attention)
 	e.EmitRequest(agentstate.RequestState{Request: agentstate.Request{ID: "r1"}, Status: agentstate.RequestStatusPending})
 	assert.Equal(t, instanceapi.AttentionRequest, e.Summary().Attention)
 	assert.Equal(t, 1, e.Summary().PendingRequests)
-	e.SetLoginRequired(&agentstate.LoginRequired{Agent: "Claude Code", Command: "claude auth login"})
+	state.LoginRequired = &agentstate.LoginRequired{Agent: "Claude Code", Command: "claude auth login"}
+	e.SetState(state)
 	assert.Equal(t, instanceapi.AttentionLogin, e.Summary().Attention)
-	e.SetLoginRequired(nil)
+	state.LoginRequired = nil
+	e.SetState(state)
 	e.EmitRequest(agentstate.RequestState{Request: agentstate.Request{ID: "r1"}, Status: agentstate.RequestStatusResolved})
-	e.SetLimitStop(nil)
+	state.Stored.LimitStop = nil
+	e.SetState(state)
 	assert.Equal(t, instanceapi.AttentionNone, e.Summary().Attention)
 	// A failed turn that waits to be tried again needs nothing of the user.
 	retry := &agentstate.RetryWait{Message: "API Error: 502 Bad Gateway", StoppedAt: start, Attempt: 1, Attempts: 3}
-	e.SetRetryWait(retry)
+	state.Stored.RetryWait = retry
+	e.SetState(state)
 	assert.Equal(t, instanceapi.AttentionNone, e.Summary().Attention)
 	assert.Equal(t, retry, e.Summary().RetryWait)
-	e.SetRetryWait(nil)
+	state.Stored.RetryWait = nil
+	e.SetState(state)
 	assert.Nil(t, e.Summary().RetryWait)
 	e.SetLifecycle(instanceapi.LifecycleExited)
 	assert.Equal(t, instanceapi.AttentionExited, e.Summary().Attention)

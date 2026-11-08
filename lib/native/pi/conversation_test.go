@@ -143,29 +143,29 @@ type settingsObserver struct {
 	mu       sync.Mutex
 	settings []agentstate.Settings
 	caps     []agentstate.Capabilities
+	last     agentstate.ConversationState
 }
 
-func (o *settingsObserver) Started(caps agentstate.Capabilities) {
+// StateChanged records the settings and the capabilities whenever they
+// change.
+func (o *settingsObserver) StateChanged(state agentstate.ConversationState) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.caps = append(o.caps, caps)
+	if state.Settings != o.last.Settings {
+		o.settings = append(o.settings, state.Settings)
+	}
+	if state.Capabilities != nil && (o.last.Capabilities == nil || *state.Capabilities != *o.last.Capabilities) {
+		o.caps = append(o.caps, *state.Capabilities)
+	}
+	o.last = state
 }
 
-func (o *settingsObserver) Settings(s agentstate.Settings) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	o.settings = append(o.settings, s)
-}
-func (*settingsObserver) LoginRequired(*agentstate.LoginRequired) {}
+func (*settingsObserver) Started()                                {}
 func (*settingsObserver) RichMessage(transcript.RichMessage)      {}
 func (*settingsObserver) SessionEvents([]transcript.SessionEvent) {}
 func (*settingsObserver) SessionName(string)                      {}
 func (*settingsObserver) SessionRef(string)                       {}
 func (*settingsObserver) RequestUpdated(agentstate.RequestState)  {}
-func (*settingsObserver) SettingsChosen(agentstate.Settings)      {}
-func (*settingsObserver) Usage(agentstate.AgentUsage)             {}
-func (*settingsObserver) LimitStop(*agentstate.LimitStop)         {}
-func (*settingsObserver) RetryWait(*agentstate.RetryWait)         {}
 func (*settingsObserver) AgentExited(native.AgentExit)            {}
 
 func TestModelSwitchReportsNoMixedSettings(t *testing.T) {

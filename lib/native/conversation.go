@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -18,55 +19,44 @@ import (
 // Observer receives the structured state a Conversation produces beyond
 // what conv.Emitter carries. Its methods are called with the conversation's
 // lock held and must not call back into the conversation. A RichMessage
-// is the observer's own copy, to keep and change.
+// and a ConversationState are the observer's own copies, to keep and
+// change.
 type Observer interface {
-	// Started reports that an agent accepts turns, and what it supports;
-	// again when that changes (a new model takes images or doesn't).
-	Started(agentstate.Capabilities)
-	// LoginRequired reports that the agent waits for the user to log in,
-	// or with nil that it no longer does. It is called when that changes.
-	LoginRequired(*agentstate.LoginRequired)
+	// StateChanged reports the conversation's state whenever a part of it
+	// changed: capabilities, login, settings (the agent's and the chosen
+	// ones), usage, the limit stop or retry wait that holds the queue. It
+	// comes where each change is made, in the order of the conversation's
+	// other reports; changes made together come as one.
+	StateChanged(agentstate.ConversationState)
+	// Started reports that an agent accepts turns: one started, or the
+	// conversation started it again by itself after it exited. What it
+	// supports came before with StateChanged.
+	Started()
 	RichMessage(transcript.RichMessage)
 	SessionEvents([]transcript.SessionEvent)
 	SessionName(string)
+	// SessionRef reports the session the next agent resumes: the one an
+	// agent opened, or the one a switch opens next. It is reported each
+	// time, also when it is the same.
 	SessionRef(string)
 	RequestUpdated(agentstate.RequestState)
-	// Settings reports the agent's session settings when they change.
-	Settings(agentstate.Settings)
-	// SettingsChosen reports the settings chosen for the session when they
-	// change: what to pass as Config.Settings to continue the session.
-	SettingsChosen(agentstate.Settings)
-	// Usage reports the agent's usage of its limits when it changes.
-	Usage(agentstate.AgentUsage)
-	// LimitStop reports the turn a usage limit stopped when that changes,
-	// or with nil that a turn started since or the stop was dismissed.
-	LimitStop(*agentstate.LimitStop)
-	// RetryWait reports the failed turn that waits to be tried again when
-	// that changes, or with nil that a turn started since or the retry was
-	// cancelled.
-	RetryWait(*agentstate.RetryWait)
 	// AgentExited reports that the agent exited on its own or failed to
 	// start, and whether the conversation starts it again. An agent that
 	// lost its login before it exited waits for the login instead
-	// (LoginRequired).
+	// (ConversationState.LoginRequired).
 	AgentExited(AgentExit)
 }
 
 type nopObserver struct{}
 
-func (nopObserver) Started(agentstate.Capabilities)         {}
-func (nopObserver) LoginRequired(*agentstate.LoginRequired) {}
-func (nopObserver) RichMessage(transcript.RichMessage)      {}
-func (nopObserver) SessionEvents([]transcript.SessionEvent) {}
-func (nopObserver) SessionName(string)                      {}
-func (nopObserver) SessionRef(string)                       {}
-func (nopObserver) RequestUpdated(agentstate.RequestState)  {}
-func (nopObserver) Settings(agentstate.Settings)            {}
-func (nopObserver) SettingsChosen(agentstate.Settings)      {}
-func (nopObserver) Usage(agentstate.AgentUsage)             {}
-func (nopObserver) LimitStop(*agentstate.LimitStop)         {}
-func (nopObserver) RetryWait(*agentstate.RetryWait)         {}
-func (nopObserver) AgentExited(AgentExit)                   {}
+func (nopObserver) StateChanged(agentstate.ConversationState) {}
+func (nopObserver) Started()                                  {}
+func (nopObserver) RichMessage(transcript.RichMessage)        {}
+func (nopObserver) SessionEvents([]transcript.SessionEvent)   {}
+func (nopObserver) SessionName(string)                        {}
+func (nopObserver) SessionRef(string)                         {}
+func (nopObserver) RequestUpdated(agentstate.RequestState)    {}
+func (nopObserver) AgentExited(AgentExit)                     {}
 
 // Config configures a Conversation.
 type Config struct {
@@ -91,18 +81,14 @@ type Config struct {
 	// LoginRetryInterval is how often the agent is started again while it
 	// waits for a login. Zero means five seconds.
 	LoginRetryInterval time.Duration
-	// Settings were chosen for the session earlier (restored after AgentAPI
-	// restarted). Every agent that starts gets them.
-	Settings agentstate.Settings
+	// State is the conversation's state before AgentAPI restarted: every
+	// agent that starts gets the settings chosen, and a limit stop or retry
+	// wait holds the queue again. With retries off (Policy.RetriesOff) a
+	// retry wait is dropped.
+	State agentstate.StoredState
 	// Policy says what the conversation does by itself when a turn or the
 	// agent stops.
 	Policy
-	// LimitStop is a turn a usage limit stopped before AgentAPI restarted.
-	LimitStop *agentstate.LimitStop
-	// RetryWait is a failed turn that waited to be tried again before
-	// AgentAPI restarted. With retries off (Policy.RetriesOff) it is
-	// dropped.
-	RetryWait *agentstate.RetryWait
 	// PrepareRichMessage, if set, changes every rich message an adapter
 	// reports before the conversation takes it, without the conversation's
 	// lock: work that can be slow (storing the images of a tool result)
@@ -186,8 +172,9 @@ type Conversation struct {
 	chosen agentstate.Settings
 	// usage is what the agent last reported of its usage. The rate limits
 	// are the account's, so they stay for the next agent; the context
-	// belongs to the session.
-	usage agentstate.AgentUsage
+	// belongs to the session. usageReported: the agent reported it.
+	usage         agentstate.AgentUsage
+	usageReported bool
 	// hold is what holds the queue (see hold.go): a turn a usage limit
 	// stopped or a failed turn that waits to be tried again, until a turn
 	// starts.
@@ -197,6 +184,9 @@ type Conversation struct {
 	// scheduled again, or the next retry. It is empty for any other turn,
 	// and once the turn ended or its agent is gone.
 	continues hold
+	// reported is the state the observer was told last (see
+	// stateChangedLocked).
+	reported agentstate.ConversationState
 }
 
 // NewConversation creates a conversation. Nothing runs until Start.
@@ -220,7 +210,7 @@ func NewConversation(cfg Config) *Conversation {
 		cfg.LoginRetryInterval = defaultLoginRetryInterval
 	}
 	if cfg.RetriesOff() {
-		cfg.RetryWait = nil
+		cfg.State.RetryWait = nil
 	}
 	cfg.Policy = cfg.withDefaults()
 	return &Conversation{
@@ -230,8 +220,8 @@ func NewConversation(cfg Config) *Conversation {
 		requests:   newRequestBook(cfg.Clock),
 		sessionRef: cfg.ResumeRef,
 		promptSent: len(cfg.InitialMessages) > 0,
-		chosen:     cfg.Settings,
-		hold:       restoredHold(cfg.LimitStop, cfg.RetryWait),
+		chosen:     cfg.State.Settings,
+		hold:       restoredHold(cfg.State.LimitStop, cfg.State.RetryWait),
 	}
 }
 
@@ -294,7 +284,36 @@ func (c *Conversation) Usage() agentstate.AgentUsage {
 
 func (c *Conversation) setUsageLocked(usage agentstate.AgentUsage) {
 	c.usage = usage
-	c.cfg.Observer.Usage(usage)
+	c.usageReported = true
+	c.stateChangedLocked()
+}
+
+// stateLocked is the conversation's state, the observer's own copy.
+func (c *Conversation) stateLocked() agentstate.ConversationState {
+	state := agentstate.ConversationState{
+		LoginRequired: c.login,
+		Settings:      c.settings,
+		Stored:        agentstate.StoredState{Settings: c.chosen, LimitStop: c.hold.limit, RetryWait: c.hold.retry},
+	}
+	if c.ran {
+		state.Capabilities = &c.caps
+	}
+	if c.usageReported {
+		state.Usage = &c.usage
+	}
+	return state.Clone()
+}
+
+// stateChangedLocked tells the observer the conversation's state, if it
+// changed since it was told last. Everything that changes a part of it
+// calls it; what changes several parts at once calls it once, after.
+func (c *Conversation) stateChangedLocked() {
+	state := c.stateLocked()
+	if reflect.DeepEqual(state, c.reported) {
+		return
+	}
+	c.reported = state
+	c.cfg.Observer.StateChanged(state.Clone())
 }
 
 // configurable returns the running agent if its settings can change.
@@ -354,9 +373,8 @@ func (c *Conversation) ApplySettings(ctx context.Context, s agentstate.Settings)
 		}
 		return ErrNotStarted
 	}
-	if hasCaps && caps != c.caps {
+	if hasCaps {
 		c.caps = caps
-		c.cfg.Observer.Started(caps)
 	}
 	// Settings the agent took before one failed show too.
 	c.setSettingsLocked(settings)
@@ -374,18 +392,14 @@ func (c *Conversation) ApplySettings(ctx context.Context, s agentstate.Settings)
 }
 
 func (c *Conversation) chooseLocked(chosen agentstate.Settings) {
-	if c.chosen != chosen {
-		c.chosen = chosen
-		c.cfg.Observer.SettingsChosen(chosen)
-	}
+	c.chosen = chosen
+	c.stateChangedLocked()
 }
 
 // setSettingsLocked records the agent's settings.
 func (c *Conversation) setSettingsLocked(settings agentstate.Settings) {
-	if c.settings != settings {
-		c.settings = settings
-		c.cfg.Observer.Settings(settings)
-	}
+	c.settings = settings
+	c.stateChangedLocked()
 }
 
 // agentSettingsLocked records settings the agent changed by itself. A

@@ -3,6 +3,7 @@ package demo_test
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -27,17 +28,23 @@ type observer struct {
 	logins   []*agentstate.LoginRequired
 	usage    []agentstate.AgentUsage
 	exits    []native.AgentExit
+	last     agentstate.ConversationState
 }
 
-func (o *observer) Usage(u agentstate.AgentUsage) {
+// StateChanged records the usage and the login whenever they change.
+func (o *observer) StateChanged(state agentstate.ConversationState) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.usage = append(o.usage, u)
+	if state.Usage != nil && !reflect.DeepEqual(state.Usage, o.last.Usage) {
+		o.usage = append(o.usage, *state.Usage)
+	}
+	if !reflect.DeepEqual(state.LoginRequired, o.last.LoginRequired) {
+		o.logins = append(o.logins, state.LoginRequired)
+	}
+	o.last = state
 }
 
-func (o *observer) Started(agentstate.Capabilities) {}
-func (o *observer) LimitStop(*agentstate.LimitStop) {}
-func (o *observer) RetryWait(*agentstate.RetryWait) {}
+func (o *observer) Started() {}
 func (o *observer) AgentExited(exit native.AgentExit) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -52,20 +59,12 @@ func (o *observer) RichMessage(m transcript.RichMessage) {
 func (o *observer) SessionEvents([]transcript.SessionEvent) {}
 func (o *observer) SessionName(string)                      {}
 func (o *observer) SessionRef(string)                       {}
-func (o *observer) LoginRequired(l *agentstate.LoginRequired) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	o.logins = append(o.logins, l)
-}
 
 func (o *observer) RequestUpdated(s agentstate.RequestState) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.requests[s.ID] = s
 }
-
-func (o *observer) Settings(agentstate.Settings)       {}
-func (o *observer) SettingsChosen(agentstate.Settings) {}
 
 // replies returns the replies to the nth turn of each agent; every agent
 // counts its turns from one.
