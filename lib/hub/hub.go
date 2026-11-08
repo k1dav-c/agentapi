@@ -517,7 +517,7 @@ type hubEvents struct {
 }
 
 // streamEvents sends the browser the instances and the hub's version
-// (instances) and the favorites (favorites), and then each change:
+// (instances) and the settings (favorites), and then each change:
 // instance, with the instance, removed, with its ID, or favorites, with
 // all of them.
 func (h *Hub) streamEvents(w http.ResponseWriter, r *http.Request) {
@@ -526,7 +526,7 @@ func (h *Hub) streamEvents(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 		return
 	}
-	instances, favorites, ch := h.store.subscribe()
+	instances, settings, ch := h.store.subscribe()
 	defer h.store.unsubscribe(ch)
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -546,7 +546,7 @@ func (h *Hub) streamEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// A page before 3.5 doesn't listen for it.
-	if !send("favorites", favoritesBody{Favorites: favorites}) {
+	if !send("favorites", favoritesBody{Favorites: settings.Favorites}) {
 		return
 	}
 	heartbeat := h.clock.NewTicker(hubHeartbeat, "hub", "browser heartbeat")
@@ -566,19 +566,16 @@ func (h *Hub) streamEvents(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
-			if event.Removed != "" {
-				if !send("removed", removedEvent{ID: event.Removed}) {
-					return
-				}
-				continue
+			var sent bool
+			switch event.Kind {
+			case eventInstance:
+				sent = send("instance", event.Instance.sent(h.clock.Now()))
+			case eventRemoved:
+				sent = send("removed", removedEvent{ID: event.Removed})
+			case eventSettings:
+				sent = send("favorites", favoritesBody{Favorites: event.Settings.Favorites})
 			}
-			if event.Favorites != nil {
-				if !send("favorites", favoritesBody{Favorites: event.Favorites}) {
-					return
-				}
-				continue
-			}
-			if !send("instance", event.Instance.sent(h.clock.Now())) {
+			if !sent {
 				return
 			}
 		}

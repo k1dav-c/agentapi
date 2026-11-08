@@ -233,18 +233,49 @@ type store struct {
 
 	mu        sync.Mutex
 	instances map[string]*Instance
-	// favorites are the prompts kept on the hub, in their order; never
-	// nil.
-	favorites []Favorite
+	settings  hubSettings
 	subs      map[chan storeEvent]struct{}
 }
 
-// storeEvent is a change: the instance, the ID of one removed, or the
-// favorites.
+// hubSettings are what the hub's page sets for the whole hub, which the
+// store keeps beside the instances.
+type hubSettings struct {
+	// Favorites are the prompts kept on the hub, in their order; never
+	// nil.
+	Favorites []Favorite `json:"favorites"`
+}
+
+// clone is a copy of the settings that shares nothing with them.
+func (s hubSettings) clone() hubSettings {
+	favorites := slices.Clone(s.Favorites)
+	if favorites == nil {
+		favorites = []Favorite{}
+	}
+	return hubSettings{Favorites: favorites}
+}
+
+func (s hubSettings) equal(other hubSettings) bool {
+	return slices.Equal(s.Favorites, other.Favorites)
+}
+
+// storeEventKind is what a storeEvent tells of.
+type storeEventKind int
+
+const (
+	// eventInstance: an instance changed or came (Instance).
+	eventInstance storeEventKind = iota + 1
+	// eventRemoved: the store forgot an instance (Removed, its ID).
+	eventRemoved
+	// eventSettings: the settings changed (Settings, all of them).
+	eventSettings
+)
+
+// storeEvent is a change, of the kind Kind, with what that kind has.
 type storeEvent struct {
-	Instance  *Instance
-	Removed   string
-	Favorites []Favorite
+	Kind     storeEventKind
+	Instance Instance
+	Removed  string
+	Settings hubSettings
 }
 
 // storedInstance is an instance in the file.
@@ -276,7 +307,7 @@ func (i Instance) kept() storedInstance {
 // newStore returns the store that keeps the instances in path (empty keeps
 // none), with those it kept, on clock.
 func newStore(path string, logger *slog.Logger, clock quartz.Clock) (*store, error) {
-	s := &store{clock: clock, instances: map[string]*Instance{}, favorites: []Favorite{}, subs: map[chan storeEvent]struct{}{}}
+	s := &store{clock: clock, instances: map[string]*Instance{}, settings: hubSettings{}.clone(), subs: map[chan storeEvent]struct{}{}}
 	if path == "" {
 		return s, nil
 	}
@@ -285,10 +316,11 @@ func newStore(path string, logger *slog.Logger, clock quartz.Clock) (*store, err
 		return nil, err
 	}
 	// A file edited by hand may have favorites the API refuses: the hub
-	// keeps those it would take.
-	if favorites, err := normalizeFavorites(file.Favorites); err == nil {
-		s.favorites = favorites
-	} else if len(file.Favorites) > 0 {
+	// starts without them.
+	settings := file.settings()
+	if favorites, err := normalizeFavorites(settings.Favorites); err == nil {
+		s.settings.Favorites = favorites
+	} else if len(settings.Favorites) > 0 {
 		logger.Warn("The hub's favorites in its file aren't valid; starting without them. The file as it was is in the .bak next to it", "file", path, "error", err)
 	}
 	now := clock.Now()
@@ -320,9 +352,9 @@ func (s *store) snapshot() ([]byte, error) {
 	for _, i := range s.sortedLocked() {
 		stored = append(stored, i.stored())
 	}
-	favorites := slices.Clone(s.favorites)
+	settings := s.settings.clone()
 	s.mu.Unlock()
-	return encodeState(stored, favorites)
+	return encodeState(stored, settings)
 }
 
 // changedLocked says the file is behind; it is written soon after. Caller
@@ -440,7 +472,7 @@ func (s *store) update(id string, create bool, change func(*Instance)) (Instance
 	}
 	changed := *i
 	if notify {
-		s.notifyLocked(storeEvent{Instance: &changed})
+		s.notifyLocked(storeEvent{Kind: eventInstance, Instance: changed})
 	}
 	s.notifyEachLocked(renumbered, i)
 	return changed, true
@@ -461,7 +493,7 @@ func (s *store) remove(id string) bool {
 		renumbered = s.numberPinsLocked()
 	}
 	s.changedLocked()
-	s.notifyLocked(storeEvent{Removed: id})
+	s.notifyLocked(storeEvent{Kind: eventRemoved, Removed: id})
 	s.notifyEachLocked(renumbered, nil)
 	return true
 }
@@ -550,20 +582,47 @@ func (s *store) refreshWork() {
 		minutes := i.work.at(now).minutes()
 		if minutes != i.workSent {
 			i.workSent = minutes
-			changed := *i
-			s.notifyLocked(storeEvent{Instance: &changed})
+			s.notifyLocked(storeEvent{Kind: eventInstance, Instance: *i})
 		}
 	}
 }
 
-// subscribe returns the instances, the favorites and a channel of the
+// subscribe returns the instances, the settings and a channel of the
 // changes after them.
-func (s *store) subscribe() ([]Instance, []Favorite, chan storeEvent) {
+func (s *store) subscribe() ([]Instance, hubSettings, chan storeEvent) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ch := make(chan storeEvent, 256)
 	s.subs[ch] = struct{}{}
-	return s.listLocked(), slices.Clone(s.favorites), ch
+	return s.listLocked(), s.settings.clone(), ch
+}
+
+// getSettings returns a copy of the settings.
+func (s *store) getSettings() hubSettings {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.settings.clone()
+}
+
+// updateSettings changes the settings with change, which gets a copy of
+// them, and returns them as the store keeps them after it. An error from
+// change changes nothing; a change keeps them in the file and tells the
+// subscribers.
+func (s *store) updateSettings(change func(*hubSettings) error) (hubSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	next := s.settings.clone()
+	if err := change(&next); err != nil {
+		return s.settings.clone(), err
+	}
+	next = next.clone()
+	if next.equal(s.settings) {
+		return next, nil
+	}
+	s.settings = next
+	s.changedLocked()
+	s.notifyLocked(storeEvent{Kind: eventSettings, Settings: next.clone()})
+	return next.clone(), nil
 }
 
 func (s *store) unsubscribe(ch chan storeEvent) {
@@ -580,8 +639,7 @@ func (s *store) unsubscribe(ch chan storeEvent) {
 func (s *store) notifyEachLocked(changed []*Instance, except *Instance) {
 	for _, i := range changed {
 		if i != except {
-			instance := *i
-			s.notifyLocked(storeEvent{Instance: &instance})
+			s.notifyLocked(storeEvent{Kind: eventInstance, Instance: *i})
 		}
 	}
 }
