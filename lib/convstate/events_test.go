@@ -429,10 +429,7 @@ func (p *recordingPersister) SetSessionRef(ref string)        { p.refs = append(
 func (p *recordingPersister) SetStoredState(state agentstate.StoredState) {
 	p.stored = append(p.stored, state)
 }
-func (p *recordingPersister) SetSeenAt(time.Time)                {}
-func (p *recordingPersister) SetSettings(agentstate.Settings)    {}
-func (p *recordingPersister) SetLimitStop(*agentstate.LimitStop) {}
-func (p *recordingPersister) SetRetryWait(*agentstate.RetryWait) {}
+func (p *recordingPersister) SetSeenAt(time.Time) {}
 func (p *recordingPersister) PutTask(id int, data []byte, _ uint64) {
 	if p.tasks == nil {
 		p.tasks = map[int]string{}

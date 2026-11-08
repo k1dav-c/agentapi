@@ -231,13 +231,6 @@ type Persister interface {
 	SetSessionName(name string)
 	// SetSessionRef stores what resumes the agent's session.
 	SetSessionRef(ref string)
-	// SetSettings stores the settings chosen for the session.
-	SetSettings(settings agentstate.Settings)
-	// SetLimitStop stores the turn a usage limit stopped; nil removes it.
-	SetLimitStop(ls *agentstate.LimitStop)
-	// SetRetryWait stores the failed turn that waits to be tried again; nil
-	// removes it.
-	SetRetryWait(rw *agentstate.RetryWait)
 	// SetStoredState stores the part of the conversation's state that
 	// survives a restart (agentstate.StoredState) whenever it changes. It
 	// may keep state: the emitter doesn't change it.
