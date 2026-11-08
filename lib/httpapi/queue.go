@@ -70,13 +70,6 @@ func (q *messageQueue) Messages() []convstate.QueuedMessage {
 	return append([]convstate.QueuedMessage{}, q.messages...)
 }
 
-// LastID is the ID of the last message queued.
-func (q *messageQueue) LastID() int {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	return q.lastID
-}
-
 // Push queues content, queued at at: last, or first with front.
 func (q *messageQueue) Push(content string, at time.Time, front bool) convstate.QueuedMessage {
 	q.mu.Lock()

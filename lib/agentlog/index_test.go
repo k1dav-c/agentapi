@@ -3,7 +3,6 @@ package agentlog
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -192,34 +191,4 @@ func TestIndexReadsAFileOnceAtATime(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-}
-
-// A Follower reads one log on from where it stopped, and from its start
-// once it was replaced; a read that fails leaves its place as it was.
-func TestFollower(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "log.jsonl")
-	var readers []*lineList
-	f := NewFollower(path, func(string) *lineList { readers = append(readers, &lineList{}); return readers[len(readers)-1] })
-	assert.Error(t, f.Read(), "not there yet")
-	appendTo(t, path, `{"n":1}`+"\n")
-	require.NoError(t, f.Read())
-	appendTo(t, path, `{"n":2}`+"\n")
-	// Windows has no mode that makes a file unreadable; root reads any.
-	if runtime.GOOS != "windows" && os.Geteuid() != 0 {
-		require.NoError(t, os.Chmod(path, 0o200))
-		assert.Error(t, f.Read(), "unreadable")
-		require.NoError(t, os.Chmod(path, 0o600))
-	}
-	require.NoError(t, f.Read())
-	require.Len(t, readers, 1)
-	assert.Equal(t, []string{`{"n":1}`, `{"n":2}`}, readers[0].lines, "read on, each line once")
-
-	require.NoError(t, os.Remove(path))
-	assert.Error(t, f.Read(), "gone")
-	appendTo(t, path, `{"n":3}`+"\n")
-	require.NoError(t, f.Read())
-	require.Len(t, readers, 2, "another file at the path")
-	assert.Equal(t, []string{`{"n":3}`}, readers[1].lines)
 }

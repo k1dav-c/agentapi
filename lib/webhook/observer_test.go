@@ -88,7 +88,7 @@ type observed struct {
 
 func newObserved(t *testing.T, d *Dispatcher, clock quartz.Clock) *observed {
 	t.Helper()
-	emitter := convstate.NewEventEmitter(convstate.WithClock(clock), convstate.WithSubscriptionBufSize(256))
+	emitter := convstate.NewEventEmitter(convstate.WithClock(clock))
 	o := newWebhookObserver(d, emitter, clock.Now())
 	_, events, replay := o.subscribe()
 	o.replay(replay, true)

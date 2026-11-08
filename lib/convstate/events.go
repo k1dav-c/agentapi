@@ -284,16 +284,6 @@ const maxStoredErrors = 100
 
 type EventEmitterOption func(*EventEmitter)
 
-func WithSubscriptionBufSize(size uint) EventEmitterOption {
-	return func(e *EventEmitter) {
-		if size == 0 {
-			e.subscriptionBufSize = defaultSubscriptionBufSize
-		} else {
-			e.subscriptionBufSize = size
-		}
-	}
-}
-
 func WithAgentType(agentType instanceapi.AgentType) EventEmitterOption {
 	return func(e *EventEmitter) {
 		e.agentType = agentType

@@ -69,7 +69,7 @@ func TestQueueRestoreKeepsCounting(t *testing.T) {
 	t.Parallel()
 	var q messageQueue
 	q.Restore([]convstate.QueuedMessage{{ID: 7, Content: "x"}}, 5)
-	assert.Equal(t, 7, q.LastID(), "an ID stored with a message counts too")
+	assert.Equal(t, 7, q.lastID, "an ID stored with a message counts too")
 	assert.Equal(t, 8, q.Push("y", time.Time{}, false).ID)
 }
 

@@ -346,14 +346,6 @@ func (s *store) close() error {
 	return s.persist.close()
 }
 
-// flush writes what the file is behind on now.
-func (s *store) flush() error {
-	if s.persist == nil {
-		return nil
-	}
-	return s.persist.flush()
-}
-
 func (s *store) sortedLocked() []*Instance {
 	list := make([]*Instance, 0, len(s.instances))
 	for _, i := range s.instances {

@@ -151,13 +151,6 @@ func (d *deliveries) snapshot() ([]byte, error) {
 	return json.Marshal(file)
 }
 
-func (d *deliveries) flush() error {
-	if d.persist == nil {
-		return nil
-	}
-	return d.persist.flush()
-}
-
 func (d *deliveries) close() error {
 	if d.persist == nil {
 		return nil

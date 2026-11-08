@@ -420,7 +420,8 @@ func restoreWebhook(dispatcher *webhook.Dispatcher, snap statedb.Snapshot, logge
 	}
 }
 
-// Handler returns the underlying chi.Router for testing purposes.
+// Handler returns the server's router. The tests of lib/httpapi and of
+// the hub (which runs real servers behind it) serve it with httptest.
 func (s *Server) Handler() http.Handler {
 	return s.router
 }
