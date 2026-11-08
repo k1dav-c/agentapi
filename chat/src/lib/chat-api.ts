@@ -1,9 +1,9 @@
 import {authFetch, withAuthRetry} from "./auth";
-import type {FileUploadResponse, QueuedMessage, SendResult} from "@/components/chat-provider";
 import type {DispatchMode} from "./dispatch";
+import type {QueuedMessage} from "./queue";
 import {normalizeRequest, type NativeRequest, type RequestPayload, type RequestResponse} from "./native-requests";
 import {normalizeRichMessage, type RichMessage} from "./conversation";
-import {parseLoginRequired, type LoginRequired, type LoginRetryOutcome} from "./login";
+import {parseLoginRequired, type LoginRetryOutcome} from "./login";
 import {ApiError} from "./error-utils";
 import type {components} from "./api-schema";
 
@@ -16,6 +16,12 @@ export interface UploadOptions {
 type Schemas = components["schemas"];
 // A response body without huma's link to its JSON schema.
 type Body<T> = Omit<T, "$schema">;
+
+// POST /message: whether the server took the message, and what it did
+// with it.
+export type SendResult = Body<Schemas["MessageResponseBody"]>;
+// POST /upload, or why the upload failed (error, without a filePath).
+export type FileUploadResponse = Omit<Body<Schemas["UploadResponseBody"]>, "filePath"> & {filePath?: string; error?: string};
 
 // GET and PUT /webhook: where the events go, which, and how they're signed.
 export type WebhookConfig = Body<Schemas["WebhookConfigResponseBody"]>;
@@ -97,10 +103,10 @@ async function errorDetail(response: Response, fallback: string): Promise<string
   return details ? `${error.detail}: ${details}` : error.detail;
 }
 
-export interface ServerStatusInfo {
-  // Set while the agent waits for someone to log it in.
-  login_required: LoginRequired | null;
-}
+// What the chat reads of GET /status: the login the agent waits for, if
+// any.
+type StatusBody = Body<Schemas["StatusResponseBody"]>;
+export type ServerStatusInfo = {login_required: NonNullable<StatusBody["login_required"]> | null};
 
 // value if it is an http(s) URL. The chat opens such links, so a
 // javascript: URL must not get through.
@@ -256,7 +262,7 @@ export function createChatAPI(baseURL: string) {
     },
 
     async getStatus(): Promise<ServerStatusInfo> {
-      const data = await jsonRequest<{login_required?: unknown}>("/status", {
+      const data = await jsonRequest<Partial<StatusBody>>("/status", {
         fallback: "Failed to read the agent status",
       });
       return {
@@ -282,7 +288,7 @@ export function createChatAPI(baseURL: string) {
     },
 
     async sendMessage(content: string, mode: DispatchMode = "queue"): Promise<SendResult> {
-      const result = await jsonRequest<{ok?: boolean; queued?: boolean; steered?: boolean}>("/message", {
+      const result = await jsonRequest<Partial<SendResult>>("/message", {
         method: "POST",
         // Only send dispatch_mode when it isn't the default, so older
         // servers that don't know the field keep accepting messages.
@@ -458,6 +464,9 @@ export function createChatAPI(baseURL: string) {
     },
   };
 }
+
+// The API calls of one server (createChatAPI).
+export type ChatAPI = ReturnType<typeof createChatAPI>;
 
 // mergeCost puts a cost report's calls after the known ones when it holds
 // the calls after them (from > 0), and stands alone otherwise.

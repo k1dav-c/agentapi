@@ -6,7 +6,7 @@ import {ChatStream} from "@/lib/chat-stream";
 import {initialConnectionState, type ConnectionState} from "@/lib/event-source";
 import {loadSession, mergeByKey} from "@/lib/session-cache";
 import {bootstrapSession, ensureSession, reconnectWhenSignedIn, withCredentials} from "@/lib/auth";
-import type {createChatAPI} from "@/lib/chat-api";
+import type {ChatAPI} from "@/lib/chat-api";
 import {isLoginNotice} from "@/lib/login";
 import type {NativeRequest} from "@/lib/native-requests";
 import type {ServerTask} from "@/lib/server-tasks";
@@ -42,7 +42,7 @@ export function useEventStream({
   onReplayed,
 }: {
   agentAPIUrl: string;
-  api: ReturnType<typeof createChatAPI>;
+  api: ChatAPI;
   syncRef: RefObject<SyncTracker>;
   setMessages: Dispatch<SetStateAction<(Message | DraftMessage)[]>>;
   setRichMessages: Dispatch<SetStateAction<RichMessage[]>>;

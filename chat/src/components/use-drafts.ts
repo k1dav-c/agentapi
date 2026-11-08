@@ -2,19 +2,12 @@
 
 import {useState, type Dispatch, type SetStateAction} from "react";
 import {toast} from "sonner";
-import type {createChatAPI} from "@/lib/chat-api";
+import type {ChatAPI, SendResult} from "@/lib/chat-api";
 import {isDraftMessage, type DraftMessage, type Message} from "@/lib/conversation";
 import type {DispatchMode} from "@/lib/dispatch";
 import {getErrorMessage} from "@/lib/error-utils";
 import {parseFailedMessages} from "@/lib/failed-messages";
 import {usePersisted} from "@/lib/use-persisted";
-
-export interface SendResult {
-  ok: boolean;
-  queued: boolean;
-  // The message was added to the turn the agent is working on.
-  steered?: boolean;
-}
 
 // useDrafts sends the user's messages. A user message shows at once as a
 // draft, "sending" until the server has it (messagesAfter drops it for the
@@ -29,7 +22,7 @@ export function useDrafts({
   queueChanged,
 }: {
   agentAPIUrl: string;
-  api: ReturnType<typeof createChatAPI>;
+  api: ChatAPI;
   messages: (Message | DraftMessage)[];
   setMessages: Dispatch<SetStateAction<(Message | DraftMessage)[]>>;
   // Reads the queue again: the message may have been queued.

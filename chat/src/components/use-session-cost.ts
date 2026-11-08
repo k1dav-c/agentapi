@@ -1,5 +1,5 @@
 import {useEffect, useRef, useState} from "react";
-import type {CostReport, createChatAPI} from "@/lib/chat-api";
+import type {CostReport, ChatAPI} from "@/lib/chat-api";
 import type {ServerStatus} from "@/lib/agent-status";
 
 // How often a running task's cost is read again.
@@ -9,7 +9,7 @@ const RUNNING_REFRESH_MS = 15_000;
 // when the agent is ready, again whenever a turn ends, and now and then
 // while one runs. null until read, or when the feature is off.
 export function useSessionCost(
-  api: ReturnType<typeof createChatAPI>,
+  api: ChatAPI,
   enabled: boolean,
   serverStatus: ServerStatus,
   ready: boolean,

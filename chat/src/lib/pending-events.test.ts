@@ -5,8 +5,8 @@ import {PendingEvents, messagesAfter, requestsAfter, tasksAfter, type EventBatch
 import type {ServerTask} from "./server-tasks";
 import {SyncTracker} from "./session-sync";
 
-const message = (id: number, seq: number) => ({id, role: "agent", content: `message ${id}`, time: "2026-10-22T10:00:00Z", seq});
-const prompt = (id: number, seq: number, time = "2026-10-22T10:00:00Z") => ({id, role: "user", content: `prompt ${id}`, time, seq});
+const message = (id: number, seq: number) => ({id, role: "agent" as const, content: `message ${id}`, time: "2026-10-22T10:00:00Z", seq});
+const prompt = (id: number, seq: number, time = "2026-10-22T10:00:00Z") => ({id, role: "user" as const, content: `prompt ${id}`, time, seq});
 const rich = (id: string, seq: number) => ({message_id: id, role: "assistant", timestamp: "2026-10-22T10:00:01Z", content: [], seq});
 const task = (id: number, seq: number, steered: number[] = []): ServerTask => ({
   id,
@@ -198,7 +198,7 @@ describe("messagesAfter", () => {
     clientId,
     deliveryStatus,
   });
-  const sent = (id: number, content: string, seq: number) => ({id, role: "user", content, time: "2026-10-22T10:00:00Z", seq});
+  const sent = (id: number, content: string, seq: number) => ({id, role: "user" as const, content, time: "2026-10-22T10:00:00Z", seq});
 
   test("a draft still being sent stays through other updates, so a failed send can mark it", () => {
     // The agent streams its turn while a message waits for POST /message.

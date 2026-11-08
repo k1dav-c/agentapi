@@ -4,7 +4,7 @@ import {useState, FormEvent, KeyboardEvent, MouseEvent, useEffect, useRef, Chang
 import {Button} from "./ui/button";
 import {Tooltip, TooltipTrigger, TooltipContent} from "./ui/tooltip";
 import {Square, Paperclip, Mic, MicOff, LoaderCircle, MoreHorizontal, SlidersHorizontal} from "lucide-react";
-import type {SendResult} from "./chat-provider";
+import type {SendResult} from "@/lib/chat-api";
 import type {ServerStatus} from "@/lib/agent-status";
 import TextareaAutosize from "react-textarea-autosize";
 import {useChatActions, useChatSelector} from "./chat-provider";

@@ -22,10 +22,12 @@ import {
   createChatAPI,
   httpURL,
   type AgentSettings,
+  type ChatAPI,
   type AgentUsage,
   type CostReport,
   type LimitStop,
   type RetryWait,
+  type SendResult,
 } from "@/lib/chat-api";
 import {features, type Features} from "@/lib/features";
 import type {AgentType} from "@/lib/agents";
@@ -52,7 +54,7 @@ import {lastUserMessage, type DraftMessage, type Message, type RichMessage} from
 import type {Timeline, ToolCall} from "@/lib/task-timeline";
 import type {QueuedMessage} from "@/lib/queue";
 import {steeredMessages, tasksByMessage, type ServerTask} from "@/lib/server-tasks";
-import {useDrafts, type SendResult} from "./use-drafts";
+import {useDrafts} from "./use-drafts";
 import {useEventStream} from "./use-event-stream";
 import {useQueue} from "./use-queue";
 import {useSessionCache} from "./use-session-cache";
@@ -63,17 +65,8 @@ import {useStableCallback} from "@/lib/use-stable-callback";
 
 export type {DraftMessage, Message, RichContentBlock, RichMessage, Usage} from "@/lib/conversation";
 
-export type {SendResult} from "./use-drafts";
-
-export interface FileUploadResponse {
-  ok: boolean;
-  filePath?: string;
-  error?: string;
-}
-
+export type {FileUploadResponse, SendResult} from "@/lib/chat-api";
 export type {QueuedMessage} from "@/lib/queue";
-
-type ChatAPI = ReturnType<typeof createChatAPI>;
 
 // The API calls components make as they are (lib/chat-api.ts).
 const API_CALLS = [
