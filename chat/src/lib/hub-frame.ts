@@ -1,4 +1,4 @@
-import {displayName, instanceState, stateLabel, type HubInstance, type InstanceState, type InstanceUpdate} from "./hub";
+import {displayName, instanceState, stateLabel, stateRank, type HubInstance, type InstanceState, type InstanceUpdate} from "./hub";
 import {instanceVersion} from "./hub-version";
 import {parseFavorites, type Favorite} from "./hub-favorites";
 import {shownUpdate} from "./hub-update";
@@ -98,12 +98,124 @@ export function frameInstance(
   };
 }
 
-// A message from a page of the same origin, in the protocol; the hub and
-// the chat it frames are served by the same hub.
-export function frameMessage<T extends ToFrame | FromFrame>(event: Pick<MessageEvent, "origin" | "data">, origin = window.location.origin): T | undefined {
-  if (event.origin !== origin) return undefined;
-  const data = event.data as {source?: unknown} | null;
-  return data && typeof data === "object" && data.source === SOURCE ? (data as T) : undefined;
+// The parsers below read a message of the protocol from what the other end
+// posted: undefined for anything else (another source, a message of
+// another type, a field missing or of the wrong type), so neither end
+// takes the other's word for its shape. A field a newer end adds is left
+// out; a state this end doesn't know is unknown.
+
+type Fields = Record<string, unknown>;
+
+function fields(value: unknown): Fields | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Fields) : undefined;
+}
+
+function text(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function stateOf(value: unknown): InstanceState {
+  return typeof value === "string" && value !== "unknown" && Object.hasOwn(stateRank, value) ? (value as InstanceState) : "unknown";
+}
+
+// parseUpdate reads an update's chip: its state, and what the chip says.
+function parseUpdate(value: unknown): InstanceUpdate | undefined {
+  const update = fields(value);
+  if (!update || typeof update.state !== "string" || typeof update.allowed !== "boolean") return undefined;
+  return {
+    allowed: update.allowed,
+    state: update.state,
+    keeps_conversation: update.keeps_conversation === true,
+    ...(text(update.target) !== undefined ? {target: text(update.target)} : {}),
+    ...(text(update.error) !== undefined ? {error: text(update.error)} : {}),
+    ...(text(update.blocked) !== undefined ? {blocked: text(update.blocked)} : {}),
+  };
+}
+
+function parseMachineAgent(value: unknown): MachineAgent | undefined {
+  const agent = fields(value);
+  const id = text(agent?.id);
+  if (!agent || !id || text(agent.name) === undefined || text(agent.label) === undefined) return undefined;
+  return {
+    id,
+    name: text(agent.name)!,
+    state: stateOf(agent.state),
+    label: text(agent.label)!,
+    ...(typeof agent.ran === "boolean" ? {ran: agent.ran} : {}),
+    ...(text(agent.agentType) ? {agentType: text(agent.agentType)} : {}),
+    ...(text(agent.agent) ? {agent: text(agent.agent)} : {}),
+  };
+}
+
+// parseFrameInstance reads what the hub tells of the instance: its ID,
+// name, state, label and tab at least.
+function parseFrameInstance(value: unknown): FrameInstance | undefined {
+  const instance = fields(value);
+  const id = text(instance?.id);
+  if (!instance || !id || text(instance.name) === undefined || text(instance.label) === undefined || text(instance.tab) === undefined) return undefined;
+  const optional = (key: keyof FrameInstance) => (text(instance[key]) ? {[key]: text(instance[key])} : {});
+  const machine = Array.isArray(instance.machine) ? instance.machine.map(parseMachineAgent).filter((agent) => agent !== undefined) : [];
+  const update = parseUpdate(instance.update);
+  return {
+    id,
+    name: text(instance.name)!,
+    state: stateOf(instance.state),
+    label: text(instance.label)!,
+    ...optional("agentType"),
+    ...optional("agent"),
+    ...optional("hostname"),
+    ...optional("version"),
+    ...optional("hubVersion"),
+    ...(typeof instance.lastKnown === "boolean" ? {lastKnown: instance.lastKnown} : {}),
+    ...(update ? {update} : {}),
+    tab: text(instance.tab)!,
+    ...(machine.length > 1 ? {machine} : {}),
+  };
+}
+
+// parseToFrame reads a message the hub posted to the chat in its frame.
+export function parseToFrame(data: unknown): ToFrame | undefined {
+  const message = fields(data);
+  if (message?.source !== SOURCE) return undefined;
+  switch (message.type) {
+    case "instance": {
+      const instance = parseFrameInstance(message.instance);
+      return instance && toFrame(instance);
+    }
+    case "favorites": {
+      const favorites = parseFavorites(message.favorites);
+      return favorites && favoritesToFrame(favorites);
+    }
+    default:
+      return undefined;
+  }
+}
+
+const asks: readonly FrameAsk[] = ["ready", "back", "cancel-update", "manage-favorites"];
+
+// parseFromFrame reads a message the chat in the frame posted to the hub.
+export function parseFromFrame(data: unknown): FromFrame | undefined {
+  const message = fields(data);
+  if (message?.source !== SOURCE) return undefined;
+  if (message.type === "open") {
+    const id = text(message.id);
+    return id ? openFromFrame(id) : undefined;
+  }
+  const ask = asks.find((type) => type === message.type);
+  return ask && fromFrame(ask);
+}
+
+// messageFromHub is what the page that frames the chat (parent) posted to
+// it, of the same origin: the hub and the chat it frames are served by the
+// same hub.
+export function messageFromHub(event: Pick<MessageEvent, "origin" | "data" | "source">, parent: unknown, origin = window.location.origin): ToFrame | undefined {
+  return event.source === parent && event.origin === origin ? parseToFrame(event.data) : undefined;
+}
+
+// messageFromFrame is what the chat in the hub's frame (its window, frame)
+// posted to the hub, of the same origin.
+export function messageFromFrame(event: Pick<MessageEvent, "origin" | "data" | "source">, frame: unknown, origin = window.location.origin): FromFrame | undefined {
+  return !!frame && event.source === frame && event.origin === origin ? parseFromFrame(event.data) : undefined;
 }
 
 // Framed is the chat the hub's frame shows, once it said it is ready, and
@@ -111,34 +223,8 @@ export function frameMessage<T extends ToFrame | FromFrame>(event: Pick<MessageE
 // server) says it again, and the hub tells it the instance again.
 export type Framed = {instance: string; ready: number};
 
-// onFrameMessage is what the hub makes of message from the frame that shows
-// instance: the frame's state after it, and what the chat asks for.
-export function onFrameMessage(
-  framed: Framed | undefined,
-  message: FromFrame,
-  instance: string,
-): {framed: Framed | undefined; ask?: "back" | "cancel-update" | "manage-favorites"; open?: string} {
-  if (message.type === "ready") {
-    return {framed: {instance, ready: framed?.instance === instance ? framed.ready + 1 : 1}};
-  }
-  if (message.type === "back" || message.type === "cancel-update" || message.type === "manage-favorites") return {framed, ask: message.type};
-  if (message.type === "open" && typeof message.id === "string" && message.id) return {framed, open: message.id};
-  return {framed};
-}
-
-// instanceFromHub is the instance a message to the chat in the frame tells
-// of: one from the page that frames it, in the protocol.
-export function instanceFromHub(event: Pick<MessageEvent, "origin" | "data" | "source">, parent: unknown, origin = window.location.origin): FrameInstance | undefined {
-  if (event.source !== parent) return undefined;
-  const message = frameMessage<ToFrame>(event, origin);
-  return message?.type === "instance" ? message.instance : undefined;
-}
-
-// favoritesFromHub is the favorites a message to the chat in the frame
-// tells of, checked like instanceFromHub; entries that aren't favorites are
-// left out.
-export function favoritesFromHub(event: Pick<MessageEvent, "origin" | "data" | "source">, parent: unknown, origin = window.location.origin): Favorite[] | undefined {
-  if (event.source !== parent) return undefined;
-  const message = frameMessage<ToFrame>(event, origin);
-  return message?.type === "favorites" ? parseFavorites((message as {favorites?: unknown}).favorites) : undefined;
+// readyAgain is the frame's state after the chat that shows instance says
+// it is ready: another ready of the same chat, or the first of another.
+export function readyAgain(framed: Framed | undefined, instance: string): Framed {
+  return {instance, ready: framed?.instance === instance ? framed.ready + 1 : 1};
 }
