@@ -2,7 +2,7 @@
 
 import {memo, useCallback, useEffect, useId, useRef, useState} from "react";
 import {Folder, Server} from "lucide-react";
-import {displayName, hasRun, instanceState, stateLabel, usagePercent, type HubInstance} from "@/lib/hub";
+import {displayName, finishedAt, hasRun, instanceState, stateLabel, usagePercent, type HubInstance} from "@/lib/hub";
 import {activity, formatAgo} from "@/lib/hub-format";
 import {groupOf} from "@/lib/hub-groups";
 import {activeAgent, sharedVersion, tabOrder, type HubMachine} from "@/lib/hub-machines";
@@ -169,7 +169,7 @@ export const MachineCard = memo(function MachineCard({card, machine, order, sele
                   single ? "-ml-0.5 px-1 font-medium text-foreground" : on ? "bg-background font-medium text-foreground shadow-xs ring-1 ring-border dark:bg-accent" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
                   )}
                 >
-                  <AgentTabMark agentType={instance.agent_type} state={instanceState(instance)} ran={hasRun(instance)} />
+                  <AgentTabMark agentType={instance.agent_type} state={instanceState(instance)} ran={hasRun(instance)} finished={finishedAt(instance)} />
                   {/* The other tabs are their marks, so the tabs and what the
                     agents share fit one line; the label says them in full. */}
                 {(on || single) && <span className="truncate">{shortAgent(instance.agent_type, agent)}</span>}

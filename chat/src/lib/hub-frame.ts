@@ -41,8 +41,10 @@ export type MachineAgent = {
   name: string;
   state: InstanceState;
   label: string;
-  // ran: it has run (hasRun); a hub before 3.6 doesn't say.
+  // ran: it has run (hasRun); a hub before 3.6 doesn't say. finished:
+  // when an idle one finished (finishedAt), in ms.
   ran?: boolean;
+  finished?: number;
   agentType?: string;
   agent?: string;
 };
@@ -142,6 +144,7 @@ function parseMachineAgent(value: unknown): MachineAgent | undefined {
     state: stateOf(agent.state),
     label: text(agent.label)!,
     ...(typeof agent.ran === "boolean" ? {ran: agent.ran} : {}),
+    ...(typeof agent.finished === "number" && Number.isFinite(agent.finished) ? {finished: agent.finished} : {}),
     ...(text(agent.agentType) ? {agentType: text(agent.agentType)} : {}),
     ...(text(agent.agent) ? {agent: text(agent.agent)} : {}),
   };

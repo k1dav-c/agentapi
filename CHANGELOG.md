@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- On the hub, an idle agent that finished in the last 30 minutes, seen or not, shows a green ring
+  with a check in the list, and a green ring as its tab's dot and in the bar's switch, so the agents
+  that just ran stand out from those idle for long. It turns grey after half an hour.
+
 ## v3.8.0
 
 ### Features
