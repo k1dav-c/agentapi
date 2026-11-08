@@ -2,28 +2,9 @@ import {afterEach, describe, expect, test} from "bun:test";
 import {createChatAPI, httpURL, mergeCost, type CostReport} from "./chat-api";
 import {resetAuthState, setSignInHandler} from "./auth";
 import {ApiError} from "./error-utils";
+import {json, mockFetch, restoreFetch} from "@/test/fetch";
 
-const realFetch = globalThis.fetch;
 const BASE = "http://agentapi.test";
-
-interface Call {
-  url: string;
-  init: RequestInit;
-}
-
-function mockFetch(...responses: Response[]): Call[] {
-  const calls: Call[] = [];
-  globalThis.fetch = (async (url: string, init: RequestInit = {}) => {
-    calls.push({url: String(url), init});
-    const next = responses.shift();
-    if (!next) throw new Error(`unexpected fetch ${url}`);
-    return next;
-  }) as typeof fetch;
-  return calls;
-}
-
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), {status, headers: {"Content-Type": "application/json"}});
 
 // What a promise rejects with.
 async function failure(promise: Promise<unknown>): Promise<unknown> {
@@ -36,7 +17,7 @@ async function failure(promise: Promise<unknown>): Promise<unknown> {
 }
 
 afterEach(() => {
-  globalThis.fetch = realFetch;
+  restoreFetch();
   resetAuthState();
 });
 

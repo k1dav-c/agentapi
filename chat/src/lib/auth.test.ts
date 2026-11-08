@@ -17,30 +17,10 @@ import {
   withAuthRetry,
   withCredentials,
 } from "./auth";
+import {json, mockFetch, restoreFetch} from "@/test/fetch";
 
-const realFetch = globalThis.fetch;
 const BASE = "http://agentapi.test";
 
-interface Call {
-  url: string;
-  init: RequestInit;
-}
-
-// Replaces fetch with one that answers from responses in order and records
-// each call.
-function mockFetch(...responses: Response[]): Call[] {
-  const calls: Call[] = [];
-  globalThis.fetch = (async (url: string, init: RequestInit = {}) => {
-    calls.push({url: String(url), init});
-    const next = responses.shift();
-    if (!next) throw new Error(`unexpected fetch ${url}`);
-    return next;
-  }) as typeof fetch;
-  return calls;
-}
-
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), {status, headers: {"Content-Type": "application/json"}});
 const unauthorized = () => new Response("Unauthorized", {status: 401});
 
 // Counts the sign-in prompts; each answers with the next result.
@@ -64,7 +44,7 @@ function page({origin = "http://agentapi.test", pathname = "/chat/", search = ""
 }
 
 afterEach(() => {
-  globalThis.fetch = realFetch;
+  restoreFetch();
   Reflect.deleteProperty(globalThis, "location");
   Reflect.deleteProperty(globalThis, "history");
   resetAuthState();
