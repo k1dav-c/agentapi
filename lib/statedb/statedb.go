@@ -84,11 +84,6 @@ const (
 	metaSeq         = "seq"
 	MetaSessionRef  = "session_ref"
 	MetaSessionName = "session_name"
-	// MetaLimitStop holds the turn a usage limit stopped, as JSON.
-	MetaLimitStop = "limit_stop"
-	// MetaRetryWait holds the failed turn that waits to be tried again, as
-	// JSON.
-	MetaRetryWait = "retry_wait"
 	// MetaState holds the part of the conversation's state that survives a
 	// restart (agentstate.StoredState: the settings chosen, a limit stop, a
 	// retry wait) as one JSON object with a version; see storedState. A
@@ -102,10 +97,7 @@ const (
 	// MetaSeenAt is when a client last showed the conversation to the
 	// user (RFC 3339), which tells a task that ended since as unread. A
 	// reset keeps it.
-	MetaSeenAt = "seen_at"
-	// metaSettings holds the settings chosen for the session (JSON). A
-	// reset keeps them.
-	metaSettings    = "settings"
+	MetaSeenAt      = "seen_at"
 	metaNextQueueID = "next_queue_id"
 	// metaClean is set while the file is closed cleanly; see Snapshot.Clean.
 	metaClean = "clean"
@@ -636,83 +628,9 @@ func (d *DB) SetSessionRef(ref string) { d.SetMeta(MetaSessionRef, ref) }
 // SetSessionName stores the name the agent gave the session.
 func (d *DB) SetSessionName(name string) { d.SetMeta(MetaSessionName, name) }
 
-// SetSettings stores the settings chosen for the session.
-func (d *DB) SetSettings(settings agentstate.Settings) {
-	data, err := json.Marshal(settings)
-	if err != nil {
-		d.logger.Error("Failed to encode the settings", "error", err)
-		return
-	}
-	d.SetMeta(metaSettings, string(data))
-}
-
-// Settings returns the stored settings chosen for the session.
-func (s Snapshot) Settings() (agentstate.Settings, error) {
-	var settings agentstate.Settings
-	data, ok := s.Meta[metaSettings]
-	if !ok || data == "" {
-		return settings, nil
-	}
-	if err := json.Unmarshal([]byte(data), &settings); err != nil {
-		return agentstate.Settings{}, fmt.Errorf("decode the stored settings: %w", err)
-	}
-	return settings, nil
-}
-
 // SetSeenAt stores when a client last showed the conversation.
 func (d *DB) SetSeenAt(at time.Time) {
 	d.SetMeta(MetaSeenAt, at.UTC().Format(time.RFC3339Nano))
-}
-
-// SetLimitStop stores the turn a usage limit stopped; nil removes it.
-func (d *DB) SetLimitStop(ls *agentstate.LimitStop) {
-	d.setMetaJSON(MetaLimitStop, ls, ls == nil, "limit stop")
-}
-
-// LimitStop returns the stored turn a usage limit stopped, or nil.
-func (s Snapshot) LimitStop() (*agentstate.LimitStop, error) {
-	return metaJSON[agentstate.LimitStop](s, MetaLimitStop, "limit stop")
-}
-
-// SetRetryWait stores the failed turn that waits to be tried again; nil
-// removes it.
-func (d *DB) SetRetryWait(rw *agentstate.RetryWait) {
-	d.setMetaJSON(MetaRetryWait, rw, rw == nil, "retry wait")
-}
-
-// RetryWait returns the stored failed turn that waits to be tried again,
-// or nil.
-func (s Snapshot) RetryWait() (*agentstate.RetryWait, error) {
-	return metaJSON[agentstate.RetryWait](s, MetaRetryWait, "retry wait")
-}
-
-// setMetaJSON stores v as JSON under key, or removes key when none. what
-// names v in errors.
-func (d *DB) setMetaJSON(key string, v any, none bool, what string) {
-	value := ""
-	if !none {
-		data, err := json.Marshal(v)
-		if err != nil {
-			d.logger.Error("Failed to encode the "+what, "error", err)
-			return
-		}
-		value = string(data)
-	}
-	d.SetMeta(key, value)
-}
-
-// metaJSON decodes the JSON stored under key, or returns nil when there is
-// none. what names it in errors.
-func metaJSON[T any](s Snapshot, key, what string) (*T, error) {
-	data := s.Meta[key]
-	if data == "" {
-		return nil, nil
-	}
-	var v T
-	if err := json.Unmarshal([]byte(data), &v); err != nil {
-		return nil, fmt.Errorf("decode the stored %s: %w", what, err)
-	}
-	return &v, nil
 }
 
 // SetSeq stores the latest change sequence of epoch.
