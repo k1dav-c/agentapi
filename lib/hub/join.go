@@ -63,7 +63,7 @@ func (h *Hub) JoinURLs() []JoinURL {
 // secret they sign their events with, which only a hub with a token
 // shows: one without would show it to everyone who reaches its page.
 type joinInfo struct {
-	URLs        []JoinURL `json:"urls"`
+	URLs        []JoinURL `json:"urls" nullable:"false"`
 	Secret      string    `json:"secret,omitempty"`
 	SecretShown bool      `json:"secret_shown"`
 }

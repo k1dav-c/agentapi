@@ -16,8 +16,10 @@ import (
 	"time"
 
 	"github.com/coder/quartz"
+	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/coder/agentapi/lib/instanceapi"
+	"github.com/coder/agentapi/lib/util"
 )
 
 // Source says how the hub learned of an instance.
@@ -30,11 +32,15 @@ const (
 	SourceManual Source = "manual"
 )
 
-// Connection is how the hub's watch of an instance's summary goes.
+var sourceValues = []Source{SourceWebhook, SourceManual}
+
+func (s Source) Schema(r huma.Registry) *huma.Schema {
+	return util.OpenAPISchema(r, "Source", sourceValues)
+}
 
 // Instance is an AgentAPI the hub watches, as GET /api/instances has it.
 type Instance struct {
-	record
+	Record
 	Connection instanceapi.Connection   `json:"connection"`
 	Error      string                   `json:"error,omitempty"`
 	Summary    *instanceapi.SummaryBody `json:"summary,omitempty"`
@@ -72,9 +78,9 @@ type Instance struct {
 	heard time.Time
 }
 
-// record is what the hub keeps of an instance in its file: not its
+// Record is what the hub keeps of an instance in its file: not its
 // summary or connection, which the hub finds out again.
-type record struct {
+type Record struct {
 	// WebhookInstance is who it is, as its events and summary say. Its ID
 	// (--instance-id) is what the hub's routes use; URL is where the hub
 	// reaches it.
@@ -104,7 +110,7 @@ type record struct {
 	Pin int `json:"pin,omitempty"`
 	// Token, for a manual instance that has its own, is sent to it; it
 	// never leaves the hub.
-	Token string `json:"token,omitempty"`
+	Token string `json:"token,omitempty" hidden:"true"`
 }
 
 // public is the instance as the browser sees it: without its token.
@@ -243,7 +249,7 @@ type storeEvent struct {
 
 // storedInstance is an instance in the file.
 type storedInstance struct {
-	record
+	Record
 	Stopped bool `json:"stopped,omitempty"`
 	// Activity is its activityKey: after a restart, a summary that says
 	// what the last one did isn't a change.
@@ -256,13 +262,13 @@ type storedInstance struct {
 }
 
 func (i Instance) stored() storedInstance {
-	return storedInstance{record: i.record, Stopped: i.Connection == instanceapi.ConnectionStopped, Activity: i.activity, ConfirmedURL: i.confirmedURL, Work: i.work.stored()}
+	return storedInstance{Record: i.Record, Stopped: i.Connection == instanceapi.ConnectionStopped, Activity: i.activity, ConfirmedURL: i.confirmedURL, Work: i.work.stored()}
 }
 
 // kept is what the file keeps of the instance, but when it was last seen
 // and its work, to compare.
 func (i Instance) kept() storedInstance {
-	stored := storedInstance{record: i.record, Stopped: i.Connection == instanceapi.ConnectionStopped, Activity: i.activity, ConfirmedURL: i.confirmedURL}
+	stored := storedInstance{Record: i.Record, Stopped: i.Connection == instanceapi.ConnectionStopped, Activity: i.activity, ConfirmedURL: i.confirmedURL}
 	stored.LastSeen = time.Time{}
 	return stored
 }
@@ -291,7 +297,7 @@ func newStore(path string, logger *slog.Logger, clock quartz.Clock) (*store, err
 		if si.Stopped {
 			connection = instanceapi.ConnectionStopped
 		}
-		i := &Instance{record: si.record, Connection: connection, activity: si.Activity, confirmedURL: si.ConfirmedURL, work: si.Work.log(si.LastSeen, now)}
+		i := &Instance{Record: si.Record, Connection: connection, activity: si.Activity, confirmedURL: si.ConfirmedURL, work: si.Work.log(si.LastSeen, now)}
 		i.Pin = max(i.Pin, 0)
 		if i.confirmedURL != "" && i.Source != SourceManual {
 			// Moved by an event to a URL that never answered: the hub

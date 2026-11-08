@@ -249,6 +249,11 @@ func (h *Hub) checkHost(next http.Handler) http.Handler {
 	})
 }
 
+// errorBody is the answer to a request the hub refuses.
+type errorBody struct {
+	Error string `json:"error"`
+}
+
 func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -257,14 +262,14 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 
 // writeError answers {"error": message}.
 func writeError(w http.ResponseWriter, status int, message string) {
-	writeJSON(w, status, map[string]string{"error": message})
+	writeJSON(w, status, errorBody{Error: message})
 }
 
 // instanceList is GET /api/instances, and the first event of the browser's
 // stream: the instances, without their tokens, and the hub's own version,
 // which the page tells the older instances by.
 type instanceList struct {
-	Instances  []Instance `json:"instances"`
+	Instances  []Instance `json:"instances" nullable:"false"`
 	HubVersion string     `json:"hub_version"`
 }
 
@@ -280,13 +285,17 @@ func (h *Hub) listInstances(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, newInstanceList(h.store.list(), h.clock.Now()))
 }
 
+// addInstanceBody is POST /api/instances: the instance's URL, and its own
+// API token when the hub's --instance-token isn't it.
+type addInstanceBody struct {
+	URL   string `json:"url"`
+	Token string `json:"token,omitempty"`
+}
+
 // addInstance adds an instance by its URL (POST /api/instances): the hub
 // asks it for its summary, which says its ID and name.
 func (h *Hub) addInstance(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		URL   string `json:"url"`
-		Token string `json:"token"`
-	}
+	var body addInstanceBody
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "send {\"url\": ..., \"token\": ...}")
 		return
@@ -362,17 +371,25 @@ func (h *Hub) fetchSummary(ctx context.Context, base, token string) (*instanceap
 // maxGroupName is the longest group name, in characters.
 const maxGroupName = 40
 
+// instanceChange is PATCH /api/instances/{id}: what it sets, the others
+// left out.
+type instanceChange struct {
+	// Group puts the instance in a group; "" in none.
+	Group *string `json:"group,omitempty"`
+	// Muted mutes what it waits for now, until that changes; false ends
+	// the mute.
+	Muted *bool `json:"muted,omitempty"`
+	// Pinned pins it below the pinned ones; false unpins it.
+	Pinned *bool `json:"pinned,omitempty"`
+}
+
 // updateInstance changes what the hub's page sets on an instance (PATCH
 // /api/instances/{id}): {"group": "..."} puts it in a group, "" in none;
 // {"muted": true} mutes what it waits for now, until that changes, and
 // {"muted": false} ends the mute; {"pinned": true} pins it below the
 // pinned ones, and {"pinned": false} unpins it.
 func (h *Hub) updateInstance(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Group  *string `json:"group"`
-		Muted  *bool   `json:"muted"`
-		Pinned *bool   `json:"pinned"`
-	}
+	var body instanceChange
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil || (body.Group == nil && body.Muted == nil && body.Pinned == nil) {
 		writeError(w, http.StatusBadRequest, "send {\"group\": ...}, {\"muted\": ...} or {\"pinned\": ...}")
 		return
@@ -420,15 +437,26 @@ func (h *Hub) updateInstance(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, updated.sent(h.clock.Now()))
 }
 
+// pinsBody is PUT /api/pins and its answer: the pinned instances' IDs,
+// from the top.
+type pinsBody struct {
+	IDs []string `json:"ids" nullable:"false"`
+}
+
+// pinsConflict is PUT /api/pins with a list that isn't exactly the pinned
+// ones (409): why, and the pinned ones in their order.
+type pinsConflict struct {
+	Error string   `json:"error"`
+	IDs   []string `json:"ids" nullable:"false"`
+}
+
 // setPins orders the instances pinned to the top of the hub's page (PUT
 // /api/pins): {"ids": [...]} lists each of them once, from the top. One
 // the hub doesn't have is 404; a list that isn't exactly the pinned ones
 // (one was pinned, unpinned or forgotten since) is 409, with the pinned
 // ones in their order.
 func (h *Hub) setPins(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		IDs []string `json:"ids"`
-	}
+	var body pinsBody
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil || body.IDs == nil {
 		writeError(w, http.StatusBadRequest, "send {\"ids\": [...]}: the pinned instances, from the top")
 		return
@@ -448,10 +476,10 @@ func (h *Hub) setPins(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	case errors.Is(err, errPinsDiffer):
-		writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "ids": pins})
+		writeJSON(w, http.StatusConflict, pinsConflict{Error: err.Error(), IDs: pins})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string][]string{"ids": pins})
+	writeJSON(w, http.StatusOK, pinsBody{IDs: pins})
 }
 
 func (h *Hub) removeInstance(w http.ResponseWriter, r *http.Request) {
@@ -466,6 +494,27 @@ func (h *Hub) removeInstance(w http.ResponseWriter, r *http.Request) {
 
 // hubHeartbeat is how often the browser's stream gets a heartbeat.
 const hubHeartbeat = 15 * time.Second
+
+// removedEvent is the removed event of the browser's stream: the instance
+// the hub forgot.
+type removedEvent struct {
+	ID string `json:"id"`
+}
+
+// heartbeatEvent is the heartbeat event of the browser's stream.
+type heartbeatEvent struct {
+	Time time.Time `json:"time"`
+}
+
+// hubEvents are the events of the browser's stream (GET /api/events), by
+// name, with what each one's data is; for the schema (Schema).
+type hubEvents struct {
+	Instances instanceList   `json:"instances"`
+	Instance  Instance       `json:"instance"`
+	Removed   removedEvent   `json:"removed"`
+	Favorites favoritesBody  `json:"favorites"`
+	Heartbeat heartbeatEvent `json:"heartbeat"`
+}
 
 // streamEvents sends the browser the instances and the hub's version
 // (instances) and the favorites (favorites), and then each change:
@@ -507,7 +556,7 @@ func (h *Hub) streamEvents(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case <-heartbeat.C:
-			if !send("heartbeat", map[string]time.Time{"time": h.clock.Now()}) {
+			if !send("heartbeat", heartbeatEvent{Time: h.clock.Now()}) {
 				return
 			}
 			// The work times that moved come as changes, to every
@@ -518,7 +567,7 @@ func (h *Hub) streamEvents(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if event.Removed != "" {
-				if !send("removed", map[string]string{"id": event.Removed}) {
+				if !send("removed", removedEvent{ID: event.Removed}) {
 					return
 				}
 				continue

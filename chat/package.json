@@ -52,7 +52,7 @@
     "deploy-gh-pages": "GITHUB_PAGES=true next build && gh-pages -d out --nojekyll -e chat -f",
     "dev": "next dev --turbopack",
     "export": "GITHUB_PAGES=true next build",
-    "gen:api": "openapi-typescript ../openapi.json -o src/lib/api-schema.ts",
+    "gen:api": "openapi-typescript ../openapi.json -o src/lib/api-schema.ts && bun scripts/hub-schema.ts",
     "lint": "eslint src",
     "serve-static": "npx serve out",
     "start": "next start",

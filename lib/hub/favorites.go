@@ -35,7 +35,7 @@ const (
 // favoritesBody is GET and PUT /api/favorites, and the favorites event of
 // the browser's stream.
 type favoritesBody struct {
-	Favorites []Favorite `json:"favorites"`
+	Favorites []Favorite `json:"favorites" nullable:"false"`
 }
 
 // favoritesError is a list of favorites the hub refuses, in words for the

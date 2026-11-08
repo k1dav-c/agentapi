@@ -52,20 +52,29 @@ func (h *Hub) requireSession(next http.Handler) http.Handler {
 	})
 }
 
+// sessionBody is GET, POST and DELETE /api/session: whether the browser is
+// signed in.
+type sessionBody struct {
+	Authenticated bool `json:"authenticated"`
+}
+
+// signInBody is POST /api/session.
+type signInBody struct {
+	Token string `json:"token"`
+}
+
 func (h *Hub) getSession(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]bool{"authenticated": h.signedIn(r)})
+	writeJSON(w, http.StatusOK, sessionBody{Authenticated: h.signedIn(r)})
 }
 
 func (h *Hub) createSession(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Token string `json:"token"`
-	}
+	var body signInBody
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "send {\"token\": ...}")
 		return
 	}
 	if h.config.NoToken {
-		writeJSON(w, http.StatusOK, map[string]bool{"authenticated": true})
+		writeJSON(w, http.StatusOK, sessionBody{Authenticated: true})
 		return
 	}
 	if !hmac.Equal([]byte(body.Token), []byte(h.config.Token)) {
@@ -76,10 +85,10 @@ func (h *Hub) createSession(w http.ResponseWriter, r *http.Request) {
 		Name: sessionCookie, Value: h.sessionValue(), Path: "/", MaxAge: int(sessionMaxAge.Seconds()),
 		HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https",
 	})
-	writeJSON(w, http.StatusOK, map[string]bool{"authenticated": true})
+	writeJSON(w, http.StatusOK, sessionBody{Authenticated: true})
 }
 
 func (h *Hub) deleteSession(w http.ResponseWriter, _ *http.Request) {
 	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
-	writeJSON(w, http.StatusOK, map[string]bool{"authenticated": false})
+	writeJSON(w, http.StatusOK, sessionBody{Authenticated: false})
 }

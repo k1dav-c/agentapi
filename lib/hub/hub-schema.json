@@ -1,0 +1,464 @@
+{
+  "components": {
+    "schemas": {
+      "AddInstanceBody": {
+        "additionalProperties": false,
+        "properties": {
+          "token": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "type": "object"
+      },
+      "Connection": {
+        "enum": [
+          "connecting",
+          "connected",
+          "unreachable",
+          "stopped"
+        ],
+        "examples": [
+          "connecting"
+        ],
+        "title": "Connection",
+        "type": "string"
+      },
+      "ErrorBody": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "Favorite": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "text"
+        ],
+        "type": "object"
+      },
+      "FavoritesBody": {
+        "additionalProperties": false,
+        "properties": {
+          "favorites": {
+            "items": {
+              "$ref": "#/components/schemas/Favorite"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "favorites"
+        ],
+        "type": "object"
+      },
+      "HeartbeatEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "time": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "time"
+        ],
+        "type": "object"
+      },
+      "HubEvents": {
+        "additionalProperties": false,
+        "properties": {
+          "favorites": {
+            "$ref": "#/components/schemas/FavoritesBody"
+          },
+          "heartbeat": {
+            "$ref": "#/components/schemas/HeartbeatEvent"
+          },
+          "instance": {
+            "$ref": "#/components/schemas/Instance"
+          },
+          "instances": {
+            "$ref": "#/components/schemas/InstanceList"
+          },
+          "removed": {
+            "$ref": "#/components/schemas/RemovedEvent"
+          }
+        },
+        "required": [
+          "instances",
+          "instance",
+          "removed",
+          "favorites",
+          "heartbeat"
+        ],
+        "type": "object"
+      },
+      "HubLimits": {
+        "additionalProperties": false,
+        "description": "The limits of what the hub takes; the page's generated types have their values (hubLimits).",
+        "properties": {
+          "max_favorite_id": {
+            "const": 64,
+            "description": "The longest favorite ID.",
+            "type": "integer"
+          },
+          "max_favorite_text": {
+            "const": 20000,
+            "description": "The longest favorite text, in characters.",
+            "type": "integer"
+          },
+          "max_favorite_title": {
+            "const": 100,
+            "description": "The longest favorite title, in characters.",
+            "type": "integer"
+          },
+          "max_favorites": {
+            "const": 100,
+            "description": "The most favorites the hub keeps.",
+            "type": "integer"
+          },
+          "max_group_name": {
+            "const": 40,
+            "description": "The longest group name, in characters.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "max_favorites",
+          "max_favorite_title",
+          "max_favorite_text",
+          "max_favorite_id",
+          "max_group_name"
+        ],
+        "type": "object"
+      },
+      "Instance": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_type": {
+            "type": "string"
+          },
+          "agentapi_version": {
+            "type": "string"
+          },
+          "changed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "connection": {
+            "$ref": "#/components/schemas/Connection"
+          },
+          "cwd": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "group": {
+            "type": "string"
+          },
+          "heartbeat_seconds": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "hostname": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "last_seen": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "muted": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "pid": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "pin": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "port": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "server_id": {
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/Source"
+          },
+          "state": {
+            "$ref": "#/components/schemas/State"
+          },
+          "summary": {
+            "additionalProperties": true,
+            "description": "The instance's latest summary: SummaryBody of the AgentAPI's schema (openapi.json).",
+            "type": "object"
+          },
+          "transport": {
+            "$ref": "#/components/schemas/Transport"
+          },
+          "url": {
+            "type": "string"
+          },
+          "work": {
+            "$ref": "#/components/schemas/WorkTime"
+          },
+          "workspace_url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "connection",
+          "state",
+          "source",
+          "last_seen",
+          "id",
+          "server_id",
+          "agent_type",
+          "transport"
+        ],
+        "type": "object"
+      },
+      "InstanceChange": {
+        "additionalProperties": false,
+        "properties": {
+          "group": {
+            "type": "string"
+          },
+          "muted": {
+            "type": "boolean"
+          },
+          "pinned": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "InstanceList": {
+        "additionalProperties": false,
+        "properties": {
+          "hub_version": {
+            "type": "string"
+          },
+          "instances": {
+            "items": {
+              "$ref": "#/components/schemas/Instance"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "instances",
+          "hub_version"
+        ],
+        "type": "object"
+      },
+      "JoinInfo": {
+        "additionalProperties": false,
+        "properties": {
+          "secret": {
+            "type": "string"
+          },
+          "secret_shown": {
+            "type": "boolean"
+          },
+          "urls": {
+            "items": {
+              "$ref": "#/components/schemas/JoinURL"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "urls",
+          "secret_shown"
+        ],
+        "type": "object"
+      },
+      "JoinURL": {
+        "additionalProperties": false,
+        "properties": {
+          "interface": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "type": "object"
+      },
+      "PinsBody": {
+        "additionalProperties": false,
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "type": "object"
+      },
+      "PinsConflict": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "error",
+          "ids"
+        ],
+        "type": "object"
+      },
+      "RemovedEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
+      "SessionBody": {
+        "additionalProperties": false,
+        "properties": {
+          "authenticated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "authenticated"
+        ],
+        "type": "object"
+      },
+      "SignInBody": {
+        "additionalProperties": false,
+        "properties": {
+          "token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "type": "object"
+      },
+      "Source": {
+        "enum": [
+          "webhook",
+          "manual"
+        ],
+        "examples": [
+          "webhook"
+        ],
+        "title": "Source",
+        "type": "string"
+      },
+      "State": {
+        "enum": [
+          "needs-you",
+          "working",
+          "unread",
+          "idle",
+          "muted",
+          "connecting",
+          "unreachable",
+          "stopped"
+        ],
+        "examples": [
+          "needs-you"
+        ],
+        "title": "State",
+        "type": "string"
+      },
+      "Transport": {
+        "enum": [
+          "native"
+        ],
+        "examples": [
+          "native"
+        ],
+        "title": "Transport",
+        "type": "string"
+      },
+      "WorkTime": {
+        "additionalProperties": false,
+        "properties": {
+          "last_24h_seconds": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "last_7d_seconds": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "working_since": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "last_24h_seconds",
+          "last_7d_seconds"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "What agentapi hub serve and its page send each other: the bodies of its API and the data of its events (HubEvents, by event name). Generated by make gen from lib/hub; the API's routes are in docs/hub.md.",
+    "title": "AgentAPI hub",
+    "version": "1"
+  },
+  "openapi": "3.1.0",
+  "paths": {}
+}

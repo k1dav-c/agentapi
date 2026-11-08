@@ -192,7 +192,7 @@ func TestWorkTimeFiles(t *testing.T) {
 	var old struct {
 		Version   int `json:"version"`
 		Instances []struct {
-			record
+			Record
 			Stopped  bool   `json:"stopped,omitempty"`
 			Activity string `json:"activity,omitempty"`
 		} `json:"instances"`

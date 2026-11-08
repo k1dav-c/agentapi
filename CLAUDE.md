@@ -15,7 +15,7 @@ make build              # Build binary to out/agentapi (includes chat UI build)
 go build -o out/agentapi main.go  # Build with existing embedded chat assets
 make embed              # Build chat UI and copy into lib/httpmw/chat/ for embedding
 make fmt                # Format Go code with gofumpt
-make gen                # Regenerate OpenAPI schema and version (go generate ./...)
+make gen                # Regenerate the OpenAPI schema, the hub's schema and version (go generate ./...)
 make lint               # Run all linters (Go, TypeScript, shellcheck, actionlint)
 ```
 
@@ -113,6 +113,7 @@ value, update every switch and map literal over that type to pass lint.
 
 - Versioning: `internal/version.Version` stays `0.0.0-dev` in source; builds stamp the real version via `-ldflags -X` (`make build` uses the latest `vX.Y.Z` tag). Releases are cut by CI on push to `main` from Conventional Commit messages (`next-version.sh`), so use `feat:`/`fix:`/`feat!:` prefixes. The Release workflow runs the tests (`go-test.yml`) on the commit first and releases only if the Linux jobs pass, so a `main` that fails them doesn't release
 - OpenAPI schema is auto-generated: run `make gen` and commit `openapi.json`. Don't redirect `server --print-openapi` into the file yourself: it escapes `<`/`>` as `\u003c`/`\u003e`, `make gen` doesn't, and the Release workflow fails on the difference. Then run `bun run gen:api` in `chat/` and commit `chat/src/lib/api-schema.ts`, the chat's API types (a chat test fails until they match)
+- The hub's API isn't huma's, so `make gen` writes its wire types to `lib/hub/hub-schema.json` (`hub.Schema`: an OpenAPI document with only `components.schemas`, from the Go types through huma's registry, and `HubLimits`, the limits the page checks; `TestHubSchema` fails until it is committed). `bun run gen:api` turns it into `chat/src/lib/hub-schema.ts` (`chat/scripts/hub-schema.ts`: openapi-typescript's types and `hubLimits`); the hub page's types come from it, not by hand
 - The chat UI build output goes to `lib/httpmw/chat/` with a base-path placeholder that gets replaced at runtime
 - AgentAPI-specific environment variables use the `AGENTAPI_` prefix (e.g., `AGENTAPI_ALLOWED_HOSTS`)
 - Server defaults: port 3284, chat at `/chat`, docs at `/docs`
