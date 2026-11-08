@@ -174,17 +174,22 @@ export function Overview({
   instances,
   hubVersion,
   counts,
+  stopped,
   onOpen,
   onFilter,
   onAdd,
+  onForgetStopped,
 }: {
   root: string;
   instances: HubInstance[];
   hubVersion: string;
   counts: Record<HubFilter, number>;
+  // stopped counts the offline ones that stopped, which Forget forgets.
+  stopped: number;
   onOpen: (id: string) => void;
   onFilter: (filter: HubFilter) => void;
   onAdd: () => void;
+  onForgetStopped: () => void;
 }) {
   const by = (state: string) => instances.filter((instance) => instanceState(instance) === state);
   const needs = by("needs-you");
@@ -227,26 +232,36 @@ export function Overview({
         <h2 className={cn("mt-2 text-4xl font-semibold tracking-tight text-balance", needs.length > 0 && "text-state-needs")}>{headline}</h2>
         <p className="mt-3 text-[15px] text-muted-foreground">{sub}</p>
 
-        <div className="mt-8 grid grid-cols-4 gap-3">
+        <div className="mt-8 grid grid-cols-4 items-start gap-3">
           {stats.map((stat) => (
-            <button
-              key={stat.filter}
-              type="button"
-              onClick={() => onFilter(stat.filter)}
-              aria-label={`${counts[stat.filter]} ${stat.label}: show them in the list`}
-              className={cn(
-                "flex items-start justify-between rounded-2xl border bg-card px-4 py-3.5 text-left shadow-xs outline-none transition-shadow hover:shadow-md focus-visible:ring-[3px] focus-visible:ring-ring/50",
-                counts[stat.filter] > 0 && stat.tint,
-              )}
-            >
-              <span>
-                <span className={cn("block text-3xl font-semibold tracking-tight tabular-nums", counts[stat.filter] > 0 ? stat.tone : "text-muted-foreground/50")}>
-                  {counts[stat.filter]}
+            <div key={stat.filter} className="flex min-w-0 flex-col">
+              <button
+                type="button"
+                onClick={() => onFilter(stat.filter)}
+                aria-label={`${counts[stat.filter]} ${stat.label}: show them in the list`}
+                className={cn(
+                  "flex items-start justify-between rounded-2xl border bg-card px-4 py-3.5 text-left shadow-xs outline-none transition-shadow hover:shadow-md focus-visible:ring-[3px] focus-visible:ring-ring/50",
+                  counts[stat.filter] > 0 && stat.tint,
+                )}
+              >
+                <span>
+                  <span className={cn("block text-3xl font-semibold tracking-tight tabular-nums", counts[stat.filter] > 0 ? stat.tone : "text-muted-foreground/50")}>
+                    {counts[stat.filter]}
+                  </span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">{stat.label}</span>
                 </span>
-                <span className="mt-0.5 block text-xs text-muted-foreground">{stat.label}</span>
-              </span>
-              <StatusGlyph state={counts[stat.filter] > 0 ? stat.glyph : "idle"} className="mt-1 size-4" />
-            </button>
+                <StatusGlyph state={counts[stat.filter] > 0 ? stat.glyph : "idle"} className="mt-1 size-4" />
+              </button>
+              {stat.filter === "offline" && stopped > 0 && (
+                <button
+                  type="button"
+                  onClick={onForgetStopped}
+                  className="mt-1.5 self-end rounded-md px-1.5 py-0.5 text-xs text-muted-foreground underline-offset-4 outline-none hover:text-destructive hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                >
+                  Forget {stopped} stopped
+                </button>
+              )}
+            </div>
           ))}
         </div>
 
