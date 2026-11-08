@@ -31,6 +31,11 @@ uncommitted changes):
   By machine views, the overview's cards and the switch of a machine's agents show these names.
   Screenshots taken before 3.2.0 show `dev-1` and so on in turn, row by row.
 
+The `dispatch-*.png` views of the issue dispatch came from a development build of the
+`feat/issue-dispatch` branch: a real hub and launcher, `native-demo` posing as Claude Code and
+Codex, a local bare repository in place of github.com, and a fake GitHub API that serves the
+issues and the app's tokens. They aren't part of `capture-docs.mjs`.
+
 ## Gallery
 
 Desktop views are 1440 × 1000 (or a part of one), phone views 390 × 844, all in the light theme at a
@@ -111,6 +116,14 @@ small.
 | [demo-terminal.gif](demo-terminal.gif) | The shell terminal: a command, a link above it, and a held Ctrl |
 | [demo-phone.gif](demo-phone.gif) | The terminal on a phone, typed with the key bar |
 | [demo-hub.gif](demo-hub.gif) | On a phone: opening the instance that needs you, allowing its command, and back to the list where it no longer does |
+| [dispatch-issues.png](dispatch-issues.png) | The hub's Issues dialog: a machine, the GitHub App, and the issues of `acme/widget`, one in review with its PR, one failed, two to assign |
+| [dispatch-confirm-stop.png](dispatch-confirm-stop.png) | Stop asks first: the worktree and the branch are deleted |
+| [dispatch-confirm-switch.png](dispatch-confirm-switch.png) | Switch asks first: Codex takes over on the same branch |
+| [dispatch-failed.png](dispatch-failed.png) | A job whose AgentAPI exited 5 times, with Retry |
+| [dispatch-new-issue.png](dispatch-new-issue.png) | New issue: open an issue and assign it to an agent |
+| [dispatch-chat.png](dispatch-chat.png) | Open chat on an issue's job: the review that came in from GitHub, fenced as the user's content |
+| [dispatch-no-github.png](dispatch-no-github.png) | The Issues dialog before GitHub is connected: Connect GitHub, and start an issue by its URL |
+| [dispatch-github-connect.png](dispatch-github-connect.png) | `/github/connect`, the hub's page that creates its GitHub App |
 
 The login card names the host and user to log in as; the script shows `dev-machine` and `dev` in
 their place. The servers get a clean environment (no tokens or workspace links of the shell that
