@@ -148,14 +148,13 @@ func (f *fileAPI) getFileDiff(ctx context.Context, input *FilePathQuery) (*FileD
 
 type FileFindResponse struct {
 	Body struct {
-		Matches []FileMatch `json:"matches" nullable:"false" doc:"Files whose path ends with the one asked for, the likeliest first."`
+		Matches []workspacefs.FileMatch `json:"matches" nullable:"false" doc:"Files whose path ends with the one asked for, the likeliest first."`
 		// Complete is false when the search stopped at its bounds.
 		Complete bool `json:"complete" doc:"The whole working directory was searched; false when the search stopped at its bounds (50,000 entries or 2 seconds)."`
 	}
 }
 
 // FileMatch is a file GET /files/find found.
-type FileMatch = workspacefs.FileMatch
 
 // findFile handles GET /files/find (workspacefs.Dir.Find).
 func (f *fileAPI) findFile(ctx context.Context, input *FilePathQuery) (*FileFindResponse, error) {

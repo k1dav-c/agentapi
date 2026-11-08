@@ -17,11 +17,11 @@ func (e *EventEmitter) EmitStatus(newStatus conv.Status) {
 	defer e.unlock()
 
 	newAgentStatus := ConvertStatus(newStatus)
-	newLifecycle := LifecycleRunning
+	newLifecycle := instanceapi.LifecycleRunning
 	if newStatus == conv.StatusInitializing {
-		newLifecycle = LifecycleStarting
+		newLifecycle = instanceapi.LifecycleStarting
 	} else if newStatus == conv.StatusStable {
-		newLifecycle = LifecycleReady
+		newLifecycle = instanceapi.LifecycleReady
 	}
 	e.reported = newLifecycle
 	if e.lifecycleHeld {
@@ -33,7 +33,7 @@ func (e *EventEmitter) EmitStatus(newStatus conv.Status) {
 
 	previousStatus := e.status
 	e.handoffRevision++
-	if newLifecycle == LifecycleRunning && e.lifecycle == LifecycleReady {
+	if newLifecycle == instanceapi.LifecycleRunning && e.lifecycle == instanceapi.LifecycleReady {
 		e.turn++
 	}
 	e.status = newAgentStatus
@@ -47,10 +47,10 @@ func (e *EventEmitter) EmitStatus(newStatus conv.Status) {
 // SetLifecycle sets the lifecycle. Restarting, exited and failed are held
 // until ReleaseLifecycle, or another SetLifecycle: the conversation's
 // status doesn't replace them.
-func (e *EventEmitter) SetLifecycle(lifecycle LifecycleState) {
+func (e *EventEmitter) SetLifecycle(lifecycle instanceapi.LifecycleState) {
 	e.mu.Lock()
 	defer e.unlock()
-	e.lifecycleHeld = lifecycle == LifecycleRestarting || lifecycle == LifecycleExited || lifecycle == LifecycleFailed
+	e.lifecycleHeld = lifecycle == instanceapi.LifecycleRestarting || lifecycle == instanceapi.LifecycleExited || lifecycle == instanceapi.LifecycleFailed
 	if e.lifecycle == lifecycle {
 		return
 	}

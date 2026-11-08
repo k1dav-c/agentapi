@@ -9,6 +9,8 @@ import (
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/coder/agentapi/lib/instanceapi"
 )
 
 // flagsWith returns flags with values.
@@ -30,7 +32,7 @@ func TestLoadServerOptions(t *testing.T) {
 		"the program names the agent": {
 			args: []string{"claude", "--model", "opus"},
 			check: func(t *testing.T, opts serverOptions) {
-				assert.Equal(t, AgentTypeClaude, opts.agentType)
+				assert.Equal(t, instanceapi.AgentTypeClaude, opts.agentType)
 				assert.Equal(t, "claude", opts.agent)
 				assert.Equal(t, []string{"--model", "opus"}, opts.agentArgs)
 				assert.Empty(t, opts.stateFile)
@@ -41,8 +43,8 @@ func TestLoadServerOptions(t *testing.T) {
 			args:   []string{"native-demo"},
 			values: map[string]any{FlagType: "custom"},
 			check: func(t *testing.T, opts serverOptions) {
-				assert.Equal(t, AgentTypeCustom, opts.agentType)
-				for _, agent := range []AgentType{AgentTypeCodex, AgentTypePi} {
+				assert.Equal(t, instanceapi.AgentTypeCustom, opts.agentType)
+				for _, agent := range []instanceapi.AgentType{instanceapi.AgentTypeCodex, instanceapi.AgentTypePi} {
 					other, err := loadServerOptions(flagsWith(nil), []string{string(agent)})
 					require.NoError(t, err)
 					assert.Equal(t, agent, other.agentType)
@@ -57,7 +59,7 @@ func TestLoadServerOptions(t *testing.T) {
 			args:   []string{"my-wrapper"},
 			values: map[string]any{FlagType: "codex"},
 			check: func(t *testing.T, opts serverOptions) {
-				assert.Equal(t, AgentTypeCodex, opts.agentType)
+				assert.Equal(t, instanceapi.AgentTypeCodex, opts.agentType)
 			},
 		},
 		"a state file is imported into a state DB next to it": {

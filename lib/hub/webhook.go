@@ -282,7 +282,7 @@ func (h *Hub) upsertFromWebhook(instance instanceapi.WebhookInstance, url string
 			if check {
 				// Stopped, as an event said: whether its URL still
 				// answers decides.
-				i.Connection = ConnectionConnecting
+				i.Connection = instanceapi.ConnectionConnecting
 				i.Error = ""
 				restart = true
 			}
@@ -290,7 +290,7 @@ func (h *Hub) upsertFromWebhook(instance instanceapi.WebhookInstance, url string
 				return
 			}
 		}
-		restart = i.URL != url || i.ServerID != instance.ServerID || i.Connection == ConnectionStopped
+		restart = i.URL != url || i.ServerID != instance.ServerID || i.Connection == instanceapi.ConnectionStopped
 		if moved {
 			// A token given for the old URL is for the AgentAPI there.
 			i.Token = ""
@@ -305,7 +305,7 @@ func (h *Hub) upsertFromWebhook(instance instanceapi.WebhookInstance, url string
 		i.LastSeen = now
 		if restart {
 			h.logger.Info("Following an instance", "instance", instance.ID, "url", url, "server_id", instance.ServerID)
-			i.Connection = ConnectionConnecting
+			i.Connection = instanceapi.ConnectionConnecting
 			i.Error = ""
 			i.failed = false
 			i.answeredBy = ""
@@ -333,12 +333,12 @@ func (h *Hub) refuseMove(i *Instance, instance instanceapi.WebhookInstance, url 
 	switch {
 	case i.Source == SourceManual:
 		reason = "An instance added by hand keeps its URL; refused an event that names another"
-	case i.answeredBy != "" || (i.failed && (i.Connection == ConnectionUnreachable || i.Connection == ConnectionStopped)):
+	case i.answeredBy != "" || (i.failed && (i.Connection == instanceapi.ConnectionUnreachable || i.Connection == instanceapi.ConnectionStopped)):
 		return false, false
-	case i.Connection == ConnectionStopped:
+	case i.Connection == instanceapi.ConnectionStopped:
 		check = true
 		reason = "A stopped instance's event names another URL; the hub tries its URL first, and moves it if that doesn't answer"
-	case i.Connection == ConnectionConnecting:
+	case i.Connection == instanceapi.ConnectionConnecting:
 		reason = "An instance's event names another URL while the hub connects to its URL; it moves only if that doesn't answer"
 	case sameRun(i.ServerID, instance.ServerID):
 		reason = "An instance's event names another URL; the hub keeps following it where it reaches it"
@@ -364,7 +364,7 @@ func (h *Hub) stopped(id, serverID string) {
 			return
 		}
 		h.logger.Info("An instance stopped", "instance", id)
-		i.Connection = ConnectionStopped
+		i.Connection = instanceapi.ConnectionStopped
 		i.Error = ""
 		i.answeredBy = ""
 		i.LastSeen = h.clock.Now()

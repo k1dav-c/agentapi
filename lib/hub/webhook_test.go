@@ -42,7 +42,7 @@ func TestAddedInstanceKeepsItsURL(t *testing.T) {
 		i.ServerID = "s1"
 		i.Source = SourceManual
 		i.Token = "its-own"
-		i.Connection = ConnectionUnreachable
+		i.Connection = instanceapi.ConnectionUnreachable
 	})
 	get := func() Instance {
 		instance, ok := h.store.get("dev:1")
@@ -58,7 +58,7 @@ func TestAddedInstanceKeepsItsURL(t *testing.T) {
 	assert.Equal(t, "http://dev:1", instance.URL)
 	assert.Equal(t, "its-own", instance.Token)
 	assert.Equal(t, "s1", instance.ServerID)
-	assert.Equal(t, ConnectionUnreachable, instance.Connection)
+	assert.Equal(t, instanceapi.ConnectionUnreachable, instance.Connection)
 	assert.Equal(t, 1, strings.Count(logs.String(), "added by hand"), "once per run")
 	h.upsertFromWebhook(instanceapi.WebhookInstance{ID: "dev:1", ServerID: "s3"}, "http://elsewhere:1", 60)
 	assert.Equal(t, 2, strings.Count(logs.String(), "added by hand"), "another run")
@@ -70,7 +70,7 @@ func TestAddedInstanceKeepsItsURL(t *testing.T) {
 	assert.Equal(t, "its-own", instance.Token)
 	assert.Equal(t, SourceManual, instance.Source)
 	h.stopped("dev:1", "s4")
-	assert.NotEqual(t, ConnectionStopped, get().Connection, "a forged instance.stopped would stop it for good")
+	assert.NotEqual(t, instanceapi.ConnectionStopped, get().Connection, "a forged instance.stopped would stop it for good")
 }
 
 // An instance that moves leaves behind the token given for its old URL;
@@ -83,7 +83,7 @@ func TestMovedInstanceLeavesItsToken(t *testing.T) {
 		i.ServerID = "s1"
 		i.Source = SourceWebhook
 		i.Token = "for-dev-1"
-		i.Connection = ConnectionUnreachable
+		i.Connection = instanceapi.ConnectionUnreachable
 		i.failed = true
 	})
 	h.upsertFromWebhook(instanceapi.WebhookInstance{ID: "dev:1", ServerID: "s2"}, "http://dev:2", 60)
@@ -184,19 +184,19 @@ func TestDeliveriesExpire(t *testing.T) {
 func TestMoveNeedsADeadURL(t *testing.T) {
 	for _, test := range []struct {
 		name       string
-		connection Connection
+		connection instanceapi.Connection
 		failed     bool
 		answeredBy string
 		moves      bool
 		connecting bool
 	}{
-		{name: "connected", connection: ConnectionConnected},
-		{name: "connecting", connection: ConnectionConnecting},
-		{name: "connecting after it failed", connection: ConnectionConnecting, failed: true},
-		{name: "unreachable", connection: ConnectionUnreachable, failed: true, moves: true},
-		{name: "another answers", connection: ConnectionUnreachable, answeredBy: "dev:9", moves: true},
-		{name: "stopped after its heartbeats", connection: ConnectionStopped, failed: true, moves: true},
-		{name: "stopped as an event said", connection: ConnectionStopped, connecting: true},
+		{name: "connected", connection: instanceapi.ConnectionConnected},
+		{name: "connecting", connection: instanceapi.ConnectionConnecting},
+		{name: "connecting after it failed", connection: instanceapi.ConnectionConnecting, failed: true},
+		{name: "unreachable", connection: instanceapi.ConnectionUnreachable, failed: true, moves: true},
+		{name: "another answers", connection: instanceapi.ConnectionUnreachable, answeredBy: "dev:9", moves: true},
+		{name: "stopped after its heartbeats", connection: instanceapi.ConnectionStopped, failed: true, moves: true},
+		{name: "stopped as an event said", connection: instanceapi.ConnectionStopped, connecting: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			h, err := New(Config{Token: "t", Secret: "s"})
@@ -213,12 +213,12 @@ func TestMoveNeedsADeadURL(t *testing.T) {
 			instance, _ := h.store.get("dev:1")
 			if test.moves {
 				assert.Equal(t, "http://elsewhere:1", instance.URL)
-				assert.Equal(t, ConnectionConnecting, instance.Connection)
+				assert.Equal(t, instanceapi.ConnectionConnecting, instance.Connection)
 				return
 			}
 			assert.Equal(t, "http://dev:1", instance.URL)
 			if test.connecting {
-				assert.Equal(t, ConnectionConnecting, instance.Connection, "tried at its URL")
+				assert.Equal(t, instanceapi.ConnectionConnecting, instance.Connection, "tried at its URL")
 			} else {
 				assert.Equal(t, test.connection, instance.Connection)
 			}

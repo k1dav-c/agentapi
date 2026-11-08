@@ -12,6 +12,8 @@ import (
 	"github.com/coder/quartz"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/coder/agentapi/lib/instanceapi"
 )
 
 // Changes that come together are one write, within persistInterval; Close
@@ -158,7 +160,7 @@ func TestStateKeepsTheConfirmedURL(t *testing.T) {
 	defer func() { _ = again.close() }()
 	instance, _ := again.get("dev:1")
 	assert.Equal(t, "http://dev:1", instance.URL)
-	assert.Equal(t, ConnectionConnecting, instance.Connection)
+	assert.Equal(t, instanceapi.ConnectionConnecting, instance.Connection)
 	instance, _ = again.get("dev:9")
 	assert.Equal(t, "http://dev:9", instance.URL, "one kept by an earlier hub stays where it was")
 }

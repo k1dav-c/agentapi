@@ -4,11 +4,13 @@ import (
 	"context"
 
 	"github.com/danielgtaylor/huma/v2"
+
+	"github.com/coder/agentapi/lib/instanceapi"
 )
 
 // SummaryResponse is the body of GET /summary.
 type SummaryResponse struct {
-	Body SummaryBody
+	Body instanceapi.SummaryBody
 }
 
 func (s *Server) getSummary(_ context.Context, _ *struct{}) (*SummaryResponse, error) {

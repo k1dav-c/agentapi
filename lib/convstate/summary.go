@@ -7,25 +7,6 @@ import (
 	"github.com/coder/agentapi/lib/instanceapi"
 )
 
-// The summary's types are the contract with the clients that watch many
-// AgentAPIs (lib/instanceapi); these names keep the OpenAPI schema's.
-type (
-	Attention      = instanceapi.Attention
-	SummaryBody    = instanceapi.SummaryBody
-	SummaryRequest = instanceapi.SummaryRequest
-	SummarySpend   = instanceapi.SummarySpend
-)
-
-const (
-	AttentionNone    = instanceapi.AttentionNone
-	AttentionLogin   = instanceapi.AttentionLogin
-	AttentionRequest = instanceapi.AttentionRequest
-	AttentionLimit   = instanceapi.AttentionLimit
-	AttentionExited  = instanceapi.AttentionExited
-)
-
-var AttentionValues = instanceapi.AttentionValues
-
 // summaryTitleLimit is how many characters of the prompt a title takes.
 const summaryTitleLimit = 60
 
@@ -35,7 +16,7 @@ const summaryRequestTitleLimit = 120
 
 // SummaryUpdateBody is the SSE payload of the summary after it changed.
 type SummaryUpdateBody struct {
-	SummaryBody
+	instanceapi.SummaryBody
 }
 
 // WithInstance has summaries name the AgentAPI with instance.
@@ -44,9 +25,9 @@ func WithInstance(instance func() instanceapi.WebhookInstance) EventEmitterOptio
 }
 
 // summaryLocked is the conversation's summary. Caller holds e.mu.
-func (e *EventEmitter) summaryLocked() SummaryBody {
+func (e *EventEmitter) summaryLocked() instanceapi.SummaryBody {
 	status := e.statusChangeBody()
-	summary := SummaryBody{
+	summary := instanceapi.SummaryBody{
 		Status: status.Status, Lifecycle: status.Lifecycle,
 		SessionName: status.SessionName, AgentSessionID: status.AgentSessionID,
 		PendingRequests: status.PendingRequests, QueuedMessages: len(e.queue),
@@ -70,7 +51,7 @@ func (e *EventEmitter) summaryLocked() SummaryBody {
 			continue
 		}
 		if summary.Request == nil || r.CreatedAt.Before(summary.Request.CreatedAt) {
-			summary.Request = &SummaryRequest{ID: r.ID, Kind: r.Kind, Title: shortText(r.Title, summaryRequestTitleLimit), CreatedAt: r.CreatedAt}
+			summary.Request = &instanceapi.SummaryRequest{ID: r.ID, Kind: r.Kind, Title: shortText(r.Title, summaryRequestTitleLimit), CreatedAt: r.CreatedAt}
 		}
 	}
 	summary.Title = summary.SessionName
@@ -84,21 +65,21 @@ func (e *EventEmitter) summaryLocked() SummaryBody {
 	}
 	switch {
 	case status.LoginRequired != nil:
-		summary.Attention = AttentionLogin
+		summary.Attention = instanceapi.AttentionLogin
 	case status.PendingRequests > 0:
-		summary.Attention = AttentionRequest
+		summary.Attention = instanceapi.AttentionRequest
 	case status.LimitStop != nil:
-		summary.Attention = AttentionLimit
-	case status.Lifecycle == LifecycleExited || status.Lifecycle == LifecycleFailed:
-		summary.Attention = AttentionExited
+		summary.Attention = instanceapi.AttentionLimit
+	case status.Lifecycle == instanceapi.LifecycleExited || status.Lifecycle == instanceapi.LifecycleFailed:
+		summary.Attention = instanceapi.AttentionExited
 	default:
-		summary.Attention = AttentionNone
+		summary.Attention = instanceapi.AttentionNone
 	}
 	return summary
 }
 
 // Summary returns the conversation's summary.
-func (e *EventEmitter) Summary() SummaryBody {
+func (e *EventEmitter) Summary() instanceapi.SummaryBody {
 	e.mu.Lock()
 	defer e.unlock()
 	return e.summaryLocked()
@@ -106,7 +87,7 @@ func (e *EventEmitter) Summary() SummaryBody {
 
 // MarkSeen records that a client showed the conversation to the user now,
 // and returns the summary.
-func (e *EventEmitter) MarkSeen() SummaryBody {
+func (e *EventEmitter) MarkSeen() instanceapi.SummaryBody {
 	e.mu.Lock()
 	defer e.unlock()
 	e.seenAt = e.clock.Now()
@@ -119,7 +100,7 @@ func (e *EventEmitter) MarkSeen() SummaryBody {
 
 // SetSpend records what the agent's sessions cost recently, and sends the
 // summary if that changed.
-func (e *EventEmitter) SetSpend(spend SummarySpend) {
+func (e *EventEmitter) SetSpend(spend instanceapi.SummarySpend) {
 	e.mu.Lock()
 	defer e.unlock()
 	if e.summary.spend != nil && e.summary.spend.Equal(spend) {
@@ -157,10 +138,10 @@ type summaryFeed struct {
 	// changed: the state changed since the summary was last sent.
 	changed bool
 	// sent is the summary sent last, nil while no subscription wants it.
-	sent *SummaryBody
+	sent *instanceapi.SummaryBody
 	// spend is what the agent's sessions cost recently (startSpend); nil
 	// until it is worked out, and for agents whose logs aren't read.
-	spend *SummarySpend
+	spend *instanceapi.SummarySpend
 	// update is how far an update through the API is (updater); nil
 	// until the server sets it.
 	update *instanceapi.UpdateStatus

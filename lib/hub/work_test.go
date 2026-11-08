@@ -33,7 +33,7 @@ var (
 func summarize(t *testing.T, s *store, id string, summary instanceapi.SummaryBody) Instance {
 	t.Helper()
 	instance, ok := s.update(id, false, func(i *Instance) {
-		i.Connection = ConnectionConnected
+		i.Connection = instanceapi.ConnectionConnected
 		i.Summary = &summary
 	})
 	require.True(t, ok)
@@ -107,7 +107,7 @@ func TestWorkTimeLostConnection(t *testing.T) {
 	heard := clock.Now()
 	clock.Advance(45 * time.Second)
 	dropped, _ := s.update("dev:1", false, func(i *Instance) {
-		i.Connection = ConnectionConnecting
+		i.Connection = instanceapi.ConnectionConnecting
 		i.Error = "the event stream went silent"
 		i.heard = heard
 	})
@@ -116,12 +116,12 @@ func TestWorkTimeLostConnection(t *testing.T) {
 	assert.Equal(t, WorkTime{Day: 600, Week: 600}, workOf(t, s, clock, "dev:1"), "until the stream last said anything")
 
 	clock.Advance(time.Minute)
-	_, _ = s.update("dev:1", false, func(i *Instance) { i.Connection = ConnectionUnreachable })
+	_, _ = s.update("dev:1", false, func(i *Instance) { i.Connection = instanceapi.ConnectionUnreachable })
 	clock.Advance(time.Minute)
 	again := summarize(t, s, "dev:1", workingSummary)
 	assert.Equal(t, clock.Now(), again.work.since, "counts again from its next summary")
 	clock.Advance(time.Minute)
-	_, _ = s.update("dev:1", false, func(i *Instance) { i.Connection = ConnectionStopped })
+	_, _ = s.update("dev:1", false, func(i *Instance) { i.Connection = instanceapi.ConnectionStopped })
 	assert.Equal(t, WorkTime{Day: 660, Week: 660}, workOf(t, s, clock, "dev:1"))
 }
 

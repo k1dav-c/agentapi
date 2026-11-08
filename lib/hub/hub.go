@@ -153,7 +153,7 @@ func (h *Hub) Run(ctx context.Context) {
 	h.ctx = ctx
 	h.watchMu.Unlock()
 	for _, instance := range h.store.list() {
-		if instance.Connection != ConnectionStopped {
+		if instance.Connection != instanceapi.ConnectionStopped {
 			h.watch(instance)
 		}
 	}
@@ -321,7 +321,7 @@ func (h *Hub) addInstance(w http.ResponseWriter, r *http.Request) {
 		i.LastSeen = h.clock.Now()
 		i.Summary = summary
 		// The hub just read its summary there.
-		i.Connection = ConnectionConnected
+		i.Connection = instanceapi.ConnectionConnected
 		i.confirmedURL = base
 		i.Error = ""
 		i.failed = false

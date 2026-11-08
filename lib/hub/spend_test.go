@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/coder/agentapi/lib/hub"
 	"github.com/coder/agentapi/lib/instanceapi"
 )
 
@@ -27,7 +26,7 @@ func TestHubSpendTokens(t *testing.T) {
 	require.Equal(t, http.StatusOK, request(t, http.MethodPost, hubSrv.URL+"/api/instances", hubToken, map[string]string{"url": instance.URL}, nil))
 	require.Eventually(t, func() bool {
 		list := instances(t, hubSrv.URL)
-		return len(list) == 1 && list[0].Connection == hub.ConnectionConnected && list[0].Summary != nil
+		return len(list) == 1 && list[0].Connection == instanceapi.ConnectionConnected && list[0].Summary != nil
 	}, 10*time.Second, 20*time.Millisecond)
 	spend := instances(t, hubSrv.URL)[0].Summary.Spend
 	require.NotNil(t, spend)
@@ -51,7 +50,7 @@ func TestHubSpendTokens(t *testing.T) {
 	_ = instance.Listener.Close()
 	instance.CloseClientConnections()
 	require.Eventually(t, func() bool {
-		return instances(t, hubSrv.URL)[0].Connection == hub.ConnectionUnreachable
+		return instances(t, hubSrv.URL)[0].Connection == instanceapi.ConnectionUnreachable
 	}, 10*time.Second, 20*time.Millisecond)
 	last := instances(t, hubSrv.URL)[0].Summary
 	require.NotNil(t, last)

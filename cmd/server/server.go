@@ -21,30 +21,22 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/coder/agentapi/lib/httpapi"
+	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/logctx"
 	"github.com/coder/agentapi/lib/native/demo"
 	"github.com/coder/agentapi/lib/pricing"
 	"github.com/coder/agentapi/lib/statedb"
 )
 
-type AgentType = httpapi.AgentType
-
-const (
-	AgentTypeClaude = httpapi.AgentTypeClaude
-	AgentTypeCodex  = httpapi.AgentTypeCodex
-	AgentTypePi     = httpapi.AgentTypePi
-	AgentTypeCustom = httpapi.AgentTypeCustom
-)
-
 // agentTypeAliases are the agent types --type takes, and the programs
 // whose type is known without it. custom is native-demo's type
 // (lib/native/demo), which it reports.
-var agentTypeAliases = map[string]AgentType{
-	"claude":      AgentTypeClaude,
-	"codex":       AgentTypeCodex,
-	"pi":          AgentTypePi,
-	"native-demo": AgentTypeCustom,
-	"custom":      AgentTypeCustom,
+var agentTypeAliases = map[string]instanceapi.AgentType{
+	"claude":      instanceapi.AgentTypeClaude,
+	"codex":       instanceapi.AgentTypeCodex,
+	"pi":          instanceapi.AgentTypePi,
+	"native-demo": instanceapi.AgentTypeCustom,
+	"custom":      instanceapi.AgentTypeCustom,
 }
 
 // agentNames are the agent types --type takes, as help names them.
@@ -62,7 +54,7 @@ func unsupportedAgent(name string) error {
 // parseAgentType returns the agent type --type (typeFlag) names, or
 // without it the type of program, the agent's command. The custom type
 // runs native-demo only.
-func parseAgentType(program, typeFlag string) (AgentType, error) {
+func parseAgentType(program, typeFlag string) (instanceapi.AgentType, error) {
 	name := typeFlag
 	if name == "" {
 		name = strings.TrimSuffix(filepath.Base(program), ".exe")
@@ -73,7 +65,7 @@ func parseAgentType(program, typeFlag string) (AgentType, error) {
 		return "", fmt.Errorf("unknown agent %s: set --type (%s); AgentAPI 3 runs Claude Code, Codex and Pi natively, and for other agents AgentAPI %s is the last release with the PTY transport", program, agentNames, lastPTYRelease)
 	case !ok:
 		return "", unsupportedAgent(name)
-	case agentType == AgentTypeCustom && program != demo.Program:
+	case agentType == instanceapi.AgentTypeCustom && program != demo.Program:
 		return "", unsupportedAgent("a custom agent")
 	}
 	return agentType, nil
@@ -268,7 +260,7 @@ func serverConfig(opts serverOptions, agent *runningAgent, stateDB *statedb.DB, 
 			RetryDelays:  opts.retryDelays,
 			Prices:       prices,
 		}
-		if opts.agentType == AgentTypePi {
+		if opts.agentType == instanceapi.AgentTypePi {
 			config.Native.PiSessionDir = piSessionDir(opts.agentArgs)
 		}
 	}

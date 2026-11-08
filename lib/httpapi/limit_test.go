@@ -9,12 +9,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/agentapi/lib/agentstate"
-	"github.com/coder/agentapi/lib/httpapi"
+	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/native"
 )
 
 func (n *nativeServer) limitStop() *agentstate.LimitStop {
-	var status httpapi.StatusChangeBody
+	var status convstate.StatusChangeBody
 	n.do(http.MethodGet, "/status", nil, &status)
 	return status.LimitStop
 }

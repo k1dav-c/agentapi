@@ -4,12 +4,14 @@ import (
 	"context"
 
 	"github.com/danielgtaylor/huma/v2"
+
+	"github.com/coder/agentapi/lib/instanceapi"
 )
 
 // TasksResponse is the body of GET /tasks.
 type TasksResponse struct {
 	Body struct {
-		Tasks []Task `json:"tasks" nullable:"false" doc:"The conversation's tasks, the earliest first."`
+		Tasks []instanceapi.Task `json:"tasks" nullable:"false" doc:"The conversation's tasks, the earliest first."`
 	}
 }
 

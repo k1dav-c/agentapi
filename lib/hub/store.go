@@ -31,19 +31,11 @@ const (
 )
 
 // Connection is how the hub's watch of an instance's summary goes.
-type Connection = instanceapi.Connection
-
-const (
-	ConnectionConnecting  = instanceapi.ConnectionConnecting
-	ConnectionConnected   = instanceapi.ConnectionConnected
-	ConnectionUnreachable = instanceapi.ConnectionUnreachable
-	ConnectionStopped     = instanceapi.ConnectionStopped
-)
 
 // Instance is an AgentAPI the hub watches, as GET /api/instances has it.
 type Instance struct {
 	record
-	Connection Connection               `json:"connection"`
+	Connection instanceapi.Connection   `json:"connection"`
 	Error      string                   `json:"error,omitempty"`
 	Summary    *instanceapi.SummaryBody `json:"summary,omitempty"`
 	// State is what the hub's page shows of it, from the three above and
@@ -134,7 +126,7 @@ func (i Instance) sent(now time.Time) Instance {
 // hub follows its summary stream. One that is connecting again shows its
 // last summary, which the hub doesn't see go on.
 func (i Instance) working() bool {
-	return i.State == instanceapi.StateWorking && i.Connection == ConnectionConnected
+	return i.State == instanceapi.StateWorking && i.Connection == instanceapi.ConnectionConnected
 }
 
 // seen is the instance as browsers see it, to tell a change they would see
@@ -165,7 +157,7 @@ func (i Instance) state() instanceapi.State {
 // keeps no titles or commands.
 func (i Instance) activityKey() string {
 	switch {
-	case i.Connection == ConnectionStopped || i.Connection == ConnectionUnreachable:
+	case i.Connection == instanceapi.ConnectionStopped || i.Connection == instanceapi.ConnectionUnreachable:
 		return string(i.Connection)
 	case i.Summary == nil:
 		return ""
@@ -264,13 +256,13 @@ type storedInstance struct {
 }
 
 func (i Instance) stored() storedInstance {
-	return storedInstance{record: i.record, Stopped: i.Connection == ConnectionStopped, Activity: i.activity, ConfirmedURL: i.confirmedURL, Work: i.work.stored()}
+	return storedInstance{record: i.record, Stopped: i.Connection == instanceapi.ConnectionStopped, Activity: i.activity, ConfirmedURL: i.confirmedURL, Work: i.work.stored()}
 }
 
 // kept is what the file keeps of the instance, but when it was last seen
 // and its work, to compare.
 func (i Instance) kept() storedInstance {
-	stored := storedInstance{record: i.record, Stopped: i.Connection == ConnectionStopped, Activity: i.activity, ConfirmedURL: i.confirmedURL}
+	stored := storedInstance{record: i.record, Stopped: i.Connection == instanceapi.ConnectionStopped, Activity: i.activity, ConfirmedURL: i.confirmedURL}
 	stored.LastSeen = time.Time{}
 	return stored
 }
@@ -295,9 +287,9 @@ func newStore(path string, logger *slog.Logger, clock quartz.Clock) (*store, err
 	}
 	now := clock.Now()
 	for _, si := range file.Instances {
-		connection := ConnectionConnecting
+		connection := instanceapi.ConnectionConnecting
 		if si.Stopped {
-			connection = ConnectionStopped
+			connection = instanceapi.ConnectionStopped
 		}
 		i := &Instance{record: si.record, Connection: connection, activity: si.Activity, confirmedURL: si.ConfirmedURL, work: si.Work.log(si.LastSeen, now)}
 		i.Pin = max(i.Pin, 0)
@@ -417,7 +409,7 @@ func (s *store) update(id string, create bool, change func(*Instance)) (Instance
 		if !create {
 			return Instance{}, false
 		}
-		i = &Instance{Connection: ConnectionConnecting}
+		i = &Instance{Connection: instanceapi.ConnectionConnecting}
 		i.ID = id
 		s.instances[id] = i
 	}

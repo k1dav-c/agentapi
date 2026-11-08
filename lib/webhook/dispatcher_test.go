@@ -73,8 +73,8 @@ func TestWebhookStatusChangesOnly(t *testing.T) {
 	assert.Equal(t, webhookEventRunStatusChanged, event.Type)
 	data, ok := event.Data.(WebhookEventData)
 	require.True(t, ok)
-	assert.Equal(t, convstate.AgentStatusRunning, data.PreviousStatus)
-	assert.Equal(t, convstate.AgentStatusStable, data.Status)
+	assert.Equal(t, instanceapi.AgentStatusRunning, data.PreviousStatus)
+	assert.Equal(t, instanceapi.AgentStatusStable, data.Status)
 	assert.Equal(t, instanceapi.AgentTypeCodex, data.AgentType)
 	assert.Equal(t, instanceapi.TransportNative, data.Transport)
 	assert.NotEmpty(t, event.ID)
@@ -106,14 +106,14 @@ func TestWebhookSend(t *testing.T) {
 		quartz.NewReal(),
 	)
 	require.NoError(t, err)
-	event := WebhookEvent{
+	event := instanceapi.WebhookEvent{
 		ID:        "delivery-1",
 		Type:      webhookEventRunStatusChanged,
 		CreatedAt: time.Unix(1_700_000_000, 0).UTC(),
 		Data: WebhookEventData{
 			ServerID:       "run-1",
-			Status:         convstate.AgentStatusStable,
-			PreviousStatus: convstate.AgentStatusRunning,
+			Status:         instanceapi.AgentStatusStable,
+			PreviousStatus: instanceapi.AgentStatusRunning,
 			AgentType:      instanceapi.AgentTypeClaude,
 			Transport:      instanceapi.TransportNative,
 		},
@@ -146,7 +146,7 @@ func TestWebhookSendRejectsNonSuccessfulResponse(t *testing.T) {
 		quartz.NewReal(),
 	)
 	require.NoError(t, err)
-	event := WebhookEvent{ID: "delivery-1", CreatedAt: time.Now()}
+	event := instanceapi.WebhookEvent{ID: "delivery-1", CreatedAt: time.Now()}
 	_, err = dispatcher.send(t.Context(), dispatcher.config, &http.Client{}, event, []byte(`{}`))
 	require.ErrorContains(t, err, "503 Service Unavailable")
 }
@@ -172,14 +172,14 @@ func TestWebhookCustomPayloadTemplate(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	event := WebhookEvent{
+	event := instanceapi.WebhookEvent{
 		ID:        "delivery-tmpl",
 		Type:      webhookEventRunStatusChanged,
 		CreatedAt: time.Unix(1_700_000_000, 0).UTC(),
 		Data: WebhookEventData{
 			ServerID:       "run-1",
-			Status:         convstate.AgentStatusStable,
-			PreviousStatus: convstate.AgentStatusRunning,
+			Status:         instanceapi.AgentStatusStable,
+			PreviousStatus: instanceapi.AgentStatusRunning,
 			AgentType:      instanceapi.AgentTypeClaude,
 			Transport:      instanceapi.TransportNative,
 		},
@@ -252,7 +252,7 @@ func TestWebhookRetries(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		dispatcher.deliver(t.Context(), queuedEvent{WebhookEvent: WebhookEvent{ID: "e1", Type: webhookEventRunStatusChanged, CreatedAt: clock.Now()}})
+		dispatcher.deliver(t.Context(), queuedEvent{WebhookEvent: instanceapi.WebhookEvent{ID: "e1", Type: webhookEventRunStatusChanged, CreatedAt: clock.Now()}})
 	}()
 	for _, wait := range []time.Duration{time.Second, 2 * time.Second} {
 		call := trap.MustWait(t.Context())
@@ -297,7 +297,7 @@ func TestWebhookRedirectIsNoDelivery(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		dispatcher.deliver(t.Context(), queuedEvent{WebhookEvent: WebhookEvent{ID: "e1", Type: webhookEventRunStatusChanged, CreatedAt: clock.Now()}})
+		dispatcher.deliver(t.Context(), queuedEvent{WebhookEvent: instanceapi.WebhookEvent{ID: "e1", Type: webhookEventRunStatusChanged, CreatedAt: clock.Now()}})
 	}()
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
@@ -324,6 +324,6 @@ func TestWebhookDisabledAtRuntime(t *testing.T) {
 	t.Parallel()
 	dispatcher := testDispatcher(t, Config{URL: "https://initial.example.com/hook"}, quartz.NewReal())
 	require.NoError(t, dispatcher.UpdateConfig(Config{}))
-	dispatcher.StatusChanged(convstate.AgentStatusRunning, convstate.AgentStatusStable)
+	dispatcher.StatusChanged(instanceapi.AgentStatusRunning, instanceapi.AgentStatusStable)
 	assert.Empty(t, dispatcher.queue)
 }

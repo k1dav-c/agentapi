@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/agentapi/lib/agentstate"
+	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/httpapi"
 	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/logctx"
@@ -31,6 +32,7 @@ import (
 	"github.com/coder/agentapi/lib/native/nativetest"
 	"github.com/coder/agentapi/lib/statedb"
 	"github.com/coder/agentapi/lib/transcript"
+	"github.com/coder/agentapi/lib/webhook"
 )
 
 // persistentServer runs a native server over the state database at path.
@@ -74,7 +76,7 @@ func persistentServerWith(t *testing.T, path, cwd string, configure func(*native
 	t.Cleanup(ts.Close)
 	n := &nativeServer{t: t, url: ts.URL, factory: factory}
 	require.Eventually(t, func() bool {
-		var status httpapi.StatusChangeBody
+		var status convstate.StatusChangeBody
 		n.do(http.MethodGet, "/status", nil, &status)
 		return status.Capabilities != nil
 	}, 5*time.Second, 5*time.Millisecond)
@@ -297,7 +299,7 @@ func TestStateDB_StopStoresTheQueueLast(t *testing.T) {
 		if err != nil {
 			return false
 		}
-		var status httpapi.StatusChangeBody
+		var status convstate.StatusChangeBody
 		err = json.NewDecoder(resp.Body).Decode(&status)
 		_ = resp.Body.Close()
 		return err == nil && status.Capabilities != nil
@@ -398,7 +400,7 @@ func TestStateDB_RestoresSettings(t *testing.T) {
 	require.NoError(t, err)
 	defer stop(t, srv, db)
 	assert.Equal(t, []agentstate.Settings{{Model: "plain"}, {PermissionMode: agentstate.PermissionModeAsk}}, n.factory.Last().Applied())
-	var status httpapi.StatusChangeBody
+	var status convstate.StatusChangeBody
 	n.do(http.MethodGet, "/status", nil, &status)
 	require.NotNil(t, status.Settings)
 	// The model has no efforts.
@@ -446,7 +448,7 @@ func TestStateDB_ContinuesAPTYConversation(t *testing.T) {
 	require.NoError(t, err)
 	snap, err := db.Load()
 	require.NoError(t, err)
-	assert.Equal(t, string(httpapi.TransportNative), snap.Meta[statedb.MetaTransport])
+	assert.Equal(t, string(instanceapi.TransportNative), snap.Meta[statedb.MetaTransport])
 	db.SetMeta(statedb.MetaTransport, "acp")
 	require.NoError(t, db.Close())
 	_, _, _, err = persistentServer(t, path, cwd)
@@ -459,7 +461,7 @@ func TestStateDB_KeepsWebhookSettings(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "state.db")
 	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
-	start := func(flags httpapi.WebhookConfig) (*httpapi.Server, *statedb.DB) {
+	start := func(flags webhook.Config) (*httpapi.Server, *statedb.DB) {
 		db, err := statedb.Open(path, nil)
 		require.NoError(t, err)
 		srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
@@ -480,7 +482,7 @@ func TestStateDB_KeepsWebhookSettings(t *testing.T) {
 		require.NoError(t, srv.Stop(ctx))
 		require.NoError(t, db.Close())
 	}
-	webhook := func(srv *httpapi.Server) (url string, events []string) {
+	getWebhook := func(srv *httpapi.Server) (url string, events []string) {
 		rec := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/webhook", nil))
 		require.Equal(t, http.StatusOK, rec.Code)
@@ -492,7 +494,7 @@ func TestStateDB_KeepsWebhookSettings(t *testing.T) {
 		return body.URL, body.Events
 	}
 
-	srv, db := start(httpapi.WebhookConfig{})
+	srv, db := start(webhook.Config{})
 	req := httptest.NewRequest(http.MethodPut, "/webhook", strings.NewReader(`{"url":"https://dashboard.example.com/hook","timeout_seconds":10,"max_attempts":3,"events":["task.*"]}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -500,15 +502,15 @@ func TestStateDB_KeepsWebhookSettings(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	stop(srv, db)
 
-	srv, db = start(httpapi.WebhookConfig{})
-	url, events := webhook(srv)
+	srv, db = start(webhook.Config{})
+	url, events := getWebhook(srv)
 	assert.Equal(t, "https://dashboard.example.com/hook", url)
 	assert.Equal(t, []string{"task.*"}, events)
 	stop(srv, db)
 
 	// Other flags win.
-	srv, db = start(httpapi.WebhookConfig{URL: "https://other.example.com/hook"})
-	url, events = webhook(srv)
+	srv, db = start(webhook.Config{URL: "https://other.example.com/hook"})
+	url, events = getWebhook(srv)
 	assert.Equal(t, "https://other.example.com/hook", url)
 	assert.Equal(t, []string{"run.status_changed"}, events)
 	stop(srv, db)
@@ -521,9 +523,9 @@ func TestStateDB_KeepsTasks(t *testing.T) {
 	n, srv, db, err := persistentServer(t, path, "/work")
 	require.NoError(t, err)
 	a := n.factory.Last()
-	tasks := func() []httpapi.Task {
+	tasks := func() []instanceapi.Task {
 		var body struct {
-			Tasks []httpapi.Task `json:"tasks"`
+			Tasks []instanceapi.Task `json:"tasks"`
 		}
 		require.Equal(t, http.StatusOK, n.do(http.MethodGet, "/tasks", nil, &body))
 		return body.Tasks
@@ -531,7 +533,7 @@ func TestStateDB_KeepsTasks(t *testing.T) {
 
 	n.send("Fix the bug", "")
 	require.Eventually(t, func() bool { return len(tasks()) == 1 }, 5*time.Second, 5*time.Millisecond)
-	assert.Equal(t, httpapi.TaskStatusRunning, tasks()[0].Status)
+	assert.Equal(t, instanceapi.TaskStatusRunning, tasks()[0].Status)
 	a.Sink().RichMessage(transcript.RichMessage{MessageID: "m1", Role: "assistant", Content: []transcript.RichContentBlock{{Type: "text", Text: "Fixed."}}})
 	var rich struct {
 		Messages []transcript.RichMessage `json:"messages"`
@@ -542,13 +544,13 @@ func TestStateDB_KeepsTasks(t *testing.T) {
 	assert.Equal(t, tasks()[0].ID, *rich.Messages[0].TaskID, "the message belongs to the task")
 
 	a.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonEndTurn})
-	require.Eventually(t, func() bool { return tasks()[0].Status == httpapi.TaskStatusCompleted }, 5*time.Second, 5*time.Millisecond)
+	require.Eventually(t, func() bool { return tasks()[0].Status == instanceapi.TaskStatusCompleted }, 5*time.Second, 5*time.Millisecond)
 
 	// A usage limit stops the next one.
 	n.send("And the tests", "")
 	require.Eventually(t, func() bool { return len(tasks()) == 2 }, 5*time.Second, 5*time.Millisecond)
 	a.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonLimited, Error: "You've hit your limit"})
-	require.Eventually(t, func() bool { return tasks()[1].Status == httpapi.TaskStatusLimited }, 5*time.Second, 5*time.Millisecond)
+	require.Eventually(t, func() bool { return tasks()[1].Status == instanceapi.TaskStatusLimited }, 5*time.Second, 5*time.Millisecond)
 	before := tasks()
 	require.NotNil(t, before[1].Limit)
 	stop(t, srv, db)
@@ -571,9 +573,9 @@ func TestStateDB_DropsTasksWithoutTheirMessage(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.db")
 	n, srv, db, err := persistentServer(t, path, "/work")
 	require.NoError(t, err)
-	tasks := func() []httpapi.Task {
+	tasks := func() []instanceapi.Task {
 		var body struct {
-			Tasks []httpapi.Task `json:"tasks"`
+			Tasks []instanceapi.Task `json:"tasks"`
 		}
 		require.Equal(t, http.StatusOK, n.do(http.MethodGet, "/tasks", nil, &body))
 		return body.Tasks
@@ -582,7 +584,7 @@ func TestStateDB_DropsTasksWithoutTheirMessage(t *testing.T) {
 		n.send(prompt, "")
 		require.Eventually(t, func() bool { return len(tasks()) == i+1 }, 5*time.Second, 5*time.Millisecond)
 		n.factory.Last().Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonEndTurn})
-		require.Eventually(t, func() bool { return tasks()[i].Status == httpapi.TaskStatusCompleted }, 5*time.Second, 5*time.Millisecond)
+		require.Eventually(t, func() bool { return tasks()[i].Status == instanceapi.TaskStatusCompleted }, 5*time.Second, 5*time.Millisecond)
 	}
 	before := tasks()
 	stop(t, srv, db)
@@ -637,7 +639,7 @@ func TestEvents_TaskUpdatesAreOptIn(t *testing.T) {
 	n.send("one", "")
 	require.Eventually(t, func() bool {
 		var body struct {
-			Tasks []httpapi.Task `json:"tasks"`
+			Tasks []instanceapi.Task `json:"tasks"`
 		}
 		n.do(http.MethodGet, "/tasks", nil, &body)
 		return len(body.Tasks) == 1
@@ -656,8 +658,8 @@ func TestStateDB_KeepsSeen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.db")
 	n, srv, db, err := persistentServer(t, path, "/work")
 	require.NoError(t, err)
-	summary := func() httpapi.SummaryBody {
-		var body httpapi.SummaryBody
+	summary := func() instanceapi.SummaryBody {
+		var body instanceapi.SummaryBody
 		require.Equal(t, http.StatusOK, n.do(http.MethodGet, "/summary", nil, &body))
 		return body
 	}
@@ -671,7 +673,7 @@ func TestStateDB_KeepsSeen(t *testing.T) {
 	n, srv, db, err = persistentServer(t, path, "/work")
 	require.NoError(t, err)
 	assert.True(t, summary().Unread, "still unread")
-	var seen httpapi.SummaryBody
+	var seen instanceapi.SummaryBody
 	require.Equal(t, http.StatusOK, n.do(http.MethodPost, "/tasks/seen", nil, &seen))
 	assert.False(t, seen.Unread)
 	stop(t, srv, db)
@@ -710,7 +712,7 @@ func TestStateDB_StoresEveryQueueChange(t *testing.T) {
 	t.Cleanup(ts.Close)
 	n := &nativeServer{t: t, url: ts.URL, factory: factory}
 	require.Eventually(t, func() bool {
-		var status httpapi.StatusChangeBody
+		var status convstate.StatusChangeBody
 		n.do(http.MethodGet, "/status", nil, &status)
 		return status.Capabilities != nil
 	}, 5*time.Second, 5*time.Millisecond)

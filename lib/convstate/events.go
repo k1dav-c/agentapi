@@ -31,30 +31,6 @@ const (
 	EventTypeSummaryUpdate     EventType = "summary_update"
 )
 
-// The agent's status and lifecycle are part of the summary's contract
-// (lib/instanceapi).
-type (
-	AgentStatus    = instanceapi.AgentStatus
-	LifecycleState = instanceapi.LifecycleState
-)
-
-const (
-	AgentStatusRunning = instanceapi.AgentStatusRunning
-	AgentStatusStable  = instanceapi.AgentStatusStable
-
-	LifecycleStarting   = instanceapi.LifecycleStarting
-	LifecycleReady      = instanceapi.LifecycleReady
-	LifecycleRunning    = instanceapi.LifecycleRunning
-	LifecycleRestarting = instanceapi.LifecycleRestarting
-	LifecycleExited     = instanceapi.LifecycleExited
-	LifecycleFailed     = instanceapi.LifecycleFailed
-)
-
-var (
-	AgentStatusValues    = instanceapi.AgentStatusValues
-	LifecycleStateValues = instanceapi.LifecycleStateValues
-)
-
 type MessageUpdateBody struct {
 	Id      int       `json:"id" doc:"Unique identifier for the message. This identifier also represents the order of the message in the conversation history."`
 	Role    conv.Role `json:"role" doc:"Role of the message author"`
@@ -77,10 +53,10 @@ type SessionSyncBody struct {
 }
 
 type StatusChangeBody struct {
-	Status    AgentStatus    `json:"status" doc:"Backward-compatible agent activity status."`
-	Lifecycle LifecycleState `json:"lifecycle" doc:"Detailed process lifecycle state."`
-	ServerID  string         `json:"server_id" doc:"Random identifier of this AgentAPI run: it changes every time AgentAPI starts."`
-	Turn      uint64         `json:"turn" doc:"How many times the agent started working since AgentAPI started."`
+	Status    instanceapi.AgentStatus    `json:"status" doc:"Backward-compatible agent activity status."`
+	Lifecycle instanceapi.LifecycleState `json:"lifecycle" doc:"Detailed process lifecycle state."`
+	ServerID  string                     `json:"server_id" doc:"Random identifier of this AgentAPI run: it changes every time AgentAPI starts."`
+	Turn      uint64                     `json:"turn" doc:"How many times the agent started working since AgentAPI started."`
 	// AgentSessionID is the agent's own session.
 	AgentSessionID string                `json:"agent_session_id,omitempty" doc:"The agent's own session ID, which GET /sessions lists and resuming opens, once the agent reports it."`
 	AgentType      instanceapi.AgentType `json:"agent_type" doc:"Type of the agent being used by the server."`
@@ -190,14 +166,14 @@ type EventEmitter struct {
 	terminal           bool
 	sessionEvents      []transcript.SessionEvent
 	nextSessionEventID int
-	status             AgentStatus
-	lifecycle          LifecycleState
+	status             instanceapi.AgentStatus
+	lifecycle          instanceapi.LifecycleState
 	// lifecycleHeld: the server set lifecycle to restarting, exited or
 	// failed, which the conversation's status doesn't change until the
 	// server releases it (ReleaseLifecycle); reported is the lifecycle the
 	// conversation's status gives meanwhile.
 	lifecycleHeld       bool
-	reported            LifecycleState
+	reported            instanceapi.LifecycleState
 	serverID            string
 	turn                uint64
 	agentSessionID      string
@@ -228,7 +204,7 @@ type EventEmitter struct {
 	// task that ended after it is unread.
 	seenAt         time.Time
 	clock          quartz.Clock
-	onStatusChange func(previous, current AgentStatus)
+	onStatusChange func(previous, current instanceapi.AgentStatus)
 	// persister, if set, stores every change of the conversation state.
 	persister Persister
 }
@@ -279,7 +255,7 @@ type EmitterState struct {
 	SessionEvents []transcript.SessionEvent
 	Requests      []agentstate.RequestState
 	RequestSeqs   []uint64
-	Tasks         []Task
+	Tasks         []instanceapi.Task
 	TaskSeqs      []uint64
 	SessionName   string
 	// SeenAt is when a client last showed the conversation; zero takes
@@ -288,14 +264,14 @@ type EmitterState struct {
 }
 
 // ConvertStatus is the agent status a conversation status reports.
-func ConvertStatus(status conv.Status) AgentStatus {
+func ConvertStatus(status conv.Status) instanceapi.AgentStatus {
 	switch status {
 	case conv.StatusInitializing:
-		return AgentStatusRunning
+		return instanceapi.AgentStatusRunning
 	case conv.StatusStable:
-		return AgentStatusStable
+		return instanceapi.AgentStatusStable
 	case conv.StatusChanging:
-		return AgentStatusRunning
+		return instanceapi.AgentStatusRunning
 	default:
 		panic(fmt.Sprintf("unknown conversation status: %s", status))
 	}
@@ -405,7 +381,7 @@ func (e *EventEmitter) Epoch() string {
 	return e.epoch
 }
 
-func WithStatusChangeHandler(handler func(previous, current AgentStatus)) EventEmitterOption {
+func WithStatusChangeHandler(handler func(previous, current instanceapi.AgentStatus)) EventEmitterOption {
 	return func(e *EventEmitter) {
 		e.onStatusChange = handler
 	}
@@ -416,9 +392,9 @@ func NewEventEmitter(opts ...EventEmitterOption) *EventEmitter {
 		messages:            make([]conv.Message, 0),
 		sessionEvents:       make([]transcript.SessionEvent, 0),
 		nextSessionEventID:  1,
-		status:              AgentStatusRunning,
-		lifecycle:           LifecycleStarting,
-		reported:            LifecycleStarting,
+		status:              instanceapi.AgentStatusRunning,
+		lifecycle:           instanceapi.LifecycleStarting,
+		reported:            instanceapi.LifecycleStarting,
 		chans:               make(map[int]subscriber),
 		subscriptionBufSize: defaultSubscriptionBufSize,
 		epoch:               NewEpoch(),

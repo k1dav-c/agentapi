@@ -10,6 +10,7 @@ import (
 
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/convstate"
+	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -37,7 +38,7 @@ func (s *Server) getTitle(ctx context.Context, input *struct{}) (*TitleResponse,
 		}
 	}
 	state := "Ready"
-	if status == AgentStatusRunning {
+	if status == instanceapi.AgentStatusRunning {
 		state = "Running"
 	}
 	title := state + " · AgentAPI"

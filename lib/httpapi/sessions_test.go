@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/httpapi"
 	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/logctx"
@@ -71,9 +72,9 @@ func newSessionServerWith(t *testing.T, configure func(*nativetest.Adapter)) *na
 	n := &nativeServer{t: t, url: ts.URL, factory: factory}
 	// The agent started: a message sent now starts a turn.
 	require.Eventually(t, func() bool {
-		var status httpapi.StatusChangeBody
+		var status convstate.StatusChangeBody
 		n.do(http.MethodGet, "/status", nil, &status)
-		return status.Status == httpapi.AgentStatusStable
+		return status.Status == instanceapi.AgentStatusStable
 	}, 5*time.Second, 5*time.Millisecond)
 	return n
 }
@@ -131,7 +132,7 @@ func TestNative_ResumeSession(t *testing.T) {
 	n.do(http.MethodGet, "/rich-messages", nil, &rich)
 	require.Len(t, rich.Messages, 1)
 	assert.Equal(t, "history-msg_2", rich.Messages[0].MessageID)
-	var status httpapi.StatusChangeBody
+	var status convstate.StatusChangeBody
 	n.do(http.MethodGet, "/status", nil, &status)
 	assert.Equal(t, "Bug hunt", status.SessionName)
 
@@ -189,9 +190,9 @@ func TestNative_ResumeDuringCompactionChangesNothing(t *testing.T) {
 	require.Len(t, msgs.Messages, 2)
 	assert.Equal(t, "hello", msgs.Messages[0].Content)
 	assert.Equal(t, "current answer", msgs.Messages[1].Content)
-	var status httpapi.StatusChangeBody
+	var status convstate.StatusChangeBody
 	n.do(http.MethodGet, "/status", nil, &status)
-	assert.Equal(t, httpapi.LifecycleRunning, status.Lifecycle, "compacting, not restarting")
+	assert.Equal(t, instanceapi.LifecycleRunning, status.Lifecycle, "compacting, not restarting")
 	assert.Equal(t, epoch, n.epoch())
 
 	// Once the compaction is done, the session opens.

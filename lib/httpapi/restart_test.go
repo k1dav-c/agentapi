@@ -9,6 +9,7 @@ import (
 
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/handoff"
+	"github.com/coder/agentapi/lib/instanceapi"
 )
 
 // A restart whose slow part panics leaves s.mu held again for the caller,
@@ -43,7 +44,7 @@ func TestRestartOffersNoHandoff(t *testing.T) {
 	<-updating
 
 	s.emitter.EmitStatus(conv.StatusStable)
-	require.Equal(t, LifecycleRestarting, s.emitter.StatusSnapshot().Lifecycle)
+	require.Equal(t, instanceapi.LifecycleRestarting, s.emitter.StatusSnapshot().Lifecycle)
 	assert.Nil(t, pendingHandoff(s))
 	result, err := s.replyHandoff(t.Context(), &HandoffReplyRequest{Body: handoff.Reply{RequestID: "any", ID: "r1", Content: "go on"}})
 	require.NoError(t, err)

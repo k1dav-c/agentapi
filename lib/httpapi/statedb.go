@@ -34,7 +34,7 @@ type restoredState struct {
 // changes there: it restores the stored conversation, or records the
 // identity of a new one, and reports writes that fail as agent errors. It
 // does nothing without a state database.
-func restoreState(config ServerConfig, db *statedb.DB, emitter *EventEmitter, logger *slog.Logger) (restoredState, error) {
+func restoreState(config ServerConfig, db *statedb.DB, emitter *convstate.EventEmitter, logger *slog.Logger) (restoredState, error) {
 	if db == nil {
 		return restoredState{}, nil
 	}
@@ -133,8 +133,8 @@ func checkRestoredIdentity(snap statedb.Snapshot, config ServerConfig) error {
 	return nil
 }
 
-func emitterStateFromSnapshot(snap statedb.Snapshot) EmitterState {
-	state := EmitterState{
+func emitterStateFromSnapshot(snap statedb.Snapshot) convstate.EmitterState {
+	state := convstate.EmitterState{
 		Epoch:         snap.Meta[statedb.MetaEpoch],
 		Seq:           snap.Seq(),
 		SessionEvents: snap.Events,
@@ -159,7 +159,7 @@ func emitterStateFromSnapshot(snap statedb.Snapshot) EmitterState {
 		state.Seq = max(state.Seq, r.Seq)
 	}
 	for _, t := range snap.Tasks {
-		var task Task
+		var task instanceapi.Task
 		if err := json.Unmarshal(t.Data, &task); err != nil {
 			// The task is derived again from its message.
 			continue
@@ -173,10 +173,10 @@ func emitterStateFromSnapshot(snap statedb.Snapshot) EmitterState {
 
 // restoreQueue puts the stored queue back. Called before the server runs.
 func (s *Server) restoreQueue(snap statedb.Snapshot) {
-	queued := make([]QueuedMessage, len(snap.Queue))
+	queued := make([]convstate.QueuedMessage, len(snap.Queue))
 	lastID := snap.NextQueueID()
 	for i, q := range snap.Queue {
-		queued[i] = QueuedMessage{ID: q.ID, Content: q.Content, Time: q.Time}
+		queued[i] = convstate.QueuedMessage{ID: q.ID, Content: q.Content, Time: q.Time}
 		lastID = max(lastID, q.ID)
 	}
 	// Stored already: the restore isn't written back.
@@ -190,7 +190,7 @@ func (s *Server) restoreQueue(snap statedb.Snapshot) {
 // stored already or a later change was. The queue's onChange calls it
 // after every change: the state database's write of the queue replaces
 // the one still pending, so changes in quick succession are written once.
-func (s *Server) storeQueue(queued []QueuedMessage, lastID int, version uint64) {
+func (s *Server) storeQueue(queued []convstate.QueuedMessage, lastID int, version uint64) {
 	if s.stateDB == nil {
 		return
 	}

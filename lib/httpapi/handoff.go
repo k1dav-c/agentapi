@@ -14,6 +14,7 @@ import (
 	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/handoff"
+	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/native"
 )
 
@@ -100,7 +101,7 @@ func (s *Server) pendingHandoff() (*handoff.Request, agentstate.RequestState) {
 		return nil, agentstate.RequestState{}
 	}
 	view := s.emitter.HandoffView()
-	if view.Status.Lifecycle != LifecycleReady || s.native.Status() != conv.StatusStable {
+	if view.Status.Lifecycle != instanceapi.LifecycleReady || s.native.Status() != conv.StatusStable {
 		return nil, agentstate.RequestState{}
 	}
 	kind := "request"

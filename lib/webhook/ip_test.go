@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/coder/agentapi/lib/convstate"
+	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/netaddr"
 )
 
@@ -79,8 +79,8 @@ func TestWebhookPublicURLFollowsTheAddress(t *testing.T) {
 	d.ip = route.resolver(clock)
 	var changed atomic.Int32
 	d.urlChanged = func() { changed.Add(1) }
-	d.snapshot = func() any { return WebhookInstanceState{Status: convstate.AgentStatusRunning} }
-	d.SetInstance(WebhookInstance{ID: "dev-1:3285", Port: 3285})
+	d.snapshot = func() any { return instanceapi.WebhookInstanceState{Status: instanceapi.AgentStatusRunning} }
+	d.SetInstance(instanceapi.WebhookInstance{ID: "dev-1:3285", Port: 3285})
 	assert.Empty(t, d.Instance().URL, "not looked up yet")
 	d.RefreshIP(t.Context())
 
@@ -123,7 +123,7 @@ func TestWebhookPublicURLWithoutAnAddress(t *testing.T) {
 	clock := quartz.NewMock(t)
 	d := testDispatcher(t, Config{PublicURL: "http://{ip}:{port}"}, clock)
 	d.ip = (&fakeRoute{}).resolver(clock)
-	d.SetInstance(WebhookInstance{ID: "dev-1:3285", Port: 3285})
+	d.SetInstance(instanceapi.WebhookInstance{ID: "dev-1:3285", Port: 3285})
 	assert.Empty(t, d.Instance().URL)
 
 	// The other placeholders need no lookup.

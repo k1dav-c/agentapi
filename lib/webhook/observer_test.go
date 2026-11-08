@@ -36,8 +36,8 @@ func testDispatcher(t *testing.T, config Config, clock quartz.Clock) *Dispatcher
 }
 
 // queued takes the events queued so far.
-func queued(d *Dispatcher) []WebhookEvent {
-	var events []WebhookEvent
+func queued(d *Dispatcher) []instanceapi.WebhookEvent {
+	var events []instanceapi.WebhookEvent
 	for {
 		select {
 		case event := <-d.queue:
@@ -48,7 +48,7 @@ func queued(d *Dispatcher) []WebhookEvent {
 	}
 }
 
-func eventTypes(events []WebhookEvent) []string {
+func eventTypes(events []instanceapi.WebhookEvent) []string {
 	types := make([]string, len(events))
 	for i, event := range events {
 		types[i] = event.Type
@@ -170,7 +170,7 @@ func TestWebhookObserverTask(t *testing.T) {
 
 	started := events[1].Data.(WebhookTask)
 	assert.Equal(t, "Fix the bug", started.Prompt)
-	assert.Equal(t, convstate.TaskStatusRunning, started.Status)
+	assert.Equal(t, instanceapi.TaskStatusRunning, started.Status)
 
 	tool := events[2].Data.(WebhookToolCall)
 	assert.Equal(t, "Bash", tool.Name)
@@ -181,7 +181,7 @@ func TestWebhookObserverTask(t *testing.T) {
 	assert.Equal(t, "Fixed it.", reply.Content)
 
 	done := events[4].Data.(WebhookTask)
-	assert.Equal(t, convstate.TaskStatusCompleted, done.Status)
+	assert.Equal(t, instanceapi.TaskStatusCompleted, done.Status)
 	assert.Equal(t, "Fixed it.", done.Reply)
 	assert.Equal(t, 1, *done.ReplyID)
 	assert.Equal(t, 90.0, done.DurationSeconds)
@@ -240,7 +240,7 @@ func TestWebhookObserverNeedsYou(t *testing.T) {
 		webhookEventLimitStopped, webhookEventTaskFailed,
 	}, eventTypes(events))
 	task := events[9].Data.(WebhookTask)
-	assert.Equal(t, convstate.TaskStatusLimited, task.Status)
+	assert.Equal(t, instanceapi.TaskStatusLimited, task.Status)
 	assert.Empty(t, task.Errors, "a warning doesn't fail a task")
 }
 
@@ -275,7 +275,7 @@ func TestWebhookObserverHistory(t *testing.T) {
 		{Id: 2, Role: conv.RoleUser, Message: "Resumed", Time: old.Add(time.Minute)},
 		{Id: 3, Role: conv.RoleUser, Message: "New", Time: now},
 	})
-	var events []WebhookEvent
+	var events []instanceapi.WebhookEvent
 	require.Eventually(t, func() bool {
 		events = append(events, queued(d)...)
 		return len(events) >= 2
@@ -304,7 +304,7 @@ func TestWebhookObserverResubscribes(t *testing.T) {
 	emitter.EmitMessages(msgs)
 	emitter.EmitError("the agent warned", conv.ErrorLevelWarning)
 	emitter.EmitMessages(append(msgs, conv.Message{Id: 1, Role: conv.RoleUser, Message: "Refused", Time: now}))
-	var events []WebhookEvent
+	var events []instanceapi.WebhookEvent
 	require.Eventually(t, func() bool {
 		events = append(events, queued(d)...)
 		return len(events) >= 4
@@ -421,7 +421,7 @@ func TestWebhookObserverReusedID(t *testing.T) {
 }
 
 // toolsCompleted counts the tool.completed events by call.
-func toolsCompleted(events []WebhookEvent) map[string]int {
+func toolsCompleted(events []instanceapi.WebhookEvent) map[string]int {
 	completed := map[string]int{}
 	for _, event := range events {
 		if event.Type == webhookEventToolCompleted {
@@ -495,7 +495,7 @@ func TestWebhookObserverResubscribesWithoutRepeats(t *testing.T) {
 	emitter.EmitRichMessage(transcript.RichMessage{MessageID: "a-open", Role: "assistant", Timestamp: start, Content: []transcript.RichContentBlock{
 		{Type: "tool_use", ToolUseID: "open", ToolName: "Edit", ToolInput: json.RawMessage(`{"file":"main.go"}`)},
 	}})
-	var events []WebhookEvent
+	var events []instanceapi.WebhookEvent
 	require.Eventually(t, func() bool {
 		events = append(events, queued(d)...)
 		return len(events) >= calls
@@ -585,8 +585,8 @@ func TestWebhookSignature(t *testing.T) {
 	}))
 	defer server.Close()
 	d := testDispatcher(t, Config{URL: server.URL, Secret: "s3cret", Events: []string{"*"}}, quartz.NewReal())
-	d.SetInstance(WebhookInstance{ID: "host:3284"})
-	require.True(t, d.emit(webhookEventTaskStarted, WebhookTask{Task: convstate.Task{ID: 1, Prompt: "Hi"}}))
+	d.SetInstance(instanceapi.WebhookInstance{ID: "host:3284"})
+	require.True(t, d.emit(webhookEventTaskStarted, WebhookTask{Task: instanceapi.Task{ID: 1, Prompt: "Hi"}}))
 	d.deliver(t.Context(), <-d.queue)
 
 	timestamp := header.Get("X-AgentAPI-Timestamp")
@@ -594,9 +594,9 @@ func TestWebhookSignature(t *testing.T) {
 	assert.True(t, strings.HasPrefix(header.Get("X-AgentAPI-Signature-256"), "sha256="))
 	assert.Equal(t, "host:3284", header.Get("X-AgentAPI-Instance"))
 	var event struct {
-		Type     string          `json:"type"`
-		Instance WebhookInstance `json:"instance"`
-		Data     WebhookTask     `json:"data"`
+		Type     string                      `json:"type"`
+		Instance instanceapi.WebhookInstance `json:"instance"`
+		Data     WebhookTask                 `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(body, &event))
 	assert.Equal(t, webhookEventTaskStarted, event.Type)
@@ -615,7 +615,7 @@ func TestWebhookPermanentFailure(t *testing.T) {
 	}))
 	defer server.Close()
 	d := testDispatcher(t, Config{URL: server.URL, MaxAttempts: 5}, quartz.NewReal())
-	d.deliver(t.Context(), queuedEvent{WebhookEvent: WebhookEvent{ID: "e1", Type: webhookEventRunStatusChanged, CreatedAt: time.Now()}})
+	d.deliver(t.Context(), queuedEvent{WebhookEvent: instanceapi.WebhookEvent{ID: "e1", Type: webhookEventRunStatusChanged, CreatedAt: time.Now()}})
 	assert.EqualValues(t, 1, calls.Load())
 	assert.Equal(t, 30*time.Second, webhookRetryDelay(10))
 	assert.Equal(t, 4*time.Second, webhookRetryDelay(3))
@@ -624,8 +624,8 @@ func TestWebhookPermanentFailure(t *testing.T) {
 func TestWebhookTemplateData(t *testing.T) {
 	t.Parallel()
 	d := testDispatcher(t, Config{Events: []string{"*"}, PayloadTemplate: `{"text":"{{.Instance.ID}}: {{.Data.prompt}}"}`}, quartz.NewReal())
-	d.SetInstance(WebhookInstance{ID: "box:1"})
-	require.True(t, d.emit(webhookEventTaskStarted, WebhookTask{Task: convstate.Task{Prompt: "Hi"}}))
+	d.SetInstance(instanceapi.WebhookInstance{ID: "box:1"})
+	require.True(t, d.emit(webhookEventTaskStarted, WebhookTask{Task: instanceapi.Task{Prompt: "Hi"}}))
 	body, err := d.renderBody((<-d.queue).WebhookEvent)
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"text":"box:1: Hi"}`, string(body))
@@ -641,7 +641,7 @@ func TestWebhookStop(t *testing.T) {
 	}))
 	defer server.Close()
 	d := testDispatcher(t, Config{URL: server.URL, Events: []string{"instance.*"}, Heartbeat: -1}, quartz.NewReal())
-	d.snapshot = func() any { return WebhookInstanceState{Status: convstate.AgentStatusStable} }
+	d.snapshot = func() any { return instanceapi.WebhookInstanceState{Status: instanceapi.AgentStatusStable} }
 	ctx := t.Context()
 	d.Start(ctx)
 	d.Stop(ctx)
@@ -679,8 +679,8 @@ func TestWebhookHeartbeat(t *testing.T) {
 	t.Parallel()
 	clock := quartz.NewMock(t)
 	d := testDispatcher(t, Config{Events: []string{"instance.heartbeat"}, Heartbeat: time.Minute}, clock)
-	d.snapshot = func() any { return WebhookInstanceState{Status: convstate.AgentStatusRunning} }
-	d.SetInstance(WebhookInstance{ID: "host:3284"})
+	d.snapshot = func() any { return instanceapi.WebhookInstanceState{Status: instanceapi.AgentStatusRunning} }
+	d.SetInstance(instanceapi.WebhookInstance{ID: "host:3284"})
 	trap := clock.Trap().NewTimer("webhook", "heartbeat")
 	defer trap.Close()
 	ctx := t.Context()
@@ -693,7 +693,7 @@ func TestWebhookHeartbeat(t *testing.T) {
 	events := queued(d)
 	require.Len(t, events, 1)
 	assert.Equal(t, webhookEventInstanceHeartbeat, events[0].Type)
-	assert.Equal(t, convstate.AgentStatusRunning, events[0].Data.(WebhookInstanceState).Status)
+	assert.Equal(t, instanceapi.AgentStatusRunning, events[0].Data.(instanceapi.WebhookInstanceState).Status)
 	// A hub refuses an instance event that names no run.
 	assert.Equal(t, d.serverID, events[0].Instance.ServerID)
 	assert.NotEmpty(t, d.serverID)

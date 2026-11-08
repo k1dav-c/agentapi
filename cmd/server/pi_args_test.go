@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/coder/agentapi/lib/instanceapi"
 )
 
 func TestIsPiCLI(t *testing.T) {
@@ -20,10 +22,10 @@ func TestPiSessionDir(t *testing.T) {
 
 func TestServerConfigPiSessionDir(t *testing.T) {
 	agent := &runningAgent{}
-	opts := serverOptions{agentType: AgentTypePi, agentArgs: []string{"--model", "x", "--session-dir=/data/pi"}}
+	opts := serverOptions{agentType: instanceapi.AgentTypePi, agentArgs: []string{"--model", "x", "--session-dir=/data/pi"}}
 	assert.Equal(t, "/data/pi", serverConfig(opts, agent, nil, "", "/work", nil, nil).Native.PiSessionDir, "where history and costs read Pi's sessions")
 	opts.agentArgs = []string{"--session-dir", "/data/pi"}
 	assert.Equal(t, "/data/pi", serverConfig(opts, agent, nil, "", "/work", nil, nil).Native.PiSessionDir)
-	opts.agentType, opts.agentArgs = AgentTypeClaude, []string{"--session-dir", "/data/pi"}
+	opts.agentType, opts.agentArgs = instanceapi.AgentTypeClaude, []string{"--session-dir", "/data/pi"}
 	assert.Empty(t, serverConfig(opts, agent, nil, "", "/work", nil, nil).Native.PiSessionDir)
 }

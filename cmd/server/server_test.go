@@ -17,6 +17,8 @@ import (
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/coder/agentapi/lib/instanceapi"
 )
 
 type nullWriter struct{}
@@ -37,16 +39,16 @@ func TestParseAgentType(t *testing.T) {
 	t.Parallel()
 	for _, test := range []struct {
 		program, typeFlag string
-		want              AgentType
+		want              instanceapi.AgentType
 	}{
-		{"claude", "", AgentTypeClaude},
-		{"/usr/local/bin/codex", "", AgentTypeCodex},
-		{"pi", "", AgentTypePi},
-		{"native-demo", "", AgentTypeCustom},
-		{"claude-wrapper", "claude", AgentTypeClaude},
-		{"native-demo", "codex", AgentTypeCodex},
-		{"native-demo", "native-demo", AgentTypeCustom},
-		{"native-demo", "custom", AgentTypeCustom},
+		{"claude", "", instanceapi.AgentTypeClaude},
+		{"/usr/local/bin/codex", "", instanceapi.AgentTypeCodex},
+		{"pi", "", instanceapi.AgentTypePi},
+		{"native-demo", "", instanceapi.AgentTypeCustom},
+		{"claude-wrapper", "claude", instanceapi.AgentTypeClaude},
+		{"native-demo", "codex", instanceapi.AgentTypeCodex},
+		{"native-demo", "native-demo", instanceapi.AgentTypeCustom},
+		{"native-demo", "custom", instanceapi.AgentTypeCustom},
 	} {
 		t.Run(test.program+"-"+test.typeFlag, func(t *testing.T) {
 			t.Parallel()

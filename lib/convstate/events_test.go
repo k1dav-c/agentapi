@@ -123,7 +123,7 @@ func TestEventEmitter(t *testing.T) {
 			},
 			{
 				Type:    EventTypeStatusChange,
-				Payload: StatusChangeBody{Status: AgentStatusRunning, Lifecycle: LifecycleStarting, Transport: instanceapi.TransportNative, Version: version.Version},
+				Payload: StatusChangeBody{Status: instanceapi.AgentStatusRunning, Lifecycle: instanceapi.LifecycleStarting, Transport: instanceapi.TransportNative, Version: version.Version},
 			},
 		}, stateEvents)
 
@@ -137,7 +137,7 @@ func TestEventEmitter(t *testing.T) {
 			Payload: MessageUpdateBody{Id: 1, Message: "Hello, world!", Role: conv.RoleUser, Time: now, Seq: 1},
 		}, newEvent)
 		// The user's message starts a task.
-		task := Task{ID: 1, Status: TaskStatusRunning, Prompt: "Hello, world!", StartedAt: now}
+		task := instanceapi.Task{ID: 1, Status: instanceapi.TaskStatusRunning, Prompt: "Hello, world!", StartedAt: now}
 		assert.Equal(t, Event{Type: EventTypeTaskUpdate, Payload: TaskUpdateBody{Task: task, Seq: 2}}, <-ch)
 
 		emitter.EmitMessages([]conv.Message{
@@ -164,7 +164,7 @@ func TestEventEmitter(t *testing.T) {
 		newEvent = <-ch
 		assert.Equal(t, Event{
 			Type:    EventTypeStatusChange,
-			Payload: StatusChangeBody{Status: AgentStatusStable, Lifecycle: LifecycleReady, AgentType: "", Transport: instanceapi.TransportNative, Version: version.Version},
+			Payload: StatusChangeBody{Status: instanceapi.AgentStatusStable, Lifecycle: instanceapi.LifecycleReady, AgentType: "", Transport: instanceapi.TransportNative, Version: version.Version},
 		}, newEvent)
 	})
 
@@ -736,8 +736,8 @@ func TestEventEmitterRestore(t *testing.T) {
 	assert.Equal(t, []string{"message 2", "task 0", "task 2"}, replayed(events), "the restored messages are not sent again; the restored one's task is done")
 	assert.Equal(t, MessageUpdateBody{Id: 2, Role: conv.RoleUser, Message: "three", Time: later, Seq: 7}, events[0].Payload)
 	tasks := emitter.Tasks()
-	assert.Equal(t, TaskStatusCompleted, tasks[0].Status)
-	assert.Equal(t, TaskStatusRunning, tasks[1].Status)
+	assert.Equal(t, instanceapi.TaskStatusCompleted, tasks[0].Status)
+	assert.Equal(t, instanceapi.TaskStatusRunning, tasks[1].Status)
 }
 
 // The emitter keeps the most recently closed requests, as the conversation
@@ -790,22 +790,22 @@ func TestEmitter_RichMessageContentIsNeverNull(t *testing.T) {
 func TestEventEmitterHoldsServerLifecycle(t *testing.T) {
 	emitter := NewEventEmitter()
 	emitter.EmitStatus(conv.StatusStable)
-	require.Equal(t, LifecycleReady, emitter.StatusSnapshot().Lifecycle)
+	require.Equal(t, instanceapi.LifecycleReady, emitter.StatusSnapshot().Lifecycle)
 
-	emitter.SetLifecycle(LifecycleRestarting)
+	emitter.SetLifecycle(instanceapi.LifecycleRestarting)
 	emitter.EmitStatus(conv.StatusChanging)
 	status := emitter.StatusSnapshot()
-	assert.Equal(t, LifecycleRestarting, status.Lifecycle, "held")
-	assert.Equal(t, AgentStatusRunning, status.Status, "the agent status still follows")
+	assert.Equal(t, instanceapi.LifecycleRestarting, status.Lifecycle, "held")
+	assert.Equal(t, instanceapi.AgentStatusRunning, status.Status, "the agent status still follows")
 	emitter.EmitStatus(conv.StatusStable)
-	assert.Equal(t, LifecycleRestarting, emitter.StatusSnapshot().Lifecycle)
+	assert.Equal(t, instanceapi.LifecycleRestarting, emitter.StatusSnapshot().Lifecycle)
 
 	emitter.ReleaseLifecycle()
-	assert.Equal(t, LifecycleReady, emitter.StatusSnapshot().Lifecycle, "the conversation's again")
+	assert.Equal(t, instanceapi.LifecycleReady, emitter.StatusSnapshot().Lifecycle, "the conversation's again")
 	emitter.EmitStatus(conv.StatusChanging)
-	assert.Equal(t, LifecycleRunning, emitter.StatusSnapshot().Lifecycle)
+	assert.Equal(t, instanceapi.LifecycleRunning, emitter.StatusSnapshot().Lifecycle)
 
-	for _, lifecycle := range []LifecycleState{LifecycleExited, LifecycleFailed} {
+	for _, lifecycle := range []instanceapi.LifecycleState{instanceapi.LifecycleExited, instanceapi.LifecycleFailed} {
 		emitter.SetLifecycle(lifecycle)
 		emitter.EmitStatus(conv.StatusStable)
 		emitter.EmitStatus(conv.StatusChanging)
@@ -813,7 +813,7 @@ func TestEventEmitterHoldsServerLifecycle(t *testing.T) {
 	}
 
 	// Another lifecycle the server sets ends the hold.
-	emitter.SetLifecycle(LifecycleStarting)
+	emitter.SetLifecycle(instanceapi.LifecycleStarting)
 	emitter.EmitStatus(conv.StatusStable)
-	assert.Equal(t, LifecycleReady, emitter.StatusSnapshot().Lifecycle)
+	assert.Equal(t, instanceapi.LifecycleReady, emitter.StatusSnapshot().Lifecycle)
 }

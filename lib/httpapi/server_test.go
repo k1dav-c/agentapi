@@ -21,6 +21,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/httpapi"
 	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/logctx"
@@ -139,7 +140,7 @@ func TestServer_MessageQueueAPI(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	var queue struct {
-		Messages []httpapi.QueuedMessage `json:"messages"`
+		Messages []convstate.QueuedMessage `json:"messages"`
 	}
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&queue))
 	require.Len(t, queue.Messages, 1)

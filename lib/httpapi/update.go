@@ -14,24 +14,9 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/coder/agentapi/internal/version"
+	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/selfupdate"
-)
-
-// The update's types are part of the summary's contract (lib/instanceapi);
-// these names keep the OpenAPI schema's.
-type (
-	UpdateState  = instanceapi.UpdateState
-	UpdateStatus = instanceapi.UpdateStatus
-)
-
-const (
-	UpdateStateIdle        = instanceapi.UpdateStateIdle
-	UpdateStateChecking    = instanceapi.UpdateStateChecking
-	UpdateStateDownloading = instanceapi.UpdateStateDownloading
-	UpdateStateWaiting     = instanceapi.UpdateStateWaiting
-	UpdateStateRestarting  = instanceapi.UpdateStateRestarting
-	UpdateStateFailed      = instanceapi.UpdateStateFailed
 )
 
 const (
@@ -90,9 +75,9 @@ type UpdateRequest struct {
 
 // UpdateResponseBody is where an update is.
 type UpdateResponseBody struct {
-	State    UpdateState `json:"state" doc:"Where the update is, as the summary's update.state."`
-	Target   string      `json:"target,omitempty" doc:"The version it updates to, once known."`
-	UpToDate bool        `json:"up_to_date,omitempty" doc:"AgentAPI runs the latest release (or a newer version) already, and the program on disk is no newer: there is nothing to update."`
+	State    instanceapi.UpdateState `json:"state" doc:"Where the update is, as the summary's update.state."`
+	Target   string                  `json:"target,omitempty" doc:"The version it updates to, once known."`
+	UpToDate bool                    `json:"up_to_date,omitempty" doc:"AgentAPI runs the latest release (or a newer version) already, and the program on disk is no newer: there is nothing to update."`
 }
 
 // UpdateResponse is the answer of POST and DELETE /update.
@@ -109,7 +94,7 @@ type UpdateResponse struct {
 type updater struct {
 	config  UpdateConfig
 	logger  *slog.Logger
-	emitter *EventEmitter
+	emitter *convstate.EventEmitter
 	// running is the version that runs; nil if it doesn't parse, which
 	// any release is newer than.
 	running *semver.Version
@@ -121,7 +106,7 @@ type updater struct {
 	// mu guards status and run. It is taken after the server's mu and
 	// before the emitter's lock, which publishing the status takes.
 	mu     sync.Mutex
-	status UpdateStatus
+	status instanceapi.UpdateStatus
 	// run is the update under way, nil when there is none. It stays set
 	// once it restarts the server.
 	run *updateRun
@@ -160,13 +145,13 @@ type updateCheck struct {
 
 // newUpdater returns the server's updater, which reports its status in the
 // summary from now on.
-func newUpdater(config UpdateConfig, logger *slog.Logger, emitter *EventEmitter, keepsConversation bool) *updater {
+func newUpdater(config UpdateConfig, logger *slog.Logger, emitter *convstate.EventEmitter, keepsConversation bool) *updater {
 	if config.Version == "" {
 		config.Version = version.Version
 	}
 	u := &updater{config: config, logger: logger, emitter: emitter}
 	u.running, _ = selfupdate.ParseVersion(config.Version)
-	u.status = UpdateStatus{Allowed: config.Allowed, State: UpdateStateIdle, KeepsConversation: keepsConversation}
+	u.status = instanceapi.UpdateStatus{Allowed: config.Allowed, State: instanceapi.UpdateStateIdle, KeepsConversation: keepsConversation}
 	if config.Allowed {
 		program, blocked := u.program()
 		u.status.Blocked = blocked
@@ -222,7 +207,7 @@ func (u *updater) setBlockedLocked(blocked string) {
 
 // publishLocked puts the status in the summary. Caller holds u.mu.
 func (u *updater) publishLocked() {
-	u.holding.Store(u.status.State == UpdateStateWaiting || u.status.State == UpdateStateRestarting)
+	u.holding.Store(u.status.State == instanceapi.UpdateStateWaiting || u.status.State == instanceapi.UpdateStateRestarting)
 	u.emitter.SetUpdate(u.status)
 }
 
@@ -239,7 +224,7 @@ func (u *updater) responseLocked(status int) *UpdateResponse {
 // advance moves run on to state, with target once it is known. It reports
 // false, changing nothing, once run is no longer the update under way: a
 // DELETE /update cancelled it.
-func (u *updater) advance(run *updateRun, state UpdateState, target string) bool {
+func (u *updater) advance(run *updateRun, state instanceapi.UpdateState, target string) bool {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	if u.run != run {
@@ -264,9 +249,9 @@ func (u *updater) end(run *updateRun, err error) {
 	run.cancel()
 	if err != nil {
 		u.logger.Error("The update failed", "error", err)
-		u.status.State, u.status.Error = UpdateStateFailed, err.Error()
+		u.status.State, u.status.Error = instanceapi.UpdateStateFailed, err.Error()
 	} else {
-		u.status.State, u.status.Target, u.status.Error = UpdateStateIdle, "", ""
+		u.status.State, u.status.Target, u.status.Error = instanceapi.UpdateStateIdle, "", ""
 	}
 	u.publishLocked()
 }
@@ -345,7 +330,7 @@ func (s *Server) postUpdate(ctx context.Context, input *UpdateRequest) (*UpdateR
 		run.restartNow()
 	}
 	u.run = run
-	u.status.State, u.status.Target, u.status.Error = UpdateStateChecking, "", ""
+	u.status.State, u.status.Target, u.status.Error = instanceapi.UpdateStateChecking, "", ""
 	u.publishLocked()
 	u.mu.Unlock()
 	u.logger.Info("Updating AgentAPI", "when", when, "running", u.config.Version, "program", program.Path)
@@ -359,7 +344,7 @@ func (s *Server) postUpdate(ctx context.Context, input *UpdateRequest) (*UpdateR
 		case checked.err != nil:
 			return nil, huma.Error502BadGateway(checked.err.Error())
 		case checked.upToDate:
-			return &UpdateResponse{Status: http.StatusOK, Body: UpdateResponseBody{State: UpdateStateIdle, UpToDate: true}}, nil
+			return &UpdateResponse{Status: http.StatusOK, Body: UpdateResponseBody{State: instanceapi.UpdateStateIdle, UpToDate: true}}, nil
 		}
 		u.mu.Lock()
 		defer u.mu.Unlock()
@@ -393,7 +378,7 @@ func (s *Server) runUpdate(run *updateRun, program selfupdate.Program) {
 	defer moved()
 	version := target.String()
 	if release != nil {
-		if !u.advance(run, UpdateStateDownloading, version) {
+		if !u.advance(run, instanceapi.UpdateStateDownloading, version) {
 			return
 		}
 		moved()
@@ -431,7 +416,7 @@ func (s *Server) runUpdate(run *updateRun, program selfupdate.Program) {
 // moved on. It reports false when run was cancelled or the server stops.
 func (s *Server) awaitUpdateRestart(run *updateRun, version string, moved func()) bool {
 	// Subscribed first, so no change goes unseen.
-	statusChanges := func(t EventType) bool { return t == EventTypeStatusChange }
+	statusChanges := func(t convstate.EventType) bool { return t == convstate.EventTypeStatusChange }
 	id, changes, _ := s.emitter.SubscribeTo(statusChanges, 0, "")
 	defer func() { s.emitter.Unsubscribe(id) }()
 	waiting := false
@@ -444,7 +429,7 @@ func (s *Server) awaitUpdateRestart(run *updateRun, version string, moved func()
 		case !current:
 			return false
 		case !waiting:
-			if !s.updater.advance(run, UpdateStateWaiting, version) {
+			if !s.updater.advance(run, instanceapi.UpdateStateWaiting, version) {
 				return false
 			}
 			moved()
@@ -478,7 +463,7 @@ func (s *Server) beginUpdateRestart(run *updateRun, version string) (began, curr
 	if !run.isNow() && (s.turnGateLocked(turnUser, s.clock.Now()) != nil || s.native.Busy()) {
 		return false, true
 	}
-	if !s.updater.advance(run, UpdateStateRestarting, version) {
+	if !s.updater.advance(run, instanceapi.UpdateStateRestarting, version) {
 		return false, false
 	}
 	s.updating.Store(true)
@@ -493,7 +478,7 @@ func (s *Server) deleteUpdate(_ context.Context, _ *struct{}) (*UpdateResponse, 
 	}
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	if u.status.State == UpdateStateRestarting {
+	if u.status.State == instanceapi.UpdateStateRestarting {
 		return nil, huma.Error409Conflict(fmt.Sprintf("AgentAPI is restarting into %s already", u.status.Target))
 	}
 	if run := u.run; run != nil {
@@ -501,7 +486,7 @@ func (s *Server) deleteUpdate(_ context.Context, _ *struct{}) (*UpdateResponse, 
 		u.run = nil
 		u.logger.Info("Cancelled the update", "target", u.status.Target)
 	}
-	u.status.State, u.status.Target, u.status.Error = UpdateStateIdle, "", ""
+	u.status.State, u.status.Target, u.status.Error = instanceapi.UpdateStateIdle, "", ""
 	u.publishLocked()
 	return u.responseLocked(http.StatusOK), nil
 }

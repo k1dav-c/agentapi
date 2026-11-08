@@ -63,7 +63,7 @@ func (h *Hub) unwatch(id string) {
 func (h *Hub) unwatchStopped(id string) {
 	h.watchMu.Lock()
 	defer h.watchMu.Unlock()
-	if current, ok := h.store.get(id); ok && current.Connection != ConnectionStopped {
+	if current, ok := h.store.get(id); ok && current.Connection != instanceapi.ConnectionStopped {
 		return
 	}
 	h.cancelWatchLocked(id)
@@ -89,7 +89,7 @@ func (h *Hub) follow(ctx context.Context, id string) {
 	var failing time.Time
 	for ctx.Err() == nil {
 		instance, ok := h.store.get(id)
-		if !ok || instance.Connection == ConnectionStopped {
+		if !ok || instance.Connection == instanceapi.ConnectionStopped {
 			return
 		}
 		heard, err := h.readSummaries(ctx, instance, func(summary instanceapi.SummaryBody) {
@@ -132,7 +132,7 @@ func (h *Hub) streamFailed(ctx context.Context, id string, err error, heard, now
 	answered := errors.As(err, &other)
 	stopped := false
 	_, _ = h.store.update(id, false, func(i *Instance) {
-		if ctx.Err() != nil || i.Connection == ConnectionStopped {
+		if ctx.Err() != nil || i.Connection == instanceapi.ConnectionStopped {
 			return
 		}
 		// What the hub saw of the instance working ends with what the
@@ -143,7 +143,7 @@ func (h *Hub) streamFailed(ctx context.Context, id string, err error, heard, now
 			// Killed without instance.stopped, such as with its workspace;
 			// its next heartbeat follows it again.
 			h.logger.Info("An instance stopped sending heartbeats; it counts as stopped", "instance", id, "last_seen", i.LastSeen)
-			i.Connection = ConnectionStopped
+			i.Connection = instanceapi.ConnectionStopped
 			i.Error = ""
 			i.answeredBy = ""
 			i.failed = true
@@ -156,7 +156,7 @@ func (h *Hub) streamFailed(ctx context.Context, id string, err error, heard, now
 			if i.answeredBy != other.id {
 				h.logger.Warn("Another AgentAPI answers at an instance's URL", "instance", id, "url", i.URL, "answers", other.id)
 			}
-			i.Connection = ConnectionUnreachable
+			i.Connection = instanceapi.ConnectionUnreachable
 			i.Error = message
 			i.answeredBy = other.id
 			i.failed = true
@@ -164,14 +164,14 @@ func (h *Hub) streamFailed(ctx context.Context, id string, err error, heard, now
 		}
 		i.answeredBy = ""
 		if grace {
-			i.Connection = ConnectionConnecting
+			i.Connection = instanceapi.ConnectionConnecting
 			i.Error = message
 			return
 		}
-		if i.Connection != ConnectionUnreachable || i.Error != message {
+		if i.Connection != instanceapi.ConnectionUnreachable || i.Error != message {
 			h.logger.Warn("An instance is unreachable", "instance", id, "url", i.URL, "error", message)
 		}
-		i.Connection = ConnectionUnreachable
+		i.Connection = instanceapi.ConnectionUnreachable
 		i.Error = message
 		i.failed = true
 	})
@@ -188,7 +188,7 @@ func (h *Hub) applySummary(ctx context.Context, id, url string, summary instance
 	now := h.clock.Now()
 	applied := false
 	_, _ = h.store.update(id, false, func(i *Instance) {
-		if ctx.Err() != nil || i.Connection == ConnectionStopped || i.URL != url {
+		if ctx.Err() != nil || i.Connection == instanceapi.ConnectionStopped || i.URL != url {
 			return
 		}
 		applied = true
@@ -197,7 +197,7 @@ func (h *Hub) applySummary(ctx context.Context, id, url string, summary instance
 			i.Muted = ""
 		}
 		i.Summary = &summary
-		i.Connection = ConnectionConnected
+		i.Connection = instanceapi.ConnectionConnected
 		i.Error = ""
 		i.answeredBy = ""
 		i.failed = false

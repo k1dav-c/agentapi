@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/httpapi"
 	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/logctx"
@@ -80,20 +81,20 @@ func (s *servedNative) do(method, path string) (*http.Response, error) {
 	return http.DefaultClient.Do(req)
 }
 
-func (s *servedNative) lifecycle() httpapi.LifecycleState {
+func (s *servedNative) lifecycle() instanceapi.LifecycleState {
 	resp, err := s.do(http.MethodGet, "/status")
 	if err != nil {
 		return ""
 	}
 	defer func() { _ = resp.Body.Close() }()
-	var status httpapi.StatusChangeBody
+	var status convstate.StatusChangeBody
 	if json.NewDecoder(resp.Body).Decode(&status) != nil {
 		return ""
 	}
 	return status.Lifecycle
 }
 
-func (s *servedNative) awaitLifecycle(want httpapi.LifecycleState) {
+func (s *servedNative) awaitLifecycle(want instanceapi.LifecycleState) {
 	s.t.Helper()
 	require.Eventually(s.t, func() bool { return s.lifecycle() == want }, 5*time.Second, 5*time.Millisecond, "lifecycle %s", want)
 }
@@ -111,10 +112,10 @@ func TestServeOutlivesTheNativeAgent(t *testing.T) {
 		}
 		a.StartErr = errors.New("the session can't be read")
 	}}, nil)
-	s.awaitLifecycle(httpapi.LifecycleReady)
+	s.awaitLifecycle(instanceapi.LifecycleReady)
 
 	s.factory.Last().Exit(errors.New("exit status 1"))
-	s.awaitLifecycle(httpapi.LifecycleFailed)
+	s.awaitLifecycle(instanceapi.LifecycleFailed)
 	assert.Len(t, s.factory.Adapters(), 3, "the first agent and two attempts")
 	select {
 	case err := <-s.served:
@@ -126,7 +127,7 @@ func TestServeOutlivesTheNativeAgent(t *testing.T) {
 	require.NoError(t, err)
 	_ = resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	s.awaitLifecycle(httpapi.LifecycleReady)
+	s.awaitLifecycle(instanceapi.LifecycleReady)
 	assert.Equal(t, "", s.factory.Last().ResumeRef, "a new session")
 
 	cancel()
@@ -152,14 +153,14 @@ func TestServeRestartsTheNativeAgent(t *testing.T) {
 		}
 		a.StartBlock = release
 	}}, nil)
-	s.awaitLifecycle(httpapi.LifecycleReady)
+	s.awaitLifecycle(instanceapi.LifecycleReady)
 
 	s.factory.Last().Exit(errors.New("exit status 1"))
 	require.Eventually(t, func() bool {
 		a := s.factory.Last()
 		return a.ResumeRef == "session-1" && a.Sink() != nil
 	}, 5*time.Second, 5*time.Millisecond)
-	assert.Equal(t, httpapi.LifecycleRestarting, s.lifecycle(), "until the new agent accepts turns")
+	assert.Equal(t, instanceapi.LifecycleRestarting, s.lifecycle(), "until the new agent accepts turns")
 	close(release)
-	s.awaitLifecycle(httpapi.LifecycleReady)
+	s.awaitLifecycle(instanceapi.LifecycleReady)
 }

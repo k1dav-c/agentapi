@@ -10,21 +10,6 @@ import (
 	"github.com/coder/agentapi/lib/instanceapi"
 )
 
-// Tasks are part of the summary's contract (lib/instanceapi).
-type (
-	Task       = instanceapi.Task
-	TaskStatus = instanceapi.TaskStatus
-)
-
-const (
-	TaskStatusRunning   = instanceapi.TaskStatusRunning
-	TaskStatusCompleted = instanceapi.TaskStatusCompleted
-	TaskStatusFailed    = instanceapi.TaskStatusFailed
-	TaskStatusLimited   = instanceapi.TaskStatusLimited
-)
-
-var TaskStatusValues = instanceapi.TaskStatusValues
-
 // taskPromptLimit is how much of the prompt a task carries; the message
 // has all of it.
 const taskPromptLimit = 1 << 10
@@ -33,7 +18,7 @@ const taskPromptLimit = 1 << 10
 // emitter calls it with its lock held; each method returns the positions of
 // the tasks it changed, to send as updates.
 type taskTracker struct {
-	tasks []Task
+	tasks []instanceapi.Task
 	// owners has the position of the task each user message started or
 	// was added to, by the message's ID.
 	owners map[int]int
@@ -71,12 +56,12 @@ func (t *taskTracker) reset(now time.Time) {
 // AgentAPI from before tasks were kept clears none when it resets or takes
 // messages back, and a message row the state database can't read is
 // skipped. One that was running when AgentAPI stopped can't go on.
-func (t *taskTracker) restore(tasks []Task, msgs []conv.Message, now time.Time) []int {
+func (t *taskTracker) restore(tasks []instanceapi.Task, msgs []conv.Message, now time.Time) []int {
 	at := make(map[int]int, len(msgs))
 	for i, msg := range msgs {
 		at[msg.Id] = i
 	}
-	t.tasks = slices.DeleteFunc(tasks, func(task Task) bool {
+	t.tasks = slices.DeleteFunc(tasks, func(task instanceapi.Task) bool {
 		i, ok := at[task.ID]
 		return !ok || msgs[i].Role != conv.RoleUser || !msgs[i].Time.Equal(task.StartedAt)
 	})
@@ -237,7 +222,7 @@ func (t *taskTracker) own(msgs []conv.Message, changed []int) []int {
 		if msg.Time.Before(t.since) {
 			// History: its turn is over.
 			ended := msg.Time
-			t.add(Task{ID: msg.Id, Status: TaskStatusCompleted, Prompt: cut(msg.Message, taskPromptLimit), StartedAt: msg.Time, EndedAt: &ended})
+			t.add(instanceapi.Task{ID: msg.Id, Status: instanceapi.TaskStatusCompleted, Prompt: cut(msg.Message, taskPromptLimit), StartedAt: msg.Time, EndedAt: &ended})
 			changed = append(changed, len(t.tasks)-1)
 			continue
 		}
@@ -257,16 +242,16 @@ func (t *taskTracker) own(msgs []conv.Message, changed []int) []int {
 			changed = appendOnce(changed, t.open)
 			continue
 		}
-		t.add(Task{ID: msg.Id, Status: TaskStatusRunning, Prompt: cut(msg.Message, taskPromptLimit), StartedAt: msg.Time})
+		t.add(instanceapi.Task{ID: msg.Id, Status: instanceapi.TaskStatusRunning, Prompt: cut(msg.Message, taskPromptLimit), StartedAt: msg.Time})
 		t.open = len(t.tasks) - 1
-		t.ran = t.status.Status == AgentStatusRunning
+		t.ran = t.status.Status == instanceapi.AgentStatusRunning
 		changed = append(changed, t.open)
 	}
 	return changed
 }
 
 // add adds a task.
-func (t *taskTracker) add(task Task) {
+func (t *taskTracker) add(task instanceapi.Task) {
 	if n := len(t.tasks); n > 0 && t.tasks[n-1].ID >= task.ID {
 		t.inOrder = false
 	}
@@ -300,7 +285,7 @@ func (t *taskTracker) replies(msgs []conv.Message, k int, at map[int]int, change
 		}
 		id := msgs[reply].Id
 		t.tasks[i].ReplyID = &id
-		if t.tasks[i].Status == TaskStatusCompleted && t.tasks[i].StartedAt.Before(t.since) {
+		if t.tasks[i].Status == instanceapi.TaskStatusCompleted && t.tasks[i].StartedAt.Before(t.since) {
 			ended := msgs[reply].Time
 			t.tasks[i].EndedAt = &ended
 		}
@@ -327,14 +312,14 @@ func (t *taskTracker) statusChanged(next StatusChangeBody, now time.Time) (chang
 	}
 	open := t.open
 	switch {
-	case next.Lifecycle == LifecycleExited || next.Lifecycle == LifecycleFailed:
+	case next.Lifecycle == instanceapi.LifecycleExited || next.Lifecycle == instanceapi.LifecycleFailed:
 		t.tasks[open].Errors = append(t.tasks[open].Errors, "the agent "+string(next.Lifecycle))
 		t.end(open, now)
 		return []int{open}, false
-	case next.Status == AgentStatusRunning:
+	case next.Status == instanceapi.AgentStatusRunning:
 		t.ran = true
 	case t.ran && t.idle():
-		if previous.Status == AgentStatusRunning {
+		if previous.Status == instanceapi.AgentStatusRunning {
 			t.end(open, now)
 			return []int{open}, false
 		}
@@ -345,7 +330,7 @@ func (t *taskTracker) statusChanged(next StatusChangeBody, now time.Time) (chang
 
 // idle reports whether the agent neither works nor waits on an answer.
 func (t *taskTracker) idle() bool {
-	return t.status.Status == AgentStatusStable && t.status.PendingRequests == 0
+	return t.status.Status == instanceapi.AgentStatusStable && t.status.PendingRequests == 0
 }
 
 // endIfIdle ends the running task if the agent is idle in the grace period
@@ -377,17 +362,17 @@ func (t *taskTracker) end(i int, now time.Time) {
 	retry := t.status.RetryWait
 	switch limit := t.status.LimitStop; {
 	case limit != nil && !limit.StoppedAt.Before(task.StartedAt):
-		task.Status = TaskStatusLimited
+		task.Status = instanceapi.TaskStatusLimited
 		task.Limit = limit
 	case retry != nil && !retry.StoppedAt.Before(task.StartedAt):
 		// The failure was a warning, as AgentAPI tries again: a task of
 		// its own, which the message that continues the turn starts.
-		task.Status = TaskStatusFailed
+		task.Status = instanceapi.TaskStatusFailed
 		task.Errors = append(task.Errors, retry.Message)
 	case len(task.Errors) > 0:
-		task.Status = TaskStatusFailed
+		task.Status = instanceapi.TaskStatusFailed
 	default:
-		task.Status = TaskStatusCompleted
+		task.Status = instanceapi.TaskStatusCompleted
 	}
 	if t.open == i {
 		t.open, t.ran = -1, false
@@ -421,7 +406,7 @@ func appendOnce(positions []int, i int) []int {
 
 // TaskUpdateBody is the SSE payload for a task that started or changed.
 type TaskUpdateBody struct {
-	Task
+	instanceapi.Task
 	Seq uint64 `json:"seq" doc:"Sequence number of this change; see message_update."`
 }
 
@@ -484,10 +469,10 @@ func (e *EventEmitter) tasksStoredLocked(changed []int) []TaskUpdateBody {
 }
 
 // Tasks returns the conversation's tasks, the earliest first.
-func (e *EventEmitter) Tasks() []Task {
+func (e *EventEmitter) Tasks() []instanceapi.Task {
 	e.mu.Lock()
 	defer e.unlock()
-	tasks := make([]Task, len(e.tasks.tasks))
+	tasks := make([]instanceapi.Task, len(e.tasks.tasks))
 	for i, task := range e.tasks.tasks {
 		tasks[i] = task.Clone()
 	}

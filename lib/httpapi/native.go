@@ -12,6 +12,8 @@ import (
 
 	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
+	"github.com/coder/agentapi/lib/convstate"
+	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/transcript"
 )
@@ -24,9 +26,9 @@ const nativeCallTimeout = 30 * time.Second
 // event emitter. The images of a rich message were stored before (see
 // native.Config.PrepareRichMessage).
 type nativeObserver struct {
-	emitter *EventEmitter
+	emitter *convstate.EventEmitter
 	// persister stores the session ref, if state is persisted.
-	persister Persister
+	persister convstate.Persister
 }
 
 var _ native.Observer = (*nativeObserver)(nil)
@@ -102,10 +104,10 @@ func (o *nativeObserver) SettingsChosen(settings agentstate.Settings) {
 // restart (DELETE /messages) starts the agent again.
 func (o *nativeObserver) AgentExited(exit native.AgentExit) {
 	if exit.Attempt > 0 {
-		o.emitter.SetLifecycle(LifecycleRestarting)
+		o.emitter.SetLifecycle(instanceapi.LifecycleRestarting)
 		return
 	}
-	o.emitter.SetLifecycle(LifecycleFailed)
+	o.emitter.SetLifecycle(instanceapi.LifecycleFailed)
 }
 
 // createNativeMessageLocked delivers a user message over the native

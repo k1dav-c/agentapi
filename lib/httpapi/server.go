@@ -60,11 +60,11 @@ type Server struct {
 	// queueStoreMu guards what storeQueue last stored in stateDB: the
 	// queue, its last ID and the version of the queue they are.
 	queueStoreMu      sync.Mutex
-	savedQueue        []QueuedMessage
+	savedQueue        []convstate.QueuedMessage
 	savedNextQueueID  int
 	savedQueueVersion uint64
 	agentType         instanceapi.AgentType
-	emitter           *EventEmitter
+	emitter           *convstate.EventEmitter
 	chatBasePath      string
 	uploads           *uploadStore
 	uploadPruneNow    chan struct{} // nil until startUploadPruning
@@ -96,7 +96,7 @@ type ServerConfig struct {
 	Clock             quartz.Clock
 	CWD               string // Working directory (used by Codex resolver)
 	// Webhook sends an event whenever the agent status changes.
-	Webhook WebhookConfig
+	Webhook webhook.Config
 	// Name is what clients call this AgentAPI (GET /summary, webhook
 	// events); empty is the working directory's name.
 	Name string
@@ -266,7 +266,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	// Clients follow the queue through queue_update events, and the state
 	// database has every change: a message that went out isn't sent again
 	// after a crash.
-	s.queue.onChange = func(queue []QueuedMessage, lastID int, version uint64) {
+	s.queue.onChange = func(queue []convstate.QueuedMessage, lastID int, version uint64) {
 		emitter.SetQueue(queue, version)
 		s.storeQueue(queue, lastID, version)
 	}
@@ -321,7 +321,7 @@ func newServerID() (string, error) {
 // tells dispatcher of status changes, keeps the conversation in the state
 // database if there is one and, with withTerminal, says a terminal is
 // offered.
-func newEventEmitter(config ServerConfig, serverID string, dispatcher *webhook.Dispatcher, withTerminal bool) *EventEmitter {
+func newEventEmitter(config ServerConfig, serverID string, dispatcher *webhook.Dispatcher, withTerminal bool) *convstate.EventEmitter {
 	options := []convstate.EventEmitterOption{
 		convstate.WithAgentType(config.AgentType),
 		convstate.WithServerID(serverID),
@@ -385,7 +385,7 @@ func newRouter(config ServerConfig, logger *slog.Logger, allowedHosts, allowedOr
 
 // newNativeConversation returns the conversation of a native agent, which
 // continues the restored one.
-func newNativeConversation(config ServerConfig, restored restoredState, emitter *EventEmitter, uploads *uploadStore, logger *slog.Logger) *native.Conversation {
+func newNativeConversation(config ServerConfig, restored restoredState, emitter *convstate.EventEmitter, uploads *uploadStore, logger *slog.Logger) *native.Conversation {
 	observer := &nativeObserver{emitter: emitter}
 	if config.StateDB != nil {
 		observer.persister = config.StateDB

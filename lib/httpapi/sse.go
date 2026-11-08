@@ -17,18 +17,18 @@ const sseHeartbeatInterval = 15 * time.Second
 
 // optInEvents are the events a client gets only with sync: those added
 // after clients that reject event types they don't know were written.
-var optInEvents = map[EventType]bool{
-	EventTypeMessageUpdate:     false,
-	EventTypeStatusChange:      false,
-	EventTypeError:             false,
-	EventTypeRichMessageUpdate: false,
-	EventTypeHeartbeat:         false,
-	EventTypeRequestUpdate:     false,
-	EventTypeSessionSync:       true,
-	EventTypeTaskUpdate:        true,
-	EventTypeQueueUpdate:       true,
+var optInEvents = map[convstate.EventType]bool{
+	convstate.EventTypeMessageUpdate:     false,
+	convstate.EventTypeStatusChange:      false,
+	convstate.EventTypeError:             false,
+	convstate.EventTypeRichMessageUpdate: false,
+	convstate.EventTypeHeartbeat:         false,
+	convstate.EventTypeRequestUpdate:     false,
+	convstate.EventTypeSessionSync:       true,
+	convstate.EventTypeTaskUpdate:        true,
+	convstate.EventTypeQueueUpdate:       true,
 	// Only ?only=summary gets it, and nothing else.
-	EventTypeSummaryUpdate: true,
+	convstate.EventTypeSummaryUpdate: true,
 }
 
 // SubscribeEventsInput lets a client that cached the conversation resume
@@ -54,7 +54,7 @@ func (s *Server) subscribeEvents(ctx context.Context, input *SubscribeEventsInpu
 	if !sync {
 		since, epoch = 0, ""
 	}
-	wants := func(t EventType) bool {
+	wants := func(t convstate.EventType) bool {
 		return convstate.AllEvents(t) && (sync || !optInEvents[t])
 	}
 	if input.Only == "summary" {
@@ -67,7 +67,7 @@ func (s *Server) subscribeEvents(ctx context.Context, input *SubscribeEventsInpu
 	s.logger.Info("New subscriber", "subscriberId", subscriberId)
 	var replaySeq uint64
 	if len(replay) > 0 {
-		if body, ok := replay[0].Payload.(SessionSyncBody); ok {
+		if body, ok := replay[0].Payload.(convstate.SessionSyncBody); ok {
 			replaySeq = body.Seq
 		}
 	}
@@ -103,7 +103,7 @@ func (s *Server) subscribeEvents(ctx context.Context, input *SubscribeEventsInpu
 				return
 			}
 		case <-heartbeat.C:
-			if err := send.Data(HeartbeatBody{Time: s.clock.Now()}); err != nil {
+			if err := send.Data(convstate.HeartbeatBody{Time: s.clock.Now()}); err != nil {
 				s.logger.Error("Failed to send heartbeat", "subscriberId", subscriberId, "error", err)
 				return
 			}
@@ -128,15 +128,15 @@ func (s *Server) registerEventRoutes() {
 		Middlewares: []func(huma.Context, func(huma.Context)){sseMiddleware},
 	}, map[string]any{
 		// Mapping of event type name to Go struct for that event.
-		"message_update":      MessageUpdateBody{},
-		"status_change":       StatusChangeBody{},
-		"agent_error":         ErrorBody{},
-		"rich_message_update": RichMessageUpdateBody{},
-		"heartbeat":           HeartbeatBody{},
-		"session_sync":        SessionSyncBody{},
-		"request_update":      RequestUpdateBody{},
-		"task_update":         TaskUpdateBody{},
-		"queue_update":        QueueUpdateBody{},
-		"summary_update":      SummaryUpdateBody{},
+		"message_update":      convstate.MessageUpdateBody{},
+		"status_change":       convstate.StatusChangeBody{},
+		"agent_error":         convstate.ErrorBody{},
+		"rich_message_update": convstate.RichMessageUpdateBody{},
+		"heartbeat":           convstate.HeartbeatBody{},
+		"session_sync":        convstate.SessionSyncBody{},
+		"request_update":      convstate.RequestUpdateBody{},
+		"task_update":         convstate.TaskUpdateBody{},
+		"queue_update":        convstate.QueueUpdateBody{},
+		"summary_update":      convstate.SummaryUpdateBody{},
 	}, s.subscribeEvents)
 }

@@ -45,12 +45,11 @@ const (
 
 // WebhookInstanceState is the data of the instance.* events
 // (lib/instanceapi).
-type WebhookInstanceState = instanceapi.WebhookInstanceState
 
 // WebhookTask is the data of task.started, task.completed and task.failed:
 // the task as GET /tasks has it, with the text of the agent's reply.
 type WebhookTask struct {
-	convstate.Task
+	instanceapi.Task
 	DurationSeconds float64 `json:"duration_seconds,omitempty"`
 	// Reply is the text of the agent's last message of the task.
 	Reply string `json:"reply,omitempty"`
@@ -384,8 +383,8 @@ func (o *webhookObserver) statusChanged(next convstate.StatusChangeBody, quiet b
 	}
 	// The agent's message is final once it is done; the task's end, which
 	// the emitter sends next, carries it as the reply.
-	if (previous.Status == convstate.AgentStatusRunning && next.Status == convstate.AgentStatusStable) ||
-		next.Lifecycle == convstate.LifecycleExited || next.Lifecycle == convstate.LifecycleFailed {
+	if (previous.Status == instanceapi.AgentStatusRunning && next.Status == instanceapi.AgentStatusStable) ||
+		next.Lifecycle == instanceapi.LifecycleExited || next.Lifecycle == instanceapi.LifecycleFailed {
 		o.flushAgent()
 	}
 }
@@ -434,7 +433,7 @@ func (o *webhookObserver) send(msg convstate.MessageUpdateBody) {
 // taskUpdated sends task.started when a task starts, and task.completed or
 // task.failed when it ends. A task from before (history) or seen in the
 // first replay isn't news.
-func (o *webhookObserver) taskUpdated(task convstate.Task, quiet bool) {
+func (o *webhookObserver) taskUpdated(task instanceapi.Task, quiet bool) {
 	key := messageKey{task.ID, task.StartedAt}
 	if quiet || task.StartedAt.Before(o.since) {
 		o.started.advance(key)
@@ -452,7 +451,7 @@ func (o *webhookObserver) taskUpdated(task convstate.Task, quiet bool) {
 	}
 	o.ended.advance(key)
 	eventType := webhookEventTaskCompleted
-	if task.Status != convstate.TaskStatusCompleted {
+	if task.Status != instanceapi.TaskStatusCompleted {
 		eventType = webhookEventTaskFailed
 	}
 	data := o.webhookTask(task)
@@ -469,7 +468,7 @@ func (o *webhookObserver) taskUpdated(task convstate.Task, quiet bool) {
 }
 
 // webhookTask is the webhook data of task.
-func (o *webhookObserver) webhookTask(task convstate.Task) WebhookTask {
+func (o *webhookObserver) webhookTask(task instanceapi.Task) WebhookTask {
 	data := WebhookTask{Task: task, SessionName: o.status.SessionName}
 	if task.EndedAt != nil {
 		data.DurationSeconds = task.EndedAt.Sub(task.StartedAt).Seconds()

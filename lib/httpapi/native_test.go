@@ -21,6 +21,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/agentapi/lib/agentstate"
+	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/httpapi"
 	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/logctx"
@@ -46,7 +47,7 @@ func newNativeServerConfig(t *testing.T, configure func(*nativetest.Adapter), ch
 	t.Helper()
 	n := startNativeServerConfig(t, configure, change)
 	require.Eventually(t, func() bool {
-		var status httpapi.StatusChangeBody
+		var status convstate.StatusChangeBody
 		n.do(http.MethodGet, "/status", nil, &status)
 		return status.Capabilities != nil
 	}, 5*time.Second, 5*time.Millisecond)
@@ -165,9 +166,9 @@ func approval(id string) agentstate.Request {
 	}
 }
 
-func (n *nativeServer) queue() []httpapi.QueuedMessage {
+func (n *nativeServer) queue() []convstate.QueuedMessage {
 	var q struct {
-		Messages []httpapi.QueuedMessage `json:"messages"`
+		Messages []convstate.QueuedMessage `json:"messages"`
 	}
 	n.do(http.MethodGet, "/queue", nil, &q)
 	return q.Messages
@@ -176,13 +177,13 @@ func (n *nativeServer) queue() []httpapi.QueuedMessage {
 func TestNative_StatusAndMessages(t *testing.T) {
 	n := newNativeServer(t, nil)
 	var status struct {
-		Transport    httpapi.Transport        `json:"transport"`
-		Status       httpapi.AgentStatus      `json:"status"`
+		Transport    instanceapi.Transport    `json:"transport"`
+		Status       instanceapi.AgentStatus  `json:"status"`
 		Capabilities *agentstate.Capabilities `json:"capabilities"`
 	}
 	n.do(http.MethodGet, "/status", nil, &status)
-	assert.Equal(t, httpapi.TransportNative, status.Transport)
-	assert.Equal(t, httpapi.AgentStatusStable, status.Status)
+	assert.Equal(t, instanceapi.TransportNative, status.Transport)
+	assert.Equal(t, instanceapi.AgentStatusStable, status.Status)
 	assert.Equal(t, &agentstate.Capabilities{Steer: true, Interrupt: true, Resume: true, Images: true}, status.Capabilities)
 
 	code, res := n.send("hello", "")
@@ -290,7 +291,7 @@ func TestNative_NoAgentRunning(t *testing.T) {
 		a.StartErr = &native.LoginRequiredError{Login: agentstate.LoginRequired{Agent: "Claude Code", Message: "Claude Code is not logged in.", Command: "claude auth login"}}
 	})
 	require.Eventually(t, func() bool {
-		var status httpapi.StatusChangeBody
+		var status convstate.StatusChangeBody
 		n.do(http.MethodGet, "/status", nil, &status)
 		return status.LoginRequired != nil
 	}, 5*time.Second, 5*time.Millisecond)
@@ -313,10 +314,10 @@ func TestNative_Requests(t *testing.T) {
 	n.send("do it", "")
 	a.Sink().RequestOpened(approval("perm-1"))
 
-	var status httpapi.StatusChangeBody
+	var status convstate.StatusChangeBody
 	n.do(http.MethodGet, "/status", nil, &status)
 	assert.Equal(t, 1, status.PendingRequests)
-	assert.Equal(t, httpapi.AgentStatusStable, status.Status)
+	assert.Equal(t, instanceapi.AgentStatusStable, status.Status)
 
 	// A message sent while the agent waits is queued, not typed into it.
 	_, res := n.send("later", "")
@@ -341,7 +342,7 @@ func TestNative_Requests(t *testing.T) {
 	var one agentstate.RequestState
 	require.Equal(t, http.StatusOK, n.do(http.MethodGet, "/requests/perm-1", nil, &one))
 	assert.Equal(t, agentstate.RequestStatusResolved, one.Status)
-	var after httpapi.StatusChangeBody
+	var after convstate.StatusChangeBody
 	n.do(http.MethodGet, "/status", nil, &after)
 	assert.Equal(t, 0, after.PendingRequests)
 }
@@ -359,9 +360,9 @@ func TestNative_UnconfirmedAnswer(t *testing.T) {
 	var one agentstate.RequestState
 	require.Equal(t, http.StatusOK, n.do(http.MethodGet, "/requests/perm-1", nil, &one))
 	assert.Equal(t, agentstate.RequestStatusPending, one.Status)
-	var status httpapi.StatusChangeBody
+	var status convstate.StatusChangeBody
 	n.do(http.MethodGet, "/status", nil, &status)
-	assert.Equal(t, httpapi.AgentStatusRunning, status.Status, "the answer is on its way")
+	assert.Equal(t, instanceapi.AgentStatusRunning, status.Status, "the answer is on its way")
 }
 
 // A message that is queued or steered into the turn doesn't answer the
@@ -475,7 +476,7 @@ func TestNative_RefusedMessageIsTakenBack(t *testing.T) {
 	events = openEvents(t, n.url+"/events?sync=1&since=3&epoch="+epoch)
 	sync := nextEvent(t, events)
 	require.Equal(t, "session_sync", sync.event)
-	var body httpapi.SessionSyncBody
+	var body convstate.SessionSyncBody
 	require.NoError(t, json.Unmarshal([]byte(sync.data), &body))
 	assert.True(t, body.Full)
 	assert.Equal(t, n.epoch(), body.Epoch)
@@ -560,14 +561,14 @@ func TestNative_LoginRequired(t *testing.T) {
 
 	n.send("hello", "")
 	a.Sink().LoginRequired(agentstate.LoginRequired{Agent: "Claude Code", Message: "Claude Code is not logged in.", Command: "claude auth login"})
-	var status httpapi.StatusChangeBody
+	var status convstate.StatusChangeBody
 	n.do(http.MethodGet, "/status", nil, &status)
 	require.NotNil(t, status.LoginRequired)
 	assert.Equal(t, "claude auth login", status.LoginRequired.Command)
 
 	require.Equal(t, http.StatusOK, n.do(http.MethodPost, "/login/retry", nil, nil))
 	require.Eventually(t, func() bool {
-		var after httpapi.StatusChangeBody
+		var after convstate.StatusChangeBody
 		n.do(http.MethodGet, "/status", nil, &after)
 		return after.LoginRequired == nil && len(n.factory.Adapters()) == 2
 	}, 5*time.Second, 10*time.Millisecond)
@@ -591,7 +592,7 @@ func TestNative_Settings(t *testing.T) {
 	assert.Equal(t, agentstate.Settings{PermissionMode: agentstate.PermissionModeBypass, Model: "fast", Effort: "low"}, got.Body.Settings)
 	assert.Equal(t, settingOptions, got.Body.Options)
 
-	var status httpapi.StatusChangeBody
+	var status convstate.StatusChangeBody
 	n.do(http.MethodGet, "/status", nil, &status)
 	require.NotNil(t, status.Capabilities)
 	assert.True(t, status.Capabilities.Settings)
@@ -612,7 +613,7 @@ func TestNative_SettingsUnsupported(t *testing.T) {
 	n := newNativeServer(t, nil)
 	assert.Equal(t, http.StatusBadRequest, n.do(http.MethodGet, "/settings", nil, nil))
 	assert.Equal(t, http.StatusBadRequest, n.do(http.MethodPut, "/settings", map[string]any{"model": "fast"}, nil))
-	var status httpapi.StatusChangeBody
+	var status convstate.StatusChangeBody
 	n.do(http.MethodGet, "/status", nil, &status)
 	assert.Nil(t, status.Settings)
 }
@@ -631,7 +632,7 @@ func TestNative_SettingsWhileStarting(t *testing.T) {
 
 func TestNative_Usage(t *testing.T) {
 	n := newNativeServer(t, nil)
-	var status httpapi.StatusChangeBody
+	var status convstate.StatusChangeBody
 	n.do(http.MethodGet, "/status", nil, &status)
 	assert.Nil(t, status.Usage, "nothing reported yet")
 
@@ -762,9 +763,9 @@ func newUpdatingServer(t *testing.T, update func(context.Context)) (*nativeServe
 	})
 	n := &nativeServer{t: t, url: ts.URL, factory: factory}
 	require.Eventually(t, func() bool {
-		var status httpapi.StatusChangeBody
+		var status convstate.StatusChangeBody
 		n.do(http.MethodGet, "/status", nil, &status)
-		return status.Lifecycle == httpapi.LifecycleReady
+		return status.Lifecycle == instanceapi.LifecycleReady
 	}, 5*time.Second, 5*time.Millisecond)
 	return n, srv
 }
@@ -790,9 +791,9 @@ func TestNative_RestartDoesntHoldTheServer(t *testing.T) {
 	require.Len(t, queue, 1)
 	require.Equal(t, http.StatusOK, n.do(http.MethodPut, "/queue/"+strconv.Itoa(queue[0].ID), map[string]any{"content": "after the restart, edited"}, nil))
 	assert.Equal(t, http.StatusOK, n.do(http.MethodGet, "/handoff", nil, nil))
-	var status httpapi.StatusChangeBody
+	var status convstate.StatusChangeBody
 	n.do(http.MethodGet, "/status", nil, &status)
-	assert.Equal(t, httpapi.LifecycleRestarting, status.Lifecycle)
+	assert.Equal(t, instanceapi.LifecycleRestarting, status.Lifecycle)
 	assert.Equal(t, http.StatusConflict, n.do(http.MethodDelete, "/messages", nil, nil), "one restart at a time")
 	assert.Len(t, n.factory.Adapters(), 1, "the new agent waits for the update")
 
@@ -873,9 +874,9 @@ func TestNative_MessagesWaitForACompaction(t *testing.T) {
 	<-compacting
 
 	// The server goes on answering, and a message waits in the queue.
-	var status httpapi.StatusChangeBody
+	var status convstate.StatusChangeBody
 	require.Equal(t, http.StatusOK, n.do(http.MethodGet, "/status", nil, &status))
-	assert.Equal(t, httpapi.AgentStatusRunning, status.Status)
+	assert.Equal(t, instanceapi.AgentStatusRunning, status.Status)
 	code, res := n.send("after the compaction", "")
 	require.Equal(t, http.StatusOK, code)
 	assert.True(t, res.Queued)

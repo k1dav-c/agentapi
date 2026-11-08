@@ -8,6 +8,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/coder/agentapi/lib/workspacefs"
 )
 
 func TestFindFile(t *testing.T) {
@@ -24,7 +26,7 @@ func TestFindFile(t *testing.T) {
 	old := time.Now().Add(-time.Hour)
 	require.NoError(t, os.Chtimes(filepath.Join(dir, "law-mcp", "docs", "design.md"), old, old))
 	s := &fileAPI{cwd: dir}
-	find := func(path string) []FileMatch {
+	find := func(path string) []workspacefs.FileMatch {
 		t.Helper()
 		resp, err := s.findFile(t.Context(), &FilePathQuery{Path: path})
 		require.NoError(t, err)

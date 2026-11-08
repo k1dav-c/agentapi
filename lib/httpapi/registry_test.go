@@ -59,7 +59,7 @@ func TestRegistry(t *testing.T) {
 	assert.NotZero(t, entry.Port)
 	assert.Equal(t, "http://127.0.0.1:"+itoa(entry.Port), entry.URL)
 
-	var summary httpapi.SummaryBody
+	var summary instanceapi.SummaryBody
 	require.Equal(t, http.StatusOK, authorized(t, http.MethodGet, entry.URL+"/summary", nil, &summary))
 	assert.Equal(t, summary.Instance.ServerID, entry.ServerID)
 	assert.Equal(t, summary.Instance.ID, entry.ID)
