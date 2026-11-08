@@ -40,11 +40,6 @@ describe("storedView", () => {
     expect(storedView(null, null)).toEqual({order: "groups", byMachine: false});
     expect(storedView("recent", "yes")).toEqual({order: "recent", byMachine: false});
   });
-
-  test("the machines order of an earlier build is the groups by machine", () => {
-    expect(storedView("machines", null)).toEqual({order: "groups", byMachine: true});
-    expect(storedView("machines", "false")).toEqual({order: "groups", byMachine: true});
-  });
 });
 
 describe("changedAt", () => {

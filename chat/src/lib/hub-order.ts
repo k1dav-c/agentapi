@@ -19,10 +19,8 @@ export function parseListOrder(stored: string | null | undefined): ListOrder {
 }
 
 // storedView reads the order and By machine a browser stored (order,
-// byMachine: "true" or "false"). An order of "machines", which a build
-// before By machine kept, is the groups by machine.
+// byMachine: "true" or "false").
 export function storedView(order: string | null | undefined, byMachine: string | null | undefined): {order: ListOrder; byMachine: boolean} {
-  if (order === "machines") return {order: "groups", byMachine: true};
   return {order: parseListOrder(order), byMachine: byMachine === "true"};
 }
 

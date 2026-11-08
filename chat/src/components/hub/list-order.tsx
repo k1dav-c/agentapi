@@ -9,17 +9,10 @@ import {cn} from "@/lib/utils";
 const orderKey = "agentapi.hub.list-order";
 const byMachineKey = "agentapi.hub.by-machine";
 
-// storedListView reads them; an order of "machines" from an earlier build
-// is kept again as the groups by machine.
+// storedListView reads them.
 function storedListView(): {order: ListOrder; byMachine: boolean} {
   try {
-    const order = localStorage.getItem(orderKey);
-    const view = storedView(order, localStorage.getItem(byMachineKey));
-    if (order === "machines") {
-      localStorage.setItem(orderKey, view.order);
-      localStorage.setItem(byMachineKey, String(view.byMachine));
-    }
-    return view;
+    return storedView(localStorage.getItem(orderKey), localStorage.getItem(byMachineKey));
   } catch {
     return {order: "groups", byMachine: false};
   }
