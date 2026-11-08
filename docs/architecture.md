@@ -947,10 +947,14 @@ chat and `parseFromFrame` in the hub.
   Actions and API calls come from `useChatActions()`, an object that never
   changes, so components that only act don't render again; state is read in
   slices with `useChatSelector` (`lib/store.ts`), so a component renders again
-  only when its slice changes. The hooks `use-event-stream.ts`, `use-queue.ts`,
-  `use-drafts.ts` and `use-session-cache.ts` apply the events to the state,
-  follow the queued messages, send messages and keep their drafts until the
-  server has them, and cache the transcript.
+  only when its slice changes. The conversation (messages, rich messages,
+  requests, tasks and the point of the server's conversation they are at) is
+  one `useReducer`: `conversationReducer` in `lib/conversation-state.ts`
+  applies every change to it, tested without React. The hooks
+  `use-event-stream.ts`, `use-queue.ts`, `use-drafts.ts` and
+  `use-session-cache.ts` dispatch the events, the cached conversation and a
+  reset, follow the queued messages, send messages and keep their drafts until
+  the server has them, and cache the transcript.
 - The event stream uses `/events?sync=1` and keeps the last sequence number
   for incremental replay (`lib/chat-stream.ts`). A long replay shows its
   progress every 1.5 seconds, but the requests and the tasks, which come
@@ -987,7 +991,10 @@ chat and `parseFromFrame` in the hub.
   shows `chat-error-boundary.tsx`, which offers to clear the cached
   conversation and reload.
 - `lib/chat-api.ts` is the typed HTTP client; `lib/api-schema.ts` contains
-  types generated from the OpenAPI schema.
+  types generated from the OpenAPI schema. A request names its route and
+  method of the generated `paths` (`route("POST", "/queue/{id}/steer", {id})`),
+  so a route the server drops fails to typecheck, and the API's types are
+  aliases of the schema's. `lib/` never imports from `components/`.
 - `components/chat.tsx` lays out the page: the message list (tasks, tool rows,
   thinking), the dock above the composer (the status strip, the login card, request cards, the usage limit card,
   the retry card, the cold prompt cache note), the composer (`message-input.tsx`, with slash
@@ -1001,7 +1008,10 @@ chat and `parseFromFrame` in the hub.
   (`cost.ts`: a task's share of the session's calls, totals by period),
   terminal keys, auth. `use-session-cost.ts` reads `GET /cost` when a turn
   ends and while one runs; after the first read it sends `from` and `digest`,
-  and gets only the calls made since.
+  and gets only the calls made since. A hook of the chat's state, or of one
+  component, sits in `components/` beside what uses it; a hook that knows
+  nothing of the chat (`use-loaded.ts`, `use-copy.ts`, `use-persisted.ts`)
+  in `lib/`. Fixtures and fakes the tests share are in `src/test/`.
 
 ## Testing
 
