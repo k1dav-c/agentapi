@@ -50,6 +50,10 @@ type selfExec struct {
 	// promptSent is set once it did.
 	carryPromptSent bool
 	promptSent      atomic.Bool
+	// sessionRef, if set, is the value of resumeSessionEnv, which carries
+	// the agent's session to the program a restart runs (no state
+	// database); it is read as the program runs again.
+	sessionRef func() string
 
 	// mu makes a restart and a shutdown one after the other, so that the
 	// second sees what the first did.
@@ -288,10 +292,16 @@ func (s *selfExec) exec() error {
 
 // execEnv is the environment the program runs again with.
 func (s *selfExec) execEnv() []string {
+	env := slices.Clone(s.env)
 	if s.carryPromptSent && s.promptSent.Load() {
-		return append(slices.Clone(s.env), initialPromptSentEnv+"=1")
+		env = append(env, initialPromptSentEnv+"=1")
 	}
-	return s.env
+	if s.sessionRef != nil {
+		if session := s.sessionRef(); session != "" {
+			env = append(env, resumeSessionEnv+"="+session)
+		}
+	}
+	return env
 }
 
 // markInitialPromptSent records that the agent got the initial prompt, so

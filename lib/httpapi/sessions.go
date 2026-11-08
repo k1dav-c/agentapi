@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/danielgtaylor/huma/v2"
 
+	conv "github.com/coder/agentapi/lib/conversation"
+	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/sessions"
@@ -179,6 +182,41 @@ func (s *Server) resumeSession(_ context.Context, input *ResumeSessionRequest) (
 		return nil, huma.Error500InternalServerError(fmt.Sprintf("failed to open the session: %v", err))
 	}
 	return okResponse(), nil
+}
+
+// SessionRef is the agent's session the conversation is in, which
+// resumes it; empty before the agent opened one.
+func (s *Server) SessionRef() string {
+	return s.native.SessionRef()
+}
+
+// resumeCarriedSession is the conversation of the session ref, which the
+// agent resumes: the session it had open before a restart in place
+// without a state database (ServerConfig.ResumeSession). Its messages are
+// read from the session's log, as resumeSession reads them, and reported
+// through emitter. A session whose log history (nil for an agent without
+// session logs) can't read isn't resumed: the agent starts a new session,
+// with a warning, rather than one that fails to start again and again.
+func resumeCarriedSession(ref string, history *sessions.Store, emitter *convstate.EventEmitter, uploads *uploadStore, logger *slog.Logger) restoredState {
+	if history == nil {
+		logger.Warn("The agent's session can't be resumed after the restart in place: its sessions can't be read; it starts a new one", "session", ref)
+		return restoredState{}
+	}
+	read, err := history.ReadHistory(ref)
+	if err != nil {
+		logger.Warn("The agent's session can't be resumed after the restart in place; it starts a new one", "session", ref, "error", err)
+		emitter.EmitError(fmt.Sprintf("AgentAPI restarted and couldn't resume the agent's session %s (%v); the agent starts a new session.", ref, err), conv.ErrorLevelWarning)
+		return restoredState{}
+	}
+	for i := range read.Rich {
+		uploads.storeRichImages(&read.Rich[i], logger)
+	}
+	emitter.SetSessionRef(ref)
+	emitter.SetSessionName(read.Title)
+	emitter.EmitMessages(read.Messages)
+	emitter.LoadRichMessages(read.Rich)
+	logger.Info("Resuming the agent's session after the restart in place", "session", ref, "messages", len(read.Messages))
+	return restoredState{messages: read.Messages, resumeRef: ref}
 }
 
 func (s *Server) registerSessionRoutes() {

@@ -104,6 +104,12 @@ type ServerConfig struct {
 	Native NativeConfig
 	// StateDB, if set, stores the conversation and restores it on start.
 	StateDB *statedb.DB
+	// ResumeSession, if set and there is no StateDB, is the agent's session
+	// the server resumes on start: the one it had open before a restart in
+	// place. The conversation is read from the session's log, as POST
+	// /sessions/{id}/resume reads it; a session whose log can't be read
+	// isn't resumed, and the agent starts a new one.
+	ResumeSession string
 	// UploadDir is where uploads and tool result images are kept. Empty
 	// means a temporary directory that is removed on stop. Either way the
 	// files AgentAPI stored there (<checksum>/<name>) that the conversation
@@ -233,6 +239,21 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	}
 	logger.Info("Using upload directory", "uploadDir", uploads.dir)
 
+	var history *sessions.Store
+	if sessions.Supported(string(config.AgentType)) {
+		history, err = sessions.New(string(config.AgentType), config.CWD, sessions.Config{
+			Prices:       config.Native.Prices,
+			PiSessionDir: config.Native.PiSessionDir,
+			Logger:       logger,
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	if stateDB == nil && config.ResumeSession != "" {
+		restored = resumeCarriedSession(config.ResumeSession, history, emitter, uploads, logger)
+	}
+
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 
 	s := &Server{
@@ -255,6 +276,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		updateAgent:  config.Native.UpdateAgent,
 		terminal:     terminal,
 		stateDB:      stateDB,
+		sessions:     history,
 	}
 	// Clients follow the queue through queue_update events, and the state
 	// database has every change: a message that went out isn't sent again
@@ -270,16 +292,6 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		restoreWebhook(dispatcher, restored.snapshot, logger)
 	}
 
-	if sessions.Supported(string(config.AgentType)) {
-		s.sessions, err = sessions.New(string(config.AgentType), config.CWD, sessions.Config{
-			Prices:       config.Native.Prices,
-			PiSessionDir: config.Native.PiSessionDir,
-			Logger:       logger,
-		})
-		if err != nil {
-			return nil, err
-		}
-	}
 	s.startWebhook(config)
 	s.registry = s.newInstanceRegistry(config.RegistryDir, bind, config.RestartsInPlace)
 	s.startSpend()

@@ -88,6 +88,7 @@ func runServer(ctx context.Context, logger *slog.Logger, args []string, self *se
 		}
 	}
 	opts.initialPrompt = initialPromptOnce(opts.initialPrompt, opts.stateDB != "" && !opts.printOpenAPI, logger, self)
+	resumeSession := carriedSession(opts, logger, self)
 	if opts.pidFile != "" {
 		if err := writePIDFile(opts.pidFile, logger); err != nil {
 			return fmt.Errorf("failed to write PID file: %w", err)
@@ -133,9 +134,16 @@ func runServer(ctx context.Context, logger *slog.Logger, args []string, self *se
 	if err != nil {
 		return err
 	}
-	srv, err := httpapi.NewServer(ctx, serverConfig(opts, agent, stateDB, apiToken, cwd, prices, self))
+	config := serverConfig(opts, agent, stateDB, apiToken, cwd, prices, self)
+	config.ResumeSession = resumeSession
+	srv, err := httpapi.NewServer(ctx, config)
 	if err != nil {
 		return fmt.Errorf("failed to create server: %w", err)
+	}
+	if stateDB == nil && self != nil {
+		// Without a state database, the session the conversation is in
+		// goes along to the program a restart in place runs.
+		self.sessionRef = func() string { return carrySession(opts.agentType, srv.SessionRef()) }
 	}
 	if opts.printOpenAPI {
 		fmt.Println(srv.GetOpenAPI())
@@ -175,6 +183,47 @@ func initialPromptOnce(prompt string, stateDB bool, logger *slog.Logger, self *s
 		return ""
 	}
 	return prompt
+}
+
+// resumeSessionEnv carries the agent's session to the program a restart in
+// place runs when there is no state database, which would restore the
+// conversation and resume the session itself: "<agent type>:<session>".
+// The new program resumes the session and reads its conversation from the
+// session's log, as the Sessions resume does. It is internal: AgentAPI
+// sets it for itself only, and removes it before it starts the agent.
+const resumeSessionEnv = "AGENTAPI_RESUME_SESSION"
+
+// carrySession is the value of resumeSessionEnv for the session ref of an
+// agent of agentType; empty, which sets nothing, without a session.
+func carrySession(agentType instanceapi.AgentType, ref string) string {
+	if ref == "" {
+		return ""
+	}
+	return string(agentType) + ":" + ref
+}
+
+// carriedSession returns the session the program that restarted in place
+// into this one carried over (resumeSessionEnv), for the agent to resume:
+// none with a state database, which restores the session itself, or for
+// another agent. The variable is removed, from this process and from what
+// self runs again with, so that neither the agent nor a later restart sees
+// it; the next restart sets the session then open.
+func carriedSession(opts serverOptions, logger *slog.Logger, self *selfExec) string {
+	carried, ok := os.LookupEnv(resumeSessionEnv)
+	_ = os.Unsetenv(resumeSessionEnv)
+	self.setEnv(resumeSessionEnv, "")
+	if !ok || opts.printOpenAPI {
+		return ""
+	}
+	agentType, ref, _ := strings.Cut(carried, ":")
+	switch {
+	case opts.stateDB != "":
+		return ""
+	case ref == "" || agentType != string(opts.agentType):
+		logger.Warn("Not resuming the session carried over the restart in place: it isn't this agent's", "carried", carried, "agentType", opts.agentType)
+		return ""
+	}
+	return ref
 }
 
 // generatedAPITokenEnv carries a generated API token to the program a
