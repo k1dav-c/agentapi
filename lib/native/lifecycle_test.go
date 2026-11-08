@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/nativetest"
@@ -34,7 +35,7 @@ func TestRestartReplacesAdapter(t *testing.T) {
 	assert.Empty(t, second.ResumeRef, "a restart starts a new session")
 	assert.Empty(t, c.Messages())
 	r1, _ := c.Request("r1")
-	assert.Equal(t, native.ResponseNotResumable, r1.Capability)
+	assert.Equal(t, agentstate.ResponseNotResumable, r1.Capability)
 	assert.True(t, c.Idle())
 
 	// Events from the replaced adapter are ignored.
@@ -106,7 +107,7 @@ func TestStopWhileStartingIsNotAnError(t *testing.T) {
 func TestCapabilitiesStayWhileRestarting(t *testing.T) {
 	release := make(chan struct{})
 	c, factory, _ := start(t, func(a *nativetest.Adapter) {
-		a.Caps = native.Capabilities{Steer: true, Images: true}
+		a.Caps = agentstate.Capabilities{Steer: true, Images: true}
 		if a.ResumeRef == "" {
 			a.StartBlock = release
 		}
@@ -115,7 +116,7 @@ func TestCapabilitiesStayWhileRestarting(t *testing.T) {
 	go func() { restarted <- c.Restart(context.Background()) }()
 	require.Eventually(t, inStart(factory, ""), 5*time.Second, time.Millisecond)
 
-	assert.Equal(t, native.Capabilities{Steer: true, Images: true}, c.Capabilities(), "what the last agent supported")
+	assert.Equal(t, agentstate.Capabilities{Steer: true, Images: true}, c.Capabilities(), "what the last agent supported")
 	close(release)
 	require.NoError(t, <-restarted)
 }
@@ -126,8 +127,8 @@ func TestCloseExpiresRequests(t *testing.T) {
 	factory.Last().Sink().RequestOpened(approval("r1"))
 	require.NoError(t, c.Close())
 	r1, _ := c.Request("r1")
-	assert.Equal(t, native.RequestStatusExpired, r1.Status)
-	assert.Equal(t, native.ResponseNotResumable, r1.Capability)
+	assert.Equal(t, agentstate.RequestStatusExpired, r1.Status)
+	assert.Equal(t, agentstate.ResponseNotResumable, r1.Capability)
 	assert.False(t, c.TurnActive())
 }
 
@@ -293,7 +294,7 @@ func TestBeginRestartRetiresFirst(t *testing.T) {
 	retired := false
 	r := c.BeginRestart(func() {
 		requests := rec.get().requests
-		retired = len(requests) > 0 && requests[len(requests)-1].Status == native.RequestStatusExpired
+		retired = len(requests) > 0 && requests[len(requests)-1].Status == agentstate.RequestStatusExpired
 	})
 	assert.True(t, retired, "the agent's requests expired before the reset")
 	statuses := len(rec.get().statuses)
@@ -357,7 +358,7 @@ func TestExitStartsTheAgentAgainOnItsSession(t *testing.T) {
 	call := restart.MustWait(ctx)
 	assert.Equal(t, 2*time.Second, call.Duration)
 	r1, _ := c.Request("r1")
-	assert.Equal(t, native.RequestStatusExpired, r1.Status, "the agent that asked is gone")
+	assert.Equal(t, agentstate.RequestStatusExpired, r1.Status, "the agent that asked is gone")
 	assert.False(t, c.TurnActive())
 	assert.Equal(t, conv.StatusInitializing, c.Status())
 	assert.Equal(t, []native.AgentExit{{Err: crash, Attempt: 1, Attempts: 3, Delay: 2 * time.Second}}, rec.get().exits)
@@ -434,7 +435,7 @@ func TestExitAfterALostLoginWaitsForTheLogin(t *testing.T) {
 	first := factory.Last()
 	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "one"}))
 	loggedIn.Store(false)
-	first.Sink().LoginRequired(native.LoginRequired{Agent: "Claude Code", Message: "Claude Code's login expired.", Command: "claude auth login"})
+	first.Sink().LoginRequired(agentstate.LoginRequired{Agent: "Claude Code", Message: "Claude Code's login expired.", Command: "claude auth login"})
 	first.Exit(errors.New("exit status 1: OAuth token has expired"))
 
 	retry.MustWait(ctx).Release()

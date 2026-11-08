@@ -6,70 +6,17 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/danielgtaylor/huma/v2"
-
-	"github.com/coder/agentapi/lib/util"
+	"github.com/coder/agentapi/lib/agentstate"
 )
 
 // ErrInvalidSetting is returned by ApplySettings for a value a setting
 // can't take.
 var ErrInvalidSetting = errors.New("not a value the setting can take")
 
-// PermissionMode is how freely the agent uses its tools.
-type PermissionMode string
-
-const (
-	// PermissionModeBypass: tools run without asking. The default.
-	PermissionModeBypass PermissionMode = "bypass"
-	// PermissionModeAuto: the agent's own review decides what may run
-	// (Claude Code's auto mode; Codex works in its sandbox and its auto
-	// review decides on what needs more).
-	PermissionModeAuto PermissionMode = "auto"
-	// PermissionModeAsk: tool calls that need approval come as requests.
-	PermissionModeAsk PermissionMode = "ask"
-	// PermissionModePlan: the agent looks around and proposes a plan, which
-	// comes as a plan request, before it changes anything.
-	PermissionModePlan PermissionMode = "plan"
-)
-
-var PermissionModeValues = []PermissionMode{PermissionModeBypass, PermissionModeAuto, PermissionModeAsk, PermissionModePlan}
-
-func (m PermissionMode) Schema(r huma.Registry) *huma.Schema {
-	return util.OpenAPISchema(r, "PermissionMode", PermissionModeValues)
-}
-
-// Settings are the settings of the agent's session that can change while it
-// runs. An empty field is one the agent doesn't report or, in a change, one
-// to leave as it is.
-type Settings struct {
-	// PermissionMode is empty while the agent runs in a mode of its own,
-	// e.g. Claude Code's acceptEdits.
-	PermissionMode PermissionMode `json:"permission_mode,omitempty" doc:"bypass: tools run without asking; auto: the agent's own review decides what may run; ask: tool calls that need approval come as requests; plan: the agent proposes a plan before it changes anything. Missing while the agent runs in a mode of its own, e.g. Claude Code's acceptEdits."`
-	Model          string         `json:"model,omitempty" doc:"Model: the id of one of the models GET /settings lists."`
-	Effort         string         `json:"effort,omitempty" doc:"Reasoning effort: one of the efforts GET /settings lists for the model, e.g. low, medium or high."`
-}
-
-// IsZero reports whether no setting is set.
-func (s Settings) IsZero() bool { return s == Settings{} }
-
-// Merge returns s with the fields that are set in o replaced.
-func (s Settings) Merge(o Settings) Settings {
-	if o.PermissionMode != "" {
-		s.PermissionMode = o.PermissionMode
-	}
-	if o.Model != "" {
-		s.Model = o.Model
-	}
-	if o.Effort != "" {
-		s.Effort = o.Effort
-	}
-	return s
-}
-
 // SettingOptions are the values the settings can take.
 type SettingOptions struct {
-	PermissionModes []PermissionMode `json:"permission_modes" nullable:"false" doc:"Permission modes the agent can switch to; empty when it has none (Pi)."`
-	Models          []ModelOption    `json:"models" nullable:"false" doc:"Models the agent can switch to."`
+	PermissionModes []agentstate.PermissionMode `json:"permission_modes" nullable:"false" doc:"Permission modes the agent can switch to; empty when it has none (Pi)."`
+	Models          []ModelOption               `json:"models" nullable:"false" doc:"Models the agent can switch to."`
 }
 
 // ModelOption is a model the agent can switch to.
@@ -96,7 +43,7 @@ func (o SettingOptions) Model(id string) (ModelOption, bool) {
 // takes its default one ("" for a model without a choice of effort). ok
 // is false when the effort stays: the change chooses one, or switches to
 // no model it knows, or to one that has current's effort.
-func (o SettingOptions) NewModelEffort(change, current Settings) (effort string, ok bool) {
+func (o SettingOptions) NewModelEffort(change, current agentstate.Settings) (effort string, ok bool) {
 	if change.Model == "" || change.Effort != "" {
 		return "", false
 	}
@@ -111,7 +58,7 @@ func (o SettingOptions) NewModelEffort(change, current Settings) (effort string,
 // can't take. The effort must be one of those of the model s switches to,
 // or else of current's model; with a model that isn't one of the options,
 // any effort passes.
-func (o SettingOptions) Check(s, current Settings) error {
+func (o SettingOptions) Check(s, current agentstate.Settings) error {
 	if s.PermissionMode != "" && !slices.Contains(o.PermissionModes, s.PermissionMode) {
 		if len(o.PermissionModes) == 0 {
 			return fmt.Errorf("%w: the agent has no permission modes", ErrInvalidSetting)
@@ -137,29 +84,30 @@ func (o SettingOptions) Check(s, current Settings) error {
 }
 
 // Configurable is implemented by adapters whose session settings can
-// change while the agent runs; Capabilities.Settings reports it.
+// change while the agent runs; agentstate.Capabilities.Settings reports
+// it.
 type Configurable interface {
 	// Settings reports the current settings.
-	Settings() Settings
+	Settings() agentstate.Settings
 	// SettingOptions reports the values the settings can take. It may ask
 	// the agent.
 	SettingOptions(ctx context.Context) (SettingOptions, error)
 	// ApplySettings changes the settings that are set in s and leaves the
 	// others. A value a setting can't take is an ErrInvalidSetting. An
 	// agent may apply a change from its next turn.
-	ApplySettings(ctx context.Context, s Settings) error
+	ApplySettings(ctx context.Context, s agentstate.Settings) error
 }
 
 // SettingsSink is implemented by the Sink a Conversation hands to adapters.
 // A Configurable adapter reports through it the settings the agent changed
 // by itself, e.g. when an approved plan switched the permission mode.
 type SettingsSink interface {
-	SettingsChanged(Settings)
+	SettingsChanged(agentstate.Settings)
 }
 
 // ReportSettings reports settings the agent changed by itself to sink, if
 // it is a SettingsSink.
-func ReportSettings(sink Sink, s Settings) {
+func ReportSettings(sink Sink, s agentstate.Settings) {
 	if ss, ok := sink.(SettingsSink); ok {
 		ss.SettingsChanged(s)
 	}

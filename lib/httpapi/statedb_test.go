@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/httpapi"
 	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/logctx"
@@ -97,7 +98,7 @@ func TestStateDB_RestoresConversation(t *testing.T) {
 	a.Sink().RichMessage(transcript.RichMessage{MessageID: "m1", Role: "assistant", Content: []transcript.RichContentBlock{{Type: "thinking", Thinking: "hmm"}, {Type: "text", Text: "Hi there"}}})
 	a.Sink().SessionName("Greeting")
 	a.Sink().SessionEvents([]transcript.SessionEvent{{Kind: "text"}})
-	a.Sink().RequestOpened(native.Request{ID: "perm", Kind: native.RequestKindApproval, Title: "Run ls", Options: []native.RequestOption{{ID: "allow", Label: "Allow", Kind: native.OptionKindAllow}}})
+	a.Sink().RequestOpened(agentstate.Request{ID: "perm", Kind: agentstate.RequestKindApproval, Title: "Run ls", Options: []agentstate.RequestOption{{ID: "allow", Label: "Allow", Kind: agentstate.OptionKindAllow}}})
 	_, queued := n.send("next task", "")
 	require.True(t, queued.Queued)
 
@@ -153,12 +154,12 @@ func TestStateDB_RestoresConversation(t *testing.T) {
 
 	// The request's agent is gone.
 	var reqs struct {
-		Requests []native.RequestState `json:"requests"`
+		Requests []agentstate.RequestState `json:"requests"`
 	}
 	n.do(http.MethodGet, "/requests", nil, &reqs)
 	require.Len(t, reqs.Requests, 1)
-	assert.Equal(t, native.RequestStatusExpired, reqs.Requests[0].Status)
-	assert.Equal(t, native.ResponseNotResumable, reqs.Requests[0].Capability)
+	assert.Equal(t, agentstate.RequestStatusExpired, reqs.Requests[0].Status)
+	assert.Equal(t, agentstate.ResponseNotResumable, reqs.Requests[0].Capability)
 	assert.Equal(t, http.StatusConflict, n.do(http.MethodPost, "/requests/perm/respond", map[string]any{"option_id": "allow"}, nil), "it is no longer pending")
 
 	// The queued message survived and is sent to the resumed agent.
@@ -396,12 +397,12 @@ func TestStateDB_RestoresSettings(t *testing.T) {
 	n, srv, db, err = persistentServerWith(t, path, "/work", configurableAdapter)
 	require.NoError(t, err)
 	defer stop(t, srv, db)
-	assert.Equal(t, []native.Settings{{Model: "plain"}, {PermissionMode: native.PermissionModeAsk}}, n.factory.Last().Applied())
+	assert.Equal(t, []agentstate.Settings{{Model: "plain"}, {PermissionMode: agentstate.PermissionModeAsk}}, n.factory.Last().Applied())
 	var status httpapi.StatusChangeBody
 	n.do(http.MethodGet, "/status", nil, &status)
 	require.NotNil(t, status.Settings)
 	// The model has no efforts.
-	assert.Equal(t, native.Settings{PermissionMode: native.PermissionModeAsk, Model: "plain"}, *status.Settings)
+	assert.Equal(t, agentstate.Settings{PermissionMode: agentstate.PermissionModeAsk, Model: "plain"}, *status.Settings)
 }
 
 // A conversation AgentAPI 2's PTY transport kept (here imported from a

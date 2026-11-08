@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/native"
 )
 
@@ -36,7 +37,7 @@ func (s *loopState) rateLimitsUpdated(n rateLimitsUpdatedNotification) {
 			r.LimitName = r.LimitID
 		}
 	}
-	limits := slices.DeleteFunc(slices.Clone(s.usage.RateLimits), func(l native.RateLimit) bool {
+	limits := slices.DeleteFunc(slices.Clone(s.usage.RateLimits), func(l agentstate.RateLimit) bool {
 		return l.ID == prefix+"primary" || l.ID == prefix+"secondary"
 	})
 	for id, w := range map[string]*rateLimitWindow{"primary": r.Primary, "secondary": r.Secondary} {
@@ -44,14 +45,14 @@ func (s *loopState) rateLimitsUpdated(n rateLimitsUpdatedNotification) {
 			continue
 		}
 		percent := w.UsedPercent
-		limit := native.RateLimit{ID: prefix + id, Label: native.WindowLabel(w.WindowDurationMins), UsedPercent: &percent}
+		limit := agentstate.RateLimit{ID: prefix + id, Label: native.WindowLabel(w.WindowDurationMins), UsedPercent: &percent}
 		if r.LimitName != "" && prefix != "" {
 			limit.Label = r.LimitName + " " + limit.Label
 		}
 		limit.ResetsAt = native.ResetTime(w.ResetsAt)
 		limits = append(limits, limit)
 	}
-	slices.SortFunc(limits, func(x, y native.RateLimit) int { return strings.Compare(x.ID, y.ID) })
+	slices.SortFunc(limits, func(x, y agentstate.RateLimit) int { return strings.Compare(x.ID, y.ID) })
 	s.usage.RateLimits = limits
 	s.reportUsage()
 }
@@ -62,7 +63,7 @@ func (s *loopState) contextUsed(used, size int64) {
 	if size <= 0 {
 		return
 	}
-	c := &native.ContextUsage{Used: int(used), Size: int(size)}
+	c := &agentstate.ContextUsage{Used: int(used), Size: int(size)}
 	if s.usage.Context != nil && *s.usage.Context == *c {
 		return
 	}

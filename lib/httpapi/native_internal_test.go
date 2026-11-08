@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/handoff"
 	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/logctx"
@@ -189,13 +190,13 @@ func TestNativeHandoffReplyAnswersTheOfferedRequest(t *testing.T) {
 	a := factory.Last()
 	sendUserMessage(t, srv, "do it")
 	sink := a.Sink()
-	sink.RequestOpened(native.Request{
-		ID: "r1", Kind: native.RequestKindApproval, Title: "Run ls",
-		Options: []native.RequestOption{{ID: "allow", Label: "Allow", Kind: native.OptionKindAllow}},
+	sink.RequestOpened(agentstate.Request{
+		ID: "r1", Kind: agentstate.RequestKindApproval, Title: "Run ls",
+		Options: []agentstate.RequestOption{{ID: "allow", Label: "Allow", Kind: agentstate.OptionKindAllow}},
 	})
-	sink.RequestOpened(native.Request{
-		ID: "r2", Kind: native.RequestKindApproval, Title: "Run rm",
-		Options: []native.RequestOption{{ID: "allow", Label: "Allow", Kind: native.OptionKindAllow}},
+	sink.RequestOpened(agentstate.Request{
+		ID: "r2", Kind: agentstate.RequestKindApproval, Title: "Run rm",
+		Options: []agentstate.RequestOption{{ID: "allow", Label: "Allow", Kind: agentstate.OptionKindAllow}},
 	})
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
@@ -214,9 +215,9 @@ func TestNativeHandoffReplyAnswersTheOfferedRequest(t *testing.T) {
 	// A reply the request doesn't take is invalid, and as nothing was sent
 	// a corrected one may follow. (The reply answers the question, but an
 	// approval takes one of its options.)
-	sink.RequestOpened(native.Request{
-		ID: "r3", Kind: native.RequestKindApproval, Title: "Run make",
-		Questions: []native.Question{{ID: "why", Question: "Why?", Options: []native.QuestionOption{{Label: "To build"}}}},
+	sink.RequestOpened(agentstate.Request{
+		ID: "r3", Kind: agentstate.RequestKindApproval, Title: "Run make",
+		Questions: []agentstate.Question{{ID: "why", Question: "Why?", Options: []agentstate.QuestionOption{{Label: "To build"}}}},
 	})
 	r3, ok := srv.native.Request("r3")
 	require.True(t, ok)

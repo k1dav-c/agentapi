@@ -10,9 +10,9 @@ import (
 
 	"github.com/coder/quartz"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/instanceapi"
-	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -91,20 +91,20 @@ type StatusChangeBody struct {
 	SessionName string `json:"session_name,omitempty" doc:"Name the agent gave the session: Claude Code's title (or its /rename), Codex's thread name or Pi's /name. Empty until the agent names it."`
 	// PendingRequests counts the structured requests the agent is
 	// waiting on.
-	PendingRequests int                  `json:"pending_requests,omitempty" doc:"Number of requests (approvals, questions, plans) the agent is waiting on; see GET /requests."`
-	Capabilities    *native.Capabilities `json:"capabilities,omitempty" doc:"Optional operations the agent supports."`
+	PendingRequests int                      `json:"pending_requests,omitempty" doc:"Number of requests (approvals, questions, plans) the agent is waiting on; see GET /requests."`
+	Capabilities    *agentstate.Capabilities `json:"capabilities,omitempty" doc:"Optional operations the agent supports."`
 	// LoginRequired is set while the agent can't work until the user logs
 	// in.
-	LoginRequired *native.LoginRequired `json:"login_required,omitempty" doc:"Set while the agent waits for the user to log in: the command to run in a terminal on the machine AgentAPI runs on."`
+	LoginRequired *agentstate.LoginRequired `json:"login_required,omitempty" doc:"Set while the agent waits for the user to log in: the command to run in a terminal on the machine AgentAPI runs on."`
 	// Settings is set for agents whose settings can change.
-	Settings *native.Settings `json:"settings,omitempty" doc:"The agent's permission mode, model and reasoning effort, for agents with the settings capability; see GET /settings."`
+	Settings *agentstate.Settings `json:"settings,omitempty" doc:"The agent's permission mode, model and reasoning effort, for agents with the settings capability; see GET /settings."`
 	// Usage is set once the agent reports it.
-	Usage *native.AgentUsage `json:"usage,omitempty" doc:"How full the agent's context window is and the account's rate limits, as the agent last reported them."`
+	Usage *agentstate.AgentUsage `json:"usage,omitempty" doc:"How full the agent's context window is and the account's rate limits, as the agent last reported them."`
 	// LimitStop is set while a turn a usage limit stopped holds the queue.
-	LimitStop *native.LimitStop `json:"limit_stop,omitempty" doc:"Set when the agent's last turn stopped because the account reached a usage limit, until a turn starts or the stop is dismissed (DELETE /limit)."`
+	LimitStop *agentstate.LimitStop `json:"limit_stop,omitempty" doc:"Set when the agent's last turn stopped because the account reached a usage limit, until a turn starts or the stop is dismissed (DELETE /limit)."`
 	// RetryWait is set while a failed turn waits to be tried again, which
 	// holds the queue.
-	RetryWait *native.RetryWait `json:"retry_wait,omitempty" doc:"Set when the agent's last turn failed on an upstream error that may pass (an HTTP 5xx or 429, an overloaded API) and AgentAPI tries it again at retry_at, until a turn starts or the retry is cancelled (DELETE /retry)."`
+	RetryWait *agentstate.RetryWait `json:"retry_wait,omitempty" doc:"Set when the agent's last turn failed on an upstream error that may pass (an HTTP 5xx or 429, an overloaded API) and AgentAPI tries it again at retry_at, until a turn starts or the retry is cancelled (DELETE /retry)."`
 	// Terminal says whether GET /terminal has a shell.
 	Terminal bool `json:"terminal,omitempty" doc:"A shell terminal in the agent's working directory is available at GET /terminal."`
 }
@@ -132,7 +132,7 @@ type RichMessageUpdateBody struct {
 // RequestUpdateBody is the SSE payload for a structured request that was
 // opened or changed state.
 type RequestUpdateBody struct {
-	native.RequestState
+	agentstate.RequestState
 	Seq uint64 `json:"seq" doc:"Sequence number of this change; see message_update."`
 }
 
@@ -179,14 +179,14 @@ type EventEmitter struct {
 	richSeq            []uint64
 	richMessages       []transcript.RichMessage
 	richIndex          map[richKey]int // a rich message's position, by its key
-	requests           []native.RequestState
+	requests           []agentstate.RequestState
 	requestSeq         []uint64
-	capabilities       *native.Capabilities
-	loginRequired      *native.LoginRequired
-	settings           *native.Settings
-	usage              *native.AgentUsage
-	limitStop          *native.LimitStop
-	retryWait          *native.RetryWait
+	capabilities       *agentstate.Capabilities
+	loginRequired      *agentstate.LoginRequired
+	settings           *agentstate.Settings
+	usage              *agentstate.AgentUsage
+	limitStop          *agentstate.LimitStop
+	retryWait          *agentstate.RetryWait
 	terminal           bool
 	sessionEvents      []transcript.SessionEvent
 	nextSessionEventID int
@@ -244,19 +244,19 @@ type Persister interface {
 	// changes a stored rich message (or its content) in place.
 	PutRichMessage(pos int, msg transcript.RichMessage, seq uint64)
 	AppendSessionEvents(events []transcript.SessionEvent)
-	PutRequest(state native.RequestState, seq uint64)
+	PutRequest(state agentstate.RequestState, seq uint64)
 	DeleteRequest(id string)
 	SetSeq(epoch string, seq uint64)
 	SetSessionName(name string)
 	// SetSessionRef stores what resumes the agent's session.
 	SetSessionRef(ref string)
 	// SetSettings stores the settings chosen for the session.
-	SetSettings(settings native.Settings)
+	SetSettings(settings agentstate.Settings)
 	// SetLimitStop stores the turn a usage limit stopped; nil removes it.
-	SetLimitStop(ls *native.LimitStop)
+	SetLimitStop(ls *agentstate.LimitStop)
 	// SetRetryWait stores the failed turn that waits to be tried again; nil
 	// removes it.
-	SetRetryWait(rw *native.RetryWait)
+	SetRetryWait(rw *agentstate.RetryWait)
 	// SetSeenAt stores when a client last showed the conversation.
 	SetSeenAt(at time.Time)
 	// PutTask stores the task the user's message id started, encoded as
@@ -277,7 +277,7 @@ type EmitterState struct {
 	RichMessages  []transcript.RichMessage
 	RichSeqs      []uint64
 	SessionEvents []transcript.SessionEvent
-	Requests      []native.RequestState
+	Requests      []agentstate.RequestState
 	RequestSeqs   []uint64
 	Tasks         []Task
 	TaskSeqs      []uint64

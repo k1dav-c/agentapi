@@ -14,8 +14,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
-	"github.com/coder/agentapi/lib/native"
 )
 
 // A row Load can't decode is skipped, and logged: the server still starts
@@ -25,7 +25,7 @@ func TestLoadSkipsRowsItCantRead(t *testing.T) {
 	db, err := Open(path, quiet())
 	require.NoError(t, err)
 	db.PutMessage(conv.Message{Id: 0, Message: "kept"}, 1)
-	db.PutRequest(native.RequestState{Request: native.Request{ID: "r1"}, Status: native.RequestStatusResolved}, 2)
+	db.PutRequest(agentstate.RequestState{Request: agentstate.Request{ID: "r1"}, Status: agentstate.RequestStatusResolved}, 2)
 	db.Flush()
 	for _, query := range []string{
 		`INSERT INTO messages (id, seq, data) VALUES (1, 3, '{"id": "not a number"}')`,

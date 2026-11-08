@@ -5,6 +5,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/native"
@@ -158,7 +159,7 @@ type ReorderQueueRequest struct {
 
 type RequestsResponse struct {
 	Body struct {
-		Requests []native.RequestState `json:"requests" nullable:"false" doc:"Pending requests and the most recently closed ones, oldest first."`
+		Requests []agentstate.RequestState `json:"requests" nullable:"false" doc:"Pending requests and the most recently closed ones, oldest first."`
 	}
 }
 
@@ -167,24 +168,24 @@ type RequestPath struct {
 }
 
 type RequestResponse struct {
-	Body native.RequestState
+	Body agentstate.RequestState
 }
 
 type RespondRequest struct {
 	ID   string `path:"id" doc:"Request identifier."`
-	Body native.Response
+	Body agentstate.Response
 }
 
 // SettingsResponse is the agent's settings and the values they can take.
 type SettingsResponse struct {
 	Body struct {
-		Settings native.Settings       `json:"settings" doc:"Current settings; a setting the agent doesn't report is missing."`
+		Settings agentstate.Settings   `json:"settings" doc:"Current settings; a setting the agent doesn't report is missing."`
 		Options  native.SettingOptions `json:"options" doc:"Values the settings can take."`
 	}
 }
 
 type UpdateSettingsRequest struct {
-	Body native.Settings
+	Body agentstate.Settings
 }
 
 type InterruptResponse struct {

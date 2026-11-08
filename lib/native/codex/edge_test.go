@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/agentio"
 	"github.com/coder/agentapi/lib/native/nativetest"
@@ -203,16 +204,16 @@ func TestCommandApprovalOptions(t *testing.T) {
 	assert.Equal(t, "needs network\nNetwork access to example.com (https)\nWorking directory: /work", req.Detail)
 	assert.Equal(t, []string{"accept", "acceptForSession", "acceptWithExecpolicyAmendment", "applyNetworkPolicyAmendment", "decline", "cancel"}, optionIDs(req))
 
-	require.ErrorIs(t, h.a.Respond(context.Background(), id, native.Response{OptionID: "maybe"}), native.ErrInvalidResponse)
-	require.ErrorIs(t, h.a.Respond(context.Background(), "nope", native.Response{OptionID: "accept"}), native.ErrRequestNotFound)
+	require.ErrorIs(t, h.a.Respond(context.Background(), id, agentstate.Response{OptionID: "maybe"}), native.ErrInvalidResponse)
+	require.ErrorIs(t, h.a.Respond(context.Background(), "nope", agentstate.Response{OptionID: "accept"}), native.ErrRequestNotFound)
 	h.act("respond", func(ctx context.Context) error {
-		return h.a.Respond(ctx, id, native.Response{OptionID: "applyNetworkPolicyAmendment"})
+		return h.a.Respond(ctx, id, agentstate.Response{OptionID: "applyNetworkPolicyAmendment"})
 	})
 	sent := h.expectSent("")
 	assert.JSONEq(t, `{"decision":{"applyNetworkPolicyAmendment":{"network_policy_amendment":{"action":"allow","host":"example.com"}}}}`, string(sent.Result))
 	h.settle()
 	require.NoError(t, h.err("respond"))
-	require.ErrorIs(t, h.a.Respond(context.Background(), id, native.Response{OptionID: "accept"}), native.ErrRequestNotFound,
+	require.ErrorIs(t, h.a.Respond(context.Background(), id, agentstate.Response{OptionID: "accept"}), native.ErrRequestNotFound,
 		"a request is answered once")
 }
 
@@ -226,8 +227,8 @@ func TestRequestWithdrawnByCodex(t *testing.T) {
 	id := h.requestID(json.RawMessage("3"))
 	req, ok := h.rec.Request(id)
 	require.True(t, ok)
-	assert.Equal(t, []native.Question{{ID: "q", Header: "Q", Question: "Secret?", FreeText: true, Secret: true}}, req.Questions)
-	require.ErrorIs(t, h.a.Respond(context.Background(), id, native.Response{}), native.ErrInvalidResponse)
+	assert.Equal(t, []agentstate.Question{{ID: "q", Header: "Q", Question: "Secret?", FreeText: true, Secret: true}}, req.Questions)
+	require.ErrorIs(t, h.a.Respond(context.Background(), id, agentstate.Response{}), native.ErrInvalidResponse)
 
 	h.feedJSON(`{"method":"serverRequest/resolved","params":{"threadId":"` + testThread + `","requestId":3}}`)
 	h.sync()
@@ -235,7 +236,7 @@ func TestRequestWithdrawnByCodex(t *testing.T) {
 	result, ok := h.rec.Message("result-call_1", "user")
 	require.True(t, ok)
 	assert.Equal(t, "failed", result.Content[0].Status)
-	require.ErrorIs(t, h.a.Respond(context.Background(), id, native.Response{Answers: map[string][]string{"q": {"x"}}}), native.ErrRequestNotFound)
+	require.ErrorIs(t, h.a.Respond(context.Background(), id, agentstate.Response{Answers: map[string][]string{"q": {"x"}}}), native.ErrRequestNotFound)
 }
 
 func TestElicitationForm(t *testing.T) {
@@ -252,19 +253,19 @@ func TestElicitationForm(t *testing.T) {
 	id := h.requestID(json.RawMessage("1"))
 	req, ok := h.rec.Request(id)
 	require.True(t, ok)
-	assert.Equal(t, native.RequestKindQuestion, req.Kind)
+	assert.Equal(t, agentstate.RequestKindQuestion, req.Kind)
 	assert.Equal(t, []string{"decline", "cancel"}, optionIDs(req))
 	require.Len(t, req.Questions, 4)
 	assert.Equal(t, "env", req.Questions[0].ID)
-	assert.Equal(t, []native.QuestionOption{{Label: "Production"}, {Label: "Development"}}, req.Questions[0].Options)
+	assert.Equal(t, []agentstate.QuestionOption{{Label: "Production"}, {Label: "Development"}}, req.Questions[0].Options)
 	assert.True(t, req.Questions[1].FreeText, "port")
 	assert.True(t, req.Questions[2].MultiSelect, "tags")
 
-	require.ErrorIs(t, h.a.Respond(context.Background(), id, native.Response{Answers: map[string][]string{
+	require.ErrorIs(t, h.a.Respond(context.Background(), id, agentstate.Response{Answers: map[string][]string{
 		"env": {"Production"}, "port": {"many"}, "tls": {"Yes"}, "tags": {"a"},
 	}}), native.ErrInvalidResponse)
 	h.act("respond", func(ctx context.Context) error {
-		return h.a.Respond(ctx, id, native.Response{Answers: map[string][]string{
+		return h.a.Respond(ctx, id, agentstate.Response{Answers: map[string][]string{
 			"env": {"Production"}, "port": {"5432"}, "tls": {"Yes"}, "tags": {"a", "b"},
 		}})
 	})
@@ -501,14 +502,14 @@ func TestPermissionsRequest(t *testing.T) {
 	id := h.requestID(json.RawMessage("2"))
 	req, ok := h.rec.Request(id)
 	require.True(t, ok)
-	assert.Equal(t, native.RequestKindApproval, req.Kind)
+	assert.Equal(t, agentstate.RequestKindApproval, req.Kind)
 	assert.Equal(t, "Grant Codex additional permissions", req.Title)
 	assert.Equal(t, "needs the network\nRequested: {\"network\":{\"enabled\":true}}", req.Detail)
 	assert.Equal(t, "call_p", req.ToolUseID)
 	assert.JSONEq(t, `{"network":{"enabled":true}}`, string(req.Input))
 	assert.Equal(t, []string{"turn", "session", "decline"}, optionIDs(req))
 
-	h.act("respond", func(ctx context.Context) error { return h.a.Respond(ctx, id, native.Response{OptionID: "session"}) })
+	h.act("respond", func(ctx context.Context) error { return h.a.Respond(ctx, id, agentstate.Response{OptionID: "session"}) })
 	sent := h.expectSent("")
 	assert.JSONEq(t, `{"permissions":{"network":{"enabled":true}},"scope":"session"}`, string(sent.Result))
 	h.settle()
@@ -524,12 +525,12 @@ func TestURLElicitation(t *testing.T) {
 	id := h.requestID(json.RawMessage("1"))
 	req, ok := h.rec.Request(id)
 	require.True(t, ok)
-	assert.Equal(t, native.RequestKindApproval, req.Kind)
+	assert.Equal(t, agentstate.RequestKindApproval, req.Kind)
 	assert.Equal(t, "Authorize GitHub", req.Title)
 	assert.Equal(t, "Open https://github.com/login/device", req.Detail)
 	assert.Equal(t, []string{"accept", "decline", "cancel"}, optionIDs(req))
 
-	h.act("respond", func(ctx context.Context) error { return h.a.Respond(ctx, id, native.Response{OptionID: "accept"}) })
+	h.act("respond", func(ctx context.Context) error { return h.a.Respond(ctx, id, agentstate.Response{OptionID: "accept"}) })
 	sent := h.expectSent("")
 	assert.JSONEq(t, `{"action":"accept"}`, string(sent.Result))
 	h.settle()
@@ -564,7 +565,7 @@ func TestOfferedOptionsAnswerTheRequest(t *testing.T) {
 		require.NotNil(t, r)
 		require.NotEmpty(t, req.Options, req.Title)
 		for _, opt := range req.Options {
-			_, err := r.result(native.Response{OptionID: opt.ID})
+			_, err := r.result(agentstate.Response{OptionID: opt.ID})
 			assert.NoError(t, err, "%s: %s", req.Title, opt.ID)
 		}
 		assert.Len(t, r.results, len(req.Options), "%s: every result is offered", req.Title)
@@ -583,7 +584,7 @@ func TestSecretAnswerIsRedacted(t *testing.T) {
 	h.sync()
 	id := h.requestID(json.RawMessage("3"))
 	h.act("respond", func(ctx context.Context) error {
-		return h.a.Respond(ctx, id, native.Response{Answers: map[string][]string{"user": {"ada"}, "token": {"hunter2"}}})
+		return h.a.Respond(ctx, id, agentstate.Response{Answers: map[string][]string{"user": {"ada"}, "token": {"hunter2"}}})
 	})
 	sent := h.expectSent("")
 	assert.JSONEq(t, `{"answers":{"user":{"answers":["ada"]},"token":{"answers":["hunter2"]}}}`, string(sent.Result))
@@ -611,7 +612,7 @@ func TestAnsweredQuestionThenTurnEnd(t *testing.T) {
 		"questions":[{"id":"q","header":"Q","question":"Go on?","isOther":true,"isSecret":false,"options":null}]}}`)
 	h.sync()
 	ctx, cancel := context.WithCancel(context.Background())
-	require.NoError(t, h.a.Respond(ctx, h.requestID(json.RawMessage("4")), native.Response{Answers: map[string][]string{"q": {"yes"}}}))
+	require.NoError(t, h.a.Respond(ctx, h.requestID(json.RawMessage("4")), agentstate.Response{Answers: map[string][]string{"q": {"yes"}}}))
 	// Once the answer is written, the context's end changes nothing.
 	cancel()
 	h.expectSent("")
@@ -653,7 +654,7 @@ func TestOpenRequestsDismissedAtTurnEnd(t *testing.T) {
 		"reason":null,"permissions":{"network":{"enabled":true}}}}`)
 	h.feedJSON(`{"id":9,"method":"item/commandExecution/requestApproval","params":{"threadId":"` + testThread + `","turnId":"turn-1","itemId":"exec-1","command":"make","cwd":"/work"}}`)
 	h.sync()
-	require.NoError(t, h.a.Respond(context.Background(), h.requestID(json.RawMessage("9")), native.Response{OptionID: "accept"}))
+	require.NoError(t, h.a.Respond(context.Background(), h.requestID(json.RawMessage("9")), agentstate.Response{OptionID: "accept"}))
 	h.expectSent("")
 
 	h.completeTurn("turn-1", "interrupted", "")
@@ -665,7 +666,7 @@ func TestOpenRequestsDismissedAtTurnEnd(t *testing.T) {
 	assert.JSONEq(t, `{"action":"cancel"}`, dismissed["7"])
 	assert.JSONEq(t, `{"permissions":{},"scope":"turn"}`, dismissed["8"])
 	h.expectNothingSent()
-	require.ErrorIs(t, h.a.Respond(context.Background(), h.requestID(json.RawMessage("7")), native.Response{OptionID: "decline"}),
+	require.ErrorIs(t, h.a.Respond(context.Background(), h.requestID(json.RawMessage("7")), agentstate.Response{OptionID: "decline"}),
 		native.ErrRequestNotFound)
 }
 
@@ -1061,9 +1062,9 @@ func TestUnconfirmedAnswerIsNotSentTwice(t *testing.T) {
 	}))
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
-	err := h.a.Respond(ctx, id, native.Response{OptionID: "accept"})
+	err := h.a.Respond(ctx, id, agentstate.Response{OptionID: "accept"})
 	require.ErrorIs(t, err, native.ErrUnconfirmed)
-	require.ErrorIs(t, h.a.Respond(context.Background(), id, native.Response{OptionID: "decline"}), native.ErrRequestNotFound,
+	require.ErrorIs(t, h.a.Respond(context.Background(), id, agentstate.Response{OptionID: "decline"}), native.ErrRequestNotFound,
 		"a second answer could contradict the first")
 
 	close(release)
@@ -1083,7 +1084,7 @@ func TestUnconfirmedAnswerIsNotSentTwice(t *testing.T) {
 	}))
 	ctx, cancel = context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
-	require.ErrorIs(t, h.a.Respond(ctx, id, native.Response{OptionID: "accept"}), native.ErrUnconfirmed)
+	require.ErrorIs(t, h.a.Respond(ctx, id, agentstate.Response{OptionID: "accept"}), native.ErrUnconfirmed)
 	// Whether that answer reached app-server, the adapter can't tell: the
 	// end of the turn sends no dismissal.
 	close(blocked)

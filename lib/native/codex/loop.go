@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/coder/agentapi/lib/agentlog/codexlog"
+	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/agentio"
@@ -32,7 +33,7 @@ type loopState struct {
 	// interrupt runs from when app-server took the interrupt of the turn.
 	interrupt agentio.InterruptDeadline
 	// usage is what app-server reported of the context and rate limits.
-	usage native.AgentUsage
+	usage agentstate.AgentUsage
 	// spawns holds the spawn_agent tool calls of the subagents still
 	// running, by their thread, to end once they are done.
 	spawns map[string]*itemState

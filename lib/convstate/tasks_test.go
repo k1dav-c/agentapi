@@ -12,8 +12,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
-	"github.com/coder/agentapi/lib/native"
 )
 
 func taskMessages(start time.Time, entries ...string) []conv.Message {
@@ -96,7 +96,7 @@ func TestTaskTracker(t *testing.T) {
 	msgs = append(msgs, conv.Message{Id: 6, Role: conv.RoleUser, Message: "Go on", Time: end})
 	take(msgs)
 	status(running, end)
-	limit := &native.LimitStop{Message: "limit", StoppedAt: end.Add(time.Second)}
+	limit := &agentstate.LimitStop{Message: "limit", StoppedAt: end.Add(time.Second)}
 	status(StatusChangeBody{Status: AgentStatusStable, LimitStop: limit}, end.Add(time.Second))
 	assert.Equal(t, TaskStatusLimited, tr.tasks[2].Status)
 	assert.Equal(t, limit, tr.tasks[2].Limit)
@@ -266,10 +266,10 @@ func TestEventEmitterMessageInGracePeriod(t *testing.T) {
 			e.EmitStatus(conv.StatusChanging)
 			// The agent waits on an approval and is interrupted: the
 			// request is withdrawn, and the agent idle.
-			approval := native.RequestState{Request: native.Request{ID: "perm-1", Kind: native.RequestKindApproval}, Status: native.RequestStatusPending}
+			approval := agentstate.RequestState{Request: agentstate.Request{ID: "perm-1", Kind: agentstate.RequestKindApproval}, Status: agentstate.RequestStatusPending}
 			e.EmitRequest(approval)
 			e.EmitStatus(conv.StatusStable)
-			approval.Status = native.RequestStatusWithdrawn
+			approval.Status = agentstate.RequestStatusWithdrawn
 			e.EmitRequest(approval)
 
 			tc.send(e, taskMessages(start, ">Rebuild the release", "Interrupted", ">Ask me which checks to run"))
@@ -424,7 +424,7 @@ func TestTaskThatWaitsToBeTriedAgainFailed(t *testing.T) {
 	take(taskMessages(start, ">Deploy"))
 	tr.statusChanged(StatusChangeBody{Status: AgentStatusRunning}, start)
 	end := start.Add(time.Minute)
-	retry := &native.RetryWait{Message: "API Error: 502 Bad Gateway", StoppedAt: end, Attempt: 1, Attempts: 3, RetryAt: end.Add(30 * time.Second)}
+	retry := &agentstate.RetryWait{Message: "API Error: 502 Bad Gateway", StoppedAt: end, Attempt: 1, Attempts: 3, RetryAt: end.Add(30 * time.Second)}
 	tr.statusChanged(StatusChangeBody{Status: AgentStatusStable, RetryWait: retry}, end)
 	require.Len(t, tr.tasks, 1)
 	assert.Equal(t, TaskStatusFailed, tr.tasks[0].Status)

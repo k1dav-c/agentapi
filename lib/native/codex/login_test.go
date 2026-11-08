@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/native"
 )
 
@@ -69,7 +70,7 @@ func TestLoginLostMidTurn(t *testing.T) {
 	h.feedJSON(`{"method":"error","params":{"error":` + final + `,"willRetry":false,"threadId":"` + testThread + `","turnId":"turn-1"}}`)
 	h.completeTurn("turn-1", "failed", `,"error":`+final)
 	s := snapshot(h.rec)
-	assert.Equal(t, []native.LoginRequired{loginHint}, s.logins, "reported once")
+	assert.Equal(t, []agentstate.LoginRequired{loginHint}, s.logins, "reported once")
 	require.Len(t, s.completions, 1)
 	assert.Contains(t, s.completions[0].Error, "401 Unauthorized")
 	assert.Less(t, slices.Index(s.log, "login_required"), slices.Index(s.log, "turn_completed:error"))

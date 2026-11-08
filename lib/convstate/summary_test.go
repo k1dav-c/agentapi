@@ -8,9 +8,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/instanceapi"
-	"github.com/coder/agentapi/lib/native"
 )
 
 // summaries returns the summaries among events.
@@ -50,19 +50,19 @@ func TestSummary(t *testing.T) {
 
 	// What the agent waits for, the most pressing first.
 	e.EmitStatus(conv.StatusStable)
-	e.SetLimitStop(&native.LimitStop{Message: "limit", StoppedAt: start})
+	e.SetLimitStop(&agentstate.LimitStop{Message: "limit", StoppedAt: start})
 	assert.Equal(t, AttentionLimit, e.Summary().Attention)
-	e.EmitRequest(native.RequestState{Request: native.Request{ID: "r1"}, Status: native.RequestStatusPending})
+	e.EmitRequest(agentstate.RequestState{Request: agentstate.Request{ID: "r1"}, Status: agentstate.RequestStatusPending})
 	assert.Equal(t, AttentionRequest, e.Summary().Attention)
 	assert.Equal(t, 1, e.Summary().PendingRequests)
-	e.SetLoginRequired(&native.LoginRequired{Agent: "Claude Code", Command: "claude auth login"})
+	e.SetLoginRequired(&agentstate.LoginRequired{Agent: "Claude Code", Command: "claude auth login"})
 	assert.Equal(t, AttentionLogin, e.Summary().Attention)
 	e.SetLoginRequired(nil)
-	e.EmitRequest(native.RequestState{Request: native.Request{ID: "r1"}, Status: native.RequestStatusResolved})
+	e.EmitRequest(agentstate.RequestState{Request: agentstate.Request{ID: "r1"}, Status: agentstate.RequestStatusResolved})
 	e.SetLimitStop(nil)
 	assert.Equal(t, AttentionNone, e.Summary().Attention)
 	// A failed turn that waits to be tried again needs nothing of the user.
-	retry := &native.RetryWait{Message: "API Error: 502 Bad Gateway", StoppedAt: start, Attempt: 1, Attempts: 3}
+	retry := &agentstate.RetryWait{Message: "API Error: 502 Bad Gateway", StoppedAt: start, Attempt: 1, Attempts: 3}
 	e.SetRetryWait(retry)
 	assert.Equal(t, AttentionNone, e.Summary().Attention)
 	assert.Equal(t, retry, e.Summary().RetryWait)
@@ -142,7 +142,7 @@ func TestSummaryOncePerChange(t *testing.T) {
 	assert.Equal(t, TaskStatusCompleted, got[0].Task.Status)
 
 	// A request is a request update and a status change.
-	e.EmitRequest(native.RequestState{Request: native.Request{ID: "r1", Title: "Run make"}, Status: native.RequestStatusPending})
+	e.EmitRequest(agentstate.RequestState{Request: agentstate.Request{ID: "r1", Title: "Run make"}, Status: agentstate.RequestStatusPending})
 	got = summaries(t, drain(ch))
 	require.Len(t, got, 1)
 	assert.Equal(t, AttentionRequest, got[0].Attention)
@@ -206,11 +206,11 @@ func TestSummaryRequest(t *testing.T) {
 	e := NewEventEmitter()
 	assert.Nil(t, e.Summary().Request)
 	start := time.Date(2026, 10, 26, 9, 0, 0, 0, time.UTC)
-	e.EmitRequest(native.RequestState{Request: native.Request{ID: "r2", Kind: native.RequestKindQuestion, Title: "Which fix?", CreatedAt: start.Add(time.Minute)}, Status: native.RequestStatusPending})
-	e.EmitRequest(native.RequestState{Request: native.Request{ID: "r1", Kind: native.RequestKindApproval, Title: "Run: rm -rf build", CreatedAt: start}, Status: native.RequestStatusPending})
+	e.EmitRequest(agentstate.RequestState{Request: agentstate.Request{ID: "r2", Kind: agentstate.RequestKindQuestion, Title: "Which fix?", CreatedAt: start.Add(time.Minute)}, Status: agentstate.RequestStatusPending})
+	e.EmitRequest(agentstate.RequestState{Request: agentstate.Request{ID: "r1", Kind: agentstate.RequestKindApproval, Title: "Run: rm -rf build", CreatedAt: start}, Status: agentstate.RequestStatusPending})
 	request := e.Summary().Request
 	require.NotNil(t, request)
-	assert.Equal(t, SummaryRequest{ID: "r1", Kind: native.RequestKindApproval, Title: "Run: rm -rf build", CreatedAt: start}, *request)
-	e.EmitRequest(native.RequestState{Request: native.Request{ID: "r1", Kind: native.RequestKindApproval, Title: "Run: rm -rf build", CreatedAt: start}, Status: native.RequestStatusResolved})
+	assert.Equal(t, SummaryRequest{ID: "r1", Kind: agentstate.RequestKindApproval, Title: "Run: rm -rf build", CreatedAt: start}, *request)
+	e.EmitRequest(agentstate.RequestState{Request: agentstate.Request{ID: "r1", Kind: agentstate.RequestKindApproval, Title: "Run: rm -rf build", CreatedAt: start}, Status: agentstate.RequestStatusResolved})
 	assert.Equal(t, "r2", e.Summary().Request.ID)
 }

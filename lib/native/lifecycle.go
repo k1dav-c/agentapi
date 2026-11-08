@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
 )
 
@@ -103,7 +104,7 @@ func (c *Conversation) launch(ctx context.Context, gen int, resume Resume) error
 
 // markStartedLocked records that the agent started, with caps and
 // settings: it accepts turns, and no start waits for a login any more.
-func (c *Conversation) markStartedLocked(caps Capabilities, settings Settings) {
+func (c *Conversation) markStartedLocked(caps agentstate.Capabilities, settings agentstate.Settings) {
 	c.started = true
 	c.ran = true
 	c.caps = caps
@@ -145,10 +146,10 @@ func (c *Conversation) sendInitialPrompt(ctx context.Context, turn pendingTurn) 
 // applyChosen gives the new adapter of generation gen the settings chosen
 // for the session, and returns its settings. A setting it can't take is
 // reported and left to the agent.
-func (c *Conversation) applyChosen(ctx context.Context, gen int, adapter Adapter, caps Capabilities) Settings {
+func (c *Conversation) applyChosen(ctx context.Context, gen int, adapter Adapter, caps agentstate.Capabilities) agentstate.Settings {
 	configurable, ok := adapter.(Configurable)
 	if !ok || !caps.Settings {
-		return Settings{}
+		return agentstate.Settings{}
 	}
 	c.mu.Lock()
 	chosen := c.chosen
@@ -156,7 +157,7 @@ func (c *Conversation) applyChosen(ctx context.Context, gen int, adapter Adapter
 	current := configurable.Settings()
 	// One at a time, so that one failure doesn't stop the others; the
 	// model goes first, as the effort depends on it.
-	for _, change := range []Settings{
+	for _, change := range []agentstate.Settings{
 		{Model: chosen.Model},
 		{Effort: chosen.Effort},
 		{PermissionMode: chosen.PermissionMode},
@@ -180,7 +181,7 @@ func (c *Conversation) applyChosen(ctx context.Context, gen int, adapter Adapter
 }
 
 // settingName names the setting that is set in s.
-func settingName(s Settings) string {
+func settingName(s agentstate.Settings) string {
 	switch {
 	case s.PermissionMode != "":
 		return fmt.Sprintf("permission mode %s", s.PermissionMode)

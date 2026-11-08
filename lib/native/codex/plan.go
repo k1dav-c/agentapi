@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/native"
 )
 
@@ -46,7 +47,7 @@ type collaborationModeSettings struct {
 
 // collaboration returns the collaboration mode to send for mode, on the
 // model and effort of s.
-func collaboration(mode string, s native.Settings) *collaborationMode {
+func collaboration(mode string, s agentstate.Settings) *collaborationMode {
 	c := &collaborationMode{Mode: mode, Settings: collaborationModeSettings{Model: s.Model}}
 	if s.Effort != "" {
 		effort := s.Effort
@@ -57,22 +58,22 @@ func collaboration(mode string, s native.Settings) *collaborationMode {
 
 // implementOptions are the ways to implement a plan: one per permission
 // mode, whose name follows optionImplement in the ID.
-var implementOptions = []native.RequestOption{
-	{ID: optionImplement + string(native.PermissionModeBypass), Label: "Yes, and bypass permissions", Description: "Codex carries out the plan without approvals or sandbox.", Kind: native.OptionKindAllow},
-	{ID: optionImplement + string(native.PermissionModeAuto), Label: "Yes, with auto review", Description: "Codex works in its sandbox, and its auto review decides on what needs more.", Kind: native.OptionKindAllow},
-	{ID: optionImplement + string(native.PermissionModeAsk), Label: "Yes, and ask before commands", Description: "Codex asks before it runs a command it doesn't trust.", Kind: native.OptionKindAllow},
+var implementOptions = []agentstate.RequestOption{
+	{ID: optionImplement + string(agentstate.PermissionModeBypass), Label: "Yes, and bypass permissions", Description: "Codex carries out the plan without approvals or sandbox.", Kind: agentstate.OptionKindAllow},
+	{ID: optionImplement + string(agentstate.PermissionModeAuto), Label: "Yes, with auto review", Description: "Codex works in its sandbox, and its auto review decides on what needs more.", Kind: agentstate.OptionKindAllow},
+	{ID: optionImplement + string(agentstate.PermissionModeAsk), Label: "Yes, and ask before commands", Description: "Codex asks before it runs a command it doesn't trust.", Kind: agentstate.OptionKindAllow},
 }
 
 // implementOption returns the index of the implementing option with id, or
 // -1.
 func implementOption(id string) int {
-	return slices.IndexFunc(implementOptions, func(o native.RequestOption) bool { return o.ID == id })
+	return slices.IndexFunc(implementOptions, func(o agentstate.RequestOption) bool { return o.ID == id })
 }
 
 // planRequest is the request that asks whether, and in which permission
 // mode, to implement plan. The mode the thread had before the plan comes
 // first.
-func (a *Adapter) planRequest(turnID, plan string) native.Request {
+func (a *Adapter) planRequest(turnID, plan string) agentstate.Request {
 	a.mu.Lock()
 	before := a.settings.PermissionMode
 	a.mu.Unlock()
@@ -81,14 +82,14 @@ func (a *Adapter) planRequest(turnID, plan string) native.Request {
 		first := options[i]
 		options = slices.Insert(slices.Delete(options, i, i+1), 0, first)
 	}
-	return native.Request{
+	return agentstate.Request{
 		ID:       a.prefix + "-plan-" + turnID,
-		Kind:     native.RequestKindPlan,
+		Kind:     agentstate.RequestKindPlan,
 		Title:    "Implement this plan?",
 		Detail:   plan,
 		Feedback: true,
-		Options: append(options, native.RequestOption{
-			ID: optionKeepPlanning, Label: "No, keep planning", Description: "Say what to change, and Codex revises the plan.", Kind: native.OptionKindDeny,
+		Options: append(options, agentstate.RequestOption{
+			ID: optionKeepPlanning, Label: "No, keep planning", Description: "Say what to change, and Codex revises the plan.", Kind: agentstate.OptionKindDeny,
 		}),
 	}
 }
@@ -107,7 +108,7 @@ func (s *loopState) awaitPlanDecision(t *turnState) {
 // answerPlan answers the plan request: implement the plan in the mode the
 // answer picks, revise it with the feedback, or end the turn when the user
 // wants to go on planning without saying how.
-func (a *Adapter) answerPlan(ctx context.Context, requestID string, response native.Response) error {
+func (a *Adapter) answerPlan(ctx context.Context, requestID string, response agentstate.Response) error {
 	feedback := strings.TrimSpace(response.Text)
 	implement := implementOption(response.OptionID) >= 0
 	if !implement && response.OptionID != optionKeepPlanning {
@@ -126,7 +127,7 @@ func (a *Adapter) answerPlan(ctx context.Context, requestID string, response nat
 	case implement:
 		// If the turn doesn't start, the thread still plans, and the
 		// answer can be tried again.
-		mode := native.PermissionMode(strings.TrimPrefix(response.OptionID, optionImplement))
+		mode := agentstate.PermissionMode(strings.TrimPrefix(response.OptionID, optionImplement))
 		if err = a.startTurn(ctx, native.Input{Text: implementPrompt}, mode); err == nil {
 			err = a.inLoop(ctx, a.reportSettings)
 		}

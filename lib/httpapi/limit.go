@@ -60,7 +60,7 @@ func (s *Server) continueLimited(_ context.Context, input *ContinueRequest) (*In
 		return nil, limitStopError(native.ErrNoLimitStop)
 	}
 	if input.Body.At == ContinueAtReset {
-		at := ls.ContinueAtReset()
+		at := native.ContinueAtReset(ls)
 		if at == nil {
 			return nil, huma.Error409Conflict("the agent didn't say when the limit resets")
 		}

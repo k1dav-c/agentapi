@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/native"
 )
 
@@ -18,19 +19,19 @@ func TestResponseTakesOfferedOptions(t *testing.T) {
 	// The session didn't start in bypassPermissions, so approving the
 	// plan doesn't offer to go back to it.
 	plan := newPendingRequest("r1", canUseTool{ToolName: toolExitPlanMode, Input: []byte(`{"plan":"x"}`)}, false)
-	_, err := plan.response(native.Response{OptionID: optionBypass})
+	_, err := plan.response(agentstate.Response{OptionID: optionBypass})
 	require.ErrorIs(t, err, native.ErrInvalidResponse)
-	out, err := plan.response(native.Response{OptionID: optionAcceptEdits})
+	out, err := plan.response(agentstate.Response{OptionID: optionAcceptEdits})
 	require.NoError(t, err)
 	assert.Equal(t, "allow", out["behavior"])
 
 	// Without suggestions there is no "allow always".
 	approval := newPendingRequest("r2", canUseTool{ToolName: "Bash", Input: []byte(`{"command":"ls"}`)}, true)
 	for _, id := range []string{optionAllowAlways, optionBypass, ""} {
-		_, err := approval.response(native.Response{OptionID: id})
+		_, err := approval.response(agentstate.Response{OptionID: id})
 		require.ErrorIs(t, err, native.ErrInvalidResponse, id)
 	}
-	out, err = approval.response(native.Response{OptionID: optionDeny, Text: "no"})
+	out, err = approval.response(agentstate.Response{OptionID: optionDeny, Text: "no"})
 	require.NoError(t, err)
 	assert.Equal(t, "no", out["message"])
 }

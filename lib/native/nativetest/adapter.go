@@ -6,6 +6,7 @@ import (
 	"errors"
 	"sync"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
 )
@@ -17,13 +18,13 @@ var ErrClosed = errors.New("nativetest: adapter closed")
 // Response is a recorded Respond call.
 type Response struct {
 	RequestID string
-	Response  native.Response
+	Response  agentstate.Response
 }
 
 // Adapter records the calls it receives. Tests play the agent's side
 // through Sink.
 type Adapter struct {
-	Caps native.Capabilities
+	Caps agentstate.Capabilities
 	// Ref is reported with Sink.SessionRef when the adapter starts.
 	Ref string
 	// ResumeRef is the ref the factory created the adapter with.
@@ -59,10 +60,10 @@ type Adapter struct {
 	// checks against. Set Caps.Settings for the conversation to use them.
 	Options native.SettingOptions
 	// Current are the settings the agent starts with.
-	Current native.Settings
+	Current agentstate.Settings
 	// Learned is merged into Current by SettingOptions, as an agent that
 	// learns with its options (Codex: a model's default effort) does.
-	Learned native.Settings
+	Learned agentstate.Settings
 	// SettingsErr is returned by ApplySettings.
 	SettingsErr error
 	// OnCall, if set, runs first thing in every method of the adapter's
@@ -75,7 +76,7 @@ type Adapter struct {
 	steers     []native.Input
 	interrupts int
 	responses  []Response
-	applied    []native.Settings
+	applied    []agentstate.Settings
 	done       chan error
 	once       sync.Once
 	closed     bool
@@ -91,7 +92,7 @@ var (
 // and images.
 func New() *Adapter {
 	return &Adapter{
-		Caps:          native.Capabilities{Steer: true, Interrupt: true, Resume: true, Images: true},
+		Caps:          agentstate.Capabilities{Steer: true, Interrupt: true, Resume: true, Images: true},
 		AutoStartTurn: true,
 		done:          make(chan error, 1),
 		closing:       make(chan struct{}),
@@ -178,7 +179,7 @@ func (a *Adapter) Interrupt(context.Context) error {
 	return a.InterruptErr
 }
 
-func (a *Adapter) Respond(ctx context.Context, requestID string, response native.Response) error {
+func (a *Adapter) Respond(ctx context.Context, requestID string, response agentstate.Response) error {
 	a.called("Respond")
 	if a.OnRespond != nil {
 		a.OnRespond(ctx)
@@ -192,7 +193,7 @@ func (a *Adapter) Respond(ctx context.Context, requestID string, response native
 	return nil
 }
 
-func (a *Adapter) Capabilities() native.Capabilities {
+func (a *Adapter) Capabilities() agentstate.Capabilities {
 	a.called("Capabilities")
 	return a.Caps
 }
@@ -205,7 +206,7 @@ func (a *Adapter) Compact(ctx context.Context) error {
 	return nil
 }
 
-func (a *Adapter) Settings() native.Settings {
+func (a *Adapter) Settings() agentstate.Settings {
 	a.called("Settings")
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -220,7 +221,7 @@ func (a *Adapter) SettingOptions(context.Context) (native.SettingOptions, error)
 	return a.Options, nil
 }
 
-func (a *Adapter) ApplySettings(_ context.Context, s native.Settings) error {
+func (a *Adapter) ApplySettings(_ context.Context, s agentstate.Settings) error {
 	a.called("ApplySettings")
 	if a.SettingsErr != nil {
 		return a.SettingsErr
@@ -240,7 +241,7 @@ func (a *Adapter) ApplySettings(_ context.Context, s native.Settings) error {
 }
 
 // ChangeSettings plays the agent changing its settings by itself.
-func (a *Adapter) ChangeSettings(s native.Settings) {
+func (a *Adapter) ChangeSettings(s agentstate.Settings) {
 	a.mu.Lock()
 	a.Current = s
 	sink := a.sink
@@ -249,10 +250,10 @@ func (a *Adapter) ChangeSettings(s native.Settings) {
 }
 
 // Applied returns the recorded ApplySettings calls that succeeded.
-func (a *Adapter) Applied() []native.Settings {
+func (a *Adapter) Applied() []agentstate.Settings {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return append([]native.Settings(nil), a.applied...)
+	return append([]agentstate.Settings(nil), a.applied...)
 }
 
 func (a *Adapter) Wait() error {

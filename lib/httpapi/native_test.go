@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/httpapi"
 	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/logctx"
@@ -132,9 +133,9 @@ func (n *nativeServer) epoch() string {
 	return status.Epoch
 }
 
-func (n *nativeServer) requests() []native.RequestState {
+func (n *nativeServer) requests() []agentstate.RequestState {
 	var list struct {
-		Requests []native.RequestState `json:"requests"`
+		Requests []agentstate.RequestState `json:"requests"`
 	}
 	n.do(http.MethodGet, "/requests", nil, &list)
 	return list.Requests
@@ -154,12 +155,12 @@ func (n *nativeServer) handoffID() string {
 	return pending.Request.ID
 }
 
-func approval(id string) native.Request {
-	return native.Request{
-		ID: id, Kind: native.RequestKindApproval, Title: "Run: rm -rf build", Feedback: true,
-		Options: []native.RequestOption{
-			{ID: "allow", Label: "Allow", Kind: native.OptionKindAllow},
-			{ID: "deny", Label: "Deny", Kind: native.OptionKindDeny},
+func approval(id string) agentstate.Request {
+	return agentstate.Request{
+		ID: id, Kind: agentstate.RequestKindApproval, Title: "Run: rm -rf build", Feedback: true,
+		Options: []agentstate.RequestOption{
+			{ID: "allow", Label: "Allow", Kind: agentstate.OptionKindAllow},
+			{ID: "deny", Label: "Deny", Kind: agentstate.OptionKindDeny},
 		},
 	}
 }
@@ -175,14 +176,14 @@ func (n *nativeServer) queue() []httpapi.QueuedMessage {
 func TestNative_StatusAndMessages(t *testing.T) {
 	n := newNativeServer(t, nil)
 	var status struct {
-		Transport    httpapi.Transport    `json:"transport"`
-		Status       httpapi.AgentStatus  `json:"status"`
-		Capabilities *native.Capabilities `json:"capabilities"`
+		Transport    httpapi.Transport        `json:"transport"`
+		Status       httpapi.AgentStatus      `json:"status"`
+		Capabilities *agentstate.Capabilities `json:"capabilities"`
 	}
 	n.do(http.MethodGet, "/status", nil, &status)
 	assert.Equal(t, httpapi.TransportNative, status.Transport)
 	assert.Equal(t, httpapi.AgentStatusStable, status.Status)
-	assert.Equal(t, &native.Capabilities{Steer: true, Interrupt: true, Resume: true, Images: true}, status.Capabilities)
+	assert.Equal(t, &agentstate.Capabilities{Steer: true, Interrupt: true, Resume: true, Images: true}, status.Capabilities)
 
 	code, res := n.send("hello", "")
 	require.Equal(t, http.StatusOK, code)
@@ -266,7 +267,7 @@ func TestNative_QueueSteerInterrupt(t *testing.T) {
 }
 
 func TestNative_DispatchModesNeedCapabilities(t *testing.T) {
-	n := newNativeServer(t, func(a *nativetest.Adapter) { a.Caps = native.Capabilities{} })
+	n := newNativeServer(t, func(a *nativetest.Adapter) { a.Caps = agentstate.Capabilities{} })
 	// Without a running turn, the message is sent as usual.
 	code, res := n.send("first", httpapi.DispatchSteer)
 	require.Equal(t, http.StatusOK, code)
@@ -286,7 +287,7 @@ func TestNative_DispatchModesNeedCapabilities(t *testing.T) {
 // and steer have no turn to act on, and messages wait in the queue.
 func TestNative_NoAgentRunning(t *testing.T) {
 	n := startNativeServer(t, func(a *nativetest.Adapter) {
-		a.StartErr = &native.LoginRequiredError{Login: native.LoginRequired{Agent: "Claude Code", Message: "Claude Code is not logged in.", Command: "claude auth login"}}
+		a.StartErr = &native.LoginRequiredError{Login: agentstate.LoginRequired{Agent: "Claude Code", Message: "Claude Code is not logged in.", Command: "claude auth login"}}
 	})
 	require.Eventually(t, func() bool {
 		var status httpapi.StatusChangeBody
@@ -322,24 +323,24 @@ func TestNative_Requests(t *testing.T) {
 	assert.True(t, res.Queued)
 
 	var list struct {
-		Requests []native.RequestState `json:"requests"`
+		Requests []agentstate.RequestState `json:"requests"`
 	}
 	n.do(http.MethodGet, "/requests", nil, &list)
 	require.Len(t, list.Requests, 1)
-	assert.Equal(t, native.RequestStatusPending, list.Requests[0].Status)
+	assert.Equal(t, agentstate.RequestStatusPending, list.Requests[0].Status)
 
 	assert.Equal(t, http.StatusBadRequest, n.do(http.MethodPost, "/requests/perm-1/respond", map[string]any{"option_id": "maybe"}, nil))
 	assert.Equal(t, http.StatusNotFound, n.do(http.MethodPost, "/requests/nope/respond", map[string]any{"option_id": "allow"}, nil))
 
-	var answered native.RequestState
+	var answered agentstate.RequestState
 	require.Equal(t, http.StatusOK, n.do(http.MethodPost, "/requests/perm-1/respond", map[string]any{"option_id": "deny", "text": "not that"}, &answered))
-	assert.Equal(t, native.RequestStatusResolved, answered.Status)
-	assert.Equal(t, []nativetest.Response{{RequestID: "perm-1", Response: native.Response{OptionID: "deny", Text: "not that"}}}, a.Responses())
+	assert.Equal(t, agentstate.RequestStatusResolved, answered.Status)
+	assert.Equal(t, []nativetest.Response{{RequestID: "perm-1", Response: agentstate.Response{OptionID: "deny", Text: "not that"}}}, a.Responses())
 	assert.Equal(t, http.StatusConflict, n.do(http.MethodPost, "/requests/perm-1/respond", map[string]any{"option_id": "allow"}, nil))
 
-	var one native.RequestState
+	var one agentstate.RequestState
 	require.Equal(t, http.StatusOK, n.do(http.MethodGet, "/requests/perm-1", nil, &one))
-	assert.Equal(t, native.RequestStatusResolved, one.Status)
+	assert.Equal(t, agentstate.RequestStatusResolved, one.Status)
 	var after httpapi.StatusChangeBody
 	n.do(http.MethodGet, "/status", nil, &after)
 	assert.Equal(t, 0, after.PendingRequests)
@@ -355,9 +356,9 @@ func TestNative_UnconfirmedAnswer(t *testing.T) {
 
 	assert.Equal(t, http.StatusInternalServerError, n.do(http.MethodPost, "/requests/perm-1/respond", map[string]any{"option_id": "allow"}, nil))
 	assert.Equal(t, http.StatusConflict, n.do(http.MethodPost, "/requests/perm-1/respond", map[string]any{"option_id": "deny"}, nil))
-	var one native.RequestState
+	var one agentstate.RequestState
 	require.Equal(t, http.StatusOK, n.do(http.MethodGet, "/requests/perm-1", nil, &one))
-	assert.Equal(t, native.RequestStatusPending, one.Status)
+	assert.Equal(t, agentstate.RequestStatusPending, one.Status)
 	var status httpapi.StatusChangeBody
 	n.do(http.MethodGet, "/status", nil, &status)
 	assert.Equal(t, httpapi.AgentStatusRunning, status.Status, "the answer is on its way")
@@ -388,9 +389,9 @@ func TestNative_HandoffAnswersRequest(t *testing.T) {
 	n := newNativeServer(t, nil)
 	a := n.factory.Last()
 	n.send("do it", "")
-	a.Sink().RequestOpened(native.Request{
-		ID: "q-1", Kind: native.RequestKindQuestion, Title: "Pick a color",
-		Questions: []native.Question{{ID: "color", Question: "Which color?", Options: []native.QuestionOption{{Label: "Red"}, {Label: "Blue"}}}},
+	a.Sink().RequestOpened(agentstate.Request{
+		ID: "q-1", Kind: agentstate.RequestKindQuestion, Title: "Pick a color",
+		Questions: []agentstate.Question{{ID: "color", Question: "Which color?", Options: []agentstate.QuestionOption{{Label: "Red"}, {Label: "Blue"}}}},
 	})
 	var pending struct {
 		Request *struct {
@@ -558,7 +559,7 @@ func TestNative_LoginRequired(t *testing.T) {
 	assert.Equal(t, http.StatusConflict, n.do(http.MethodPost, "/login/retry", nil, nil))
 
 	n.send("hello", "")
-	a.Sink().LoginRequired(native.LoginRequired{Agent: "Claude Code", Message: "Claude Code is not logged in.", Command: "claude auth login"})
+	a.Sink().LoginRequired(agentstate.LoginRequired{Agent: "Claude Code", Message: "Claude Code is not logged in.", Command: "claude auth login"})
 	var status httpapi.StatusChangeBody
 	n.do(http.MethodGet, "/status", nil, &status)
 	require.NotNil(t, status.LoginRequired)
@@ -573,21 +574,21 @@ func TestNative_LoginRequired(t *testing.T) {
 }
 
 var settingOptions = native.SettingOptions{
-	PermissionModes: []native.PermissionMode{native.PermissionModeBypass, native.PermissionModeAsk},
+	PermissionModes: []agentstate.PermissionMode{agentstate.PermissionModeBypass, agentstate.PermissionModeAsk},
 	Models:          []native.ModelOption{{ID: "fast", Name: "Fast", Efforts: []string{"low", "high"}}, {ID: "plain", Name: "Plain"}},
 }
 
 func configurableAdapter(a *nativetest.Adapter) {
 	a.Caps.Settings = true
 	a.Options = settingOptions
-	a.Current = native.Settings{PermissionMode: native.PermissionModeBypass, Model: "fast", Effort: "low"}
+	a.Current = agentstate.Settings{PermissionMode: agentstate.PermissionModeBypass, Model: "fast", Effort: "low"}
 }
 
 func TestNative_Settings(t *testing.T) {
 	n := newNativeServer(t, configurableAdapter)
 	var got httpapi.SettingsResponse
 	require.Equal(t, http.StatusOK, n.do(http.MethodGet, "/settings", nil, &got.Body))
-	assert.Equal(t, native.Settings{PermissionMode: native.PermissionModeBypass, Model: "fast", Effort: "low"}, got.Body.Settings)
+	assert.Equal(t, agentstate.Settings{PermissionMode: agentstate.PermissionModeBypass, Model: "fast", Effort: "low"}, got.Body.Settings)
 	assert.Equal(t, settingOptions, got.Body.Options)
 
 	var status httpapi.StatusChangeBody
@@ -598,10 +599,10 @@ func TestNative_Settings(t *testing.T) {
 	assert.Equal(t, "fast", status.Settings.Model)
 
 	require.Equal(t, http.StatusOK, n.do(http.MethodPut, "/settings", map[string]any{"permission_mode": "ask", "effort": "high"}, &got.Body))
-	assert.Equal(t, native.Settings{PermissionMode: native.PermissionModeAsk, Model: "fast", Effort: "high"}, got.Body.Settings)
+	assert.Equal(t, agentstate.Settings{PermissionMode: agentstate.PermissionModeAsk, Model: "fast", Effort: "high"}, got.Body.Settings)
 	n.do(http.MethodGet, "/status", nil, &status)
-	assert.Equal(t, native.PermissionModeAsk, status.Settings.PermissionMode)
-	assert.Equal(t, []native.Settings{{PermissionMode: native.PermissionModeAsk, Effort: "high"}}, n.factory.Last().Applied())
+	assert.Equal(t, agentstate.PermissionModeAsk, status.Settings.PermissionMode)
+	assert.Equal(t, []agentstate.Settings{{PermissionMode: agentstate.PermissionModeAsk, Effort: "high"}}, n.factory.Last().Applied())
 
 	assert.Equal(t, http.StatusBadRequest, n.do(http.MethodPut, "/settings", map[string]any{"model": "huge"}, nil), "a model the agent doesn't offer")
 	assert.Equal(t, http.StatusUnprocessableEntity, n.do(http.MethodPut, "/settings", map[string]any{"permission_mode": "yolo"}, nil), "not a permission mode")
@@ -635,9 +636,9 @@ func TestNative_Usage(t *testing.T) {
 	assert.Nil(t, status.Usage, "nothing reported yet")
 
 	percent := 27.0
-	n.factory.Last().Sink().(native.UsageSink).UsageChanged(native.AgentUsage{
-		Context:    &native.ContextUsage{Used: 41000, Size: 200000},
-		RateLimits: []native.RateLimit{{ID: "seven_day", Label: "Weekly limit", UsedPercent: &percent}},
+	n.factory.Last().Sink().(native.UsageSink).UsageChanged(agentstate.AgentUsage{
+		Context:    &agentstate.ContextUsage{Used: 41000, Size: 200000},
+		RateLimits: []agentstate.RateLimit{{ID: "seven_day", Label: "Weekly limit", UsedPercent: &percent}},
 	})
 	n.do(http.MethodGet, "/status", nil, &status)
 	require.NotNil(t, status.Usage)

@@ -4,9 +4,9 @@ import (
 	"reflect"
 
 	"github.com/coder/agentapi/internal/version"
+	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/instanceapi"
-	"github.com/coder/agentapi/lib/native"
 )
 
 // EmitStatus records the conversation's status. Its lifecycle (starting,
@@ -101,7 +101,7 @@ func (e *EventEmitter) StatusSnapshot() StatusChangeBody {
 func (e *EventEmitter) statusChangeBody() StatusChangeBody {
 	pending := 0
 	for _, r := range e.requests {
-		if r.Status == native.RequestStatusPending {
+		if r.Status == agentstate.RequestStatusPending {
 			pending++
 		}
 	}
@@ -128,7 +128,7 @@ func (e *EventEmitter) SetAgentSessionID(id string) {
 }
 
 // SetCapabilities records the optional operations the agent supports.
-func (e *EventEmitter) SetCapabilities(caps native.Capabilities) {
+func (e *EventEmitter) SetCapabilities(caps agentstate.Capabilities) {
 	e.mu.Lock()
 	defer e.unlock()
 	if e.capabilities != nil && *e.capabilities == caps {
@@ -139,7 +139,7 @@ func (e *EventEmitter) SetCapabilities(caps native.Capabilities) {
 }
 
 // SetSettings records the agent's settings.
-func (e *EventEmitter) SetSettings(settings native.Settings) {
+func (e *EventEmitter) SetSettings(settings agentstate.Settings) {
 	e.mu.Lock()
 	defer e.unlock()
 	if e.settings != nil && *e.settings == settings {
@@ -150,7 +150,7 @@ func (e *EventEmitter) SetSettings(settings native.Settings) {
 }
 
 // SetUsage records the agent's usage of its limits.
-func (e *EventEmitter) SetUsage(usage native.AgentUsage) {
+func (e *EventEmitter) SetUsage(usage agentstate.AgentUsage) {
 	e.mu.Lock()
 	defer e.unlock()
 	if e.usage != nil && reflect.DeepEqual(*e.usage, usage) {
@@ -161,7 +161,7 @@ func (e *EventEmitter) SetUsage(usage native.AgentUsage) {
 }
 
 // SetLimitStop records the turn a usage limit stopped (nil: none).
-func (e *EventEmitter) SetLimitStop(ls *native.LimitStop) {
+func (e *EventEmitter) SetLimitStop(ls *agentstate.LimitStop) {
 	e.mu.Lock()
 	defer e.unlock()
 	if reflect.DeepEqual(e.limitStop, ls) {
@@ -173,7 +173,7 @@ func (e *EventEmitter) SetLimitStop(ls *native.LimitStop) {
 
 // SetRetryWait records the failed turn that waits to be tried again (nil:
 // none).
-func (e *EventEmitter) SetRetryWait(rw *native.RetryWait) {
+func (e *EventEmitter) SetRetryWait(rw *agentstate.RetryWait) {
 	e.mu.Lock()
 	defer e.unlock()
 	if reflect.DeepEqual(e.retryWait, rw) {
@@ -185,7 +185,7 @@ func (e *EventEmitter) SetRetryWait(rw *native.RetryWait) {
 
 // SetLoginRequired records that the agent waits for a login (nil: it no
 // longer does).
-func (e *EventEmitter) SetLoginRequired(login *native.LoginRequired) {
+func (e *EventEmitter) SetLoginRequired(login *agentstate.LoginRequired) {
 	e.mu.Lock()
 	defer e.unlock()
 	if login == nil && e.loginRequired == nil {

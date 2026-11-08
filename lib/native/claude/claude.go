@@ -20,6 +20,7 @@ import (
 
 	"github.com/coder/quartz"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/agentio"
@@ -205,7 +206,7 @@ type Adapter struct {
 	models []claudeModel
 	// usage is the usage the CLI last reported (see usage.go). Read loop
 	// only.
-	usage native.AgentUsage
+	usage agentstate.AgentUsage
 }
 
 var (
@@ -258,8 +259,8 @@ func newUUID() string {
 }
 
 // Capabilities implements native.Adapter.
-func (a *Adapter) Capabilities() native.Capabilities {
-	return native.Capabilities{Steer: true, Interrupt: true, Resume: !a.args.noPersistence, Images: true, Settings: true}
+func (a *Adapter) Capabilities() agentstate.Capabilities {
+	return agentstate.Capabilities{Steer: true, Interrupt: true, Resume: !a.args.noPersistence, Images: true, Settings: true}
 }
 
 // Start implements native.Adapter: it checks the login, starts the CLI and
@@ -510,7 +511,7 @@ func (a *Adapter) interruptAccepted(json.RawMessage) {
 }
 
 // Respond implements native.Adapter.
-func (a *Adapter) Respond(ctx context.Context, requestID string, response native.Response) error {
+func (a *Adapter) Respond(ctx context.Context, requestID string, response agentstate.Response) error {
 	a.mu.Lock()
 	p, ok := a.requests[requestID]
 	if !ok || p.answering {
@@ -734,7 +735,7 @@ func (a *Adapter) handleControlRequest(f *frame) {
 	a.mu.Lock()
 	a.requests[f.RequestID] = p
 	a.mu.Unlock()
-	if p.req.Kind == native.RequestKindPlan {
+	if p.req.Kind == agentstate.RequestKindPlan {
 		// The ExitPlanMode call can come without its input; the plan is
 		// added to the permission request.
 		a.sendRich(a.parser.patchToolInput(r.ToolUseID, r.Input))

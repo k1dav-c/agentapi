@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/transcript"
 )
@@ -47,7 +48,7 @@ type pendingRequest struct {
 	results map[string]any
 	// questions of a question request; form converts their answers for
 	// an MCP form elicitation.
-	questions []native.Question
+	questions []agentstate.Question
 	form      map[string]formField
 	answered  bool
 	// unconfirmed: the answer went out, but its write didn't finish, so
@@ -69,7 +70,7 @@ type formField struct {
 // show are answered with an error, never approved.
 func (s *loopState) serverRequest(msg rpcMessage) {
 	var r *pendingRequest
-	var req native.Request
+	var req agentstate.Request
 	var ok bool
 	switch msg.Method {
 	case methodCommandApproval:
@@ -95,7 +96,7 @@ func (s *loopState) serverRequest(msg rpcMessage) {
 	r.method = msg.Method
 	req.ID = r.id
 	req.CreatedAt = s.now()
-	req.Capability = native.ResponseLive
+	req.Capability = agentstate.ResponseLive
 	s.a.mu.Lock()
 	s.a.requests[r.id] = r
 	s.a.mu.Unlock()
@@ -110,7 +111,7 @@ func (s *loopState) decline(msg rpcMessage, code int, message string) {
 
 // addOption offers opt and records the result it sends. An option already
 // offered is skipped.
-func addOption(req *native.Request, r *pendingRequest, opt native.RequestOption, result any) {
+func addOption(req *agentstate.Request, r *pendingRequest, opt agentstate.RequestOption, result any) {
 	if _, dup := r.results[opt.ID]; dup {
 		return
 	}
@@ -129,17 +130,17 @@ func (s *loopState) toolItem(itemID string) *itemState {
 	return nil
 }
 
-func (s *loopState) commandApproval(msg rpcMessage) (*pendingRequest, native.Request, bool) {
+func (s *loopState) commandApproval(msg rpcMessage) (*pendingRequest, agentstate.Request, bool) {
 	var p commandExecutionRequestApprovalParams
 	if !s.decode(msg, &p) {
-		return nil, native.Request{}, false
+		return nil, agentstate.Request{}, false
 	}
 	// The command that runs, not Codex's reading of it: that may leave out
 	// parts (pipes, the cd of `cd dir && ...`). The title is its first line;
 	// the input has all of it.
 	command := unwrapShell(p.Command)
-	req := native.Request{
-		Kind: native.RequestKindApproval, Title: native.OneLine(command, native.MaxTitleRunes), ToolName: "exec_command",
+	req := agentstate.Request{
+		Kind: agentstate.RequestKindApproval, Title: native.OneLine(command, native.MaxTitleRunes), ToolName: "exec_command",
 		ToolUseID: p.ItemID, Input: commandInput(p.Command, p.CWD),
 	}
 	var detail []string
@@ -194,21 +195,21 @@ func commandDecisions(p commandExecutionRequestApprovalParams) []json.RawMessage
 
 // addCommandDecision offers one decision of a command approval: a name
 // ("accept") or an amendment object.
-func addCommandDecision(req *native.Request, r *pendingRequest, raw json.RawMessage) {
-	add := func(id, label string, kind native.OptionKind, decision any) {
-		addOption(req, r, native.RequestOption{ID: id, Label: label, Kind: kind}, map[string]any{"decision": decision})
+func addCommandDecision(req *agentstate.Request, r *pendingRequest, raw json.RawMessage) {
+	add := func(id, label string, kind agentstate.OptionKind, decision any) {
+		addOption(req, r, agentstate.RequestOption{ID: id, Label: label, Kind: kind}, map[string]any{"decision": decision})
 	}
 	var name string
 	if json.Unmarshal(raw, &name) == nil {
 		switch name {
 		case "accept":
-			add(name, "Allow", native.OptionKindAllow, name)
+			add(name, "Allow", agentstate.OptionKindAllow, name)
 		case "acceptForSession":
-			add(name, "Allow for this session", native.OptionKindAllowAlways, name)
+			add(name, "Allow for this session", agentstate.OptionKindAllowAlways, name)
 		case "decline":
-			add(name, "Deny", native.OptionKindDeny, name)
+			add(name, "Deny", agentstate.OptionKindDeny, name)
 		case "cancel":
-			add(name, "Deny and stop the turn", native.OptionKindCancel, name)
+			add(name, "Deny and stop the turn", agentstate.OptionKindCancel, name)
 		}
 		return
 	}
@@ -225,7 +226,7 @@ func addCommandDecision(req *native.Request, r *pendingRequest, raw json.RawMess
 		if len(amendment.Prefix) > 0 {
 			label = fmt.Sprintf("Always allow commands starting with `%s`", strings.Join(amendment.Prefix, " "))
 		}
-		add("acceptWithExecpolicyAmendment", label, native.OptionKindAllowAlways, raw)
+		add("acceptWithExecpolicyAmendment", label, agentstate.OptionKindAllowAlways, raw)
 	}
 	if v, ok := obj["applyNetworkPolicyAmendment"]; ok {
 		var amendment struct {
@@ -240,9 +241,9 @@ func addCommandDecision(req *native.Request, r *pendingRequest, raw json.RawMess
 			id = fmt.Sprintf("%s:%d", id, n+1)
 		}
 		if amendment.Rule.Action == "deny" {
-			add(id, "Always block network access to "+amendment.Rule.Host, native.OptionKindDeny, raw)
+			add(id, "Always block network access to "+amendment.Rule.Host, agentstate.OptionKindDeny, raw)
 		} else {
-			add(id, "Always allow network access to "+amendment.Rule.Host, native.OptionKindAllowAlways, raw)
+			add(id, "Always allow network access to "+amendment.Rule.Host, agentstate.OptionKindAllowAlways, raw)
 		}
 	}
 }
@@ -259,31 +260,31 @@ func countPrefix(m map[string]any, prefix string) int {
 
 // sortOptions puts allow options first, then deny, then cancel, keeping
 // the agent's order otherwise.
-func sortOptions(options []native.RequestOption) {
-	rank := func(k native.OptionKind) int {
+func sortOptions(options []agentstate.RequestOption) {
+	rank := func(k agentstate.OptionKind) int {
 		switch k {
-		case native.OptionKindAllow:
+		case agentstate.OptionKindAllow:
 			return 0
-		case native.OptionKindAllowAlways:
+		case agentstate.OptionKindAllowAlways:
 			return 1
-		case native.OptionKindOther:
+		case agentstate.OptionKindOther:
 			return 2
-		case native.OptionKindDeny:
+		case agentstate.OptionKindDeny:
 			return 3
-		case native.OptionKindCancel:
+		case agentstate.OptionKindCancel:
 			return 4
 		}
 		return 2
 	}
-	slices.SortStableFunc(options, func(x, y native.RequestOption) int { return rank(x.Kind) - rank(y.Kind) })
+	slices.SortStableFunc(options, func(x, y agentstate.RequestOption) int { return rank(x.Kind) - rank(y.Kind) })
 }
 
-func (s *loopState) fileChangeApproval(msg rpcMessage) (*pendingRequest, native.Request, bool) {
+func (s *loopState) fileChangeApproval(msg rpcMessage) (*pendingRequest, agentstate.Request, bool) {
 	var p fileChangeRequestApprovalParams
 	if !s.decode(msg, &p) {
-		return nil, native.Request{}, false
+		return nil, agentstate.Request{}, false
 	}
-	req := native.Request{Kind: native.RequestKindApproval, Title: "Edit files", ToolName: "apply_patch", ToolUseID: p.ItemID}
+	req := agentstate.Request{Kind: agentstate.RequestKindApproval, Title: "Edit files", ToolName: "apply_patch", ToolUseID: p.ItemID}
 	var detail []string
 	if p.Reason != "" {
 		detail = append(detail, p.Reason)
@@ -306,11 +307,11 @@ func (s *loopState) fileChangeApproval(msg rpcMessage) (*pendingRequest, native.
 		sessionDesc = "Also allows writes under " + p.GrantRoot + " for the rest of the session."
 	}
 	r := &pendingRequest{toolUseID: p.ItemID, results: map[string]any{}}
-	for _, opt := range []native.RequestOption{
-		{ID: "accept", Label: "Allow", Kind: native.OptionKindAllow},
-		{ID: "acceptForSession", Label: "Allow for this session", Description: sessionDesc, Kind: native.OptionKindAllowAlways},
-		{ID: "decline", Label: "Deny", Kind: native.OptionKindDeny},
-		{ID: "cancel", Label: "Deny and stop the turn", Kind: native.OptionKindCancel},
+	for _, opt := range []agentstate.RequestOption{
+		{ID: "accept", Label: "Allow", Kind: agentstate.OptionKindAllow},
+		{ID: "acceptForSession", Label: "Allow for this session", Description: sessionDesc, Kind: agentstate.OptionKindAllowAlways},
+		{ID: "decline", Label: "Deny", Kind: agentstate.OptionKindDeny},
+		{ID: "cancel", Label: "Deny and stop the turn", Kind: agentstate.OptionKindCancel},
 	} {
 		addOption(&req, r, opt, map[string]any{"decision": opt.ID})
 	}
@@ -343,22 +344,22 @@ func userInputQuestionsInput(questions []userInputQuestion) json.RawMessage {
 	return mustJSON(in)
 }
 
-func (s *loopState) userInputRequest(msg rpcMessage) (*pendingRequest, native.Request, bool) {
+func (s *loopState) userInputRequest(msg rpcMessage) (*pendingRequest, agentstate.Request, bool) {
 	var p toolRequestUserInputParams
 	if !s.decode(msg, &p) || len(p.Questions) == 0 {
-		return nil, native.Request{}, false
+		return nil, agentstate.Request{}, false
 	}
 	input := userInputQuestionsInput(p.Questions)
-	req := native.Request{
-		Kind: native.RequestKindQuestion, ToolName: "request_user_input", ToolUseID: p.ItemID, Input: input,
+	req := agentstate.Request{
+		Kind: agentstate.RequestKindQuestion, ToolName: "request_user_input", ToolUseID: p.ItemID, Input: input,
 	}
 	for _, q := range p.Questions {
-		nq := native.Question{
+		nq := agentstate.Question{
 			ID: q.ID, Header: q.Header, Question: q.Question, Secret: q.IsSecret,
 			FreeText: q.IsOther || len(q.Options) == 0,
 		}
 		for _, o := range q.Options {
-			nq.Options = append(nq.Options, native.QuestionOption{Label: o.Label, Description: o.Description})
+			nq.Options = append(nq.Options, agentstate.QuestionOption{Label: o.Label, Description: o.Description})
 		}
 		req.Questions = append(req.Questions, nq)
 	}
@@ -378,13 +379,13 @@ func (s *loopState) userInputRequest(msg rpcMessage) (*pendingRequest, native.Re
 	return &pendingRequest{toolUseID: p.ItemID, questions: req.Questions}, req, true
 }
 
-func (s *loopState) elicitationRequest(msg rpcMessage) (*pendingRequest, native.Request, bool) {
+func (s *loopState) elicitationRequest(msg rpcMessage) (*pendingRequest, agentstate.Request, bool) {
 	var p mcpServerElicitationRequestParams
 	if !s.decode(msg, &p) {
-		return nil, native.Request{}, false
+		return nil, agentstate.Request{}, false
 	}
 	r := &pendingRequest{results: map[string]any{}}
-	req := native.Request{Kind: native.RequestKindApproval, Title: native.OneLine(p.Message, native.MaxTitleRunes)}
+	req := agentstate.Request{Kind: agentstate.RequestKindApproval, Title: native.OneLine(p.Message, native.MaxTitleRunes)}
 	if req.Title == "" {
 		req.Title = fmt.Sprintf("The %s MCP server asks for input", p.ServerName)
 	} else if req.Title != strings.TrimSpace(p.Message) {
@@ -403,7 +404,7 @@ func (s *loopState) elicitationRequest(msg rpcMessage) (*pendingRequest, native.
 	switch {
 	case p.Mode == "url":
 		req.Detail = joinDetail(req.Detail, "Open "+p.URL)
-		addOption(&req, r, native.RequestOption{ID: "accept", Label: "Continue", Description: "After completing the step at the link", Kind: native.OptionKindAllow},
+		addOption(&req, r, agentstate.RequestOption{ID: "accept", Label: "Continue", Description: "After completing the step at the link", Kind: agentstate.OptionKindAllow},
 			mcpServerElicitationResponse{Action: "accept"})
 	case len(properties) == 0 || (p.Meta != nil && p.Meta.ApprovalKind == "mcp_tool_call"):
 		if p.Meta != nil {
@@ -419,17 +420,17 @@ func (s *loopState) elicitationRequest(msg rpcMessage) (*pendingRequest, native.
 			}
 			req.Detail = joinDetail(req.Detail, strings.Join(detail, "\n"))
 		}
-		addOption(&req, r, native.RequestOption{ID: "accept", Label: "Allow", Kind: native.OptionKindAllow},
+		addOption(&req, r, agentstate.RequestOption{ID: "accept", Label: "Allow", Kind: agentstate.OptionKindAllow},
 			mcpServerElicitationResponse{Action: "accept", Content: map[string]any{}})
 	default:
 		// A form: one question per field, answered with accept + content.
-		req.Kind = native.RequestKindQuestion
+		req.Kind = agentstate.RequestKindQuestion
 		req.Questions, r.form = formQuestions(properties)
 		r.questions = req.Questions
 	}
-	addOption(&req, r, native.RequestOption{ID: "decline", Label: "Deny", Kind: native.OptionKindDeny},
+	addOption(&req, r, agentstate.RequestOption{ID: "decline", Label: "Deny", Kind: agentstate.OptionKindDeny},
 		mcpServerElicitationResponse{Action: "decline"})
-	addOption(&req, r, native.RequestOption{ID: "cancel", Label: "Cancel", Kind: native.OptionKindCancel},
+	addOption(&req, r, agentstate.RequestOption{ID: "cancel", Label: "Cancel", Kind: agentstate.OptionKindCancel},
 		mcpServerElicitationResponse{Action: "cancel"})
 	return r, req, true
 }
@@ -450,14 +451,14 @@ func (s *loopState) openMCPCall(server string) *itemState {
 }
 
 // formQuestions asks one question per field of a form, by field name.
-func formQuestions(properties map[string]mcpElicitationProperty) ([]native.Question, map[string]formField) {
+func formQuestions(properties map[string]mcpElicitationProperty) ([]agentstate.Question, map[string]formField) {
 	form := map[string]formField{}
 	names := make([]string, 0, len(properties))
 	for name := range properties {
 		names = append(names, name)
 	}
 	slices.Sort(names)
-	var questions []native.Question
+	var questions []agentstate.Question
 	for _, name := range names {
 		q, field := formQuestion(name, properties[name])
 		questions = append(questions, q)
@@ -466,8 +467,8 @@ func formQuestions(properties map[string]mcpElicitationProperty) ([]native.Quest
 	return questions, form
 }
 
-func formQuestion(name string, prop mcpElicitationProperty) (native.Question, formField) {
-	q := native.Question{ID: name, Header: prop.Title, Question: prop.Description}
+func formQuestion(name string, prop mcpElicitationProperty) (agentstate.Question, formField) {
+	q := agentstate.Question{ID: name, Header: prop.Title, Question: prop.Description}
 	if q.Question == "" {
 		q.Question = prop.Title
 	}
@@ -480,7 +481,7 @@ func formQuestion(name string, prop mcpElicitationProperty) (native.Question, fo
 		if label == "" {
 			label = value
 		}
-		q.Options = append(q.Options, native.QuestionOption{Label: label})
+		q.Options = append(q.Options, agentstate.QuestionOption{Label: label})
 		field.values[label] = value
 	}
 	switch {
@@ -513,13 +514,13 @@ func formQuestion(name string, prop mcpElicitationProperty) (native.Question, fo
 	return q, field
 }
 
-func (s *loopState) permissionsRequest(msg rpcMessage) (*pendingRequest, native.Request, bool) {
+func (s *loopState) permissionsRequest(msg rpcMessage) (*pendingRequest, agentstate.Request, bool) {
 	var p permissionsRequestApprovalParams
 	if !s.decode(msg, &p) {
-		return nil, native.Request{}, false
+		return nil, agentstate.Request{}, false
 	}
-	req := native.Request{
-		Kind: native.RequestKindApproval, Title: "Grant Codex additional permissions",
+	req := agentstate.Request{
+		Kind: agentstate.RequestKindApproval, Title: "Grant Codex additional permissions",
 		ToolUseID: p.ItemID, Input: p.Permissions,
 	}
 	var detail []string
@@ -530,17 +531,17 @@ func (s *loopState) permissionsRequest(msg rpcMessage) (*pendingRequest, native.
 	req.Detail = strings.Join(detail, "\n")
 	granted := rawOrEmpty(p.Permissions)
 	r := &pendingRequest{toolUseID: p.ItemID, results: map[string]any{}}
-	addOption(&req, r, native.RequestOption{ID: "turn", Label: "Allow for this turn", Kind: native.OptionKindAllow},
+	addOption(&req, r, agentstate.RequestOption{ID: "turn", Label: "Allow for this turn", Kind: agentstate.OptionKindAllow},
 		permissionsRequestApprovalResponse{Permissions: granted, Scope: "turn"})
-	addOption(&req, r, native.RequestOption{ID: "session", Label: "Allow for this session", Kind: native.OptionKindAllowAlways},
+	addOption(&req, r, agentstate.RequestOption{ID: "session", Label: "Allow for this session", Kind: agentstate.OptionKindAllowAlways},
 		permissionsRequestApprovalResponse{Permissions: granted, Scope: "session"})
-	addOption(&req, r, native.RequestOption{ID: "decline", Label: "Deny", Kind: native.OptionKindDeny},
+	addOption(&req, r, agentstate.RequestOption{ID: "decline", Label: "Deny", Kind: agentstate.OptionKindDeny},
 		permissionsRequestApprovalResponse{Permissions: json.RawMessage("{}"), Scope: "turn"})
 	return r, req, true
 }
 
 // result translates a response into the JSON-RPC result for r.
-func (r *pendingRequest) result(resp native.Response) (any, error) {
+func (r *pendingRequest) result(resp agentstate.Response) (any, error) {
 	if resp.OptionID != "" {
 		res, ok := r.results[resp.OptionID]
 		if !ok {
@@ -608,7 +609,7 @@ func (f formField) convert(answers []string) (any, error) {
 }
 
 // Respond implements native.Adapter.
-func (a *Adapter) Respond(ctx context.Context, requestID string, response native.Response) error {
+func (a *Adapter) Respond(ctx context.Context, requestID string, response agentstate.Response) error {
 	a.mu.Lock()
 	if a.planWait != "" && a.planWait == requestID {
 		a.mu.Unlock()

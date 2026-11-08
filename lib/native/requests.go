@@ -6,78 +6,17 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"time"
 
 	"github.com/coder/quartz"
-	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/coder/agentapi/lib/util"
+	"github.com/coder/agentapi/lib/agentstate"
 )
-
-// RequestStatus is where a request is in its life.
-type RequestStatus string
-
-const (
-	RequestStatusPending  RequestStatus = "pending"
-	RequestStatusResolved RequestStatus = "resolved"
-	// RequestStatusWithdrawn: the agent stopped waiting before it was
-	// answered here.
-	RequestStatusWithdrawn RequestStatus = "withdrawn"
-	// RequestStatusExpired: the turn ended or the agent was restarted while
-	// the request was open.
-	RequestStatusExpired RequestStatus = "expired"
-)
-
-var RequestStatusValues = []RequestStatus{RequestStatusPending, RequestStatusResolved, RequestStatusWithdrawn, RequestStatusExpired}
-
-func (s RequestStatus) Schema(r huma.Registry) *huma.Schema {
-	return util.OpenAPISchema(r, "RequestStatus", RequestStatusValues)
-}
-
-// RequestState is a request together with what became of it.
-type RequestState struct {
-	Request
-	Status   RequestStatus `json:"status" doc:"pending, resolved, withdrawn (the agent stopped waiting) or expired (the turn ended or the agent restarted)."`
-	Response *Response     `json:"response,omitempty" doc:"The answer, once resolved."`
-	ClosedAt *time.Time    `json:"closed_at,omitempty" doc:"When the request stopped being pending."`
-}
-
-// MaxClosedRequests is how many answered or expired requests are kept for
-// clients that reconnect after a request was closed: the most recently
-// closed ones.
-const MaxClosedRequests = 50
-
-// ExcessClosed returns the indexes, ascending, of the closed requests to
-// drop so that MaxClosedRequests remain: those that closed first. state
-// returns request i of n.
-func ExcessClosed(n int, state func(i int) *RequestState) []int {
-	var closed []int
-	for i := range n {
-		if state(i).Status != RequestStatusPending {
-			closed = append(closed, i)
-		}
-	}
-	excess := len(closed) - MaxClosedRequests
-	if excess <= 0 {
-		return nil
-	}
-	closedAt := func(i int) time.Time {
-		if at := state(i).ClosedAt; at != nil {
-			return *at
-		}
-		return time.Time{}
-	}
-	slices.SortStableFunc(closed, func(a, b int) int { return closedAt(a).Compare(closedAt(b)) })
-	drop := closed[:excess]
-	slices.Sort(drop)
-	return drop
-}
 
 // requestBook holds a conversation's requests: the pending ones and the
 // most recently closed, in the order they opened.
 type requestBook struct {
 	clock    quartz.Clock
-	requests []*RequestState
+	requests []*agentstate.RequestState
 	// answering holds the requests whose answer is being delivered, so a
 	// second answer can't be sent at the same time, and those whose answer
 	// went out unconfirmed.
@@ -99,8 +38,8 @@ type answer struct {
 // requestClose is how a request closes: its new status, and how it can
 // still be answered.
 type requestClose struct {
-	status     RequestStatus
-	capability ResponseCapability
+	status     agentstate.RequestStatus
+	capability agentstate.ResponseCapability
 }
 
 func newRequestBook(clock quartz.Clock) requestBook {
@@ -109,14 +48,14 @@ func newRequestBook(clock quartz.Clock) requestBook {
 
 // open adds a request the agent waits on, or replaces the one with its ID,
 // and returns its state.
-func (b *requestBook) open(req Request) RequestState {
+func (b *requestBook) open(req agentstate.Request) agentstate.RequestState {
 	if req.CreatedAt.IsZero() {
 		req.CreatedAt = b.clock.Now()
 	}
 	if req.Capability == "" {
-		req.Capability = ResponseLive
+		req.Capability = agentstate.ResponseLive
 	}
-	state := &RequestState{Request: req, Status: RequestStatusPending}
+	state := &agentstate.RequestState{Request: req, Status: agentstate.RequestStatusPending}
 	if existing := b.find(req.ID); existing != nil {
 		*existing = *state
 	} else {
@@ -125,7 +64,7 @@ func (b *requestBook) open(req Request) RequestState {
 	return *state
 }
 
-func (b *requestBook) find(id string) *RequestState {
+func (b *requestBook) find(id string) *agentstate.RequestState {
 	for _, r := range b.requests {
 		if r.ID == id {
 			return r
@@ -135,8 +74,8 @@ func (b *requestBook) find(id string) *RequestState {
 }
 
 // all returns the requests, oldest first.
-func (b *requestBook) all() []RequestState {
-	out := make([]RequestState, 0, len(b.requests))
+func (b *requestBook) all() []agentstate.RequestState {
+	out := make([]agentstate.RequestState, 0, len(b.requests))
 	for _, r := range b.requests {
 		out = append(out, *r)
 	}
@@ -144,10 +83,10 @@ func (b *requestBook) all() []RequestState {
 }
 
 // pending returns the requests the agent waits on.
-func (b *requestBook) pending() []RequestState {
-	var out []RequestState
+func (b *requestBook) pending() []agentstate.RequestState {
+	var out []agentstate.RequestState
 	for _, r := range b.requests {
-		if r.Status == RequestStatusPending {
+		if r.Status == agentstate.RequestStatusPending {
 			out = append(out, *r)
 		}
 	}
@@ -164,8 +103,8 @@ func (b *requestBook) waitingOnUser() bool {
 // answer to the request is being delivered, endAnswer closes it instead:
 // as resolved if the delivery works, otherwise as the first close asked
 // for meanwhile. A request whose answer went out unconfirmed closes now.
-func (b *requestBook) close(r *RequestState, status RequestStatus, capability ResponseCapability) bool {
-	if r.Status != RequestStatusPending {
+func (b *requestBook) close(r *agentstate.RequestState, status agentstate.RequestStatus, capability agentstate.ResponseCapability) bool {
+	if r.Status != agentstate.RequestStatusPending {
 		return false
 	}
 	if a, answering := b.answering[r.ID]; answering {
@@ -189,15 +128,15 @@ func (b *requestBook) close(r *RequestState, status RequestStatus, capability Re
 // expire closes the pending requests and returns those it closed. If only
 // their turn ended, questions can still be answered with a message; once
 // the agent is gone, nothing can be answered.
-func (b *requestBook) expire(agentGone bool) []RequestState {
-	var closed []RequestState
+func (b *requestBook) expire(agentGone bool) []agentstate.RequestState {
+	var closed []agentstate.RequestState
 	// Closing a request trims b.requests.
 	for _, r := range slices.Clone(b.requests) {
-		capability := ResponseNotResumable
+		capability := agentstate.ResponseNotResumable
 		if !agentGone {
 			capability = closedCapability(r.Kind)
 		}
-		if b.close(r, RequestStatusExpired, capability) {
+		if b.close(r, agentstate.RequestStatusExpired, capability) {
 			closed = append(closed, *r)
 		}
 	}
@@ -206,9 +145,9 @@ func (b *requestBook) expire(agentGone bool) []RequestState {
 
 // answerable reports whether r waits for an answer and none is on its
 // way.
-func (b *requestBook) answerable(r *RequestState) bool {
+func (b *requestBook) answerable(r *agentstate.RequestState) bool {
 	_, answering := b.answering[r.ID]
-	return r.Status == RequestStatusPending && !answering
+	return r.Status == agentstate.RequestStatusPending && !answering
 }
 
 // beginAnswer marks the request with id as being answered.
@@ -221,13 +160,13 @@ func (b *requestBook) beginAnswer(id string) {
 // a close that came meanwhile. Without one, an unconfirmed delivery keeps
 // r from taking another answer until it closes. It reports whether r
 // closed.
-func (b *requestBook) endAnswer(r *RequestState, response *Response, unconfirmed bool) bool {
+func (b *requestBook) endAnswer(r *agentstate.RequestState, response *agentstate.Response, unconfirmed bool) bool {
 	a := b.answering[r.ID]
 	delete(b.answering, r.ID)
 	switch {
 	case response != nil:
 		r.Response = response
-		return b.close(r, RequestStatusResolved, r.Capability)
+		return b.close(r, agentstate.RequestStatusResolved, r.Capability)
 	case a.closed.status != "":
 		// The agent stopped waiting while the answer was on its way.
 		return b.close(r, a.closed.status, a.closed.capability)
@@ -237,10 +176,10 @@ func (b *requestBook) endAnswer(r *RequestState, response *Response, unconfirmed
 	return false
 }
 
-// trim drops the closed requests beyond MaxClosedRequests that closed
-// first.
+// trim drops the closed requests beyond agentstate.MaxClosedRequests that
+// closed first.
 func (b *requestBook) trim() {
-	drop := ExcessClosed(len(b.requests), func(i int) *RequestState { return b.requests[i] })
+	drop := agentstate.ExcessClosed(len(b.requests), func(i int) *agentstate.RequestState { return b.requests[i] })
 	for n, i := range drop {
 		// The n dropped before were in front of it.
 		b.requests = slices.Delete(b.requests, i-n, i-n+1)
@@ -249,27 +188,27 @@ func (b *requestBook) trim() {
 
 // Requests returns the pending requests and the most recently closed ones,
 // oldest first.
-func (c *Conversation) Requests() []RequestState {
+func (c *Conversation) Requests() []agentstate.RequestState {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.requests.all()
 }
 
 // PendingRequests returns the requests the agent is waiting on.
-func (c *Conversation) PendingRequests() []RequestState {
+func (c *Conversation) PendingRequests() []agentstate.RequestState {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.requests.pending()
 }
 
 // Request returns one request by ID.
-func (c *Conversation) Request(id string) (RequestState, bool) {
+func (c *Conversation) Request(id string) (agentstate.RequestState, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if r := c.requests.find(id); r != nil {
 		return *r, true
 	}
-	return RequestState{}, false
+	return agentstate.RequestState{}, false
 }
 
 // Respond answers a pending request. It returns ErrRequestNotFound if the
@@ -278,12 +217,12 @@ func (c *Conversation) Request(id string) (RequestState, bool) {
 // wrote but the agent didn't confirm (ErrUnconfirmed) may still reach the
 // agent, so the request takes no other: it stays pending until the agent
 // closes it or the turn ends.
-func (c *Conversation) Respond(ctx context.Context, id string, response Response) (RequestState, error) {
+func (c *Conversation) Respond(ctx context.Context, id string, response agentstate.Response) (agentstate.RequestState, error) {
 	c.mu.Lock()
 	r := c.requests.find(id)
 	if r == nil {
 		c.mu.Unlock()
-		return RequestState{}, ErrRequestNotFound
+		return agentstate.RequestState{}, ErrRequestNotFound
 	}
 	adapter := c.adapter
 	err := ErrRequestNotFound
@@ -305,7 +244,7 @@ func (c *Conversation) Respond(ctx context.Context, id string, response Response
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	var resolved *Response
+	var resolved *agentstate.Response
 	if err == nil {
 		redacted := redactSecrets(r.Request, response)
 		resolved = &redacted
@@ -320,7 +259,7 @@ func (c *Conversation) Respond(ctx context.Context, id string, response Response
 // redactSecrets replaces the answers to secret questions with RedactedAnswer
 // for the stored and published request state. The agent gets the real
 // answers.
-func redactSecrets(req Request, resp Response) Response {
+func redactSecrets(req agentstate.Request, resp agentstate.Response) agentstate.Response {
 	redacted := false
 	for _, q := range req.Questions {
 		if !q.Secret || len(resp.Answers[q.ID]) == 0 {
@@ -336,11 +275,11 @@ func redactSecrets(req Request, resp Response) Response {
 }
 
 // validateResponse checks that a response answers the request.
-func validateResponse(req Request, resp Response) error {
+func validateResponse(req agentstate.Request, resp agentstate.Response) error {
 	switch req.Kind {
-	case RequestKindApproval, RequestKindPlan:
+	case agentstate.RequestKindApproval, agentstate.RequestKindPlan:
 		return validateOption(req, resp.OptionID)
-	case RequestKindQuestion:
+	case agentstate.RequestKindQuestion:
 		if resp.OptionID != "" {
 			return validateOption(req, resp.OptionID)
 		}
@@ -356,7 +295,7 @@ func validateResponse(req Request, resp Response) error {
 				continue
 			}
 			for _, a := range answers {
-				if !slices.ContainsFunc(q.Options, func(o QuestionOption) bool { return o.Label == a }) {
+				if !slices.ContainsFunc(q.Options, func(o agentstate.QuestionOption) bool { return o.Label == a }) {
 					return fmt.Errorf("%w: %q is not an option of question %q", ErrInvalidResponse, a, q.ID)
 				}
 			}
@@ -368,15 +307,15 @@ func validateResponse(req Request, resp Response) error {
 }
 
 // validateOption checks that id is one of the request's options.
-func validateOption(req Request, id string) error {
-	if slices.ContainsFunc(req.Options, func(o RequestOption) bool { return o.ID == id }) {
+func validateOption(req agentstate.Request, id string) error {
+	if slices.ContainsFunc(req.Options, func(o agentstate.RequestOption) bool { return o.ID == id }) {
 		return nil
 	}
 	return fmt.Errorf("%w: unknown option %q", ErrInvalidResponse, id)
 }
 
 // closeRequestLocked closes a pending request and publishes it.
-func (c *Conversation) closeRequestLocked(r *RequestState, status RequestStatus, capability ResponseCapability) {
+func (c *Conversation) closeRequestLocked(r *agentstate.RequestState, status agentstate.RequestStatus, capability agentstate.ResponseCapability) {
 	if c.requests.close(r, status, capability) {
 		c.cfg.Observer.RequestUpdated(*r)
 	}
@@ -392,9 +331,9 @@ func (c *Conversation) expireRequestsLocked(agentGone bool) {
 // closedCapability is how a request the agent stopped waiting for can still
 // be answered: a question with a new message, an approval or a plan not at
 // all.
-func closedCapability(kind RequestKind) ResponseCapability {
-	if kind == RequestKindQuestion {
-		return ResponseMessage
+func closedCapability(kind agentstate.RequestKind) agentstate.ResponseCapability {
+	if kind == agentstate.RequestKindQuestion {
+		return agentstate.ResponseMessage
 	}
-	return ResponseNotResumable
+	return agentstate.ResponseNotResumable
 }

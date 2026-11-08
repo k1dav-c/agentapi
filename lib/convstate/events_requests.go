@@ -3,17 +3,17 @@ package convstate
 import (
 	"slices"
 
-	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/agentstate"
 )
 
 // EmitRequest stores a structured request's latest state and broadcasts it.
 // A change in the number of pending requests is also a status change.
-func (e *EventEmitter) EmitRequest(state native.RequestState) {
+func (e *EventEmitter) EmitRequest(state agentstate.RequestState) {
 	e.mu.Lock()
 	defer e.unlock()
 	before := e.statusChangeBody().PendingRequests
-	idx := slices.IndexFunc(e.requests, func(r native.RequestState) bool { return r.ID == state.ID })
-	if idx < 0 && state.Status != native.RequestStatusPending {
+	idx := slices.IndexFunc(e.requests, func(r agentstate.RequestState) bool { return r.ID == state.ID })
+	if idx < 0 && state.Status != agentstate.RequestStatusPending {
 		// A request closed after a reset belongs to the conversation that
 		// was cleared (the restarted agent's requests expire after
 		// DELETE /messages cleared them), not to this one.
@@ -41,12 +41,12 @@ func (e *EventEmitter) EmitRequest(state native.RequestState) {
 }
 
 // trimRequestsLocked drops the closed requests beyond the
-// native.MaxClosedRequests the conversation keeps too: those that closed
+// agentstate.MaxClosedRequests the conversation keeps too: those that closed
 // first. Caller holds e.mu. No event says so: a client keeps the same
 // bound (the chat's mergeRequests), so what it holds after a replay since
 // a seq is what a full replay gives.
 func (e *EventEmitter) trimRequestsLocked() {
-	drop := native.ExcessClosed(len(e.requests), func(i int) *native.RequestState { return &e.requests[i] })
+	drop := agentstate.ExcessClosed(len(e.requests), func(i int) *agentstate.RequestState { return &e.requests[i] })
 	for n, i := range drop {
 		// The n dropped before were in front of it.
 		i -= n
@@ -59,18 +59,18 @@ func (e *EventEmitter) trimRequestsLocked() {
 }
 
 // Requests returns the stored structured requests, oldest first.
-func (e *EventEmitter) Requests() []native.RequestState {
+func (e *EventEmitter) Requests() []agentstate.RequestState {
 	e.mu.Lock()
 	defer e.unlock()
 	return slices.Clone(e.requests)
 }
 
 // Request returns the stored request with the given ID.
-func (e *EventEmitter) Request(id string) (native.RequestState, bool) {
+func (e *EventEmitter) Request(id string) (agentstate.RequestState, bool) {
 	e.mu.Lock()
 	defer e.unlock()
-	if i := slices.IndexFunc(e.requests, func(r native.RequestState) bool { return r.ID == id }); i >= 0 {
+	if i := slices.IndexFunc(e.requests, func(r agentstate.RequestState) bool { return r.ID == id }); i >= 0 {
 		return e.requests[i], true
 	}
-	return native.RequestState{}, false
+	return agentstate.RequestState{}, false
 }

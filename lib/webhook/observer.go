@@ -8,10 +8,10 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/instanceapi"
-	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/pricing"
 	"github.com/coder/agentapi/lib/transcript"
 )
@@ -576,9 +576,9 @@ func toolInput(raw json.RawMessage) any {
 	return raw
 }
 
-func (o *webhookObserver) requestUpdated(state native.RequestState, quiet bool) {
+func (o *webhookObserver) requestUpdated(state agentstate.RequestState, quiet bool) {
 	wasOpen := o.openRequests[state.ID]
-	open := state.Status == native.RequestStatusPending
+	open := state.Status == agentstate.RequestStatusPending
 	if open {
 		o.openRequests[state.ID] = true
 	} else {

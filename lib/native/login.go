@@ -7,12 +7,13 @@ import (
 	"os/user"
 	"sync"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
 )
 
 // awaitLogin records that the agent of generation gen needs a login and
 // starts it again after LoginRetryInterval, or sooner on RetryLogin.
-func (c *Conversation) awaitLogin(ctx context.Context, gen int, resume Resume, login LoginRequired) {
+func (c *Conversation) awaitLogin(ctx context.Context, gen int, resume Resume, login agentstate.LoginRequired) {
 	login = withLocalAccount(login)
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -40,7 +41,7 @@ func (c *Conversation) awaitLoginLocked(ctx context.Context, resume Resume) {
 
 // setLoginLocked records that the agent waits for login and reports whether
 // that is news. Observers only hear about changes.
-func (c *Conversation) setLoginLocked(login LoginRequired) bool {
+func (c *Conversation) setLoginLocked(login agentstate.LoginRequired) bool {
 	if c.login != nil && *c.login == login {
 		return false
 	}
@@ -69,7 +70,7 @@ var localAccount = sync.OnceValues(func() (host, username string) {
 })
 
 // withLocalAccount fills in where to log in, unless the adapter said.
-func withLocalAccount(login LoginRequired) LoginRequired {
+func withLocalAccount(login agentstate.LoginRequired) agentstate.LoginRequired {
 	host, username := localAccount()
 	if login.Host == "" {
 		login.Host = host
@@ -80,7 +81,7 @@ func withLocalAccount(login LoginRequired) LoginRequired {
 	return login
 }
 
-func loginErrorText(login LoginRequired) string {
+func loginErrorText(login agentstate.LoginRequired) string {
 	where := ""
 	if login.Host != "" && login.User != "" {
 		where = fmt.Sprintf(" on %s as %s", login.Host, login.User)
@@ -89,7 +90,7 @@ func loginErrorText(login LoginRequired) string {
 }
 
 // LoginRequired returns what the agent waits for to log in, or nil.
-func (c *Conversation) LoginRequired() *LoginRequired {
+func (c *Conversation) LoginRequired() *agentstate.LoginRequired {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.login == nil {

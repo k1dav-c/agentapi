@@ -7,10 +7,10 @@ import (
 	"slices"
 	"time"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/instanceapi"
-	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/statedb"
 )
 
@@ -23,11 +23,11 @@ type restoredState struct {
 	// resumeRef resumes the native agent's session.
 	resumeRef string
 	// settings were chosen for the session.
-	settings native.Settings
+	settings agentstate.Settings
 	// limitStop is the turn a usage limit stopped.
-	limitStop *native.LimitStop
+	limitStop *agentstate.LimitStop
 	// retryWait is the failed turn that waits to be tried again.
-	retryWait *native.RetryWait
+	retryWait *agentstate.RetryWait
 }
 
 // restoreState connects the state database to emitter, which stores its
@@ -75,9 +75,9 @@ func restoreState(config ServerConfig, db *statedb.DB, emitter *EventEmitter, lo
 	// The agent that asked is gone; its requests can't be answered.
 	now := config.Clock.Now()
 	for _, r := range emitter.Requests() {
-		if r.Status == native.RequestStatusPending {
-			r.Status = native.RequestStatusExpired
-			r.Capability = native.ResponseNotResumable
+		if r.Status == agentstate.RequestStatusPending {
+			r.Status = agentstate.RequestStatusExpired
+			r.Capability = agentstate.ResponseNotResumable
 			r.ClosedAt = &now
 			emitter.EmitRequest(r)
 		}

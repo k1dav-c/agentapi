@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/instanceapi"
-	"github.com/coder/agentapi/lib/native"
 )
 
 // ChangedAt moves when an instance changes what its row shows it does, and
@@ -68,7 +68,7 @@ func TestChangedAt(t *testing.T) {
 		{"and comes back", connected(nil), false},
 		{"spend, usage and reading it", connected(func(s *instanceapi.SummaryBody) {
 			s.Spend = &instanceapi.SummarySpend{DayUSD: 4.2, Scope: "x", UpdatedAt: clock.Now()}
-			s.Usage = &native.AgentUsage{}
+			s.Usage = &agentstate.AgentUsage{}
 			s.SeenAt = clock.Now()
 		}), false},
 		{"a task starts", connected(func(s *instanceapi.SummaryBody) {
@@ -86,7 +86,7 @@ func TestChangedAt(t *testing.T) {
 		{"it asks", connected(func(s *instanceapi.SummaryBody) {
 			s.Attention = instanceapi.AttentionRequest
 			s.PendingRequests = 1
-			s.Request = &instanceapi.SummaryRequest{ID: "r1", Kind: native.RequestKindApproval, Title: "make release"}
+			s.Request = &instanceapi.SummaryRequest{ID: "r1", Kind: agentstate.RequestKindApproval, Title: "make release"}
 		}), true},
 		{"muted", func(i *Instance) { i.Muted = instanceapi.AttentionKey(i.Summary) }, false},
 		{"it asks something else", connected(func(s *instanceapi.SummaryBody) {

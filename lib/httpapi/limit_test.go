@@ -8,11 +8,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/httpapi"
 	"github.com/coder/agentapi/lib/native"
 )
 
-func (n *nativeServer) limitStop() *native.LimitStop {
+func (n *nativeServer) limitStop() *agentstate.LimitStop {
 	var status httpapi.StatusChangeBody
 	n.do(http.MethodGet, "/status", nil, &status)
 	return status.LimitStop

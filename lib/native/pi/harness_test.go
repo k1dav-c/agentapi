@@ -20,6 +20,7 @@ import (
 	"github.com/coder/quartz"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/nativetest"
 	"github.com/coder/agentapi/lib/native/procutil"
@@ -528,13 +529,13 @@ func (h *harness) images(m map[string]any) []native.Image {
 // Respond, mapping the fixture's answer onto the request.
 func (h *harness) respond(m map[string]any) {
 	id := m["id"].(string)
-	var req native.Request
+	var req agentstate.Request
 	require.Eventually(h.t, func() bool {
 		var ok bool
 		req, ok = h.sink.Request(id)
 		return ok
 	}, 5*time.Second, time.Millisecond)
-	var resp native.Response
+	var resp agentstate.Response
 	switch {
 	case m["cancelled"] == true:
 		resp.OptionID = optionCancel
@@ -543,7 +544,7 @@ func (h *harness) respond(m map[string]any) {
 		if m["confirmed"] == true {
 			resp.OptionID = optionYes
 		}
-	case req.Kind == native.RequestKindApproval:
+	case req.Kind == agentstate.RequestKindApproval:
 		resp.OptionID = m["value"].(string)
 	default:
 		resp.Answers = map[string][]string{req.Questions[0].ID: {m["value"].(string)}}

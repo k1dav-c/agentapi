@@ -5,13 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/native"
 )
 
 // loginHint tells the user how to log Codex in. AgentAPI usually runs on a
 // server without a browser, where the browser sign-in's redirect to
 // localhost can't come back, so the hint signs in with a device code.
-var loginHint = native.LoginRequired{
+var loginHint = agentstate.LoginRequired{
 	Agent:   "Codex",
 	Message: "Codex is not logged in.",
 	Command: "codex login --device-auth",

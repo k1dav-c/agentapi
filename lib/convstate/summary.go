@@ -3,8 +3,8 @@ package convstate
 import (
 	"reflect"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/instanceapi"
-	"github.com/coder/agentapi/lib/native"
 )
 
 // The summary's types are the contract with the clients that watch many
@@ -66,7 +66,7 @@ func (e *EventEmitter) summaryLocked() SummaryBody {
 		summary.Update = &update
 	}
 	for _, r := range e.requests {
-		if r.Status != native.RequestStatusPending {
+		if r.Status != agentstate.RequestStatusPending {
 			continue
 		}
 		if summary.Request == nil || r.CreatedAt.Before(summary.Request.CreatedAt) {

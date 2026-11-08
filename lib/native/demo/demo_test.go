@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/demo"
@@ -22,21 +23,21 @@ import (
 type observer struct {
 	mu       sync.Mutex
 	rich     map[string]transcript.RichMessage
-	requests map[string]native.RequestState
-	logins   []*native.LoginRequired
-	usage    []native.AgentUsage
+	requests map[string]agentstate.RequestState
+	logins   []*agentstate.LoginRequired
+	usage    []agentstate.AgentUsage
 	exits    []native.AgentExit
 }
 
-func (o *observer) Usage(u native.AgentUsage) {
+func (o *observer) Usage(u agentstate.AgentUsage) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.usage = append(o.usage, u)
 }
 
-func (o *observer) Started(native.Capabilities) {}
-func (o *observer) LimitStop(*native.LimitStop) {}
-func (o *observer) RetryWait(*native.RetryWait) {}
+func (o *observer) Started(agentstate.Capabilities) {}
+func (o *observer) LimitStop(*agentstate.LimitStop) {}
+func (o *observer) RetryWait(*agentstate.RetryWait) {}
 func (o *observer) AgentExited(exit native.AgentExit) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -51,20 +52,20 @@ func (o *observer) RichMessage(m transcript.RichMessage) {
 func (o *observer) SessionEvents([]transcript.SessionEvent) {}
 func (o *observer) SessionName(string)                      {}
 func (o *observer) SessionRef(string)                       {}
-func (o *observer) LoginRequired(l *native.LoginRequired) {
+func (o *observer) LoginRequired(l *agentstate.LoginRequired) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.logins = append(o.logins, l)
 }
 
-func (o *observer) RequestUpdated(s native.RequestState) {
+func (o *observer) RequestUpdated(s agentstate.RequestState) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.requests[s.ID] = s
 }
 
-func (o *observer) Settings(native.Settings)       {}
-func (o *observer) SettingsChosen(native.Settings) {}
+func (o *observer) Settings(agentstate.Settings)       {}
+func (o *observer) SettingsChosen(agentstate.Settings) {}
 
 // replies returns the replies to the nth turn of each agent; every agent
 // counts its turns from one.
@@ -106,7 +107,7 @@ func (o *observer) toolResults() []transcript.RichContentBlock {
 // one) and waits until it accepts turns.
 func start(t *testing.T, clock quartz.Clock) (*native.Conversation, *observer) {
 	t.Helper()
-	obs := &observer{rich: map[string]transcript.RichMessage{}, requests: map[string]native.RequestState{}}
+	obs := &observer{rich: map[string]transcript.RichMessage{}, requests: map[string]agentstate.RequestState{}}
 	c := native.NewConversation(native.Config{
 		Factory:  demo.Factory(demo.Options{Step: time.Millisecond}),
 		Observer: obs,
@@ -119,11 +120,11 @@ func start(t *testing.T, clock quartz.Clock) (*native.Conversation, *observer) {
 	})
 	c.Start(ctx)
 	require.Eventually(t, c.Idle, 5*time.Second, time.Millisecond)
-	assert.Equal(t, native.Capabilities{Steer: true, Interrupt: true, Resume: true, Images: true, Settings: true, Compact: true}, c.Capabilities())
+	assert.Equal(t, agentstate.Capabilities{Steer: true, Interrupt: true, Resume: true, Images: true, Settings: true, Compact: true}, c.Capabilities())
 	return c, obs
 }
 
-func pending(t *testing.T, c *native.Conversation) native.RequestState {
+func pending(t *testing.T, c *native.Conversation) agentstate.RequestState {
 	t.Helper()
 	require.Eventually(t, func() bool { return len(c.PendingRequests()) == 1 }, 5*time.Second, time.Millisecond)
 	return c.PendingRequests()[0]
@@ -148,12 +149,12 @@ func TestApprovalDenyWithFeedback(t *testing.T) {
 	c, obs := start(t, nil)
 	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "please approve this"}))
 	req := pending(t, c)
-	assert.Equal(t, native.RequestKindApproval, req.Kind)
+	assert.Equal(t, agentstate.RequestKindApproval, req.Kind)
 	assert.True(t, req.Feedback)
 	assert.NotEmpty(t, req.ToolUseID)
 	assert.Equal(t, conv.StatusStable, c.Status())
 
-	_, err := c.Respond(context.Background(), req.ID, native.Response{OptionID: "deny", Text: "use make build"})
+	_, err := c.Respond(context.Background(), req.ID, agentstate.Response{OptionID: "deny", Text: "use make build"})
 	require.NoError(t, err)
 	require.Eventually(t, c.Idle, 5*time.Second, time.Millisecond)
 
@@ -171,22 +172,22 @@ func TestQuestionAndPlan(t *testing.T) {
 	c, obs := start(t, nil)
 	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "ask me, then plan"}))
 	q := pending(t, c)
-	require.Equal(t, native.RequestKindQuestion, q.Kind)
+	require.Equal(t, agentstate.RequestKindQuestion, q.Kind)
 	require.Len(t, q.Questions, 3)
 	assert.True(t, q.Questions[1].MultiSelect)
 	assert.True(t, q.Questions[2].FreeText)
-	_, err := c.Respond(context.Background(), q.ID, native.Response{Answers: map[string][]string{
+	_, err := c.Respond(context.Background(), q.ID, agentstate.Response{Answers: map[string][]string{
 		"pm": {"bun"}, "checks": {"Lint", "Unit tests"}, "notes": {"none"},
 	}})
 	require.NoError(t, err)
 
 	require.Eventually(t, func() bool {
 		p := c.PendingRequests()
-		return len(p) == 1 && p[0].Kind == native.RequestKindPlan
+		return len(p) == 1 && p[0].Kind == agentstate.RequestKindPlan
 	}, 5*time.Second, time.Millisecond)
 	plan := c.PendingRequests()[0]
 	assert.Contains(t, plan.Detail, "## Plan")
-	_, err = c.Respond(context.Background(), plan.ID, native.Response{OptionID: "approve"})
+	_, err = c.Respond(context.Background(), plan.ID, agentstate.Response{OptionID: "approve"})
 	require.NoError(t, err)
 	require.Eventually(t, c.Idle, 5*time.Second, time.Millisecond)
 	text := obs.reply(1).Content[0].Text
@@ -218,9 +219,9 @@ func TestInterruptExpiresRequests(t *testing.T) {
 	obs.mu.Lock()
 	state := obs.requests[req.ID]
 	obs.mu.Unlock()
-	assert.Equal(t, native.RequestStatusExpired, state.Status)
-	assert.Equal(t, native.ResponseMessage, state.Capability)
-	_, err := c.Respond(context.Background(), req.ID, native.Response{Answers: map[string][]string{"pm": {"bun"}}})
+	assert.Equal(t, agentstate.RequestStatusExpired, state.Status)
+	assert.Equal(t, agentstate.ResponseMessage, state.Capability)
+	_, err := c.Respond(context.Background(), req.ID, agentstate.Response{Answers: map[string][]string{"pm": {"bun"}}})
 	assert.ErrorIs(t, err, native.ErrRequestNotFound)
 }
 
@@ -234,7 +235,7 @@ func TestLogin(t *testing.T) {
 
 	require.NoError(t, c.StartTurn(ctx, native.Input{Text: "please approve this"}))
 	req := pending(t, c)
-	_, err := c.Respond(ctx, req.ID, native.Response{OptionID: "allow"})
+	_, err := c.Respond(ctx, req.ID, agentstate.Response{OptionID: "allow"})
 	require.NoError(t, err)
 	require.Eventually(t, c.Idle, 5*time.Second, time.Millisecond)
 	reply := c.Messages()[1].Message
@@ -261,7 +262,7 @@ func TestLogin(t *testing.T) {
 	require.NoError(t, c.StartTurn(ctx, native.Input{Text: "approve that too"}))
 	again := pending(t, c)
 	assert.NotEqual(t, req.ID, again.ID)
-	_, err = c.Respond(ctx, again.ID, native.Response{OptionID: "allow"})
+	_, err = c.Respond(ctx, again.ID, agentstate.Response{OptionID: "allow"})
 	require.NoError(t, err)
 	require.Eventually(t, c.Idle, 5*time.Second, time.Millisecond)
 	msgs := c.Messages()
@@ -269,49 +270,49 @@ func TestLogin(t *testing.T) {
 	assert.Equal(t, reply, msgs[1].Message)
 	assert.Len(t, obs.replies(1), 2, "the first reply of each agent")
 	obs.mu.Lock()
-	assert.Equal(t, native.RequestStatusResolved, obs.requests[req.ID].Status)
+	assert.Equal(t, agentstate.RequestStatusResolved, obs.requests[req.ID].Status)
 	obs.mu.Unlock()
 }
 
 func TestSettings(t *testing.T) {
 	c, _ := start(t, nil)
-	assert.Equal(t, native.Settings{PermissionMode: native.PermissionModeBypass, Model: "demo-swift", Effort: "medium"}, c.Settings())
+	assert.Equal(t, agentstate.Settings{PermissionMode: agentstate.PermissionModeBypass, Model: "demo-swift", Effort: "medium"}, c.Settings())
 	options, err := c.SettingOptions(context.Background())
 	require.NoError(t, err)
-	assert.Equal(t, native.PermissionModeValues, options.PermissionModes)
+	assert.Equal(t, agentstate.PermissionModeValues, options.PermissionModes)
 	require.Len(t, options.Models, 3)
 
 	// A model without the current effort gets its default one, a model
 	// without efforts none.
-	require.NoError(t, c.ApplySettings(context.Background(), native.Settings{Model: "demo-deep", Effort: "max"}))
-	require.NoError(t, c.ApplySettings(context.Background(), native.Settings{Model: "demo-swift"}))
+	require.NoError(t, c.ApplySettings(context.Background(), agentstate.Settings{Model: "demo-deep", Effort: "max"}))
+	require.NoError(t, c.ApplySettings(context.Background(), agentstate.Settings{Model: "demo-swift"}))
 	assert.Equal(t, "medium", c.Settings().Effort)
-	require.NoError(t, c.ApplySettings(context.Background(), native.Settings{Model: "demo-plain"}))
+	require.NoError(t, c.ApplySettings(context.Background(), agentstate.Settings{Model: "demo-plain"}))
 	assert.Empty(t, c.Settings().Effort)
-	assert.ErrorIs(t, c.ApplySettings(context.Background(), native.Settings{Effort: "low"}), native.ErrInvalidSetting)
+	assert.ErrorIs(t, c.ApplySettings(context.Background(), agentstate.Settings{Effort: "low"}), native.ErrInvalidSetting)
 }
 
 func TestAskModeAsksBeforeTheFirstCommand(t *testing.T) {
 	c, _ := start(t, nil)
-	require.NoError(t, c.ApplySettings(context.Background(), native.Settings{PermissionMode: native.PermissionModeAsk}))
+	require.NoError(t, c.ApplySettings(context.Background(), agentstate.Settings{PermissionMode: agentstate.PermissionModeAsk}))
 	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "hello"}))
 	r := pending(t, c)
 	assert.Equal(t, "Run ls", r.Title)
-	_, err := c.Respond(context.Background(), r.ID, native.Response{OptionID: "allow"})
+	_, err := c.Respond(context.Background(), r.ID, agentstate.Response{OptionID: "allow"})
 	require.NoError(t, err)
 	require.Eventually(t, c.Idle, 5*time.Second, time.Millisecond)
 }
 
 func TestPlanModeEndsInBypassOnceApproved(t *testing.T) {
 	c, _ := start(t, nil)
-	require.NoError(t, c.ApplySettings(context.Background(), native.Settings{PermissionMode: native.PermissionModePlan}))
+	require.NoError(t, c.ApplySettings(context.Background(), agentstate.Settings{PermissionMode: agentstate.PermissionModePlan}))
 	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "add a feature"}))
 	r := pending(t, c)
-	assert.Equal(t, native.RequestKindPlan, r.Kind)
-	_, err := c.Respond(context.Background(), r.ID, native.Response{OptionID: "approve"})
+	assert.Equal(t, agentstate.RequestKindPlan, r.Kind)
+	_, err := c.Respond(context.Background(), r.ID, agentstate.Response{OptionID: "approve"})
 	require.NoError(t, err)
 	require.Eventually(t, c.Idle, 5*time.Second, time.Millisecond)
-	assert.Equal(t, native.PermissionModeBypass, c.Settings().PermissionMode)
+	assert.Equal(t, agentstate.PermissionModeBypass, c.Settings().PermissionMode)
 }
 
 func TestUsage(t *testing.T) {

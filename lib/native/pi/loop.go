@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/coder/agentapi/lib/agentlog/pilog"
+	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/agentio"
@@ -22,7 +23,7 @@ type loopState struct {
 	sink native.Sink
 	cwd  string
 	// usage is the context usage reported last.
-	usage native.AgentUsage
+	usage agentstate.AgentUsage
 
 	sessionName string
 	events      *pilog.EventParser

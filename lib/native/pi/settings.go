@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/native"
 )
 
@@ -79,11 +80,11 @@ type thinkingLevelChanged struct {
 }
 
 // stateSettings returns the settings a session state reports.
-func stateSettings(state sessionState) native.Settings {
+func stateSettings(state sessionState) agentstate.Settings {
 	if !state.hasModel() {
-		return native.Settings{}
+		return agentstate.Settings{}
 	}
-	settings := native.Settings{Model: state.Model.modelID()}
+	settings := agentstate.Settings{Model: state.Model.modelID()}
 	if state.Model.Reasoning {
 		settings.Effort = state.ThinkingLevel
 	}
@@ -116,20 +117,20 @@ func (a *Adapter) contextUsed(usage *messageUsage) {
 	if window <= 0 || tokens <= 0 {
 		return
 	}
-	a.loop.usage.Context = &native.ContextUsage{Used: int(tokens), Size: int(window)}
+	a.loop.usage.Context = &agentstate.ContextUsage{Used: int(tokens), Size: int(window)}
 	native.ReportUsage(a.loop.sink, a.loop.usage)
 }
 
 // setSettings records the settings.
-func (a *Adapter) setSettings(settings native.Settings) {
-	a.updateSettings(func(s *native.Settings) { *s = settings })
+func (a *Adapter) setSettings(settings agentstate.Settings) {
+	a.updateSettings(func(s *agentstate.Settings) { *s = settings })
 }
 
 // updateSettings changes the settings with f in one locked step, so the
 // event loop and ApplySettings can't undo each other's change. It returns
 // the settings, whether they changed, and whether an ApplySettings is
 // under way.
-func (a *Adapter) updateSettings(f func(*native.Settings)) (settings native.Settings, changed, applying bool) {
+func (a *Adapter) updateSettings(f func(*agentstate.Settings)) (settings agentstate.Settings, changed, applying bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	before := a.settings
@@ -140,7 +141,7 @@ func (a *Adapter) updateSettings(f func(*native.Settings)) (settings native.Sett
 // handleThinkingLevel follows a thinking level Pi changed, by a switch or
 // because a new model clamped it. Event loop only.
 func (a *Adapter) handleThinkingLevel(level string) {
-	settings, changed, applying := a.updateSettings(func(s *native.Settings) {
+	settings, changed, applying := a.updateSettings(func(s *agentstate.Settings) {
 		// A model that doesn't reason has no effort to follow.
 		if s.Effort != "" {
 			s.Effort = level
@@ -153,7 +154,7 @@ func (a *Adapter) handleThinkingLevel(level string) {
 
 // Settings implements native.Configurable. Pi has no permission modes: it
 // runs tools without asking.
-func (a *Adapter) Settings() native.Settings {
+func (a *Adapter) Settings() agentstate.Settings {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.settings
@@ -184,12 +185,12 @@ func (a *Adapter) SettingOptions(ctx context.Context) (native.SettingOptions, er
 		a.models = models
 		a.mu.Unlock()
 	}
-	return native.SettingOptions{PermissionModes: []native.PermissionMode{}, Models: slices.Clone(models)}, nil
+	return native.SettingOptions{PermissionModes: []agentstate.PermissionMode{}, Models: slices.Clone(models)}, nil
 }
 
 // ApplySettings implements native.Configurable. Pi fits the thinking level
 // to a new model by itself; the state it reports afterwards says which.
-func (a *Adapter) ApplySettings(ctx context.Context, s native.Settings) error {
+func (a *Adapter) ApplySettings(ctx context.Context, s agentstate.Settings) error {
 	if err := a.ready(); err != nil {
 		return err
 	}
@@ -242,7 +243,7 @@ func (a *Adapter) applyModel(ctx context.Context, model string) error {
 	// if what follows fails.
 	var m piModel
 	if json.Unmarshal(res, &m) == nil && m.ID != "" {
-		a.updateSettings(func(settings *native.Settings) {
+		a.updateSettings(func(settings *agentstate.Settings) {
 			settings.Model = m.modelID()
 			if !m.Reasoning {
 				settings.Effort = ""

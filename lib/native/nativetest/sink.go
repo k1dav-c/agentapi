@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/transcript"
@@ -39,15 +40,15 @@ type SinkState struct {
 	Events   []transcript.SessionEvent
 	Started  int
 	Results  []native.TurnResult
-	Requests []native.Request
+	Requests []agentstate.Request
 	Closed   []string
 	Names    []string
 	Refs     []string
 	// Errors are "<level>: <message>".
 	Errors   []string
-	Logins   []native.LoginRequired
-	Settings []native.Settings
-	Usage    []native.AgentUsage
+	Logins   []agentstate.LoginRequired
+	Settings []agentstate.Settings
+	Usage    []agentstate.AgentUsage
 }
 
 var (
@@ -129,7 +130,7 @@ func (s *Sink) SessionEvents(events []transcript.SessionEvent) {
 	s.state.Events = append(s.state.Events, events...)
 }
 
-func (s *Sink) RequestOpened(r native.Request) {
+func (s *Sink) RequestOpened(r agentstate.Request) {
 	defer s.enter()()
 	s.state.Requests = append(s.state.Requests, r)
 	s.state.Log = append(s.state.Log, "request_opened:"+r.ID)
@@ -151,19 +152,19 @@ func (s *Sink) SessionRef(ref string) {
 	s.state.Refs = append(s.state.Refs, ref)
 }
 
-func (s *Sink) LoginRequired(l native.LoginRequired) {
+func (s *Sink) LoginRequired(l agentstate.LoginRequired) {
 	defer s.enter()()
 	s.state.Logins = append(s.state.Logins, l)
 	s.state.Log = append(s.state.Log, "login_required")
 }
 
-func (s *Sink) SettingsChanged(settings native.Settings) {
+func (s *Sink) SettingsChanged(settings agentstate.Settings) {
 	defer s.enter()()
 	s.state.Settings = append(s.state.Settings, settings)
 	s.state.Log = append(s.state.Log, "settings:"+string(settings.PermissionMode))
 }
 
-func (s *Sink) UsageChanged(usage native.AgentUsage) {
+func (s *Sink) UsageChanged(usage agentstate.AgentUsage) {
 	defer s.enter()()
 	s.state.Usage = append(s.state.Usage, usage)
 }
@@ -240,13 +241,13 @@ func (s *Sink) Snapshots(id string) []transcript.RichMessage {
 }
 
 // Request returns the request opened with id.
-func (s *Sink) Request(id string) (native.Request, bool) {
+func (s *Sink) Request(id string) (agentstate.Request, bool) {
 	for _, r := range s.State().Requests {
 		if r.ID == id {
 			return r, true
 		}
 	}
-	return native.Request{}, false
+	return agentstate.Request{}, false
 }
 
 // TurnLog returns the turn entries of the log.

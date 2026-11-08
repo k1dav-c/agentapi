@@ -18,10 +18,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/instanceapi"
-	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -201,10 +201,10 @@ func TestWebhookObserverNeedsYou(t *testing.T) {
 	e := x.emitter
 	e.EmitStatus(conv.StatusStable)
 
-	request := native.RequestState{Request: native.Request{ID: "r1"}, Status: native.RequestStatusPending}
+	request := agentstate.RequestState{Request: agentstate.Request{ID: "r1"}, Status: agentstate.RequestStatusPending}
 	e.EmitRequest(request)
 	e.EmitRequest(request)
-	request.Status = native.RequestStatusResolved
+	request.Status = agentstate.RequestStatusResolved
 	e.EmitRequest(request)
 
 	// A turn waiting on an approval goes on once it is answered: the
@@ -212,22 +212,22 @@ func TestWebhookObserverNeedsYou(t *testing.T) {
 	deploy := conv.Message{Id: 0, Role: conv.RoleUser, Message: "Deploy", Time: start}
 	e.EmitMessages([]conv.Message{deploy})
 	e.EmitStatus(conv.StatusChanging)
-	approval := native.RequestState{Request: native.Request{ID: "r2"}, Status: native.RequestStatusPending}
+	approval := agentstate.RequestState{Request: agentstate.Request{ID: "r2"}, Status: agentstate.RequestStatusPending}
 	e.EmitRequest(approval)
 	e.EmitStatus(conv.StatusStable)
-	approval.Status = native.RequestStatusResolved
+	approval.Status = agentstate.RequestStatusResolved
 	e.EmitRequest(approval)
 	e.EmitStatus(conv.StatusChanging)
 	e.EmitStatus(conv.StatusStable)
 
-	e.SetLoginRequired(&native.LoginRequired{Agent: "Claude Code", Command: "claude auth login"})
+	e.SetLoginRequired(&agentstate.LoginRequired{Agent: "Claude Code", Command: "claude auth login"})
 	e.SetLoginRequired(nil)
 
 	goOn := conv.Message{Id: 1, Role: conv.RoleUser, Message: "Go on", Time: start}
 	e.EmitMessages([]conv.Message{deploy, goOn})
 	e.EmitStatus(conv.StatusChanging)
 	e.EmitError("warned", conv.ErrorLevelWarning)
-	e.SetLimitStop(&native.LimitStop{Message: "You've hit your limit", StoppedAt: start})
+	e.SetLimitStop(&agentstate.LimitStop{Message: "You've hit your limit", StoppedAt: start})
 	e.EmitStatus(conv.StatusStable)
 	x.pump()
 
@@ -349,9 +349,9 @@ func TestWebhookObserverForgets(t *testing.T) {
 		e.EmitRichMessageSnapshot(transcript.RichMessage{MessageID: "r" + id, Role: "user", Timestamp: start, Content: []transcript.RichContentBlock{
 			{Type: "tool_result", ToolUseID: id, Text: "ok", Status: "completed"},
 		}})
-		request := native.RequestState{Request: native.Request{ID: "q" + id}, Status: native.RequestStatusPending}
+		request := agentstate.RequestState{Request: agentstate.Request{ID: "q" + id}, Status: agentstate.RequestStatusPending}
 		e.EmitRequest(request)
-		request.Status = native.RequestStatusResolved
+		request.Status = agentstate.RequestStatusResolved
 		e.EmitRequest(request)
 		x.pump()
 	}

@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/agentapi/lib/agentlog/pilog"
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/transcript"
 )
@@ -251,31 +252,31 @@ func TestReplayExtensionDialogs(t *testing.T) {
 	require.Len(t, h.sink.State().Requests, 4)
 
 	input := h.sink.State().Requests[0]
-	assert.Equal(t, native.RequestKindQuestion, input.Kind)
+	assert.Equal(t, agentstate.RequestKindQuestion, input.Kind)
 	assert.Equal(t, "Enter a value", input.Title)
 	assert.Equal(t, "type something...", input.Detail)
-	assert.Equal(t, []native.Question{{ID: valueQuestion, Question: "Enter a value", FreeText: true}}, input.Questions)
-	assert.Equal(t, []native.RequestOption{{ID: optionCancel, Label: "Cancel", Kind: native.OptionKindCancel}}, input.Options)
+	assert.Equal(t, []agentstate.Question{{ID: valueQuestion, Question: "Enter a value", FreeText: true}}, input.Questions)
+	assert.Equal(t, []agentstate.RequestOption{{ID: optionCancel, Label: "Cancel", Kind: agentstate.OptionKindCancel}}, input.Options)
 
 	approval := h.sink.State().Requests[1]
-	assert.Equal(t, native.RequestKindApproval, approval.Kind)
+	assert.Equal(t, agentstate.RequestKindApproval, approval.Kind)
 	assert.Equal(t, "Dangerous command: rm -rf junkdir", approval.Title)
 	assert.Equal(t, "bash", approval.ToolName)
 	assert.Equal(t, "call_9362c31ec3e943a19ec8cfab6b71badf|fc_0b32c3692bef9e49016ad1d825dc9c81958f6b90567074a199", approval.ToolUseID)
 	assert.JSONEq(t, `{"command":"rm -rf junkdir","timeout":null}`, string(approval.Input))
-	assert.Equal(t, []native.RequestOption{
-		{ID: "Allow", Label: "Allow", Kind: native.OptionKindAllow},
-		{ID: "Block", Label: "Block", Kind: native.OptionKindDeny},
+	assert.Equal(t, []agentstate.RequestOption{
+		{ID: "Allow", Label: "Allow", Kind: agentstate.OptionKindAllow},
+		{ID: "Block", Label: "Block", Kind: agentstate.OptionKindDeny},
 	}, approval.Options)
 
 	confirm := h.sink.State().Requests[2]
-	assert.Equal(t, native.RequestKindApproval, confirm.Kind)
+	assert.Equal(t, agentstate.RequestKindApproval, confirm.Kind)
 	assert.Equal(t, "Clear session?", confirm.Title)
 	assert.Equal(t, "All messages will be lost.", confirm.Detail)
 	assert.Empty(t, confirm.ToolUseID)
 	assert.Equal(t, []string{optionYes, optionNo}, []string{confirm.Options[0].ID, confirm.Options[1].ID})
 
-	assert.Equal(t, native.RequestKindQuestion, h.sink.State().Requests[3].Kind)
+	assert.Equal(t, agentstate.RequestKindQuestion, h.sink.State().Requests[3].Kind)
 
 	// The commands matched the capture: value, Block, confirmed false,
 	// cancelled.
@@ -309,7 +310,7 @@ func TestReplayExtensionDialogs(t *testing.T) {
 	assert.Empty(t, h.sink.State().Closed)
 
 	// Answered requests are gone.
-	assert.ErrorIs(t, h.a.Respond(h.ctx, approval.ID, native.Response{OptionID: "Allow"}), native.ErrRequestNotFound)
+	assert.ErrorIs(t, h.a.Respond(h.ctx, approval.ID, agentstate.Response{OptionID: "Allow"}), native.ErrRequestNotFound)
 }
 
 func TestReplayApprovalAllow(t *testing.T) {
@@ -322,7 +323,7 @@ func TestReplayApprovalAllow(t *testing.T) {
 	require.NoError(t, h.result("7a0091f5-b02a-4261-b1aa-d6bb410f95b6"))
 
 	require.Len(t, h.sink.State().Requests, 1)
-	assert.Equal(t, native.RequestKindApproval, h.sink.State().Requests[0].Kind)
+	assert.Equal(t, agentstate.RequestKindApproval, h.sink.State().Requests[0].Kind)
 	allow := h.sent[len(h.sent)-1]
 	assert.Equal(t, "Allow", allow["value"])
 	results := toolResults(h.sink.Final())
@@ -344,9 +345,9 @@ func TestRespondValidation(t *testing.T) {
 	h.started()
 	id := "7a0091f5-b02a-4261-b1aa-d6bb410f95b6"
 
-	assert.ErrorIs(t, h.a.Respond(h.ctx, "nope", native.Response{OptionID: "Allow"}), native.ErrRequestNotFound)
-	assert.ErrorIs(t, h.a.Respond(h.ctx, id, native.Response{OptionID: "Maybe"}), native.ErrInvalidResponse)
-	require.NoError(t, h.a.Respond(h.ctx, id, native.Response{OptionID: "Allow"}))
+	assert.ErrorIs(t, h.a.Respond(h.ctx, "nope", agentstate.Response{OptionID: "Allow"}), native.ErrRequestNotFound)
+	assert.ErrorIs(t, h.a.Respond(h.ctx, id, agentstate.Response{OptionID: "Maybe"}), native.ErrInvalidResponse)
+	require.NoError(t, h.a.Respond(h.ctx, id, agentstate.Response{OptionID: "Allow"}))
 	cmd := h.pi.nextCmd()
 	assert.Equal(t, "Allow", cmd["value"])
 }
@@ -512,7 +513,7 @@ func TestExitWhileRequestPending(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the event loop didn't stop")
 	}
-	assert.ErrorIs(t, h.a.Respond(h.ctx, "7a0091f5-b02a-4261-b1aa-d6bb410f95b6", native.Response{OptionID: "Allow"}), native.ErrRequestNotFound)
+	assert.ErrorIs(t, h.a.Respond(h.ctx, "7a0091f5-b02a-4261-b1aa-d6bb410f95b6", agentstate.Response{OptionID: "Allow"}), native.ErrRequestNotFound)
 	assert.ErrorIs(t, h.a.StartTurn(h.ctx, native.Input{Text: "hi"}), errExited)
 	closeAdapter(t, h)
 }
@@ -590,8 +591,8 @@ func TestDialogTimeoutClosesRequest(t *testing.T) {
 	assert.Equal(t, []string{"d1"}, h.sink.State().Closed)
 	req, ok := h.sink.Request("d1")
 	require.True(t, ok)
-	assert.Equal(t, native.RequestKindQuestion, req.Kind)
-	assert.ErrorIs(t, h.a.Respond(h.ctx, "d1", native.Response{Answers: map[string][]string{choiceQuestion: {"a"}}}), native.ErrRequestNotFound)
+	assert.Equal(t, agentstate.RequestKindQuestion, req.Kind)
+	assert.ErrorIs(t, h.a.Respond(h.ctx, "d1", agentstate.Response{Answers: map[string][]string{choiceQuestion: {"a"}}}), native.ErrRequestNotFound)
 }
 
 func TestNotifyErrorIsReported(t *testing.T) {

@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/native"
 )
 
@@ -52,7 +53,7 @@ func TestLimitStopTakesTheResetOfTheReachedLimit(t *testing.T) {
 	sink := factory.Last().Sink()
 	weekly, fiveHour := clock.Now().Add(48*time.Hour), clock.Now().Add(2*time.Hour)
 	full, half := 100.0, 50.0
-	native.ReportUsage(sink, native.AgentUsage{RateLimits: []native.RateLimit{
+	native.ReportUsage(sink, agentstate.AgentUsage{RateLimits: []agentstate.RateLimit{
 		{ID: "five_hour", UsedPercent: &full, ResetsAt: &fiveHour},
 		{ID: "seven_day", UsedPercent: &half, ResetsAt: &weekly},
 	}})
@@ -124,7 +125,7 @@ func TestScheduledContinueCanBeCancelled(t *testing.T) {
 	resets := clock.Now().Add(time.Hour)
 	limitTurn(t, c, a.Sink(), native.TurnResult{Error: "limit", ResetsAt: &resets})
 
-	at := c.LimitStop().ContinueAtReset()
+	at := native.ContinueAtReset(c.LimitStop())
 	require.NoError(t, c.ScheduleContinue(at))
 	require.NotNil(t, c.LimitStop().ContinueAt)
 	assert.True(t, c.HoldsQueue(resets.Add(30*time.Second)))
@@ -141,7 +142,7 @@ func TestScheduledContinueCanBeCancelled(t *testing.T) {
 func TestRestartClearsTheLimitStop(t *testing.T) {
 	clock := quartz.NewMock(t)
 	resets := clock.Now().Add(time.Hour)
-	c, _, _ := start(t, nil, native.Config{Clock: clock, LimitStop: &native.LimitStop{Message: "limit", ResetsAt: &resets}})
+	c, _, _ := start(t, nil, native.Config{Clock: clock, LimitStop: &agentstate.LimitStop{Message: "limit", ResetsAt: &resets}})
 	require.NotNil(t, c.LimitStop(), "restored from the state database")
 	require.NoError(t, c.Restart(context.Background()))
 	assert.Nil(t, c.LimitStop())
