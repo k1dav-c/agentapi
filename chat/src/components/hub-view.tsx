@@ -14,6 +14,7 @@ import {HubMark} from "./hub/brand";
 import {AddInstance, ForgetStopped, GroupName, type Naming} from "./hub/dialogs";
 import {HubClock} from "./hub/clock";
 import {HubList} from "./hub/hub-list";
+import {IssuesDialog} from "./hub/issues-dialog";
 import {basePath, FrameFavorites, FrameInfo, InstanceBar} from "./hub/instance-bar";
 import {HubListContext, type HubList as HubListShared, type RowActions} from "./hub/list-context";
 import {ListEdge, useListWidth} from "./hub/list-edge";
@@ -43,6 +44,7 @@ export function HubView() {
   const {session, signedIn, retrySession, instances, hubVersion, favorites, setFavorites, unreachable, status} = useHubStream(root);
   const {selected, select} = useHubHistory();
   const [adding, setAdding] = useState(false);
+  const [issues, setIssues] = useState(false);
   const [naming, setNaming] = useState<Naming | null>(null);
   const [settings, setSettings] = useState<SettingsSection | null>(null);
   // The stopped agents the dialog asks to forget.
@@ -177,6 +179,7 @@ export function HubView() {
             onToggleNotify={() => void toggleNotify()}
             onSettings={() => setSettings("favorites")}
             onAdd={() => setAdding(true)}
+            onIssues={() => setIssues(true)}
             search={search}
             filters={filters}
             view={view}
@@ -246,6 +249,7 @@ export function HubView() {
           {announcement}
         </div>
         <AddInstance root={root} open={adding} onOpenChange={setAdding} onAdded={(id) => select(id)} />
+        <IssuesDialog root={root} open={issues} onOpenChange={setIssues} onOpen={select} />
         <HubSettings root={root} section={settings} onClose={() => setSettings(null)} favorites={favorites} onFavoritesSaved={setFavorites} />
         <ForgetStopped instances={forgetting} onClose={() => setForgetting(null)} onForget={forgetStopped} />
         <GroupName

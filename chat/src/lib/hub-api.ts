@@ -24,8 +24,11 @@ export class HubAPIError extends Error {
 // as it is.
 export type InstanceChange = HubWire["InstanceChange"];
 
-export function createHubAPI(root: string, fetcher: Fetcher = (url, init) => fetch(url, init)) {
-  const call = async (path: string, init: RequestInit): Promise<Response | undefined> => {
+// hubCall calls the hub's API at path, and returns its answer, or throws
+// HubAPIError: the hub's own error ({error}), the dispatch's ({message}) or
+// huma's ({detail}, {title}).
+export function hubCall(root: string, fetcher: Fetcher = (url, init) => fetch(url, init)) {
+  return async (path: string, init: RequestInit = {}): Promise<Response> => {
     let response: Response;
     try {
       response = await fetcher(`${root}${path}`, {credentials: "same-origin", ...init});
@@ -33,10 +36,13 @@ export function createHubAPI(root: string, fetcher: Fetcher = (url, init) => fet
       throw new HubAPIError("The hub didn't answer.", 0);
     }
     if (response.ok) return response;
-    // The hub's own errors, or huma's.
-    const body = (await response.json().catch(() => null)) as (Partial<HubWire["ErrorBody"]> & {detail?: string; title?: string}) | null;
-    throw new HubAPIError(body?.error || body?.detail || body?.title || `The hub answered ${response.status}.`, response.status);
+    const body = (await response.json().catch(() => null)) as (Partial<HubWire["ErrorBody"]> & {message?: string; detail?: string; title?: string}) | null;
+    throw new HubAPIError(body?.error || body?.message || body?.detail || body?.title || `The hub answered ${response.status}.`, response.status);
   };
+}
+
+export function createHubAPI(root: string, fetcher: Fetcher = (url, init) => fetch(url, init)) {
+  const call = hubCall(root, fetcher);
   const json = (method: string, body: unknown): RequestInit => ({method, headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
   const instance = (id: string) => `/api/instances/${encodeURIComponent(id)}`;
   const done = async (answer: Promise<unknown>): Promise<void> => {

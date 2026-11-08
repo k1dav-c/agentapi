@@ -175,6 +175,21 @@ func (h *Hub) receiveWebhook(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
+	if strings.HasPrefix(event.Type, "host.") {
+		// A launcher's (agentapi host): the machine, for the dispatch.
+		if h.config.Dispatch != nil {
+			if err := h.config.Dispatch.HostEvent(event.Type, event.Data); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if h.config.Dispatch != nil && strings.HasPrefix(event.Type, "task.") {
+		// A job's task: its state and cost.
+		h.config.Dispatch.TaskEvent(instance.ID, event.Type, event.Data)
+	}
 	switch event.Type {
 	case instanceapi.EventInstanceStarted, instanceapi.EventInstanceHeartbeat:
 		url := instanceURL(instance)

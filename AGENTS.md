@@ -56,7 +56,7 @@ protocols (the native transport).
 ### Core components
 
 - `main.go` - Entry point using the Cobra CLI framework
-- `cmd/` - CLI command definitions, including server, list, hub, restart (registered AgentAPIs restart in place, e.g. into an updated binary), and update
+- `cmd/` - CLI command definitions, including server, list, hub, host (the launcher, and the systemd user service `agentapi host install` writes), restart (registered AgentAPIs restart in place, e.g. into an updated binary), and update
 - `lib/httpapi/` - HTTP server: routes, OpenAPI schema, auth, event streams, instance summaries for monitoring multiple AgentAPIs (`GET /summary`, `/events?only=summary`), the webhook's configuration, and updates through the API (`POST /update`, with `--allow-update`); it wires the three packages below and uses their types under their own names (huma names a schema after the Go type)
 - `lib/httpmw/` - The HTTP pieces the server and the hub share: the Host and cross-origin checks, gzip, the host/origin/bind flag parsing, and the file server of the chat UI embedded from `lib/httpmw/chat/`
 - `lib/convstate/` - The conversation state clients read, without HTTP: the `EventEmitter`, the tasks and summary it derives, the queue it reports, the `Persister` interface
@@ -78,6 +78,10 @@ protocols (the native transport).
 - `lib/netaddr/` - The machine's IPv4 addresses: those other machines may reach (the hub's join URLs), and the one on the route to a host (`{ip}` in `--public-url`)
 - `lib/userconfig/` - The user's settings file (`~/.agentapi/config.yaml`), which `agentapi server` reads and `agentapi hub join` writes
 - `lib/registry/` - The registry of the AgentAPIs running on a machine (`~/.agentapi/instances`), which `agentapi list` reads
+- `lib/dispatch/` - The hub's issue dispatch (`docs/specs/issue-dispatch.zh-TW.md`): the machines whose launchers report with signed `host.*` events, `POST /api/dispatch` (start, send, link_pr, stop; a signed-in browser or `--dispatch-token`), the jobs and the cost of each run from their `task.*` events, the prompts, and the GitHub App the hub registers from a manifest (`/github/connect`) and hands out per-repository tokens of to the launchers (`/api/github/token`, signed)
+- `examples/issue-dispatch/` - The GitHub side of the issue dispatch: the reusable workflow a self-hosted runner in the hub's network runs (`agent-dispatch.yml`), the caller each repository adds, and how to set it all up (README, in Traditional Chinese)
+- `lib/github/` - The GitHub App's JWT, installation tokens for one repository, and the REST calls the dispatch makes as the app; standard library only
+- `lib/host/` - `agentapi host serve`: the launcher that starts an AgentAPI for each GitHub issue a hub dispatches to the machine, in a git worktree on the issue's branch (`docs/specs/issue-dispatch.zh-TW.md`): its API for the hub behind the host token, the jobs it keeps in `~/.agentapi/jobs.json` and takes over after a restart, and the unix socket the jobs' git credential helper and gh shim get a GitHub token from
 - `lib/atomicfile/` - Replaces a file at once, synced so a crash leaves the old data or the new (settings, registry entries, the hub's file)
 - `lib/selfupdate/` - Installs the latest release in place of the program (`agentapi update`, `POST /update`): the GitHub lookup, the binary for the platform, checksum verification and the rename under a lock file; whether the user can replace the program (`Program.Blocked`)
 - `lib/shellterm/` - The shared shell terminal (`GET /terminal`)

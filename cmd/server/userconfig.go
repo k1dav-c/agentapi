@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 
+	"github.com/coder/agentapi/lib/host"
 	"github.com/coder/agentapi/lib/userconfig"
 )
 
@@ -36,6 +37,9 @@ func readUserConfig(v *viper.Viper, flags *pflag.FlagSet, logger *slog.Logger) {
 	}
 	var unknown []string
 	for key := range config {
+		if slices.Contains(otherSections, key) {
+			continue
+		}
 		if flags.Lookup(key) == nil || key == FlagConfig || key == FlagValidate {
 			unknown = append(unknown, key)
 		}
@@ -62,6 +66,10 @@ func readUserConfig(v *viper.Viper, flags *pflag.FlagSet, logger *slog.Logger) {
 	}
 	logger.Info("Read the AgentAPI config file", "path", path)
 }
+
+// otherSections are the config file's sections other commands read,
+// which agentapi server leaves alone: agentapi host's.
+var otherSections = []string{host.ConfigKey}
 
 // perServerFiles are the settings that name a file only one server can
 // use: the first locks a state database, and the others refuse a PID file

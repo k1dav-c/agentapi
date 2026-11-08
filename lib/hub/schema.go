@@ -9,7 +9,11 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/coder/agentapi/lib/dispatch"
+	"github.com/coder/agentapi/lib/github"
+	"github.com/coder/agentapi/lib/host"
 	"github.com/coder/agentapi/lib/instanceapi"
+	"github.com/coder/agentapi/lib/jsonapi"
 )
 
 // The hub's API isn't huma's (it serves it with chi), so openapi.json
@@ -45,6 +49,40 @@ var wireTypes = []reflect.Type{
 	reflect.TypeFor[signInBody](),
 	reflect.TypeFor[joinInfo](),
 	reflect.TypeFor[errorBody](),
+	// The issue dispatch's (lib/dispatch), named Dispatch*, Launcher* and
+	// GitHub* by the package they come from (schemaNamer).
+	reflect.TypeFor[dispatch.Request](),
+	reflect.TypeFor[dispatch.Response](),
+	reflect.TypeFor[dispatch.Error](),
+	reflect.TypeFor[dispatch.HostsBody](),
+	reflect.TypeFor[dispatch.JobsBody](),
+	reflect.TypeFor[dispatch.GitHubStatus](),
+	reflect.TypeFor[dispatch.ReposBody](),
+	reflect.TypeFor[dispatch.IssuesBody](),
+	reflect.TypeFor[dispatch.CreateIssueRequest](),
+	reflect.TypeFor[dispatch.CreateIssueResponse](),
+}
+
+// schemaPrefixes name the types of the dispatch's packages apart from the
+// hub's, whose names they share (host.Job and dispatch.Job).
+var schemaPrefixes = map[string]string{
+	reflect.TypeFor[dispatch.Job]().PkgPath():  "Dispatch",
+	reflect.TypeFor[host.Job]().PkgPath():      "Launcher",
+	reflect.TypeFor[github.Issue]().PkgPath():  "GitHub",
+	reflect.TypeFor[jsonapi.Error]().PkgPath(): "Dispatch",
+}
+
+// schemaNamer is huma's namer, with the prefix of the type's package.
+func schemaNamer(t reflect.Type, hint string) string {
+	name := huma.DefaultSchemaNamer(t, hint)
+	base := t
+	for base.Kind() == reflect.Pointer || base.Kind() == reflect.Slice || base.Kind() == reflect.Array || base.Kind() == reflect.Map {
+		base = base.Elem()
+	}
+	if prefix, ok := schemaPrefixes[base.PkgPath()]; ok && base.Name() != "" {
+		return prefix + name
+	}
+	return name
 }
 
 // hubLimits are the limits of what the hub takes, which the page shows
@@ -79,7 +117,7 @@ func limitsSchema() *huma.Schema {
 // Schema is the hub's schema: an OpenAPI document with the wire types in
 // its components and no paths.
 func Schema() ([]byte, error) {
-	registry := huma.NewMapRegistry("#/components/schemas/", huma.DefaultSchemaNamer)
+	registry := huma.NewMapRegistry("#/components/schemas/", schemaNamer)
 	registry.RegisterTypeAlias(reflect.TypeFor[instanceapi.SummaryBody](), reflect.TypeFor[summaryRef]())
 	for _, t := range wireTypes {
 		registry.Schema(t, true, "")

@@ -17,6 +17,156 @@ export interface components {
          * @enum {string}
          */
         Connection: "connecting" | "connected" | "unreachable" | "stopped";
+        DispatchAssign: {
+            agent?: string;
+            host?: string;
+        };
+        DispatchCost: {
+            /** Format: int64 */
+            calls: number;
+            /** Format: int64 */
+            tasks: number;
+            tokens: components["schemas"]["DispatchTokens"];
+            /** Format: double */
+            usd: number;
+            /** Format: double */
+            work_seconds: number;
+        };
+        DispatchCreateIssueRequest: {
+            assign?: components["schemas"]["DispatchAssign"];
+            body: string;
+            labels?: string[] | null;
+            repo: string;
+            title: string;
+        };
+        DispatchCreateIssueResponse: {
+            issue: components["schemas"]["GitHubIssue"];
+            job?: components["schemas"]["DispatchJob"];
+        };
+        DispatchError: {
+            code: string;
+            message: string;
+        };
+        DispatchGitHubStatus: {
+            connected: boolean;
+            html_url?: string;
+            install_url?: string;
+            installations: components["schemas"]["GitHubInstallation"][] | null;
+            owner?: string;
+            slug?: string;
+        };
+        DispatchHost: {
+            /** Format: int64 */
+            active: number;
+            agentapi_version: string;
+            agents: string[] | null;
+            clone: boolean;
+            credentials_available: boolean;
+            default_agent: string;
+            /** Format: int64 */
+            heartbeat_seconds: number;
+            hostname: string;
+            hub_credentials: boolean;
+            jobs: components["schemas"]["LauncherJobInfo"][] | null;
+            /** Format: date-time */
+            last_seen: string;
+            /** Format: int64 */
+            max_jobs: number;
+            online: boolean;
+            repos: string[] | null;
+            stopped?: boolean;
+            url: string;
+        };
+        DispatchHostsBody: {
+            hosts: components["schemas"]["DispatchHost"][] | null;
+        };
+        DispatchIssuesBody: {
+            issues: components["schemas"]["GitHubIssue"][] | null;
+        };
+        DispatchJob: {
+            agent: string;
+            /** Format: int64 */
+            cost_comment_id?: number;
+            /** Format: date-time */
+            created_at: string;
+            credentials: boolean;
+            default_branch?: string;
+            error?: string;
+            host: string;
+            instance_id: string;
+            /** Format: int64 */
+            issue: number;
+            issue_url: string;
+            key: string;
+            pr_url?: string;
+            repo: string;
+            /** Format: int64 */
+            round: number;
+            runs: components["schemas"]["DispatchRun"][] | null;
+            /** @enum {string} */
+            state: "starting" | "working" | "review" | "failed" | "done" | "stopped";
+            title?: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        DispatchJobsBody: {
+            jobs: components["schemas"]["DispatchJob"][] | null;
+        };
+        DispatchReposBody: {
+            repos: components["schemas"]["GitHubRepo"][] | null;
+        };
+        DispatchRequest: {
+            /** @enum {string} */
+            action: "start" | "send" | "link_pr" | "stop";
+            agent?: string;
+            author?: string;
+            comments?: components["schemas"]["DispatchReviewComment"][] | null;
+            delivery_id?: string;
+            dispatch_mode?: string;
+            host?: string;
+            /** Format: int64 */
+            issue: number;
+            message?: string;
+            pr_url?: string;
+            replace?: boolean;
+            repo: string;
+            review_state?: string;
+        };
+        DispatchResponse: {
+            created: boolean;
+            duplicate?: boolean;
+            job: components["schemas"]["DispatchJob"];
+        };
+        DispatchReviewComment: {
+            body: string;
+            /** Format: int64 */
+            line?: number;
+            path: string;
+        };
+        DispatchRun: {
+            agent: string;
+            cost: components["schemas"]["DispatchCost"];
+            end_reason?: string;
+            /** Format: date-time */
+            ended_at?: string;
+            host: string;
+            instance_id: string;
+            missed?: boolean;
+            /** Format: int64 */
+            round: number;
+            /** Format: date-time */
+            started_at: string;
+        };
+        DispatchTokens: {
+            /** Format: int64 */
+            cache_read: number;
+            /** Format: int64 */
+            cache_write: number;
+            /** Format: int64 */
+            input: number;
+            /** Format: int64 */
+            output: number;
+        };
         ErrorBody: {
             error: string;
         };
@@ -30,6 +180,38 @@ export interface components {
         };
         ForgetBody: {
             ids: string[];
+        };
+        GitHubInstallation: {
+            account: string;
+            /** Format: int64 */
+            id: number;
+            repository_selection: string;
+        };
+        GitHubIssue: {
+            body: string;
+            html_url: string;
+            labels: components["schemas"]["GitHubLabel"][] | null;
+            /** Format: int64 */
+            number: number;
+            pull_request?: components["schemas"]["GitHubPullRequestRef"];
+            state: string;
+            title: string;
+            user: components["schemas"]["GitHubUser"];
+        };
+        GitHubLabel: {
+            name: string;
+        };
+        GitHubPullRequestRef: {
+            url?: string;
+        };
+        GitHubRepo: {
+            default_branch: string;
+            full_name: string;
+            html_url: string;
+            private: boolean;
+        };
+        GitHubUser: {
+            login: string;
         };
         HeartbeatEvent: {
             /** Format: date-time */
@@ -122,6 +304,25 @@ export interface components {
         JoinURL: {
             interface?: string;
             url: string;
+        };
+        LauncherJobInfo: {
+            agent: string;
+            branch: string;
+            credentials?: string;
+            default_branch: string;
+            error?: string;
+            instance_id: string;
+            key: string;
+            /** Format: int64 */
+            pid?: number;
+            /** Format: int64 */
+            port: number;
+            /** Format: int64 */
+            run: number;
+            /** Format: date-time */
+            started_at: string;
+            state: string;
+            worktree: string;
         };
         PinsBody: {
             ids: string[];

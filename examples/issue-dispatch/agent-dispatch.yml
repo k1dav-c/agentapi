@@ -1,0 +1,162 @@
+# Reusable workflow of the issue dispatch (docs/specs/issue-dispatch.zh-TW.md
+# §9): it turns a repository's GitHub events into POST /api/dispatch of an
+# agentapi hub, on a self-hosted runner inside the hub's network.
+#
+# Put it in a central repository (such as <owner>/.github, as
+# .github/workflows/agent-dispatch.yml) and call it from each repository with
+# caller.yml. The runner's environment names the hub: HUB_URL and
+# HUB_DISPATCH_TOKEN (the hub's --dispatch-token), in the runner's .env file.
+#
+# Events:
+#   issues labeled agent or agent:<claude|codex|pi>  → start
+#   a comment "/agent …" on the issue or its pull request → send
+#   a review (not an approval) of an agent/issue-<n> pull request → send
+#   an agent/issue-<n> pull request opened → link_pr, closed → stop
+# Only people with write access to the repository count: the job asks
+# GitHub for the permission of who added the label, commented or reviewed
+# (an organization's MEMBER may have read access only), and ignores the
+# event when it can't tell. Only pull requests from the repository itself
+# count, not forks.
+#
+# The job reads the event from $GITHUB_EVENT_PATH with jq and never puts
+# its text into the script, so an issue's title or a comment can't run as
+# shell.
+name: agent dispatch
+
+on:
+  workflow_call:
+    inputs:
+      runner-label:
+        description: Label of the self-hosted runners that reach the hub
+        type: string
+        default: agent-dispatch
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  dispatch:
+    if: >-
+      (github.event_name == 'issues' && github.event.action == 'labeled'
+        && (github.event.label.name == 'agent' || startsWith(github.event.label.name, 'agent:')))
+      || (github.event_name == 'issue_comment' && github.event.action == 'created'
+        && startsWith(github.event.comment.body, '/agent')
+        && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
+      || (github.event_name == 'pull_request_review' && github.event.action == 'submitted'
+        && startsWith(github.event.pull_request.head.ref, 'agent/issue-')
+        && github.event.pull_request.head.repo.full_name == github.repository
+        && github.event.review.state != 'approved'
+        && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.review.author_association))
+      || (github.event_name == 'pull_request' && (github.event.action == 'opened' || github.event.action == 'closed')
+        && startsWith(github.event.pull_request.head.ref, 'agent/issue-')
+        && github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: [self-hosted, "${{ inputs.runner-label }}"]
+    timeout-minutes: 10
+    steps:
+      - name: Dispatch to the hub
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${HUB_URL:?the runner has no HUB_URL: add it to the .env file of the runner}"
+          : "${HUB_DISPATCH_TOKEN:?the runner has no HUB_DISPATCH_TOKEN: add it to the .env file of the runner}"
+          event="$GITHUB_EVENT_PATH"
+          repo="$GITHUB_REPOSITORY"
+          api="${GITHUB_API_URL:-https://api.github.com}"
+          gh_api() { curl -fsSL --max-time 30 -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" "$api$1"; }
+          # ignore ends the job without a dispatch, saying why.
+          ignore() { echo "::notice::$1"; exit 0; }
+          # require_write ignores the event unless user has write access
+          # (admin, maintain or write) to the repository.
+          require_write() {
+            local permission
+            permission="$(gh_api "/repos/$repo/collaborators/$1/permission" | jq -r '.permission // "none"')" || permission=unknown
+            case "$permission" in
+              admin | write) ;;
+              *) ignore "$1 has $permission access to $repo, not write: ignored" ;;
+            esac
+          }
+          # The issue of an agent/issue-<n> branch, or nothing.
+          issue_of() { local n="${1#agent/issue-}"; [[ "$1" == agent/issue-* && "$n" =~ ^[0-9]+$ ]] && echo "$n"; }
+          # Where a failure is told: the issue, or the pull request.
+          number=""
+
+          case "$GITHUB_EVENT_NAME" in
+            issues)
+              number="$(jq -r .issue.number "$event")"
+              # An issue form can set the label when anyone opens an issue.
+              require_write "$(jq -r .sender.login "$event")"
+              label="$(jq -r .label.name "$event")"
+              agent="${label#agent}"; agent="${agent#:}"
+              body="$(jq -n --arg repo "$repo" --argjson issue "$number" --arg agent "$agent" \
+                '{action: "start", repo: $repo, issue: $issue, agent: $agent}')"
+              ;;
+            issue_comment)
+              number="$(jq -r .issue.number "$event")"
+              # /agent, not /agents or /agentic.
+              [[ "$(jq -r .comment.body "$event")" =~ ^/agent([[:space:]]|$) ]] || ignore "not an /agent command"
+              require_write "$(jq -r .comment.user.login "$event")"
+              issue="$number"
+              if [ "$(jq -r '.issue.pull_request != null' "$event")" = true ]; then
+                ref="$(gh_api "/repos/$repo/pulls/$number" | jq -r .head.ref)"
+                issue="$(issue_of "$ref")" || ignore "pull request #$number isn't an agent's ($ref)"
+              fi
+              body="$(jq --arg repo "$repo" --argjson issue "$issue" \
+                '{action: "send", repo: $repo, issue: $issue, author: .comment.user.login,
+                  message: (.comment.body | sub("^/agent\\s*"; ""))}' "$event")"
+              ;;
+            pull_request_review)
+              number="$(jq -r .pull_request.number "$event")"
+              require_write "$(jq -r .review.user.login "$event")"
+              issue="$(issue_of "$(jq -r .pull_request.head.ref "$event")")" || ignore "not an agent branch"
+              review_id="$(jq -r .review.id "$event")"
+              comments="$(gh_api "/repos/$repo/pulls/$number/reviews/$review_id/comments?per_page=100" \
+                | jq '[.[] | {path, line: (.line // .original_line // 0), body}]')"
+              body="$(jq --arg repo "$repo" --argjson issue "$issue" --argjson comments "$comments" \
+                '{action: "send", repo: $repo, issue: $issue, author: .review.user.login,
+                  review_state: .review.state, message: (.review.body // ""), comments: $comments}' "$event")"
+              if [ "$(jq -r '(.message == "") and (.comments | length == 0)' <<<"$body")" = true ]; then
+                echo "The review has no comment to pass on"
+                exit 0
+              fi
+              ;;
+            pull_request)
+              number="$(jq -r .pull_request.number "$event")"
+              issue="$(issue_of "$(jq -r .pull_request.head.ref "$event")")" || ignore "not an agent branch"
+              if [ "$(jq -r .action "$event")" = opened ]; then
+                body="$(jq --arg repo "$repo" --argjson issue "$issue" \
+                  '{action: "link_pr", repo: $repo, issue: $issue, pr_url: .pull_request.html_url}' "$event")"
+              else
+                body="$(jq -n --arg repo "$repo" --argjson issue "$issue" '{action: "stop", repo: $repo, issue: $issue}')"
+              fi
+              ;;
+            *)
+              echo "Not an event of the dispatch: $GITHUB_EVENT_NAME"
+              exit 0
+              ;;
+          esac
+
+          # A run run again counts once: the hub keeps the ID of a dispatch
+          # it took, and a failed one isn't kept.
+          body="$(jq --arg id "github-$GITHUB_REPOSITORY-$GITHUB_RUN_ID" '. + {delivery_id: $id}' <<<"$body")"
+          echo "Dispatching: $(jq -c '{action, repo, issue, agent}' <<<"$body")"
+          answer="$(mktemp)"
+          status="$(curl -sS --max-time 60 -o "$answer" -w '%{http_code}' -X POST "${HUB_URL%/}/api/dispatch" \
+            -H "Authorization: Bearer $HUB_DISPATCH_TOKEN" -H "Content-Type: application/json" \
+            --data-binary @- <<<"$body")" || status=000
+          if [[ "$status" == 2* ]]; then
+            jq -c '{state: .job.state, host: .job.host, agent: .job.agent, created, duplicate}' "$answer" || true
+            exit 0
+          fi
+          message="$(jq -r '.message // empty' "$answer" 2>/dev/null || true)"
+          message="${message:-the hub answered $status}"
+          echo "::error::The hub refused the dispatch: $message"
+          if [ -n "$number" ]; then
+            jq -n --arg m "agentapi hub 沒有接受這次派工（$status）：$message" '{body: $m}' \
+              | curl -fsS --max-time 30 -o /dev/null -X POST -H "Authorization: Bearer $GITHUB_TOKEN" \
+                  -H "Accept: application/vnd.github+json" --data-binary @- \
+                  "$api/repos/$repo/issues/$number/comments" || true
+          fi
+          exit 1

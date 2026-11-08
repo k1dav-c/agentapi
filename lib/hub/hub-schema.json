@@ -29,6 +29,580 @@
         "title": "Connection",
         "type": "string"
       },
+      "DispatchAssign": {
+        "additionalProperties": false,
+        "properties": {
+          "agent": {
+            "type": "string"
+          },
+          "host": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "DispatchCost": {
+        "additionalProperties": false,
+        "properties": {
+          "calls": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "tasks": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "tokens": {
+            "$ref": "#/components/schemas/DispatchTokens"
+          },
+          "usd": {
+            "format": "double",
+            "type": "number"
+          },
+          "work_seconds": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "usd",
+          "tokens",
+          "calls",
+          "tasks",
+          "work_seconds"
+        ],
+        "type": "object"
+      },
+      "DispatchCreateIssueRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "assign": {
+            "$ref": "#/components/schemas/DispatchAssign"
+          },
+          "body": {
+            "type": "string"
+          },
+          "labels": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "repo": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "repo",
+          "title",
+          "body"
+        ],
+        "type": "object"
+      },
+      "DispatchCreateIssueResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "issue": {
+            "$ref": "#/components/schemas/GitHubIssue"
+          },
+          "job": {
+            "$ref": "#/components/schemas/DispatchJob"
+          }
+        },
+        "required": [
+          "issue"
+        ],
+        "type": "object"
+      },
+      "DispatchError": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "type": "object"
+      },
+      "DispatchGitHubStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "connected": {
+            "type": "boolean"
+          },
+          "html_url": {
+            "type": "string"
+          },
+          "install_url": {
+            "type": "string"
+          },
+          "installations": {
+            "items": {
+              "$ref": "#/components/schemas/GitHubInstallation"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "owner": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "connected",
+          "installations"
+        ],
+        "type": "object"
+      },
+      "DispatchHost": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "agentapi_version": {
+            "type": "string"
+          },
+          "agents": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "clone": {
+            "type": "boolean"
+          },
+          "credentials_available": {
+            "type": "boolean"
+          },
+          "default_agent": {
+            "type": "string"
+          },
+          "heartbeat_seconds": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "hostname": {
+            "type": "string"
+          },
+          "hub_credentials": {
+            "type": "boolean"
+          },
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/LauncherJobInfo"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "last_seen": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "max_jobs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "online": {
+            "type": "boolean"
+          },
+          "repos": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "stopped": {
+            "type": "boolean"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "heartbeat_seconds",
+          "last_seen",
+          "online",
+          "active",
+          "hostname",
+          "url",
+          "agentapi_version",
+          "repos",
+          "agents",
+          "default_agent",
+          "max_jobs",
+          "clone",
+          "credentials_available",
+          "hub_credentials",
+          "jobs"
+        ],
+        "type": "object"
+      },
+      "DispatchHostsBody": {
+        "additionalProperties": false,
+        "properties": {
+          "hosts": {
+            "items": {
+              "$ref": "#/components/schemas/DispatchHost"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "hosts"
+        ],
+        "type": "object"
+      },
+      "DispatchIssuesBody": {
+        "additionalProperties": false,
+        "properties": {
+          "issues": {
+            "items": {
+              "$ref": "#/components/schemas/GitHubIssue"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "issues"
+        ],
+        "type": "object"
+      },
+      "DispatchJob": {
+        "additionalProperties": false,
+        "properties": {
+          "agent": {
+            "type": "string"
+          },
+          "cost_comment_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "credentials": {
+            "type": "boolean"
+          },
+          "default_branch": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "host": {
+            "type": "string"
+          },
+          "instance_id": {
+            "type": "string"
+          },
+          "issue": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "issue_url": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "pr_url": {
+            "type": "string"
+          },
+          "repo": {
+            "type": "string"
+          },
+          "round": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/DispatchRun"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "state": {
+            "enum": [
+              "starting",
+              "working",
+              "review",
+              "failed",
+              "done",
+              "stopped"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "repo",
+          "issue",
+          "host",
+          "agent",
+          "instance_id",
+          "state",
+          "issue_url",
+          "credentials",
+          "created_at",
+          "updated_at",
+          "runs",
+          "round"
+        ],
+        "type": "object"
+      },
+      "DispatchJobsBody": {
+        "additionalProperties": false,
+        "properties": {
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/DispatchJob"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "jobs"
+        ],
+        "type": "object"
+      },
+      "DispatchReposBody": {
+        "additionalProperties": false,
+        "properties": {
+          "repos": {
+            "items": {
+              "$ref": "#/components/schemas/GitHubRepo"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "repos"
+        ],
+        "type": "object"
+      },
+      "DispatchRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "start",
+              "send",
+              "link_pr",
+              "stop"
+            ],
+            "type": "string"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "author": {
+            "type": "string"
+          },
+          "comments": {
+            "items": {
+              "$ref": "#/components/schemas/DispatchReviewComment"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "delivery_id": {
+            "type": "string"
+          },
+          "dispatch_mode": {
+            "type": "string"
+          },
+          "host": {
+            "type": "string"
+          },
+          "issue": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "message": {
+            "type": "string"
+          },
+          "pr_url": {
+            "type": "string"
+          },
+          "replace": {
+            "type": "boolean"
+          },
+          "repo": {
+            "type": "string"
+          },
+          "review_state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "repo",
+          "issue"
+        ],
+        "type": "object"
+      },
+      "DispatchResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "created": {
+            "type": "boolean"
+          },
+          "duplicate": {
+            "type": "boolean"
+          },
+          "job": {
+            "$ref": "#/components/schemas/DispatchJob"
+          }
+        },
+        "required": [
+          "job",
+          "created"
+        ],
+        "type": "object"
+      },
+      "DispatchReviewComment": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "line": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "body"
+        ],
+        "type": "object"
+      },
+      "DispatchRun": {
+        "additionalProperties": false,
+        "properties": {
+          "agent": {
+            "type": "string"
+          },
+          "cost": {
+            "$ref": "#/components/schemas/DispatchCost"
+          },
+          "end_reason": {
+            "type": "string"
+          },
+          "ended_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "host": {
+            "type": "string"
+          },
+          "instance_id": {
+            "type": "string"
+          },
+          "missed": {
+            "type": "boolean"
+          },
+          "round": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "round",
+          "agent",
+          "host",
+          "instance_id",
+          "started_at",
+          "cost"
+        ],
+        "type": "object"
+      },
+      "DispatchTokens": {
+        "additionalProperties": false,
+        "properties": {
+          "cache_read": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "cache_write": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "input": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "output": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "input",
+          "output",
+          "cache_write",
+          "cache_read"
+        ],
+        "type": "object"
+      },
       "ErrorBody": {
         "additionalProperties": false,
         "properties": {
@@ -87,6 +661,130 @@
         },
         "required": [
           "ids"
+        ],
+        "type": "object"
+      },
+      "GitHubInstallation": {
+        "additionalProperties": false,
+        "properties": {
+          "account": {
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "repository_selection": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "account",
+          "repository_selection"
+        ],
+        "type": "object"
+      },
+      "GitHubIssue": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "html_url": {
+            "type": "string"
+          },
+          "labels": {
+            "items": {
+              "$ref": "#/components/schemas/GitHubLabel"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "number": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "pull_request": {
+            "$ref": "#/components/schemas/GitHubPullRequestRef"
+          },
+          "state": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "user": {
+            "$ref": "#/components/schemas/GitHubUser"
+          }
+        },
+        "required": [
+          "number",
+          "title",
+          "body",
+          "state",
+          "html_url",
+          "labels",
+          "user"
+        ],
+        "type": "object"
+      },
+      "GitHubLabel": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "GitHubPullRequestRef": {
+        "additionalProperties": false,
+        "properties": {
+          "url": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "GitHubRepo": {
+        "additionalProperties": false,
+        "properties": {
+          "default_branch": {
+            "type": "string"
+          },
+          "full_name": {
+            "type": "string"
+          },
+          "html_url": {
+            "type": "string"
+          },
+          "private": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "full_name",
+          "default_branch",
+          "private",
+          "html_url"
+        ],
+        "type": "object"
+      },
+      "GitHubUser": {
+        "additionalProperties": false,
+        "properties": {
+          "login": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "login"
         ],
         "type": "object"
       },
@@ -334,6 +1032,67 @@
         },
         "required": [
           "url"
+        ],
+        "type": "object"
+      },
+      "LauncherJobInfo": {
+        "additionalProperties": false,
+        "properties": {
+          "agent": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "credentials": {
+            "type": "string"
+          },
+          "default_branch": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "instance_id": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "pid": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "port": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "run": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "worktree": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "agent",
+          "run",
+          "port",
+          "instance_id",
+          "branch",
+          "default_branch",
+          "worktree",
+          "state",
+          "started_at"
         ],
         "type": "object"
       },

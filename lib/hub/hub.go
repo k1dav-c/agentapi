@@ -28,6 +28,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/coder/agentapi/internal/version"
+	"github.com/coder/agentapi/lib/dispatch"
 	"github.com/coder/agentapi/lib/httpmw"
 	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/netaddr"
@@ -70,6 +71,10 @@ type Config struct {
 	// ConnectGrace is how long the hub keeps trying an instance it can't
 	// reach before it calls it unreachable; zero is 10 seconds.
 	ConnectGrace time.Duration
+	// Dispatch, when set, is the issue dispatch: the launchers' host.*
+	// events and the instances' task.* events go to it, and it serves its
+	// routes (POST /api/dispatch, the machines, the jobs, GitHub).
+	Dispatch *dispatch.Service
 }
 
 // Hub is the server.
@@ -185,6 +190,10 @@ func (h *Hub) Handler() http.Handler {
 	// Instances sign their webhook events, whatever name or origin they
 	// come by.
 	r.Post("/hooks", h.receiveWebhook)
+	if h.config.Dispatch != nil {
+		// Signed with the hub's secret, as the events are.
+		h.config.Dispatch.MountLauncher(r)
+	}
 	r.Group(func(r chi.Router) {
 		r.Use(h.checkHost)
 		r.Use(httpmw.CrossOriginProtection(nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -201,8 +210,15 @@ func (h *Hub) routes(r chi.Router) {
 	r.Get("/api/session", h.getSession)
 	r.Post("/api/session", h.createSession)
 	r.Delete("/api/session", h.deleteSession)
+	if h.config.Dispatch != nil {
+		// A signed-in browser, or the dispatch token alone.
+		h.config.Dispatch.MountDispatch(r, h.signedIn)
+	}
 	r.Group(func(r chi.Router) {
 		r.Use(h.requireSession)
+		if h.config.Dispatch != nil {
+			h.config.Dispatch.MountSession(r)
+		}
 		r.Get("/api/instances", h.listInstances)
 		r.Post("/api/instances", h.addInstance)
 		r.Patch("/api/instances/{id}", h.updateInstance)

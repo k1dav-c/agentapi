@@ -5,6 +5,7 @@ package server
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -23,8 +24,10 @@ func isProcessRunning(pid int) bool {
 	}
 
 	// A PID can be reused after agentapi exits without cleaning up its PID
-	// file. On Linux, make sure the live PID still belongs to this executable
-	// instead of treating an unrelated process as another agentapi instance.
+	// file. On Linux, make sure the live PID still is an agentapi: this
+	// executable, or another one named agentapi (another install, a build
+	// from source, the program before an update), whose PID file isn't
+	// stale either. An unrelated process isn't taken for one.
 	if runtime.GOOS == "linux" {
 		currentExecutable, err := os.Executable()
 		if err != nil {
@@ -34,12 +37,16 @@ func isProcessRunning(pid int) bool {
 		if err != nil {
 			return true // Preserve conservative behavior if procfs is unavailable.
 		}
+		pidExecutable = strings.TrimSuffix(pidExecutable, " (deleted)")
+		if strings.HasPrefix(filepath.Base(pidExecutable), "agentapi") {
+			return true
+		}
 		currentInfo, currentErr := os.Stat(currentExecutable)
 		pidInfo, pidErr := os.Stat(pidExecutable)
 		if currentErr == nil && pidErr == nil {
 			return os.SameFile(currentInfo, pidInfo)
 		}
-		return currentExecutable == strings.TrimSuffix(pidExecutable, " (deleted)")
+		return currentExecutable == pidExecutable
 	}
 
 	return true

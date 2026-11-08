@@ -89,7 +89,10 @@ func runServer(ctx context.Context, logger *slog.Logger, args []string, self *se
 	}
 	opts.initialPrompt = initialPromptOnce(opts.initialPrompt, opts.stateDB != "" && !opts.printOpenAPI, logger, self)
 	resumeSession := carriedSession(opts, logger, self)
-	if opts.pidFile != "" {
+	// Printing the schema runs nothing to stop: it leaves the PID file, the
+	// one of the server whose environment it may run in (make gen in an
+	// agent's shell), alone.
+	if opts.pidFile != "" && !opts.printOpenAPI {
 		if err := writePIDFile(opts.pidFile, logger); err != nil {
 			return fmt.Errorf("failed to write PID file: %w", err)
 		}
