@@ -39,6 +39,8 @@ type updateOptions struct {
 	// restartErr is what the restart in place returns.
 	restartErr error
 	stateDB    bool
+	// noAgentRestarts: an agent that exits isn't started again.
+	noAgentRestarts bool
 }
 
 // updateServer is a native server that updates itself from a fake
@@ -87,6 +89,9 @@ func newUpdateServer(t *testing.T, opts updateOptions) *updateServer {
 				return opts.restartErr
 			},
 		},
+	}
+	if opts.noAgentRestarts {
+		config.Native.RestartDelays = []time.Duration{}
 	}
 	if opts.stateDB {
 		path := filepath.Join(t.TempDir(), "state.db")
@@ -264,6 +269,21 @@ func TestUpdate_WaitsForTheAgent(t *testing.T) {
 	assert.Equal(t, httpapi.UpdateStateRestarting, body.State)
 	assert.EqualValues(t, 1, u.restarts.Load())
 	assert.Equal(t, http.StatusConflict, u.do(http.MethodDelete, "/messages", nil, nil), "nor does the agent restart")
+}
+
+// An agent that exited in the middle of its turn has no work left that a
+// restart would cut short: the update doesn't wait for it.
+func TestUpdate_DoesntWaitForAnAgentThatExited(t *testing.T) {
+	t.Parallel()
+	u := newUpdateServer(t, updateOptions{noAgentRestarts: true})
+	u.busy()
+	code, _, _ := u.post("")
+	require.Equal(t, http.StatusAccepted, code)
+	u.awaitState(httpapi.UpdateStateWaiting)
+	assert.Zero(t, u.restarts.Load(), "the agent works")
+
+	u.factory.Last().Exit(errors.New("exit status 1"))
+	require.Eventually(t, func() bool { return u.restarts.Load() == 1 }, 5*time.Second, 5*time.Millisecond)
 }
 
 // "now" restarts without waiting for the agent.

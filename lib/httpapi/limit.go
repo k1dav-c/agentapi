@@ -98,10 +98,9 @@ func (s *Server) dismissLimitStop(_ context.Context, _ *struct{}) (*InterruptRes
 func (s *Server) continueIfDueLocked() {
 	ctx, cancel := s.agentCtx(nativeCallTimeout)
 	defer cancel()
-	retry := s.native.RetryWait() != nil
-	if _, err := s.native.ContinueIfDue(ctx, s.clock.Now()); err != nil && !errors.Is(err, conv.ErrMessageValidationChanging) {
+	if kind, err := s.native.ContinueIfDue(ctx, s.clock.Now()); err != nil && !errors.Is(err, conv.ErrMessageValidationChanging) {
 		what := "continue after the usage limit"
-		if retry {
+		if kind == native.HoldRetry {
 			what = "try the failed turn again"
 		}
 		s.logger.Error("Failed to "+what, "error", err)

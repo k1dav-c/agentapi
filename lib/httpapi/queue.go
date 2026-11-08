@@ -283,12 +283,13 @@ func (s *Server) startMessageQueue() {
 	}, "messageQueueDispatch")
 }
 
-// beforeQueue sends the continuation of a turn a usage limit stopped once
-// it is due, on the queue's tick: the queued messages go after it.
+// beforeQueue sends the continuation of a turn a usage limit stopped, or
+// the retry of a failed turn, once it is due, on the queue's tick: the
+// queued messages go after it.
 func (s *Server) beforeQueue() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.restarting.Load() || s.updating.Load() || s.shutdownCtx.Err() != nil {
+	if s.turnGateLocked(turnContinuation, s.clock.Now()) != nil {
 		return
 	}
 	s.continueIfDueLocked()
@@ -301,23 +302,10 @@ func (s *Server) beforeQueue() {
 func (s *Server) dispatchNextQueuedMessage() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	switch {
-	case s.restarting.Load():
-		// The messages wait for the new agent.
-		return
-	case s.updater.holdsQueue():
-		// An update waits for the agent or restarts AgentAPI: the
-		// messages are stored to go out after the restart.
-		return
-	case s.shutdownCtx.Err() != nil:
-		// A tick that waited for s.mu while Stop began: the messages are
-		// stored to go out after the restart.
-		return
-	}
+	// turnGateLocked says why the head waits, a tick that waited for s.mu
+	// while Stop began included: the queue is stored for after the restart.
 	next, ok := s.queue.Head()
-	// Queued messages also wait while a usage limit holds them (see
-	// native.Conversation.HoldsQueue).
-	if !ok || !s.native.Idle() || s.native.HoldsQueue(s.clock.Now()) {
+	if !ok || s.turnGateLocked(turnQueued, s.clock.Now()) != nil {
 		return
 	}
 	err := s.sendQueued(next.Content)

@@ -161,7 +161,7 @@ func (s *Server) createMessage(ctx context.Context, input *MessageRequest) (*Mes
 	if strings.TrimSpace(input.Body.Content) == "" {
 		return nil, huma.Error400BadRequest("message must not be empty")
 	}
-	if s.restarting.Load() || s.updating.Load() {
+	if s.turnGateLocked(turnUser, s.clock.Now()) != nil {
 		// The new agent, or AgentAPI's new program, gets it once it runs.
 		s.queueMessageLocked(resp, input.Body.Content, false)
 		return resp, nil

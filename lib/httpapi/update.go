@@ -472,7 +472,10 @@ func (s *Server) awaitUpdateRestart(run *updateRun, version string, moved func()
 func (s *Server) beginUpdateRestart(run *updateRun, version string) (began, current bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !run.isNow() && (s.restarting.Load() || !s.emitter.AgentIdle()) {
+	// The agent's own view, not the emitter's: an agent that exited in the
+	// middle of a turn has no work left, though its last status said it
+	// worked.
+	if !run.isNow() && (s.turnGateLocked(turnUser, s.clock.Now()) != nil || s.native.Busy()) {
 		return false, true
 	}
 	if !s.updater.advance(run, UpdateStateRestarting, version) {

@@ -226,3 +226,54 @@ func TestNativeHandoffReplyAnswersTheOfferedRequest(t *testing.T) {
 	assert.False(t, recorded)
 	assert.Empty(t, a.Responses())
 }
+
+// holdForUpdate puts the server's update in state, as runUpdate does.
+func holdForUpdate(srv *Server, state UpdateState) {
+	srv.updater.mu.Lock()
+	defer srv.updater.mu.Unlock()
+	srv.updater.status.State = state
+	srv.updater.publishLocked()
+}
+
+// While an update waits for the agent, the queue's tick starts no turn: a
+// due continuation waits for the new program like the queued messages.
+func TestNativeTickHoldsWhileAnUpdateWaits(t *testing.T) {
+	srv, factory := newQuietNativeServer(t, nil)
+	a := factory.Last()
+	sendUserMessage(t, srv, "first")
+	sendUserMessage(t, srv, "second")
+	resets := srv.clock.Now()
+	a.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonLimited, Error: "You've hit your limit", ResetsAt: &resets})
+	require.NoError(t, srv.native.ScheduleContinue(&resets))
+
+	holdForUpdate(srv, UpdateStateWaiting)
+	srv.beforeQueue()
+	srv.dispatchNextQueuedMessage()
+	assert.Len(t, a.Turns(), 1, "the continuation waits for the new program")
+	assert.NotNil(t, srv.native.LimitStop())
+
+	holdForUpdate(srv, UpdateStateIdle)
+	srv.beforeQueue()
+	require.Len(t, a.Turns(), 2, "the update was cancelled")
+	assert.Equal(t, native.ContinuePrompt, a.Turns()[1].Text)
+}
+
+// A message the user sends past a held queue that the agent refuses
+// leaves the queue held: the queued messages still wait for the limit.
+func TestNativeRefusedMessageKeepsTheQueueHeld(t *testing.T) {
+	srv, factory := newQuietNativeServer(t, nil)
+	a := factory.Last()
+	sendUserMessage(t, srv, "first")
+	sendUserMessage(t, srv, "second")
+	a.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonLimited, Error: "You're out of usage credits"})
+
+	a.TurnErr = errors.New("connection reset")
+	_, err := srv.createMessage(t.Context(), &MessageRequest{Body: MessageRequestBody{Type: MessageTypeUser, Content: "go on"}})
+	require.Error(t, err)
+	a.TurnErr = nil
+	assert.NotNil(t, srv.native.LimitStop())
+	srv.beforeQueue()
+	srv.dispatchNextQueuedMessage()
+	assert.Len(t, a.Turns(), 1, "the queued message still waits")
+	assert.Len(t, srv.queue.Messages(), 1)
+}
