@@ -398,6 +398,7 @@ shape of its own, so it reads without its color:
 | Turning blue arc | Working | The agent works on the task shown |
 | Turning blue arc | Retrying | Its turn failed on an API error (a 502, say), and AgentAPI tries it again by itself; the line shows the status and which try |
 | Green check | Finished | A task ended since anyone last looked at this agent |
+| Green ring with a check | (its title) | Idle, finished in the last 30 minutes (seen) |
 | Grey ring | (its title) | Idle |
 | Struck-through bell, grey | Muted | It needs you, and you muted that until it changes ([Muting](#muting)) |
 | Dashed ring, turning | Connecting | The hub is opening its summary stream, or opening it again |
@@ -485,7 +486,8 @@ machine's host name alone, wrapped rather than cut; the start most machines' nam
 
 Below the name, each agent has a tab with its mark and a dot in its state's color: amber when it
 needs you, blue while it works, green when it finished unseen, grey when muted, stopped or idle, red
-when unreachable. An idle agent's dot is a grey ring until it has run (a task, or work the hub saw
+when unreachable. An idle agent's dot is a green ring for 30 minutes after it finished, seen or not,
+so the agents that just ran stand out, and a grey ring until it has run (a task, or work the hub saw
 this week), so a tab says its state without its label. The picked tab also says the agent's short name (Claude, Codex, Pi);
 hover over the others for theirs. Tabs keep their order, by agent, whatever their states. Beside
 them is what the agents share: their AgentAPI version and what they spent in the last 24 hours. A
