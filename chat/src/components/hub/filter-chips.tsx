@@ -2,7 +2,7 @@
 
 import type {ReactNode} from "react";
 import {AgentMark} from "@/components/agent-mark";
-import {agentLabel, toggleAgent, type HubAgent, type HubFilter} from "@/lib/hub";
+import {agentLabel, toggleAgent, type HubAgent, type HubFilter} from "@/lib/hub-filter";
 import {cn} from "@/lib/utils";
 
 const filters: {id: HubFilter; label: string}[] = [

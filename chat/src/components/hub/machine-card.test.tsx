@@ -1,6 +1,7 @@
 import {describe, expect, test} from "bun:test";
 import {renderToStaticMarkup} from "react-dom/server";
-import type {HubInstance, HubMachine, Summary} from "@/lib/hub";
+import type {HubInstance, Summary} from "@/lib/hub";
+import type {HubMachine} from "@/lib/hub-machines";
 import {hubInstance, summary as baseSummary} from "@/lib/hub-fixtures";
 import type {ListOrder} from "@/lib/hub-order";
 import {FixedHubClock} from "./clock";

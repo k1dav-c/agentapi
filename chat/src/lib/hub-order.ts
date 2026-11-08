@@ -4,24 +4,11 @@
 // machine's agents together in one card. Each browser keeps its choices.
 // The instances pinned on the hub come first, in their own order.
 
-import {
-  activity,
-  displayName,
-  instanceState,
-  groupByMachine,
-  groupInstances,
-  groupNames,
-  machinesInOrder,
-  matchesAgents,
-  matchesFilter,
-  matchesSearch,
-  needsYou,
-  type HubAgent,
-  type HubFilter,
-  type HubGroup,
-  type HubInstance,
-  type HubMachine,
-} from "./hub";
+import {displayName, instanceState, needsYou, type HubInstance} from "./hub";
+import {matchesAgents, matchesFilter, matchesSearch, type HubAgent, type HubFilter} from "./hub-filter";
+import {activity} from "./hub-format";
+import {groupInstances, groupNames, type HubGroup} from "./hub-groups";
+import {groupByMachine, machinesInOrder, type HubMachine} from "./hub-machines";
 
 export type ListOrder = "groups" | "recent";
 

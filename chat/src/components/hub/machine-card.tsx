@@ -2,27 +2,12 @@
 
 import {memo, useCallback, useEffect, useId, useRef, useState} from "react";
 import {Folder, Server} from "lucide-react";
-import {
-  activeAgent,
-  activity,
-  displayName,
-  formatAgo,
-  formatUSD,
-  hasRun,
-  groupOf,
-  instanceState,
-  instanceVersion,
-  olderThanHub,
-  sharedVersion,
-  spendTitle,
-  spendTotals,
-  stateLabel,
-  tabOrder,
-  tokenTotals,
-  usagePercent,
-  type HubInstance,
-  type HubMachine,
-} from "@/lib/hub";
+import {displayName, hasRun, instanceState, stateLabel, usagePercent, type HubInstance} from "@/lib/hub";
+import {activity, formatAgo} from "@/lib/hub-format";
+import {groupOf} from "@/lib/hub-groups";
+import {activeAgent, sharedVersion, tabOrder, type HubMachine} from "@/lib/hub-machines";
+import {formatUSD, spendTitle, spendTotals, tokenTotals} from "@/lib/hub-spend";
+import {instanceVersion, olderThanHub} from "@/lib/hub-version";
 import {changedAt, recentAgent, type ListOrder} from "@/lib/hub-order";
 import {shownUpdate, updateBadge} from "@/lib/hub-update";
 import {cn} from "@/lib/utils";

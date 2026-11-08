@@ -3,7 +3,8 @@
 // the Versions card offer, and the requests, which go through the hub's
 // proxy with the instance's token.
 
-import {currentSummary, olderThanHub, type HubInstance, type InstanceUpdate} from "./hub";
+import type {HubInstance, InstanceUpdate} from "./hub";
+import {currentSummary, olderThanHub} from "./hub-version";
 
 // When an AgentAPI updates: once its agent is idle (the task finished and
 // nothing waits for an answer), or now, which interrupts the task.

@@ -1,7 +1,8 @@
 "use client";
 
 import {useEffect, useRef, useState} from "react";
-import {activity, displayName, instanceState, type HubInstance, type InstanceState} from "@/lib/hub";
+import {displayName, instanceState, type HubInstance, type InstanceState} from "@/lib/hub";
+import {activity} from "@/lib/hub-format";
 
 // useNeedsYou tells people who aren't looking that an agent needs them: it
 // returns what a screen reader announces, and with notify, shows a

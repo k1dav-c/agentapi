@@ -1,6 +1,9 @@
 import {describe, expect, test} from "bun:test";
 import {hubInstance, summary as baseSummary} from "./hub-fixtures";
-import {groupInstances, machinesInOrder, type HubAgent, type HubInstance, type Summary} from "./hub";
+import type {HubInstance, Summary} from "./hub";
+import type {HubAgent} from "./hub-filter";
+import {groupInstances} from "./hub-groups";
+import {machinesInOrder} from "./hub-machines";
 import {changedAt, listSections, movePin, parseListOrder, pinnedKey, pinOf, recentAgent, recentKey, sortPinned, sortRecent, storedView, type ListSection} from "./hub-order";
 
 const summary = (overrides: Partial<Summary> = {}): Summary => baseSummary({seen_at: "2026-10-26T00:00:00Z", ...overrides});

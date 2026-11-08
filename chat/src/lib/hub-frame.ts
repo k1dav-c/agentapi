@@ -1,4 +1,5 @@
-import {displayName, instanceState, instanceVersion, stateLabel, type HubInstance, type InstanceState, type InstanceUpdate} from "./hub";
+import {displayName, instanceState, stateLabel, type HubInstance, type InstanceState, type InstanceUpdate} from "./hub";
+import {instanceVersion} from "./hub-version";
 import {parseFavorites, type Favorite} from "./hub-favorites";
 import {shownUpdate} from "./hub-update";
 

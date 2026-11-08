@@ -15,26 +15,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {agentDisplayName, parseAgentType} from "@/lib/agents";
-import {
-  activity,
-  displayName,
-  formatAgo,
-  formatUSD,
-  formatWork,
-  groupOf,
-  instanceState,
-  instanceVersion,
-  olderThanHub,
-  spendTitle,
-  spendTotals,
-  tokenTotals,
-  stateLabel,
-  usagePercent,
-  workSeconds,
-  workTitle,
-  type HubGroup,
-  type HubInstance,
-} from "@/lib/hub";
+import {displayName, instanceState, stateLabel, usagePercent, type HubInstance} from "@/lib/hub";
+import {activity, formatAgo} from "@/lib/hub-format";
+import {groupOf, type HubGroup} from "@/lib/hub-groups";
+import {formatUSD, spendTitle, spendTotals, tokenTotals} from "@/lib/hub-spend";
+import {instanceVersion, olderThanHub} from "@/lib/hub-version";
+import {formatWork, workSeconds, workTitle} from "@/lib/hub-work";
 import {changedAt, type ListOrder} from "@/lib/hub-order";
 import {shownUpdate, updateBadge} from "@/lib/hub-update";
 import {cn} from "@/lib/utils";

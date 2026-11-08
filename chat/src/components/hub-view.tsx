@@ -4,27 +4,11 @@ import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from
 import {Bell, BellOff, Plus, Search, Settings, X} from "lucide-react";
 import {ModeToggle} from "@/components/mode-toggle";
 import {Button} from "@/components/ui/button";
-import {
-  agentsIn,
-  chatURL,
-  countAgents,
-  countFilters,
-  displayName,
-  formatUSD,
-  groupNames,
-  groupOf,
-  hostPrefix,
-  hubRoot,
-  machineOf,
-  matchesAgents,
-  nothingMatches,
-  parseAgents,
-  shownAgents,
-  spendTitle,
-  spendTotals,
-  type HubAgent,
-  type HubFilter,
-} from "@/lib/hub";
+import {chatURL, displayName, hubRoot} from "@/lib/hub";
+import {agentsIn, countAgents, countFilters, matchesAgents, nothingMatches, parseAgents, shownAgents, type HubAgent, type HubFilter} from "@/lib/hub-filter";
+import {groupNames, groupOf} from "@/lib/hub-groups";
+import {hostPrefix, machineOf} from "@/lib/hub-machines";
+import {formatUSD, spendTitle, spendTotals} from "@/lib/hub-spend";
 import {listSections, movePin, pinOf, sortPinned} from "@/lib/hub-order";
 import {useStableCallback} from "@/lib/use-stable-callback";
 import {cn} from "@/lib/utils";

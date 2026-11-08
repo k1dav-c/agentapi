@@ -1,7 +1,8 @@
 "use client";
 
 import {AgentMark} from "@/components/agent-mark";
-import {displayName, hasRun, instanceState, sameMachine, stateLabel, type HubInstance, type InstanceState} from "@/lib/hub";
+import {displayName, hasRun, instanceState, stateLabel, type HubInstance, type InstanceState} from "@/lib/hub";
+import {sameMachine} from "@/lib/hub-machines";
 import type {MachineAgent} from "@/lib/hub-frame";
 import {cn} from "@/lib/utils";
 import {agentName} from "./instance-row";

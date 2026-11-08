@@ -43,3 +43,9 @@ export function hubInstance(id: string, overrides: Partial<HubInstance> = {}): H
     ...overrides,
   };
 }
+
+// idleInstance is an instance whose AgentAPI the hub follows, idle: with
+// its summary.
+export function idleInstance(id: string, overrides: Partial<HubInstance> = {}): HubInstance {
+  return hubInstance(id, {summary: summary(), ...overrides});
+}
