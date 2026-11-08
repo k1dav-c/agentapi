@@ -1,6 +1,6 @@
 import {describe, expect, test} from "bun:test";
 import {EventSourceConnection, QUIET_RECONNECT_MS, type ConnectionOptions, type ConnectionState} from "./event-source";
-import {fakeEnvironment} from "./fake-event-source";
+import {fakeEnvironment} from "@/test/fake-event-source";
 
 function connect(options: Partial<ConnectionOptions> = {}) {
   const env = fakeEnvironment();

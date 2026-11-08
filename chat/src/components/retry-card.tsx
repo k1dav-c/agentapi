@@ -3,10 +3,11 @@
 import { useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import {useChatActions, useChatSelector} from "./chat-provider";
-import { CardStatus, DecisionCardShell, PrimaryButton, SecondaryButton } from "./decision-card";
+import { DecisionCardFooter, DecisionCardShell, PrimaryButton, SecondaryButton } from "./decision-card";
 import type { RetryWait } from "@/lib/chat-api";
-import { getErrorMessage } from "@/lib/error-utils";
+import { queuedWaiting } from "@/lib/queue";
 import { retryCountdown, retryTitle } from "@/lib/retry";
+import { useAction } from "@/lib/use-action";
 
 // The agent's last turn failed on an upstream error that may pass (native
 // transport): AgentAPI tries it again by itself, and the queued tasks wait
@@ -16,8 +17,7 @@ export function RetryCard() {
   const retryWait = useChatSelector((chat) => chat.retryWait);
   const queued = useChatSelector((chat) => chat.queuedMessages.length);
   const {retryNow, cancelRetry} = useChatActions();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const {busy, error, run} = useAction(retryWait?.stopped_at);
   // The countdown moves on every second while the card shows.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -26,23 +26,7 @@ export function RetryCard() {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, [retryWait]);
-  // A new failure starts without the last one's error.
-  useEffect(() => setError(""), [retryWait?.stopped_at]);
-
   if (!retryWait) return null;
-
-  const act = async (action: () => Promise<void>) => {
-    if (busy) return;
-    setBusy(true);
-    setError("");
-    try {
-      await action();
-    } catch (failure) {
-      setError(getErrorMessage(failure));
-    } finally {
-      setBusy(false);
-    }
-  };
 
   return (
     <RetryWaitCard
@@ -51,8 +35,8 @@ export function RetryCard() {
       now={now}
       busy={busy}
       error={error}
-      onRetryNow={() => void act(retryNow)}
-      onCancel={() => void act(cancelRetry)}
+      onRetryNow={() => void run(retryNow)}
+      onCancel={() => void run(cancelRetry)}
     />
   );
 }
@@ -75,7 +59,6 @@ export function RetryWaitCard({
   onRetryNow?: () => void;
   onCancel?: () => void;
 }) {
-  const waiting = queued ? ` ${queued} queued ${queued === 1 ? "task waits" : "tasks wait"} for it.` : "";
   return (
     <DecisionCardShell
       data-retry-wait
@@ -84,7 +67,7 @@ export function RetryWaitCard({
       title={retryTitle(retryWait)}
       description={retryWait.message}
       footer={
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3.5 pb-3 pt-2">
+        <DecisionCardFooter error={error}>
           <PrimaryButton onClick={onRetryNow} disabled={busy} className="min-h-9 px-3">
             Retry now
           </PrimaryButton>
@@ -96,13 +79,12 @@ export function RetryWaitCard({
           >
             Cancel
           </SecondaryButton>
-          <CardStatus className="min-w-0 flex-1 basis-48 text-[11.5px]" status="" error={error} />
-        </div>
+        </DecisionCardFooter>
       }
     >
       <p className="px-3.5 pb-1 pt-1 text-[12.5px] text-muted-foreground">
         {retryCountdown(retryWait, now)}
-        {waiting}
+        {queuedWaiting(queued, "for it")}
       </p>
     </DecisionCardShell>
   );

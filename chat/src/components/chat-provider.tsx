@@ -11,6 +11,7 @@ import {
   PropsWithChildren,
   useContext,
   useLayoutEffect,
+  useReducer,
 } from "react";
 import {toast} from "sonner";
 import {getErrorMessage} from "@/lib/error-utils";
@@ -22,10 +23,12 @@ import {
   createChatAPI,
   httpURL,
   type AgentSettings,
+  type ChatAPI,
   type AgentUsage,
   type CostReport,
   type LimitStop,
   type RetryWait,
+  type SendResult,
 } from "@/lib/chat-api";
 import {features, type Features} from "@/lib/features";
 import type {AgentType} from "@/lib/agents";
@@ -37,8 +40,6 @@ import {
   type DispatchMode,
 } from "@/lib/dispatch";
 import {
-  mergeListedRequests,
-  mergeRequests,
   pendingRequests,
   type NativeRequest,
   type RequestResponse,
@@ -49,10 +50,11 @@ import {getAgentState, waitingFor, type AgentStateKind, type TokenTotals, type W
 import {SyncTracker} from "@/lib/session-sync";
 import {resolveAgentAPIUrl} from "@/lib/agentapi-url";
 import {lastUserMessage, type DraftMessage, type Message, type RichMessage} from "@/lib/conversation";
+import {conversationReducer, initialConversation} from "@/lib/conversation-state";
 import type {Timeline, ToolCall} from "@/lib/task-timeline";
 import type {QueuedMessage} from "@/lib/queue";
 import {steeredMessages, tasksByMessage, type ServerTask} from "@/lib/server-tasks";
-import {useDrafts, type SendResult} from "./use-drafts";
+import {useDrafts} from "./use-drafts";
 import {useEventStream} from "./use-event-stream";
 import {useQueue} from "./use-queue";
 import {useSessionCache} from "./use-session-cache";
@@ -63,17 +65,8 @@ import {useStableCallback} from "@/lib/use-stable-callback";
 
 export type {DraftMessage, Message, RichContentBlock, RichMessage, Usage} from "@/lib/conversation";
 
-export type {SendResult} from "./use-drafts";
-
-export interface FileUploadResponse {
-  ok: boolean;
-  filePath?: string;
-  error?: string;
-}
-
+export type {FileUploadResponse, SendResult} from "@/lib/chat-api";
 export type {QueuedMessage} from "@/lib/queue";
-
-type ChatAPI = ReturnType<typeof createChatAPI>;
 
 // The API calls components make as they are (lib/chat-api.ts).
 const API_CALLS = [
@@ -269,8 +262,11 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
   const workspaceValue = searchParams.get("workspace");
   const workspaceParam = workspaceValue ? httpURL(workspaceValue, window.location.origin) : undefined;
   const [serverWorkspaceUrl, setServerWorkspaceUrl] = useState<string>();
-  const [messages, setMessages] = useState<(Message | DraftMessage)[]>([]);
-  const [richMessages, setRichMessages] = useState<RichMessage[]>([]);
+  // The conversation: messages, rich messages, requests, the server's
+  // tasks, and the point of the server's conversation it is at
+  // (lib/conversation-state).
+  const [conversation, dispatchConversation] = useReducer(conversationReducer, initialConversation);
+  const {messages, richMessages, requests, tasks: serverTasks, synced} = conversation;
   // The agent's status, from status_change events (lib/agent-status). An
   // event that changes nothing leaves it as it is; the ref has the latest,
   // for the event handlers.
@@ -297,9 +293,6 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
     loginRequired,
     lifecycle,
   } = agentStatus;
-  const [requests, setRequests] = useState<NativeRequest[]>([]);
-  // The tasks as the server derives them (lib/server-tasks).
-  const [serverTasks, setServerTasks] = useState<ServerTask[]>([]);
   const [api] = useState(() => createChatAPI(agentAPIUrl));
   // Server conversation state the client holds: its epoch and the highest
   // change sequence applied. Sent as /events?since=&epoch= so a reconnect
@@ -314,7 +307,7 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
   const refreshRequests = async () => {
     const heldWhenAsked = requestsRef.current;
     const listed = await api.getRequests();
-    setRequests((previous) => mergeListedRequests(previous, listed, heldWhenAsked));
+    dispatchConversation({type: "requestsListed", listed, heldWhenAsked});
   };
   // A connection that resumes gets what changed since, but the server lets
   // go of closed requests without a word: a request still held as pending
@@ -322,14 +315,10 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
   const onReplayed = useStableCallback(() => {
     if (pendingRequests(requestsRef.current).length > 0) void refreshRequests().catch(() => undefined);
   });
-  const {connectionStatus, reconnectAttempt, nextReconnectAt, reconnectByUser, synced, markSynced} = useEventStream({
+  const {connectionStatus, reconnectAttempt, nextReconnectAt, reconnectByUser} = useEventStream({
     agentAPIUrl,
-    api,
     syncRef,
-    setMessages,
-    setRichMessages,
-    setRequests,
-    setTasks: setServerTasks,
+    dispatch: dispatchConversation,
     updateAgentStatus,
     agentStatusRef,
     refreshQueue,
@@ -377,12 +366,12 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
     };
   }, [api, connectionStatus, workspaceParam]);
 
-  const {loading, sendMessage, retryFailedMessage, dismissFailedMessage} = useDrafts({agentAPIUrl, api, messages, setMessages, queueChanged});
+  const {loading, sendMessage, retryFailedMessage, dismissFailedMessage} = useDrafts({agentAPIUrl, api, messages, dispatch: dispatchConversation, queueChanged});
 
   const respondToRequest = async (id: string, response: RequestResponse) => {
     try {
       const state = await api.respondRequest(id, response);
-      setRequests((previous) => mergeRequests(previous, [state]));
+      dispatchConversation({type: "requestAnswered", request: state});
       return state;
     } catch (error) {
       // Whatever went wrong, show the request as the server has it now.
@@ -438,12 +427,8 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
     await change();
     if (syncRef.current.epoch !== epoch) return;
     syncRef.current.reset();
-    markSynced();
     void clearSession(agentAPIUrl);
-    setMessages([]);
-    setRichMessages([]);
-    setRequests([]);
-    setServerTasks([]);
+    dispatchConversation({type: "reset"});
   };
 
   // The actions keep their identity from render to render, and each calls

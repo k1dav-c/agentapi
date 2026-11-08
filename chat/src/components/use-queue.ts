@@ -1,7 +1,7 @@
 "use client";
 
 import {useCallback, useEffect, useRef, useState} from "react";
-import type {createChatAPI} from "@/lib/chat-api";
+import type {ChatAPI} from "@/lib/chat-api";
 import {sameValue} from "@/lib/agent-status";
 import {QueueView, type QueuedMessage} from "@/lib/queue";
 
@@ -16,7 +16,7 @@ const QUEUE_POLL_MS = 60_000;
 // (GET /queue) on every connection; after the chat changed it, a status
 // change while it holds messages, and every QUEUE_POLL_MS, only while the
 // server sends no queue events.
-export function useQueue(api: ReturnType<typeof createChatAPI>) {
+export function useQueue(api: ChatAPI) {
   const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
   const viewRef = useRef<QueueView | null>(null);
   viewRef.current ??= new QueueView();

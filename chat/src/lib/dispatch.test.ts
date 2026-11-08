@@ -3,6 +3,7 @@ import {
   canInterrupt,
   canSteer,
   canStop,
+  composerPlaceholder,
   dispatchModeForKey,
   dispatchModes,
   moveInQueue,
@@ -111,5 +112,30 @@ describe("moveInQueue", () => {
     expect(moveInQueue([1, 2, 3], 1, -1)).toBeNull();
     expect(moveInQueue([1, 2, 3], 3, 1)).toBeNull();
     expect(moveInQueue([1, 2, 3], 9, 1)).toBeNull();
+  });
+});
+
+describe("composerPlaceholder", () => {
+  const placeholder = (fields: Partial<Parameters<typeof composerPlaceholder>[0]>) =>
+    composerPlaceholder({phone: false, serverStatus: "stable", waitingFor: null, steerable: false, ...fields});
+
+  test("says what a message sent now does", () => {
+    expect(placeholder({})).toBe("Describe a task…");
+    expect(placeholder({serverStatus: "running"})).toBe("Queue a follow-up…");
+    expect(placeholder({serverStatus: "running", steerable: true})).toBe("Queue a follow-up, or steer the agent…");
+    expect(placeholder({serverStatus: "offline"})).toBe("Reconnecting… Your draft is saved.");
+  });
+
+  test("a queued task waits for the login or the answer, whatever the status", () => {
+    expect(placeholder({waitingFor: "login", serverStatus: "running"})).toBe("Queue a task (runs after the agent is logged in)…");
+    expect(placeholder({waitingFor: "answer", serverStatus: "offline"})).toBe("Queue a task (runs after you answer)…");
+    expect(placeholder({waitingFor: "limit"})).toBe("Describe a task…");
+  });
+
+  test("short on a phone, where waiting shows only while the agent is idle", () => {
+    expect(placeholder({phone: true})).toBe("Describe a task…");
+    expect(placeholder({phone: true, waitingFor: "answer"})).toBe("Queue a task…");
+    expect(placeholder({phone: true, waitingFor: "login", serverStatus: "running", steerable: true})).toBe("Queue a follow-up…");
+    expect(placeholder({phone: true, serverStatus: "offline"})).toBe("Reconnecting…");
   });
 });

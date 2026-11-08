@@ -12,8 +12,10 @@ import { common } from "lowlight";
 // shell, sql, swift, typescript, vbnet, wasm, xml, yaml
 //
 // This covers the vast majority of what coding agents produce.
-// To add a niche language, import it from highlight.js and register:
+// common is a record of language name to grammar, which rehype-highlight
+// takes as its languages option. To add a niche language, import it from
+// highlight.js and export the record with it:
 //   import haskell from "highlight.js/lib/languages/haskell";
-//   common.register("haskell", haskell);
+//   export const languages = {...common, haskell};
 
 export { common };

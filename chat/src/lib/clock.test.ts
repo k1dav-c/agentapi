@@ -1,5 +1,5 @@
 import {describe, expect, test} from "bun:test";
-import {formatDuration, formatTimeOfDay, secondsBetween} from "./clock";
+import {formatDuration, formatMilliseconds, formatTimeOfDay, secondsBetween} from "./clock";
 
 describe("clock", () => {
   test("durations show hours only from an hour on", () => {
@@ -7,6 +7,12 @@ describe("clock", () => {
     expect(formatDuration(65)).toBe("1:05");
     expect(formatDuration(3599)).toBe("59:59");
     expect(formatDuration(4500)).toBe("1:15:00");
+  });
+
+  test("a tool call's time in milliseconds", () => {
+    expect(formatMilliseconds(400)).toBe("< 1s");
+    expect(formatMilliseconds(4200)).toBe("4.2s");
+    expect(formatMilliseconds(185_000)).toBe("3m 5s");
   });
 
   test("a time of day, or nothing for a time that doesn't parse", () => {

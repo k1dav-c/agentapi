@@ -716,8 +716,10 @@ AgentAPI 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
 - `components/chat-provider.tsx` 組合用戶端狀態與 API 操作。動作與 API 呼叫來自
   `useChatActions()`，這個物件永遠不變，所以只做動作的元件不會重新 render；狀態則用
   `useChatSelector`（`lib/store.ts`）分片讀取，元件只在它讀的那一片改變時才重新 render。
-  `use-event-stream.ts`、`use-queue.ts`、`use-drafts.ts` 與 `use-session-cache.ts` 分別把事件套用
-  到狀態、追蹤訊息佇列、送出訊息並保留草稿直到伺服器收到，以及快取對話。
+  對話（訊息、結構化訊息、請求、任務，以及它們位於伺服器對話的哪一點）是單一個 `useReducer`：
+  每一種變更都由 `lib/conversation-state.ts` 的 `conversationReducer` 套用，不需 React 就能測試。
+  `use-event-stream.ts`、`use-queue.ts`、`use-drafts.ts` 與 `use-session-cache.ts` 分別 dispatch
+  事件、快取的對話和重設，追蹤訊息佇列、送出訊息並保留草稿直到伺服器收到，以及快取對話。
 - 事件串流使用 `/events?sync=1`，並記錄最後序號以便增量重播（`lib/chat-stream.ts`）。很長的
   重播每 1.5 秒先顯示一次進度，但排在訊息之後的請求和任務會沿用 chat 原有的，等重播自己的送到
   才取代；屬於別的對話的會立刻拿掉：重播送來的同 ID 訊息已是另一則的任務，以及在重播第一則訊息
@@ -738,6 +740,9 @@ AgentAPI 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
   `queue_update` 事件更新；每次連線時讀取 `GET /queue`，只有一直沒收到事件時才每 60 秒讀取一次。
   render 出錯時會顯示 `chat-error-boundary.tsx`，可以清除快取的對話後重新載入。
 - `lib/chat-api.ts` 是型別化的 HTTP 用戶端，`lib/api-schema.ts` 保存由 OpenAPI schema 產生的型別。
+  每個請求都以產生的 `paths` 裡的路由和方法指定（`route("POST", "/queue/{id}/steer", {id})`），
+  伺服器拿掉的路由就無法通過型別檢查；API 的型別都是 schema 型別的別名。`lib/` 不從 `components/`
+  匯入。
 - `components/chat.tsx` 負責頁面版面：訊息清單（任務、工具呼叫列、思考）、輸入框上方的停靠區
   （狀態列、登入卡片、請求卡片、用量限制卡片、重試卡片、prompt cache 過期提醒）、
   輸入框（`message-input.tsx`，含斜線指令、工作階段設定和用量指示）、Explorer（含先前的工作階段和
@@ -747,7 +752,9 @@ AgentAPI 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
 - `lib/` 將邏輯封裝為獨立模組，並附有 Bun 測試：任務分組、工具格式化、檔案參照、diff、斜線
   指令、設定、用量、花費（`cost.ts`：任務在工作階段呼叫中的份額、各期間的加總）、終端機按鍵、
   驗證。`use-session-cost.ts` 會在回合結束時和回合執行中讀取 `GET /cost`；第一次讀取之後會帶上
-  `from` 和 `digest`，只取得之後新增的呼叫。
+  `from` 和 `digest`，只取得之後新增的呼叫。用到 chat 狀態或只屬於某個元件的 hook，放在
+  `components/` 裡、靠近使用它的地方；和 chat 無關的 hook（`use-loaded.ts`、`use-copy.ts`、
+  `use-persisted.ts`）放在 `lib/`。測試共用的 fixture 和假物件放在 `src/test/`。
 
 ## 測試
 

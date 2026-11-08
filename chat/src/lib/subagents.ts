@@ -3,6 +3,7 @@
 // transcript can show.
 
 import type {SubagentRun} from "./chat-api";
+import type {Message} from "./conversation";
 import {buildTranscript, type TaskSection, type ToolCall} from "./task-timeline";
 
 // The tools that start a subagent: Claude Code's Agent (Task before 2.1),
@@ -31,7 +32,7 @@ export function subagentCounts(toolCalls: ToolCall[]): {total: number; running: 
 // activity.
 export function subagentTask(run: SubagentRun): TaskSection {
   const time = run.messages[0]?.timestamp ?? run.subagent.started_at;
-  const prompt = {id: 0, role: "user", content: run.prompt || run.subagent.description || "Subagent task", time: run.subagent.started_at < time ? run.subagent.started_at : time};
+  const prompt: Message = {id: 0, role: "user", content: run.prompt || run.subagent.description || "Subagent task", time: run.subagent.started_at < time ? run.subagent.started_at : time};
   const {timeline} = buildTranscript([prompt], run.messages);
   return {...timeline.tasks[0], key: `subagent-${run.subagent.id}`};
 }

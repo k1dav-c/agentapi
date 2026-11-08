@@ -120,7 +120,7 @@ describe("token totals", () => {
 describe("taskProgress", () => {
   const use = (id: string, time: string, name: string, input: unknown): RichMessage =>
     ({message_id: id, role: "assistant", timestamp: time, content: [{type: "tool_use", tool_use_id: id, tool_name: name, tool_input: input}]});
-  const prompt = {id: 0, role: "user", content: "fix it", time: "2026-10-22T10:00:00Z"};
+  const prompt = {id: 0, role: "user" as const, content: "fix it", time: "2026-10-22T10:00:00Z"};
 
   test("says the tool call the agent waits on, else what it thinks", () => {
     const thinking: RichMessage = {message_id: "th", role: "assistant", timestamp: "2026-10-22T10:00:01Z", content: [{type: "thinking", thinking: "**Reading the parser**\n\nIt drops a token."}]};

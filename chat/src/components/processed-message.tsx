@@ -1,115 +1,28 @@
 import React from "react";
 import {HighlightedText} from "./highlighted-text";
-import {LinkifyIt} from "linkify-it";
 import {Check, Clipboard} from "lucide-react";
-import ReactMarkdown, {type Components} from "react-markdown";
+import ReactMarkdown, {type Components, type Options} from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import {common} from "@/lib/highlight-langs";
-import {copyText} from "@/lib/clipboard";
+import {linkify, remarkLinkify} from "@/lib/markdown/remark-linkify";
+import {useCopy} from "@/lib/use-copy";
 import {fileLinkRef, parseFilePathRef, type FilePathRef} from "@/lib/file-refs";
 import {FilePathCode, inlineCodeClass} from "./file-path";
 import {useFileViewer} from "./file-viewer-context";
-
-type MarkdownNode = {
-  type: string;
-  value?: string;
-  url?: string;
-  children?: MarkdownNode[];
-};
-
-const linkify = new LinkifyIt();
 
 // Set inside a link, where code that names a file stays plain: a click
 // would open the file and follow the link, and a control can't sit in a
 // link.
 const InsideLink = React.createContext(false);
 
-// isAutolink says whether a link is a bare URL GFM linked: its text is its
-// URL, "http://" before a www. address or "mailto:" before an email.
-function isAutolink(url: string | undefined, text: string): boolean {
-  return url === text || url === `http://${text}` || url === `mailto:${text}`;
-}
-
-function remarkLinkify() {
-  return (tree: MarkdownNode) => {
-    const visit = (node: MarkdownNode) => {
-      if (!node.children || ["link", "code", "inlineCode"].includes(node.type)) {
-        return;
-      }
-
-      node.children = node.children.flatMap((child) => {
-        if (
-          child.type === "link" &&
-          child.children?.length === 1 &&
-          child.children[0].type === "text" &&
-          child.children[0].value
-        ) {
-          const text = child.children[0].value;
-          // Only a bare URL GFM linked runs on into the Chinese punctuation
-          // after it; a [label](url) link keeps its label and its URL.
-          if (!isAutolink(child.url, text)) return child;
-          const punctuationIndex = text.search(/[，。！？；：]/u);
-          if (punctuationIndex !== -1) {
-            const linkText = text.slice(0, punctuationIndex);
-            return [
-              {
-                ...child,
-                // The URL less what ran on, as GFM wrote it (with http://
-                // before www.).
-                url: child.url!.slice(0, child.url!.length - (text.length - linkText.length)),
-                children: [{type: "text", value: linkText}],
-              },
-              {type: "text", value: text.slice(punctuationIndex)},
-            ];
-          }
-          return child;
-        }
-
-        if (child.type !== "text" || !child.value) {
-          visit(child);
-          return child;
-        }
-
-        const matches = linkify.match(child.value);
-        if (!matches) return child;
-
-        const parts: MarkdownNode[] = [];
-        let cursor = 0;
-        for (const match of matches) {
-          const punctuationIndex = match.text.search(/[，。！？；：]/u);
-          const linkText =
-            punctuationIndex === -1
-              ? match.text
-              : match.text.slice(0, punctuationIndex);
-          const normalizedUrl =
-            linkify.match(linkText)?.[0]?.url ?? linkText;
-          const lastIndex = match.index + linkText.length;
-
-          if (match.index > cursor) {
-            parts.push({
-              type: "text",
-              value: child.value.slice(cursor, match.index),
-            });
-          }
-          parts.push({
-            type: "link",
-            url: normalizedUrl,
-            children: [{type: "text", value: linkText}],
-          });
-          cursor = lastIndex;
-        }
-        if (cursor < child.value.length) {
-          parts.push({type: "text", value: child.value.slice(cursor)});
-        }
-        return parts;
-      });
-    };
-
-    visit(tree);
-  };
-}
+// The Markdown pipelines, made once rather than on every render. A
+// message keeps its line breaks (remark-breaks), as the agent wrote them; a
+// Markdown file (MarkdownDocument) renders as Markdown does.
+const MESSAGE_REMARK_PLUGINS: Options["remarkPlugins"] = [remarkLinkify, remarkGfm, remarkBreaks];
+const DOCUMENT_REMARK_PLUGINS: Options["remarkPlugins"] = [remarkLinkify, remarkGfm];
+const REHYPE_PLUGINS: Options["rehypePlugins"] = [[rehypeHighlight, {languages: common}]];
 
 interface ProcessedMessageProps {
   messageContent: string;
@@ -153,7 +66,7 @@ function linkifyTerminalText(content: string) {
 }
 
 function CodeBlockCopy({ children }: { children: React.ReactNode }) {
-  const [copied, setCopied] = React.useState(false);
+  const {copied, copy} = useCopy();
 
   const getCodeString = (node: React.ReactNode): string => {
     if (typeof node === "string") return node;
@@ -164,15 +77,8 @@ function CodeBlockCopy({ children }: { children: React.ReactNode }) {
     return "";
   };
 
-  const handleCopy = async () => {
-    try {
-      await copyText(getCodeString(children));
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1600);
-    } catch {
-      // Clipboard access may be blocked
-    }
-  };
+  // Clipboard access may be blocked: the button stays as it is.
+  const handleCopy = () => copy(getCodeString(children));
 
   return (
     <div className="group/code relative my-3">
@@ -219,8 +125,8 @@ export const ProcessedMessage = React.memo(function ProcessedMessage({
   return (
     <div className="prose-transcript min-w-0 text-left text-[15px] leading-[1.7]">
       <ReactMarkdown
-        remarkPlugins={[remarkLinkify, remarkGfm, remarkBreaks]}
-        rehypePlugins={[[rehypeHighlight, {languages: common}]]}
+        remarkPlugins={MESSAGE_REMARK_PLUGINS}
+        rehypePlugins={REHYPE_PLUGINS}
         components={linkFilePaths ? linkingComponents : plainComponents}
       >
         {messageContent}
@@ -354,8 +260,8 @@ export const MarkdownDocument = React.memo(function MarkdownDocument({
   return (
     <div className="prose-transcript min-w-0 text-left text-[15px] leading-[1.7]">
       <ReactMarkdown
-        remarkPlugins={[remarkLinkify, remarkGfm]}
-        rehypePlugins={[[rehypeHighlight, {languages: common}]]}
+        remarkPlugins={DOCUMENT_REMARK_PLUGINS}
+        rehypePlugins={REHYPE_PLUGINS}
         components={components}
       >
         {content}

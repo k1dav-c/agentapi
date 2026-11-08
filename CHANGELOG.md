@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+### Changes
+
+- The chat's task filter names the states as the tasks' badges do: Working and Done, not Running
+  and Completed.
+
+### Internal
+
+- The chat's conversation (messages, rich messages, requests, tasks and the point they are at) is
+  one reducer, `conversationReducer` in `chat/src/lib/conversation-state.ts`, with tests for its
+  epoch, replay, restore and reset rules; the event stream, the cache restore, starting over, the
+  request REST calls and the drafts dispatch to it.
+- The chat's API types are aliases of the generated schema, and its requests name their route in
+  the generated `paths` (`route()`), so a route the server drops fails to typecheck. `lib/` no
+  longer imports from `components/`.
+- The composer's phone and desktop buttons are one `ComposerActions`; the composer's placeholder,
+  the limit card's content (`LimitStopCard`), `remarkLinkify` and the byte formats are tested
+  modules. Shared hooks (`useLoaded`, `useAction`, `useCopy`) and `DecisionCardFooter` replace
+  copies. The file viewer's short size has one decimal (12.1 KB).
+- Storybook, whose one story couldn't render, is gone; `eslint-config-next` matches `next`
+  (15.4.10); `lib/ui-copy.ts` is inlined; the tests' shared helpers are in `chat/src/test/`.
+
 ## v3.7.4
 
 ### Internal

@@ -16,6 +16,8 @@ import type {FileContent, FileDiff as FileChanges, FileDiffStatus, FilePreview} 
 import {isRelativeRef, previewKind, resolveRelativeRef, withPreviewCSP, type PreviewKind} from "@/lib/file-preview";
 import {highlightCode, languageForPath, type CodeToken} from "@/lib/code-highlight";
 import {cn} from "@/lib/utils";
+import {useLoaded, type Loaded} from "@/lib/use-loaded";
+import {formatBytes} from "@/lib/format-size";
 
 // The file viewer: a file the agent works on, with its contents (File), a
 // preview of an HTML, Markdown or SVG file (Preview), and its changes
@@ -57,28 +59,6 @@ export function FileViewerDialog({
 // scrolling, so it shows it.
 const panelClass =
   "min-h-0 overflow-auto overscroll-contain pb-[env(safe-area-inset-bottom)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring";
-
-type Loaded<T> = {state: "loading"} | {state: "ready"; data: T} | {state: "error"; error: unknown};
-
-// A resource read when load is called (again: read again). A response that
-// comes after a newer load started is dropped.
-function useLoaded<T>(read: () => Promise<T>) {
-  const [loaded, setLoaded] = useState<Loaded<T> | null>(null);
-  const latest = useRef(0);
-  const load = useCallback(() => {
-    const id = ++latest.current;
-    setLoaded({state: "loading"});
-    read().then(
-      (data) => {
-        if (latest.current === id) setLoaded({state: "ready", data});
-      },
-      (error: unknown) => {
-        if (latest.current === id) setLoaded({state: "error", error});
-      },
-    );
-  }, [read]);
-  return [loaded, load] as const;
-}
 
 // The dialog's content for one request. A new request remounts it, so every
 // open reads the file again.
@@ -467,16 +447,3 @@ function SectionHeading({title, note, badge, copy}: {title: string; note?: strin
   );
 }
 
-// "12,345 bytes (12.1 KB)".
-function formatBytes(bytes: number): string {
-  const exact = `${bytes.toLocaleString("en-US")} ${bytes === 1 ? "byte" : "bytes"}`;
-  if (bytes < 1024) return exact;
-  const units = ["KB", "MB", "GB"];
-  let value = bytes / 1024;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit++;
-  }
-  return `${exact} (${value.toFixed(value < 10 ? 1 : 0)} ${units[unit]})`;
-}

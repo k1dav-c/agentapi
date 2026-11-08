@@ -1,17 +1,9 @@
+import type {components} from "./api-schema";
+
 // What the server reports in GET /status and status_change while the agent
 // can't work until someone logs it in (native transport). The login happens
 // in a terminal on the machine AgentAPI runs on, not in the browser.
-export interface LoginRequired {
-  agent: string;
-  message: string;
-  // The command to run in a terminal, e.g. "claude auth login".
-  command: string;
-  // More help, as Markdown.
-  detail?: string;
-  // The machine and the user AgentAPI runs as: where to run the command.
-  host?: string;
-  user?: string;
-}
+export type LoginRequired = components["schemas"]["LoginRequired"];
 
 // The login the server reports, or null for anything that isn't one.
 export function parseLoginRequired(value: unknown): LoginRequired | null {

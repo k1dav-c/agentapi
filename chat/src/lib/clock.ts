@@ -7,6 +7,15 @@ export function formatDuration(totalSeconds: number): string {
   return hours > 0 ? `${hours}:${pad(minutes)}:${pad(seconds)}` : `${minutes}:${pad(seconds)}`;
 }
 
+// "< 1s", "4.2s", or "3m 5s": how long a tool call took, in milliseconds.
+export function formatMilliseconds(ms: number): string {
+  if (ms < 1000) return "< 1s";
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  const minutes = Math.floor(ms / 60_000);
+  const seconds = Math.round((ms % 60_000) / 1000);
+  return `${minutes}m ${seconds}s`;
+}
+
 // "HH:MM" of an ISO time, in the viewer's time zone; "" for a time that
 // doesn't parse.
 export function formatTimeOfDay(iso: string): string {

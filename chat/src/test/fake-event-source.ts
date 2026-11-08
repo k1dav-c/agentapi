@@ -2,7 +2,7 @@
 // event sources driven by hand, a clock that moves when told, and the
 // window, document and navigator events.
 
-import type {Clock, ConnectionEnvironment, EventSourceLike} from "./event-source";
+import type {Clock, ConnectionEnvironment, EventSourceLike} from "@/lib/event-source";
 
 export class FakeEventSource implements EventSourceLike {
   readyState = 0;

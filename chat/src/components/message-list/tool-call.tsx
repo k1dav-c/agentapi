@@ -4,10 +4,9 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {HighlightedText} from "../highlighted-text";
 import { ArrowDown, ChevronRight, FileDiff, FileText, Wrench } from "lucide-react";
 import { Button } from "../ui/button";
-import { uiCopy } from "@/lib/ui-copy";
 import { describeToolCall } from "@/lib/tool-call-view";
 import type { ToolCall } from "@/lib/task-timeline";
-import {useChatSelector} from "../chat-provider";
+import {useChatSelector, type ChatState} from "../chat-provider";
 import { ImageThumb } from "../image-preview";
 import { toolRequestBadge, type Tone } from "@/lib/native-requests";
 import { fileName, viewerTab, type FileTarget, type FileTargetKind } from "@/lib/file-refs";
@@ -15,15 +14,8 @@ import { useFileViewer, type FileViewer, type FileViewerTab } from "../file-view
 import { DiffView } from "../diff-view";
 import { PathLabel } from "../file-path";
 import { CopyButton } from "./message-item";
+import {formatMilliseconds} from "@/lib/clock";
 import {isSubagentTool, openLineage} from "@/lib/subagents";
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return "< 1s";
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  const minutes = Math.floor(ms / 60_000);
-  const seconds = Math.round((ms % 60_000) / 1000);
-  return `${minutes}m ${seconds}s`;
-}
 
 export function ToolDetail({
   label,
@@ -196,8 +188,12 @@ export const ToolCallCard = React.memo(function ToolCallCard({
   const isPending = view.pending;
   const storageScope = useChatSelector((chat) => chat.storageScope);
   const subagentsShown = useChatSelector((chat) => chat.features.subagents);
-  const requests = useChatSelector((chat) => chat.requests);
-  const request = requests.findLast((candidate) => candidate.tool_use_id === toolCall.id);
+  // Only the request for this tool call: the card renders again when that
+  // one changes, not whenever any request does (a request keeps its object
+  // until it changes).
+  const request = useChatSelector(
+    useCallback((chat: ChatState) => chat.requests.findLast((candidate) => candidate.tool_use_id === toolCall.id), [toolCall.id]),
+  );
   const requestBadge = request ? toolRequestBadge(request) : null;
   const [localIsOpen, setLocalIsOpen] = useState(Boolean(searchQuery));
   const isOpen = open ?? localIsOpen;
@@ -295,7 +291,7 @@ export const ToolCallCard = React.memo(function ToolCallCard({
           ) : isFailed ? (
             <ToolChip tone="fault">error</ToolChip>
           ) : null}
-          {durationMs > 0 && <ToolChip>{formatDuration(durationMs)}</ToolChip>}
+          {durationMs > 0 && <ToolChip>{formatMilliseconds(durationMs)}</ToolChip>}
           <ArrowDown className="size-3 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
         </span>
         {preview && (
@@ -377,7 +373,7 @@ export function ToolCallGroup({
       <header className="flex items-center justify-between gap-2">
         <span className="flex min-w-0 items-center gap-1.5 text-xs font-medium">
           <Wrench className="size-3 shrink-0 text-muted-foreground" />
-          <span>{uiCopy.tools.groupLabel(toolCalls.length)}</span>
+          <span>{toolCalls.length} consecutive tool calls</span>
         </span>
         <Button
           type="button"
@@ -391,7 +387,7 @@ export function ToolCallGroup({
           }
           aria-expanded={allOpen}
         >
-          {allOpen ? uiCopy.tools.collapseAll : uiCopy.tools.expandAll}
+          {allOpen ? "Collapse all" : "Expand all"}
         </Button>
       </header>
       <div className="space-y-1.5">

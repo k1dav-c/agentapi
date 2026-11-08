@@ -2,6 +2,7 @@
 // dispatch_mode), and what the composer offers for it.
 
 import { isImeComposing, type ImeKeyEvent } from "./keys";
+import type {WaitingFor} from "./session-status";
 
 export type DispatchMode = "queue" | "steer" | "interrupt";
 
@@ -90,4 +91,32 @@ export function moveInQueue(ids: number[], id: number, delta: number): number[] 
   next.splice(from, 1);
   next.splice(to, 0, id);
   return next;
+}
+
+// composerPlaceholder returns what the empty composer says: what a message
+// sent now does. Short on a phone, to fit its one row; there waiting on a
+// login or an answer only shows while the agent is idle.
+export function composerPlaceholder({
+  phone,
+  serverStatus,
+  waitingFor,
+  steerable,
+}: {
+  phone: boolean;
+  serverStatus: string;
+  // What the agent waits on before it runs the queue.
+  waitingFor: WaitingFor;
+  // A message can steer the turn the agent works on (canSteer).
+  steerable: boolean;
+}): string {
+  const waiting = waitingFor === "login" || waitingFor === "answer";
+  if (phone) {
+    if (serverStatus === "stable") return waiting ? "Queue a task…" : "Describe a task…";
+    return serverStatus === "running" ? "Queue a follow-up…" : "Reconnecting…";
+  }
+  if (waitingFor === "login") return "Queue a task (runs after the agent is logged in)…";
+  if (waitingFor === "answer") return "Queue a task (runs after you answer)…";
+  if (serverStatus === "running") return steerable ? "Queue a follow-up, or steer the agent…" : "Queue a follow-up…";
+  if (serverStatus === "stable") return "Describe a task…";
+  return "Reconnecting… Your draft is saved.";
 }

@@ -9,7 +9,7 @@ import { MessageImages } from "../image-preview";
 import { withoutUploadedImages } from "@/lib/uploads";
 import { toast } from "sonner";
 import { formatMessageTime } from "@/lib/format-time";
-import { copyText } from "@/lib/clipboard";
+import { useCopy } from "@/lib/use-copy";
 import {isDraftMessage, type DraftMessage, type Message} from "@/lib/conversation";
 
 export function CopyButton({
@@ -22,20 +22,14 @@ export function CopyButton({
   // Sits on a terminal (always dark) surface.
   onDark?: boolean;
 }) {
-  const [copied, setCopied] = useState(false);
+  const {copied, copy: copyContent} = useCopy();
 
   const copy = async () => {
-    try {
-      await copyText(content);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1600);
-    } catch {
-      // Clipboard access can be blocked in embedded contexts.
-      setCopied(false);
-      toast.error(`Could not copy the ${label}`, {
-        description: "Clipboard access may be blocked in this browser context.",
-      });
-    }
+    if (await copyContent(content)) return;
+    // Clipboard access can be blocked in embedded contexts.
+    toast.error(`Could not copy the ${label}`, {
+      description: "Clipboard access may be blocked in this browser context.",
+    });
   };
 
   return (

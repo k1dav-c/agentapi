@@ -92,6 +92,27 @@ for any agent.
 Steering appends to the reply, and Stop ends the turn as interrupted. The adapter lives in
 `lib/native/demo`.
 
+## Code layout
+
+- `src/app/`: the routes: the chat (`/chat/`), its embeddable version (`/chat/embed`) and the hub's
+  page (`/chat/hub/`).
+- `src/components/chat-provider.tsx`: the chat's state and actions, read with `useChatSelector`
+  and `useChatActions`. The conversation is one reducer, `lib/conversation-state.ts`; the hooks
+  beside the provider (`use-event-stream.ts`, `use-drafts.ts`, `use-queue.ts`,
+  `use-session-cache.ts`) feed it.
+- `src/components/message-input.tsx` with `message-input/` (the buttons in
+  `composer-actions.tsx`, attachments, slash command suggestions, favorites) is the composer;
+  `message-list/` the transcript; `hub-view.tsx` with `hub/` the hub's page.
+- `src/lib/`: the logic as plain modules with bun tests beside them, and the API client
+  (`chat-api.ts`, its types and routes from the generated `api-schema.ts`). `lib/` never imports
+  from `components/`.
+- Hooks: one that reads the chat's state, or serves one component, sits beside what uses it in
+  `src/components/`; one that knows nothing of the chat (`use-loaded.ts`, `use-copy.ts`,
+  `use-persisted.ts`) in `src/lib/`.
+- `src/test/`: fixtures and fakes the tests share.
+
+Run `bun run typecheck`, `bun lint` and `bun test` before a change goes in.
+
 ## What the chat keeps in the browser
 
 The chat stores one conversation per server in IndexedDB. Reopening shows the cached transcript

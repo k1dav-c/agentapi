@@ -7,10 +7,11 @@ import type {components} from "./api-schema";
 type Schemas = components["schemas"];
 
 // A message as the chat holds it: a message_update (see messageFromEvent
-// in lib/events.ts), or a rich message's text as the timeline shows it.
+// in lib/events.ts), or a rich message's text as the timeline shows it
+// ("assistant", the rich message's role).
 export interface Message {
   id: number;
-  role: string;
+  role: Schemas["ConversationRole"] | "assistant";
   content: string;
   time?: string;
 }

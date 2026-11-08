@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Brain, ChevronDown, ClipboardList, Hand, LoaderCircle, Shield, ShieldCheck, Zap } from "lucide-react";
 import { toast } from "sonner";
 import {useChatActions, useChatSelector} from "./chat-provider";
@@ -15,11 +15,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
-import type { AgentSettings, PermissionMode, SettingOptions } from "@/lib/chat-api";
+import type { AgentSettings, PermissionMode } from "@/lib/chat-api";
 import { getErrorMessage } from "@/lib/error-utils";
 import { modeMeta, modelLabel, effortsOf } from "@/lib/session-settings";
 import { OPEN_SETTINGS_EVENT, type SettingsMenu } from "@/lib/slash-commands";
 import { cn } from "@/lib/utils";
+import {useLoaded} from "@/lib/use-loaded";
 
 const MODE_ICONS: Record<PermissionMode, ReactNode> = {
   bypass: <Zap />,
@@ -35,34 +36,21 @@ export function SessionSettings({ className }: { className?: string }) {
   const features = useChatSelector((chat) => chat.features);
   const agentSettings = useChatSelector((chat) => chat.agentSettings);
   const {getSettings, updateSettings} = useChatActions();
-  const [options, setOptions] = useState<SettingOptions | null>(null);
   // The menu that is open, also when a slash command opened it.
   const [openMenu, setOpenMenu] = useState<SettingsMenu | null>(null);
-  const [loadError, setLoadError] = useState("");
-  const [loading, setLoading] = useState(false);
+  // The choices (GET /settings), and what changing a setting returned; the
+  // last ones show while they are read again.
+  const [choices, load, setChoices] = useLoaded(useCallback(async () => (await getSettings()).options, [getSettings]));
+  const options = choices?.data ?? null;
+  const loading = choices?.state === "loading";
+  const loadError = choices?.state === "error" ? getErrorMessage(choices.error) : "";
   const [saving, setSaving] = useState(false);
   const enabled = features.settings && agentSettings !== null;
-
-  // Only the latest load counts: an older one that ends later is stale.
-  const loads = useRef(0);
-  const load = useCallback(async () => {
-    const seq = ++loads.current;
-    setLoading(true);
-    setLoadError("");
-    try {
-      const { options } = await getSettings();
-      if (seq === loads.current) setOptions(options);
-    } catch (error) {
-      if (seq === loads.current) setLoadError(getErrorMessage(error));
-    } finally {
-      if (seq === loads.current) setLoading(false);
-    }
-  }, [getSettings]);
 
   // The names of the models (the settings carry ids) and whether the agent
   // has permission modes come with the choices.
   useEffect(() => {
-    if (enabled) void load();
+    if (enabled) load();
   }, [enabled, load]);
 
   // /model, /effort and /mode without a value open the menu.
@@ -70,7 +58,7 @@ export function SessionSettings({ className }: { className?: string }) {
     if (!enabled) return;
     const onOpen = (event: Event) => {
       setOpenMenu((event as CustomEvent<SettingsMenu>).detail);
-      void load();
+      load();
     };
     window.addEventListener(OPEN_SETTINGS_EVENT, onOpen);
     return () => window.removeEventListener(OPEN_SETTINGS_EVENT, onOpen);
@@ -83,13 +71,13 @@ export function SessionSettings({ className }: { className?: string }) {
   // meanwhile.
   const onOpenChange = (menu: SettingsMenu) => (open: boolean) => {
     setOpenMenu(open ? menu : null);
-    if (open) void load();
+    if (open) load();
   };
 
   const apply = async (change: AgentSettings) => {
     setSaving(true);
     try {
-      setOptions((await updateSettings(change)).options);
+      setChoices((await updateSettings(change)).options);
     } catch (error) {
       toast.error("Couldn't change the setting", { description: getErrorMessage(error) });
     } finally {
@@ -106,7 +94,7 @@ export function SessionSettings({ className }: { className?: string }) {
     <>
       {loading && !options && <DropdownMenuItem disabled><LoaderCircle className="animate-spin" />Loading…</DropdownMenuItem>}
       {loadError && (
-        <DropdownMenuItem onSelect={(event) => { event.preventDefault(); void load(); }} className="text-destructive">
+        <DropdownMenuItem onSelect={(event) => { event.preventDefault(); load(); }} className="text-destructive">
           Couldn&apos;t load the choices: {loadError}. Tap to try again.
         </DropdownMenuItem>
       )}
