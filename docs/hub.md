@@ -370,6 +370,9 @@ update them. On the machine:
 
 - From 2.1.0 on, AgentAPI restarts in place: `sudo agentapi update --restart` updates the binary
   and restarts the machine's AgentAPIs into it (without `sudo` when the binary is yours).
+- To let the hub update them from then on, add `--allow-update` (from 3.8.0), which writes
+  `allow-update: true` into the config file first. With an older `agentapi`, add that line to
+  `~/.agentapi/config.yaml` yourself, then run `sudo agentapi update --restart`.
 - Before 2.1.0, run `sudo agentapi update`, then restart each AgentAPI once, or its workspace.
 
 ### The list

@@ -324,6 +324,9 @@ hub 舊。
 
 - 2.1.0 以後的 AgentAPI 能原地重新啟動：執行 `sudo agentapi update --restart`，更新 binary 後，
   這台主機的 AgentAPI 會原地重新啟動到新版（binary 屬於你自己時不必加 `sudo`）。
+- 想讓之後都能從 hub 更新，就加上 `--allow-update`（3.8.0 起），它會先把 `allow-update: true`
+  寫進設定檔。舊版的 `agentapi` 沒有這個參數：先自己把這一行加進 `~/.agentapi/config.yaml`，
+  再執行 `sudo agentapi update --restart`。
 - 2.1.0 之前的版本：先執行 `sudo agentapi update`，再把每個 AgentAPI（或它的 workspace）重新啟動
   一次。
 

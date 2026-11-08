@@ -1608,6 +1608,7 @@ agentapi update            # 下載並安裝最新版本
 agentapi update --check    # 僅檢查是否有可用更新
 agentapi update --force    # 即使已是最新版本也執行更新
 agentapi update --restart  # 更新後讓執行中的 AgentAPI 改用新版本
+agentapi update --restart --allow-update  # 之後也讓 hub 可以更新它們
 ```
 
 更新前，AgentAPI 會先依據該版本的 `checksums.txt` 清單，以 SHA-256 驗證下載的執行檔，
@@ -1621,6 +1622,12 @@ agentapi update --restart  # 更新後讓執行中的 AgentAPI 改用新版本
 透過 `sudo` 執行時（安裝在 `/usr/local/bin`），重新啟動的是執行 `sudo` 那位使用者的 AgentAPI，
 依據該使用者的登記目錄。hub 不在其中：請用服務管理工具重新啟動，例如
 `systemctl restart agentapi-hub`。
+
+`--allow-update` 會在 `--restart` 之前，先把 `allow-update: true` 寫進設定檔（`--config`，預設是
+執行 `sudo` 那位使用者的 `~/.agentapi/config.yaml`，檔案擁有者仍是該使用者），重新啟動後的
+AgentAPI 從此就能由 [hub](docs/hub.zh-TW.md#從-hub-更新) 更新。設定檔裡的其他設定都會保留，
+和 `agentapi hub join --allow-update` 一樣。搭配 `--check` 時不會寫入任何東西。舊版的 `agentapi`
+沒有這個參數：先自己把這一行加進設定檔，再執行 `agentapi update --restart`。
 
 ### `agentapi restart`
 
