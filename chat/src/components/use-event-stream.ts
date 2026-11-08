@@ -1,20 +1,17 @@
 "use client";
 
-import {startTransition, useCallback, useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction} from "react";
+import {startTransition, useCallback, useEffect, useRef, useState, type Dispatch, type RefObject} from "react";
 import {toast} from "sonner";
 import {ChatStream} from "@/lib/chat-stream";
 import {initialConnectionState, type ConnectionState} from "@/lib/event-source";
-import {loadSession, mergeByKey} from "@/lib/session-cache";
+import {loadSession} from "@/lib/session-cache";
 import {bootstrapSession, ensureSession, reconnectWhenSignedIn, withCredentials} from "@/lib/auth";
-import type {ChatAPI} from "@/lib/chat-api";
 import {isLoginNotice} from "@/lib/login";
-import type {NativeRequest} from "@/lib/native-requests";
-import type {ServerTask} from "@/lib/server-tasks";
 import type {QueuedMessage} from "@/lib/queue";
 import type {SyncTracker} from "@/lib/session-sync";
 import {applyStatusChange, update, type AgentStatus} from "@/lib/agent-status";
-import {isDraftMessage, richMessageKey, withoutSeq, type DraftMessage, type Message, type RichMessage} from "@/lib/conversation";
-import {messagesAfter, requestsAfter, tasksAfter, type EventBatch, type SyncPoint} from "@/lib/pending-events";
+import type {ConversationAction} from "@/lib/conversation-state";
+import type {EventBatch} from "@/lib/pending-events";
 import {agentErrorKey, dismissedErrors, rememberDismissed} from "@/lib/agent-errors";
 
 // How long to wait for the cache before connecting without it.
@@ -23,17 +20,13 @@ const CACHE_LOAD_TIMEOUT_MS = 400;
 // useEventStream keeps the chat in step with the server's /events. It
 // shows the cached transcript first and connects from where the cache left
 // off; the stream (ChatStream) hands on the events in batches, a replay at
-// once when it is complete, and keeps the connection open. It returns,
-// besides the connection's state, the point of the conversation the
-// rendered state is at (synced), for the cache.
+// once when it is complete, and keeps the connection open. It changes the
+// conversation through dispatch (lib/conversation-state), and returns the
+// connection's state.
 export function useEventStream({
   agentAPIUrl,
-  api,
   syncRef,
-  setMessages,
-  setRichMessages,
-  setRequests,
-  setTasks,
+  dispatch,
   updateAgentStatus,
   agentStatusRef,
   refreshQueue,
@@ -42,12 +35,8 @@ export function useEventStream({
   onReplayed,
 }: {
   agentAPIUrl: string;
-  api: ChatAPI;
   syncRef: RefObject<SyncTracker>;
-  setMessages: Dispatch<SetStateAction<(Message | DraftMessage)[]>>;
-  setRichMessages: Dispatch<SetStateAction<RichMessage[]>>;
-  setRequests: Dispatch<SetStateAction<NativeRequest[]>>;
-  setTasks: Dispatch<SetStateAction<ServerTask[]>>;
+  dispatch: Dispatch<ConversationAction>;
   updateAgentStatus: (change: (status: AgentStatus) => AgentStatus) => void;
   agentStatusRef: RefObject<AgentStatus>;
   // Reading the queue (GET /queue), as every connection does; applying a
@@ -65,52 +54,16 @@ export function useEventStream({
   // already.
   const shownErrorsRef = useRef(new Set<string>());
   const streamRef = useRef<ChatStream | null>(null);
-  // The point of the conversation the rendered state is at. It is set with
-  // the updates that bring the state there, and rendered with them: the
-  // tracker's watermark runs ahead, and a cache that saved it with the
-  // state of the last render could claim changes the state didn't hold,
-  // which ?since= never sends again.
-  const [synced, setSynced] = useState<SyncPoint>({epoch: "", seq: 0});
   const cacheLoadedForRef = useRef("");
 
-  // Sets synced to where the tracker is, for a state set at the same time.
-  const markSynced = useCallback(() => {
-    const {epoch, watermark: seq} = syncRef.current;
-    setSynced((previous) => (previous.epoch === epoch && previous.seq === seq ? previous : {epoch, seq}));
-  }, [syncRef]);
-
   const apply = useCallback((batch: EventBatch) => {
-    const {replace, point} = batch;
-    const messageUpdates = batch.messages;
-    const richUpdates = batch.richMessages;
-    const requestUpdates = batch.requests;
-    const taskUpdates = batch.tasks;
-
     // The transcript renders in a transition: a long one takes a while,
     // and typing or a click shouldn't wait for it. Requests apply at once
     // (see request_update), so they are never behind the point.
-    startTransition(() => {
-      setSynced((previous) => (previous.epoch === point.epoch && previous.seq === point.seq ? previous : point));
-      if (replace || messageUpdates.length > 0) {
-        setMessages((previous) => messagesAfter(previous, batch));
-      }
-      if (replace || richUpdates.length > 0) {
-        setRichMessages((previous) =>
-          mergeByKey(replace ? [] : previous, richUpdates.map(withoutSeq), richMessageKey),
-        );
-      }
-      // Tasks keep their seq, as requests do, so an update never replaces
-      // a later one. A full replay replaces them once it is complete.
-      if (batch.replaceHeld || batch.held || taskUpdates.length > 0) setTasks((previous) => tasksAfter(previous, batch));
-    });
-    if (batch.replaceHeld || batch.held || requestUpdates.length > 0) {
-      // Requests keep their seq: it decides between an event and a state
-      // read from the REST API (see mergeRequests). A full replay replaces
-      // them once it is complete.
-      setRequests((previous) => requestsAfter(previous, batch));
-    }
+    startTransition(() => dispatch({type: "batch", batch}));
+    if (batch.replaceHeld || batch.held || batch.requests.length > 0) dispatch({type: "batchRequests", batch});
     if (batch.queue) applyQueue(batch.queue);
-  }, [applyQueue, setMessages, setRequests, setRichMessages, setTasks]);
+  }, [applyQueue, dispatch]);
 
   // Reconnect now, as the user asked. Once the user closed the sign-in
   // dialog, reconnects in the background stop asking for the token; this
@@ -179,11 +132,7 @@ export function useEventStream({
       void loadSession(agentAPIUrl).then((cached) => {
         if (cached && !started && !disposed) {
           syncRef.current.restore(cached.epoch, cached.seq);
-          markSynced();
-          setMessages((previous) => [...cached.messages, ...previous.filter(isDraftMessage)]);
-          setRichMessages(cached.richMessages);
-          setRequests(cached.requests);
-          setTasks(cached.tasks);
+          dispatch({type: "restore", cached});
         }
         start();
       });
@@ -197,14 +146,12 @@ export function useEventStream({
       stream.stop();
       streamRef.current = null;
     };
-  }, [agentAPIUrl, agentStatusRef, api, apply, markSynced, onReplayed, queueMayHaveSent, refreshQueue, setMessages, setRequests, setRichMessages, setTasks, syncRef, updateAgentStatus]);
+  }, [agentAPIUrl, agentStatusRef, apply, dispatch, onReplayed, queueMayHaveSent, refreshQueue, syncRef, updateAgentStatus]);
 
   return {
     connectionStatus: connection.status,
     reconnectAttempt: connection.attempt,
     nextReconnectAt: connection.nextAttemptAt,
     reconnectByUser,
-    synced,
-    markSynced,
   };
 }

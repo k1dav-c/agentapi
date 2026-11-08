@@ -336,27 +336,3 @@ export async function clearSession(key: string): Promise<void> {
     // See saveSession.
   }
 }
-
-// Applies a batch of upserts keyed by keyOf in one pass: existing entries are
-// replaced in place, new ones appended in arrival order. Replaying a long
-// session is thousands of updates; doing a copy and a linear search per
-// update made reloads quadratic.
-export function mergeByKey<T>(previous: T[], updates: Iterable<T>, keyOf: (item: T) => string | undefined): T[] {
-  const next = previous.slice();
-  const index = new Map<string, number>();
-  next.forEach((item, i) => {
-    const key = keyOf(item);
-    if (key !== undefined) index.set(key, i);
-  });
-  for (const item of updates) {
-    const key = keyOf(item);
-    const at = key === undefined ? undefined : index.get(key);
-    if (at === undefined) {
-      if (key !== undefined) index.set(key, next.length);
-      next.push(item);
-    } else {
-      next[at] = item;
-    }
-  }
-  return next;
-}

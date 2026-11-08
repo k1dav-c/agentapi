@@ -1,9 +1,10 @@
 "use client";
 
-import {useState, type Dispatch, type SetStateAction} from "react";
+import {useState, type Dispatch} from "react";
 import {toast} from "sonner";
 import type {ChatAPI, SendResult} from "@/lib/chat-api";
 import {isDraftMessage, type DraftMessage, type Message} from "@/lib/conversation";
+import type {ConversationAction} from "@/lib/conversation-state";
 import type {DispatchMode} from "@/lib/dispatch";
 import {getErrorMessage} from "@/lib/error-utils";
 import {parseFailedMessages} from "@/lib/failed-messages";
@@ -18,13 +19,13 @@ export function useDrafts({
   agentAPIUrl,
   api,
   messages,
-  setMessages,
+  dispatch,
   queueChanged,
 }: {
   agentAPIUrl: string;
   api: ChatAPI;
   messages: (Message | DraftMessage)[];
-  setMessages: Dispatch<SetStateAction<(Message | DraftMessage)[]>>;
+  dispatch: Dispatch<ConversationAction>;
   // Reads the queue again: the message may have been queued.
   queueChanged: () => Promise<void>;
 }) {
@@ -39,42 +40,33 @@ export function useDrafts({
     },
     (stored) => {
       if (!stored) return;
-      const failed = parseFailedMessages(stored) as DraftMessage[];
-      setMessages((previous) => {
-        const existing = new Set(previous.filter(isDraftMessage).map((message) => message.clientId));
-        return [...previous, ...failed.filter((message) => !existing.has(message.clientId))];
-      });
+      dispatch({type: "draftsRestored", drafts: parseFailedMessages(stored) as DraftMessage[]});
     },
   );
-
-  const withoutDraft = (clientId: string) => (previous: (Message | DraftMessage)[]) =>
-    previous.filter((message) => !isDraftMessage(message) || message.clientId !== clientId);
 
   // Sends a message, shown as a draft until the server has it.
   const sendMessage = async (content: string, mode: DispatchMode = "queue"): Promise<SendResult> => {
     if (!content.trim()) return {ok: false, queued: false};
     const clientId = crypto.randomUUID();
-    setMessages((previous) => [...previous, {role: "user", content, clientId, deliveryStatus: "sending"}]);
+    dispatch({type: "draftAdded", draft: {role: "user", content, clientId, deliveryStatus: "sending"}});
     setLoading(true);
     try {
       const result = await api.sendMessage(content, mode);
       await queueChanged();
-      setMessages(withoutDraft(clientId));
+      dispatch({type: "draftRemoved", clientId});
       return {ok: result.ok, queued: result.queued, steered: result.steered};
     } catch (error) {
       console.error("Error sending message:", error);
       const message = getErrorMessage(error);
       toast.error(`Error sending message`, {description: message});
-      setMessages((previous) =>
-        previous.map((item) => (isDraftMessage(item) && item.clientId === clientId ? {...item, deliveryStatus: "failed", error: message} : item)),
-      );
+      dispatch({type: "draftFailed", clientId, error: message});
       return {ok: false, queued: false};
     } finally {
       setLoading(false);
     }
   };
 
-  const dismissFailedMessage = (clientId: string) => setMessages(withoutDraft(clientId));
+  const dismissFailedMessage = (clientId: string) => dispatch({type: "draftRemoved", clientId});
 
   const retryFailedMessage = async (clientId: string) => {
     const failedMessage = messages.find((message) => isDraftMessage(message) && message.clientId === clientId);

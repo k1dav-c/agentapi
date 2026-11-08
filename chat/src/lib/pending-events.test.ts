@@ -1,42 +1,8 @@
 import {describe, expect, test} from "bun:test";
-import type {NativeRequest} from "./native-requests";
-import type {DraftMessage} from "./conversation";
-import {PendingEvents, messagesAfter, requestsAfter, tasksAfter, type EventBatch} from "./pending-events";
-import type {ServerTask} from "./server-tasks";
+import {PendingEvents} from "./pending-events";
+import {requestsAfter, tasksAfter} from "./conversation-state";
 import {SyncTracker} from "./session-sync";
-
-const message = (id: number, seq: number) => ({id, role: "agent" as const, content: `message ${id}`, time: "2026-10-22T10:00:00Z", seq});
-const prompt = (id: number, seq: number, time = "2026-10-22T10:00:00Z") => ({id, role: "user" as const, content: `prompt ${id}`, time, seq});
-const rich = (id: string, seq: number) => ({message_id: id, role: "assistant", timestamp: "2026-10-22T10:00:01Z", content: [], seq});
-const task = (id: number, seq: number, steered: number[] = []): ServerTask => ({
-  id,
-  status: "completed",
-  prompt: `prompt ${id}`,
-  started_at: "2026-10-22T10:00:00Z",
-  errors: [],
-  steered,
-  seq,
-});
-const request = (id: string, status: NativeRequest["status"], seq: number | undefined, createdAt = "2026-10-22T10:00:05Z"): NativeRequest => ({
-  id,
-  kind: "approval",
-  title: `run ${id}`,
-  status,
-  created_at: createdAt,
-  response_capability: "live",
-  seq,
-});
-const batch = (fields: Partial<EventBatch>): EventBatch => ({
-  replace: false,
-  messages: [],
-  richMessages: [],
-  requests: [],
-  tasks: [],
-  held: false,
-  replaceHeld: false,
-  point: {epoch: "e1", seq: 0},
-  ...fields,
-});
+import {batch, message, prompt, request, rich, task} from "@/test/conversation";
 
 describe("PendingEvents", () => {
   test("a batch's point is the changes it holds", () => {
@@ -188,40 +154,5 @@ describe("PendingEvents", () => {
     expect(batch.messages.map((m) => m.id)).toEqual([0]);
     expect(batch.point).toEqual({epoch: "new", seq: 3});
     expect(pending.take().replace).toBe(false);
-  });
-});
-
-describe("messagesAfter", () => {
-  const draft = (clientId: string, content: string, deliveryStatus: DraftMessage["deliveryStatus"] = "sending"): DraftMessage => ({
-    role: "user",
-    content,
-    clientId,
-    deliveryStatus,
-  });
-  const sent = (id: number, content: string, seq: number) => ({id, role: "user" as const, content, time: "2026-10-22T10:00:00Z", seq});
-
-  test("a draft still being sent stays through other updates, so a failed send can mark it", () => {
-    // The agent streams its turn while a message waits for POST /message.
-    const next = messagesAfter([prompt(0, 1), draft("c1", "next one")], batch({messages: [message(1, 2)]}));
-    expect(next.map((item) => ("clientId" in item ? item.clientId : item.id))).toEqual([0, "c1", 1]);
-  });
-
-  test("the server's message with its content takes the draft's place", () => {
-    const next = messagesAfter([prompt(0, 1), draft("c1", "next one ")], batch({messages: [sent(2, "next one", 3)]}));
-    expect(next).toEqual([prompt(0, 1), {id: 2, role: "user", content: "next one", time: "2026-10-22T10:00:00Z"}]);
-  });
-
-  test("one message takes the place of one draft; an update of a message held already of none", () => {
-    const drafts = [draft("c1", "yes"), draft("c2", "yes")];
-    const next = messagesAfter([sent(4, "yes", 1), ...drafts], batch({messages: [sent(4, "yes", 5), sent(6, "yes", 6)]}));
-    expect(next.filter((item) => "clientId" in item)).toEqual([drafts[1]]);
-  });
-
-  test("failed drafts stay, through a full replay too", () => {
-    const failed = draft("c1", "lost", "failed");
-    const sending = draft("c2", "on its way");
-    const next = messagesAfter([prompt(0, 1), failed, sending], batch({replace: true, messages: [message(1, 2), sent(2, "lost", 3)]}));
-    expect(next.slice(0, 2)).toEqual([failed, sending]);
-    expect(next).toHaveLength(4);
   });
 });

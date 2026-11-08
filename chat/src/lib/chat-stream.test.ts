@@ -3,7 +3,8 @@ import {ChatStream, EVENT_FLUSH_MS, REPLAY_FLUSH_MAX_MS, STALE_CONNECTION_MS, ty
 import {QUIET_RECONNECT_MS, type ConnectionState} from "./event-source";
 import {fakeEnvironment} from "./fake-event-source";
 import type {NativeRequest} from "./native-requests";
-import {requestsAfter, tasksAfter, type EventBatch} from "./pending-events";
+import {requestsAfter, tasksAfter} from "./conversation-state";
+import type {EventBatch} from "./pending-events";
 import type {ServerTask} from "./server-tasks";
 import {SyncTracker} from "./session-sync";
 

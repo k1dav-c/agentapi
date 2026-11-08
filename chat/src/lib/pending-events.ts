@@ -1,12 +1,11 @@
 // The /events updates received but not applied yet. The chat applies them
-// together (see use-event-stream.ts), and with them the point of the
-// conversation they bring its state to.
+// together (conversationReducer in lib/conversation-state.ts), and with
+// them the point of the conversation they bring its state to.
 
-import {isDraftMessage, richMessageKey, withoutSeq, type DraftMessage, type Message, type RichMessage} from "./conversation";
-import {mergeRequests, type NativeRequest} from "./native-requests";
+import {richMessageKey, type Message, type RichMessage} from "./conversation";
+import type {NativeRequest} from "./native-requests";
 import type {QueuedMessage} from "./queue";
-import {mergeTasks, type ServerTask} from "./server-tasks";
-import {mergeByKey} from "./session-cache";
+import type {ServerTask} from "./server-tasks";
 import type {SyncTracker} from "./session-sync";
 
 // Where a state of the conversation is: its epoch, and the highest change
@@ -25,8 +24,8 @@ export interface EventBatch {
   tasks: ServerTask[];
   // A full replay sends the requests and the tasks after the messages (the
   // tasks last). While it is on its way (held) they wait, and the state's
-  // stay (requestsAfter, tasksAfter); the batch that completes it replaces
-  // them (replaceHeld). replayFrom is the time of the replay's first
+  // stay (requestsAfter, tasksAfter in lib/conversation-state.ts); the
+  // batch that completes it replaces them (replaceHeld). replayFrom is the time of the replay's first
   // message, the start of the conversation it holds, while held.
   held: boolean;
   replaceHeld: boolean;
@@ -125,76 +124,4 @@ export class PendingEvents {
     if (queueSeq !== undefined) this.sync.applied(queueSeq);
     return {...batch, point: {epoch: this.sync.epoch, seq: this.sync.watermark}};
   }
-}
-
-// messagesAfter returns the messages once batch is applied to previous.
-// The server's messages replace their own; of the drafts, the failed ones
-// stay until they are retried or dismissed, and those still being sent
-// until the server has them: a new user message of the batch with their
-// content takes the place of one, and sendMessage drops the others once the
-// server answered. A draft dropped before that, by any update, would leave
-// a send that fails nothing to mark failed.
-export function messagesAfter(previous: (Message | DraftMessage)[], batch: EventBatch): (Message | DraftMessage)[] {
-  const known = new Set(previous.flatMap((message) => (isDraftMessage(message) ? [] : [message.id])));
-  // The content of the new user messages, as many times as each came.
-  const arrived = new Map<string, number>();
-  for (const message of batch.messages) {
-    if (message.role !== "user" || known.has(message.id)) continue;
-    const content = message.content.trim();
-    arrived.set(content, (arrived.get(content) ?? 0) + 1);
-  }
-  const kept = previous.filter((message) => {
-    if (!isDraftMessage(message)) return !batch.replace;
-    if (message.deliveryStatus === "failed") return true;
-    const content = message.content.trim();
-    const count = arrived.get(content) ?? 0;
-    if (count === 0) return true;
-    arrived.set(content, count - 1);
-    return false;
-  });
-  return mergeByKey(kept, batch.messages.map(withoutSeq), (message) => (isDraftMessage(message) ? undefined : String(message.id)));
-}
-
-// tasksAfter returns the tasks once batch is applied to previous. While a
-// full replay is on its way they stay as they were: the transcript is
-// grouped by them, and without them a long replay's progress would show
-// each steered message as a task of its own, with a guessed status, until
-// they came. Those whose message the replay sends as another message
-// (another conversation's, after a restart without a state database) go.
-export function tasksAfter(previous: ServerTask[], batch: EventBatch): ServerTask[] {
-  if (batch.replaceHeld) return mergeTasks([], batch.tasks);
-  if (batch.held) return tasksStillOf(previous, batch.messages);
-  return batch.tasks.length > 0 ? mergeTasks(previous, batch.tasks) : previous;
-}
-
-// tasksStillOf returns the tasks but those whose user message messages has
-// as another message: not the user's, or sent at another time.
-function tasksStillOf(tasks: ServerTask[], messages: readonly Message[]): ServerTask[] {
-  if (tasks.length === 0 || messages.length === 0) return tasks;
-  const byId = new Map(messages.map((message) => [message.id, message]));
-  const kept = tasks.filter((task) => {
-    const message = byId.get(task.id);
-    return !message || (message.role === "user" && (message.time === undefined || Date.parse(message.time) === Date.parse(task.started_at)));
-  });
-  return kept.length === tasks.length ? tasks : kept;
-}
-
-// requestsAfter returns the requests once batch is applied to previous,
-// with mergeRequests. While a full replay is on its way they stay as they
-// were, so its progress doesn't take the decision cards away until its
-// requests come. Those the agent made before the replay's first message
-// (replayFrom) go: they belong to another conversation, one the server
-// replaced since (a restart, a new session).
-export function requestsAfter(previous: NativeRequest[], batch: EventBatch): NativeRequest[] {
-  if (batch.replaceHeld) return mergeRequests([], batch.requests);
-  if (batch.held) return requestsSince(previous, batch.replayFrom);
-  return batch.requests.length > 0 ? mergeRequests(previous, batch.requests) : previous;
-}
-
-// requestsSince returns the requests but those the agent made before from.
-function requestsSince(requests: NativeRequest[], from: string | undefined): NativeRequest[] {
-  const start = from === undefined ? NaN : Date.parse(from);
-  if (Number.isNaN(start)) return requests;
-  const kept = requests.filter((request) => !(Date.parse(request.created_at) < start));
-  return kept.length === requests.length ? requests : kept;
 }
