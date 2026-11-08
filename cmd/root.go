@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/coder/agentapi/cmd/host"
 	"github.com/coder/agentapi/cmd/hub"
 	"github.com/coder/agentapi/cmd/list"
 	"github.com/coder/agentapi/cmd/restart"
@@ -36,4 +37,5 @@ func init() {
 	rootCmd.AddCommand(list.ListCmd)
 	rootCmd.AddCommand(restart.RestartCmd)
 	rootCmd.AddCommand(hub.HubCmd())
+	rootCmd.AddCommand(host.HostCmd())
 }

@@ -39,6 +39,22 @@ func TestReadUserConfig(t *testing.T) {
 	assert.Equal(t, 3285, v.GetInt(FlagPort), "a flag wins")
 }
 
+// The config file's host section is agentapi host's: agentapi server
+// doesn't call it a setting it lacks, as it does a typo.
+func TestReadUserConfigOtherSections(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("host:\n  port: 3291\ntypo: 1\n"), 0o600))
+	flags := pflag.NewFlagSet("server", pflag.ContinueOnError)
+	flags.String(FlagConfig, "", "")
+	require.NoError(t, flags.Parse([]string{"--config=" + path}))
+	v := viper.New()
+	require.NoError(t, v.BindPFlags(flags))
+	var log bytes.Buffer
+	readUserConfig(v, flags, slog.New(slog.NewTextHandler(&log, nil)))
+	assert.Contains(t, log.String(), "settings=[typo]")
+}
+
 // allow-update: true in the config file lets clients update every server
 // of the user through its API (agentapi hub join --allow-update writes it).
 func TestReadUserConfigAllowUpdate(t *testing.T) {
@@ -100,6 +116,21 @@ func TestPrintOpenAPIIgnoresUserConfig(t *testing.T) {
 		t.Fatalf("the hub got %q from --print-openapi", event)
 	case <-time.After(500 * time.Millisecond):
 	}
+}
+
+// Printing the schema leaves a PID file alone: make gen runs it in an
+// agent's shell, whose AGENTAPI_PID_FILE is the agent's server's.
+func TestPrintOpenAPILeavesThePIDFile(t *testing.T) {
+	isolateViper(t)
+	pidFile := filepath.Join(t.TempDir(), "agentapi.pid")
+	require.NoError(t, os.WriteFile(pidFile, []byte("1\n"), 0o600))
+	serverCmd := CreateServerCmd()
+	setupCommandOutput(t, serverCmd)
+	serverCmd.SetArgs([]string{"--print-openapi", "--pid-file", pidFile, "--registry-dir", t.TempDir(), "dummy-command"})
+	require.NoError(t, serverCmd.Execute())
+	data, err := os.ReadFile(pidFile)
+	require.NoError(t, err)
+	assert.Equal(t, "1\n", string(data))
 }
 
 // A state-db or pid-file in the config file without {port} would be every
