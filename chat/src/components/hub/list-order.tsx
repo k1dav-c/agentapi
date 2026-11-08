@@ -8,7 +8,9 @@ import {cn} from "@/lib/utils";
 // useListView is the order of the hub's list this browser keeps (its
 // groups, or the latest change first) and whether it puts each machine's
 // agents together.
-export function useListView(): {order: ListOrder; setOrder: (order: ListOrder) => void; byMachine: boolean; setByMachine: (on: boolean) => void} {
+export type HubListView = {order: ListOrder; setOrder: (order: ListOrder) => void; byMachine: boolean; setByMachine: (on: boolean) => void};
+
+export function useListView(): HubListView {
   const [order, setOrder] = useHubSetting("listOrder");
   const [byMachine, setByMachine] = useHubSetting("byMachine");
   return {order, setOrder, byMachine, setByMachine};

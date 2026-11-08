@@ -5,6 +5,7 @@ import type {HubMachine} from "@/lib/hub-machines";
 import {hubInstance, summary as baseSummary} from "@/lib/hub-fixtures";
 import type {ListOrder} from "@/lib/hub-order";
 import {FixedHubClock} from "./clock";
+import {HubListContext} from "./list-context";
 import {MachineCard} from "./machine-card";
 
 // One task so far, seen at 9:00.
@@ -40,7 +41,9 @@ const card = (instances: HubInstance[], selected?: string, hostname = "dev-1", o
   const section = order === "recent" ? " recent" : "Group";
   return renderToStaticMarkup(
     <FixedHubClock now={Date.parse("2026-11-01T10:00:00Z")}>
-      <MachineCard card={`${section}\nhost ${hostname}`} machine={machine} prefix={prefix} order={order} hubVersion="3.1.0" root="" groups={[]} selected={selected} actions={actions} />
+      <HubListContext.Provider value={{hubVersion: "3.1.0", root: "", groups: [], prefix, actions}}>
+        <MachineCard card={`${section}\nhost ${hostname}`} machine={machine} order={order} selected={selected} />
+      </HubListContext.Provider>
     </FixedHubClock>,
   );
 };

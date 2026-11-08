@@ -5,6 +5,7 @@ import {hubInstance, summary} from "@/lib/hub-fixtures";
 import type {ListOrder} from "@/lib/hub-order";
 import {FixedHubClock} from "./clock";
 import {InstanceRow, agentName} from "./instance-row";
+import {HubListContext, pinPlace} from "./list-context";
 
 // Finished at 9:40, which the hub saw at 9:41; in the group Client work.
 const finished: HubInstance = hubInstance("dev-1:3284", {
@@ -29,7 +30,9 @@ const actions = {select() {}, forget() {}, group() {}, newGroup() {}, mute() {},
 const row = (order: ListOrder, target: HubInstance = finished, pinned?: {first: boolean; last: boolean}) =>
   renderToStaticMarkup(
     <FixedHubClock now={Date.parse("2026-11-01T10:00:00Z")}>
-      <InstanceRow instance={target} hubVersion="2.1.0" root="" groups={["Client work"]} order={order} selected={false} pinned={pinned} actions={actions} />
+      <HubListContext.Provider value={{hubVersion: "2.1.0", root: "", groups: ["Client work"], prefix: "", actions}}>
+        <InstanceRow instance={target} order={order} selected={false} pinned={pinned && pinPlace(pinned.first, pinned.last)} />
+      </HubListContext.Provider>
     </FixedHubClock>,
   );
 

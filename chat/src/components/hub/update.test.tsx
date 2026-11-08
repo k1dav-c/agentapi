@@ -4,6 +4,7 @@ import {Dialog} from "@/components/ui/dialog";
 import type {HubInstance, InstanceUpdate} from "@/lib/hub";
 import {hubInstance, summary, update} from "@/lib/hub-fixtures";
 import {InstanceRow} from "./instance-row";
+import {HubListContext} from "./list-context";
 import {UpdateDialogBody} from "./update";
 import {UpdateChip, UpdateStatus} from "./update-chip";
 
@@ -119,7 +120,9 @@ describe("UpdateDialogBody", () => {
 describe("InstanceRow", () => {
   const row = (target: HubInstance) =>
     renderToStaticMarkup(
-      <InstanceRow instance={target} hubVersion="2.1.0" root="" groups={[]} order="groups" selected={false} actions={{select() {}, forget() {}, group() {}, newGroup() {}, mute() {}, pin() {}, move() {}}} />,
+      <HubListContext.Provider value={{hubVersion: "2.1.0", root: "", groups: [], prefix: "", actions: {select() {}, forget() {}, group() {}, newGroup() {}, mute() {}, pin() {}, move() {}}}}>
+        <InstanceRow instance={target} order="groups" selected={false} />
+      </HubListContext.Provider>,
     );
 
   test("shows an update under way, and says it to a screen reader", () => {

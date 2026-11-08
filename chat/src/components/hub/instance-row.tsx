@@ -28,6 +28,7 @@ import {StatusGlyph, stateTone} from "./status-glyph";
 import {UpdateDialog, UpdateMenuItems, cancelFromHub} from "./update";
 import {UpdateChip} from "./update-chip";
 import {useHubTime} from "./clock";
+import {useHubList, type PinPlace} from "./list-context";
 import {VersionTag} from "./version-tag";
 
 // activityTone is the color of the line that says what a row's instance does.
@@ -60,46 +61,22 @@ export function agentName(instance: HubInstance): string {
   return type === "custom" && instance.agent_type !== "custom" ? instance.agent_type : agentDisplayName(type, instance.agent_type);
 }
 
-// RowActions are what a row does to its instance; the hub keeps the same
-// object from render to render, so a row renders again only when its own
-// props change (InstanceRow is memoized).
-export interface RowActions {
-  select: (id: string) => void;
-  forget: (id: string) => void;
-  group: (id: string, name: string) => void;
-  newGroup: (id: string) => void;
-  // Mutes what it waits for now, until that changes; false ends the mute.
-  mute: (id: string, muted: boolean) => void;
-  // Pins it below the pinned ones; false unpins it.
-  pin: (id: string, pinned: boolean) => void;
-  // Moves it up (-1) or down (1) among the pinned ones.
-  move: (id: string, step: -1 | 1) => void;
-}
-
 export interface InstanceRowProps {
   instance: HubInstance;
-  // hubVersion is the hub's own version, which marks the older instances.
-  hubVersion: string;
-  // root is the hub's address, whose proxy takes the instance's update.
-  root: string;
-  groups: string[];
   // order is the list's: in the recent order, with no group headers, the
   // row names its group, and its age is that of its latest change.
   order: ListOrder;
   selected: boolean;
-  // pinned is the row's place in the pinned section, when it is pinned:
-  // whether it is the first or the last there. The row names its group,
-  // as in the recent order.
-  pinned?: {first: boolean; last: boolean};
-  actions: RowActions;
+  // pinned is the row's place in the pinned section, when it is pinned
+  // (pinPlace). The row names its group, as in the recent order.
+  pinned?: PinPlace;
 }
 
-const samePlace = (a: InstanceRowProps["pinned"], b: InstanceRowProps["pinned"]) => a === b || (!!a && !!b && a.first === b.first && a.last === b.last);
-
-// InstanceRow is an instance in the hub's list. Its age reads the hub's
-// clock (useHubTime): the row renders again when the age it shows changes,
-// not on every tick.
-export const InstanceRow = memo(function InstanceRow({instance, hubVersion, root, groups, order, selected, pinned, actions}: InstanceRowProps) {
+// InstanceRow is an instance in the hub's list; what every row shares
+// comes from HubListContext. Its age reads the hub's clock (useHubTime):
+// the row renders again when the age it shows changes, not on every tick.
+export const InstanceRow = memo(function InstanceRow({instance, order, selected, pinned}: InstanceRowProps) {
+  const {hubVersion, actions} = useHubList();
   const state = instanceState(instance);
   const summary = instance.summary;
   const usage = usagePercent(summary);
@@ -195,33 +172,17 @@ export const InstanceRow = memo(function InstanceRow({instance, hubVersion, root
             )}
           </span>
         </button>
-        <RowMenu instance={instance} hubVersion={hubVersion} root={root} groups={groups} pinned={pinned} actions={actions} />
+        <RowMenu instance={instance} pinned={pinned} />
       </div>
     </li>
   );
-}, (a, b) =>
-  a.instance === b.instance &&
-  a.hubVersion === b.hubVersion &&
-  a.root === b.root &&
-  a.groups === b.groups &&
-  a.order === b.order &&
-  a.selected === b.selected &&
-  a.actions === b.actions &&
-  samePlace(a.pinned, b.pinned),
-);
+});
 
 // RowMenu is a row's ⋯ menu: pin, mute, its group, update and forget, and
 // the update's dialog. pinned is the row's place among the pinned ones, as
 // InstanceRow has it; className sizes its button.
-export function RowMenu({
-  instance,
-  hubVersion,
-  root,
-  groups,
-  pinned,
-  actions,
-  className,
-}: Pick<InstanceRowProps, "instance" | "hubVersion" | "root" | "groups" | "pinned" | "actions"> & {className?: string}) {
+export function RowMenu({instance, pinned, className}: Pick<InstanceRowProps, "instance" | "pinned"> & {className?: string}) {
+  const {hubVersion, root, groups, actions} = useHubList();
   const state = instanceState(instance);
   const gone = state === "stopped" || state === "unreachable";
   const id = instance.id;
