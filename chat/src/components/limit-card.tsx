@@ -3,9 +3,11 @@
 import { useEffect, useState } from "react";
 import { Gauge } from "lucide-react";
 import {useChatActions, useChatSelector} from "./chat-provider";
-import { CardStatus, DecisionCardShell, PrimaryButton, SecondaryButton } from "./decision-card";
-import { getErrorMessage } from "@/lib/error-utils";
+import { DecisionCardFooter, DecisionCardShell, PrimaryButton, SecondaryButton } from "./decision-card";
+import type { ContinueAt, LimitStop } from "@/lib/chat-api";
 import { formatMessageTime } from "@/lib/format-time";
+import { queuedWaiting } from "@/lib/queue";
+import { useAction } from "@/lib/use-action";
 import { formatResetIn } from "@/lib/usage";
 
 // The agent's last turn stopped on a usage limit (native transport): the
@@ -13,10 +15,10 @@ import { formatResetIn } from "@/lib/usage";
 // to continue the task then (or now), or to let the queue go at once.
 export function LimitCard() {
   const limitStop = useChatSelector((chat) => chat.limitStop);
-  const queuedMessages = useChatSelector((chat) => chat.queuedMessages);
+  const queued = useChatSelector((chat) => chat.queuedMessages.length);
   const {continueAfterLimit, cancelContinue, dismissLimitStop} = useChatActions();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  // A new stop starts without the last one's error.
+  const {busy, error, run} = useAction(limitStop?.stopped_at);
   // The countdown moves on while the card shows.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -25,34 +27,47 @@ export function LimitCard() {
     const timer = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(timer);
   }, [limitStop]);
-  // A new stop starts without the last one's error.
-  useEffect(() => setError(""), [limitStop?.stopped_at]);
 
   if (!limitStop) return null;
+  return (
+    <LimitStopCard
+      limitStop={limitStop}
+      queued={queued}
+      now={now}
+      busy={busy}
+      error={error}
+      onContinue={(at) => void run(() => continueAfterLimit(at))}
+      onCancelContinue={() => void run(cancelContinue)}
+      onDismiss={() => void run(dismissLimitStop)}
+    />
+  );
+}
+
+// LimitStopCard is the card itself, without the chat it reads.
+export function LimitStopCard({
+  limitStop,
+  queued,
+  now,
+  busy = false,
+  error = "",
+  onContinue,
+  onCancelContinue,
+  onDismiss,
+}: {
+  limitStop: LimitStop;
+  queued: number;
+  now: number;
+  busy?: boolean;
+  error?: string;
+  onContinue?: (at: ContinueAt) => void;
+  onCancelContinue?: () => void;
+  onDismiss?: () => void;
+}) {
   const resetsAt = limitStop.resets_at;
   const continueAt = limitStop.continue_at;
-  const queued = queuedMessages.length;
-
-  const act = async (action: () => Promise<void>) => {
-    if (busy) return;
-    setBusy(true);
-    setError("");
-    try {
-      await action();
-    } catch (failure) {
-      setError(getErrorMessage(failure));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const when = resetsAt
     ? `The limit resets ${formatResetIn(resetsAt, now)}, at ${formatMessageTime(resetsAt)}.`
     : "The agent didn't say when the limit resets.";
-  const waiting = queued
-    ? ` ${queued} queued ${queued === 1 ? "task waits" : "tasks wait"} ${continueAt ? "for the task to go on" : resetsAt ? "until then" : "until you go on"}.`
-    : "";
-
   return (
     <DecisionCardShell
       data-limit-stop
@@ -61,38 +76,33 @@ export function LimitCard() {
       title="The account reached its usage limit"
       description={limitStop.message}
       footer={
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3.5 pb-3 pt-2">
+        <DecisionCardFooter status={continueAt ? `Continues the task at ${formatMessageTime(continueAt)}.` : ""} error={error}>
           {continueAt ? (
-            <SecondaryButton onClick={() => void act(cancelContinue)} disabled={busy} className="min-h-9 px-3">
+            <SecondaryButton onClick={onCancelContinue} disabled={busy} className="min-h-9 px-3">
               Don&apos;t continue
             </SecondaryButton>
           ) : resetsAt ? (
-            <PrimaryButton onClick={() => void act(() => continueAfterLimit("reset"))} disabled={busy} className="min-h-9 px-3">
+            <PrimaryButton onClick={() => onContinue?.("reset")} disabled={busy} className="min-h-9 px-3">
               Continue at reset
             </PrimaryButton>
           ) : null}
-          <SecondaryButton onClick={() => void act(() => continueAfterLimit("now"))} disabled={busy} className="min-h-9 px-3">
+          <SecondaryButton onClick={() => onContinue?.("now")} disabled={busy} className="min-h-9 px-3">
             Continue now
           </SecondaryButton>
           <SecondaryButton
-            onClick={() => void act(dismissLimitStop)}
+            onClick={onDismiss}
             disabled={busy}
             className="min-h-9 px-3"
             title={queued ? "Send the queued tasks as soon as the agent can take them" : "Hide this card"}
           >
             {queued ? "Send queued tasks" : "Dismiss"}
           </SecondaryButton>
-          <CardStatus
-            className="min-w-0 flex-1 basis-48 text-[11.5px]"
-            status={continueAt ? `Continues the task at ${formatMessageTime(continueAt)}.` : ""}
-            error={error}
-          />
-        </div>
+        </DecisionCardFooter>
       }
     >
       <p className="px-3.5 pb-1 pt-1 text-[12.5px] text-muted-foreground">
         {when}
-        {waiting}
+        {queuedWaiting(queued, continueAt ? "for the task to go on" : resetsAt ? "until then" : "until you go on")}
       </p>
     </DecisionCardShell>
   );

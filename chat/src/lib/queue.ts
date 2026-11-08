@@ -58,3 +58,9 @@ function inOrder(queue: QueuedMessage[], ids: number[]): QueuedMessage[] {
   const placed = new Set(ids);
   return [...ordered, ...queue.filter((message) => !placed.has(message.id))];
 }
+
+// queuedWaiting says that the queued tasks wait, and for what (" 2 queued
+// tasks wait until then."); "" without any.
+export function queuedWaiting(queued: number, forWhat: string): string {
+  return queued ? ` ${queued} queued ${queued === 1 ? "task waits" : "tasks wait"} ${forWhat}.` : "";
+}

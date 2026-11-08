@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { KeyRound, RefreshCw, TerminalSquare } from "lucide-react";
 import {useChatActions, useChatSelector} from "./chat-provider";
-import { CardStatus, CommandBlock, DecisionCardShell, MarkdownDetail, PrimaryButton, SecondaryButton } from "./decision-card";
+import { CommandBlock, DecisionCardFooter, DecisionCardShell, MarkdownDetail, PrimaryButton, SecondaryButton } from "./decision-card";
 import { getErrorMessage } from "@/lib/error-utils";
 import { loginNote, loginTitle, loginWhere } from "@/lib/login";
 
@@ -57,7 +57,7 @@ export function LoginCard({ onRunInTerminal }: { onRunInTerminal?: (command: str
       title={loginTitle(login)}
       description={login.message}
       footer={
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3.5 pb-3 pt-2">
+        <DecisionCardFooter status={loginNote(agentStarting)} error={error}>
           {onRunInTerminal ? (
             <>
               <PrimaryButton onClick={() => onRunInTerminal(login.command)} className="flex min-h-9 items-center gap-1.5 px-3" data-run-in-terminal>
@@ -73,8 +73,7 @@ export function LoginCard({ onRunInTerminal }: { onRunInTerminal?: (command: str
               {checkAgain}
             </PrimaryButton>
           )}
-          <CardStatus className="min-w-0 flex-1 basis-48 text-[11.5px]" status={loginNote(agentStarting)} error={error} />
-        </div>
+        </DecisionCardFooter>
       }
     >
       <div className="grid gap-2 px-3.5 pb-1 pt-1">

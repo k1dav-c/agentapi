@@ -1,6 +1,6 @@
 "use client";
 
-import {useCallback, useEffect, useState} from "react";
+import {useEffect, useState} from "react";
 import {GitFork, History, LoaderCircle, RefreshCw} from "lucide-react";
 import {toast} from "sonner";
 import {useChatActions, useChatSelector} from "./chat-provider";
@@ -10,6 +10,7 @@ import {costDetails, formatUSD, periodTotals} from "@/lib/cost";
 import {agentDisplayName} from "@/lib/agents";
 import {getErrorMessage} from "@/lib/error-utils";
 import {formatMessageTime} from "@/lib/format-time";
+import {useLoaded} from "@/lib/use-loaded";
 
 // An action on a session that asks for a second click: it replaces the
 // conversation.
@@ -26,32 +27,19 @@ export function SessionHistory({active, onOpened}: {active: boolean; onOpened: (
   const serverStatus = useChatSelector((chat) => chat.serverStatus);
   const agentType = useChatSelector((chat) => chat.agentType);
   const {listSessions, resumeSession} = useChatActions();
-  const [sessions, setSessions] = useState<SessionSummary[] | null>(null);
-  const [current, setCurrent] = useState<string | undefined>();
-  const [total, setTotal] = useState<SessionCost | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  // The last list read is kept while the list is read again.
+  const [list, load] = useLoaded(listSessions);
+  const sessions = list?.data?.sessions ?? null;
+  const current = list?.data?.current;
+  const total = list?.data?.total_cost ?? null;
+  const loading = list?.state === "loading";
+  const error = list?.state === "error" ? getErrorMessage(list.error) : "";
   const [pending, setPending] = useState<Pending | null>(null);
   const [opening, setOpening] = useState<Pending | null>(null);
   const working = serverStatus === "running";
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const list = await listSessions();
-      setSessions(list.sessions);
-      setCurrent(list.current);
-      setTotal(list.total_cost ?? null);
-    } catch (failure) {
-      setError(getErrorMessage(failure));
-    } finally {
-      setLoading(false);
-    }
-  }, [listSessions]);
-
   useEffect(() => {
-    if (active) void load();
+    if (active) load();
   }, [active, load]);
 
   // The second click must come soon.
@@ -83,7 +71,7 @@ export function SessionHistory({active, onOpened}: {active: boolean; onOpened: (
     <div className="space-y-3" data-session-history>
       <div className="flex items-center justify-between gap-3">
         <h3 className="text-sm font-semibold">Sessions</h3>
-        <Button type="button" variant="ghost" size="sm" disabled={loading} onClick={() => void load()}>
+        <Button type="button" variant="ghost" size="sm" disabled={loading} onClick={load}>
           <RefreshCw className={loading ? "animate-spin" : undefined} />
           Refresh
         </Button>

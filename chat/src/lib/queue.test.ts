@@ -1,5 +1,5 @@
 import {describe, expect, test} from "bun:test";
-import {QueueView, type QueuedMessage} from "./queue";
+import {QueueView, queuedWaiting, type QueuedMessage} from "./queue";
 
 const queued = (id: number): QueuedMessage => ({id, content: `task ${id}`, time: "2026-10-22T10:00:00Z"});
 const ids = (view: QueueView) => view.shown.map((message) => message.id);
@@ -43,5 +43,13 @@ describe("QueueView", () => {
     view.reorder([2, 1]);
     view.reordered(false);
     expect(ids(view)).toEqual([1, 2]);
+  });
+});
+
+describe("queuedWaiting", () => {
+  test("counts the queued tasks that wait, and says for what", () => {
+    expect(queuedWaiting(0, "for it")).toBe("");
+    expect(queuedWaiting(1, "for it")).toBe(" 1 queued task waits for it.");
+    expect(queuedWaiting(3, "until then")).toBe(" 3 queued tasks wait until then.");
   });
 });
