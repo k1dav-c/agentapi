@@ -2,6 +2,7 @@ import {describe, expect, test} from "bun:test";
 import {renderToStaticMarkup} from "react-dom/server";
 import type {HubInstance} from "@/lib/hub";
 import {hubInstance, summary} from "@/lib/hub-fixtures";
+import {FixedHubClock} from "./clock";
 import {InstanceBar} from "./instance-bar";
 import {AgentTabMark, machineAgents, MachineSwitch, shortAgent} from "./machine-tabs";
 
@@ -28,6 +29,19 @@ describe("machineAgents", () => {
   test("none on a machine of one, or one that doesn't say", () => {
     expect(machineAgents(all, all[3])).toEqual([]);
     expect(machineAgents(all, all[4])).toEqual([]);
+  });
+
+  test("an idle agent that finished lately has a green ring, grey once half an hour passed", () => {
+    const at = Date.parse("2026-11-08T10:00:00Z");
+    const mark = (now: number) =>
+      renderToStaticMarkup(
+        <FixedHubClock now={now}>
+          <AgentTabMark agentType="codex" state="idle" finished={at} />
+        </FixedHubClock>,
+      );
+    expect(mark(at + 5 * 60_000)).toContain("border-state-ready");
+    expect(mark(at + 5 * 60_000)).toContain('data-tab-finished="true"');
+    expect(mark(at + 31 * 60_000)).not.toContain("border-state-ready");
   });
 
   test("every state has a dot; an idle agent's says whether it has run", () => {

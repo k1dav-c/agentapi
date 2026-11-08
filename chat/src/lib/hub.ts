@@ -46,6 +46,24 @@ export function hasRun(instance: HubInstance): boolean {
   return (instance.summary?.tasks ?? 0) > 0 || !!work?.working_since || (work?.last_7d_seconds ?? 0) > 0;
 }
 
+// RECENTLY_FINISHED is how long an idle agent that has run reads as just
+// finished, with a green mark, before it greys like one idle for long.
+export const RECENTLY_FINISHED = 30 * 60_000;
+
+// finishedAt is when an idle agent that has run last changed, in ms: when
+// it finished, seen or not; undefined for any other agent.
+export function finishedAt(instance: HubInstance): number | undefined {
+  if (instanceState(instance) !== "idle" || !hasRun(instance) || !instance.changed_at) return undefined;
+  const at = Date.parse(instance.changed_at);
+  return Number.isNaN(at) ? undefined : at;
+}
+
+// finishedLately says whether an agent that finished at at (finishedAt)
+// did so less than RECENTLY_FINISHED before now.
+export function finishedLately(at: number | undefined, now: number): boolean {
+  return at !== undefined && now >= at && now - at < RECENTLY_FINISHED;
+}
+
 // HubWork is how long the hub saw an instance working, as of when it sent
 // it: the seconds of the last 24 hours and 7 days from the spans that
 // ended, and since when it works now. The page adds the time since then

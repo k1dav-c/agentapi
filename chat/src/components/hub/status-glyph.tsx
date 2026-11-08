@@ -1,12 +1,24 @@
-import type {InstanceState} from "@/lib/hub";
+import {finishedLately, type InstanceState} from "@/lib/hub";
 import {cn} from "@/lib/utils";
+import {useHubTime} from "./clock";
 
 // StatusGlyph draws an instance's state with a shape of its own, so the
 // state reads without its color: an exclamation, a turning arc, a check, a
 // hollow ring, a struck-through bell, a broken ring, a stop square, and a
 // question mark for a state this page doesn't know.
-export function StatusGlyph({state, className}: {state: InstanceState; className?: string}) {
+// finished: when an idle agent finished (finishedAt); while lately, its
+// ring is green with a check, apart from the filled check of one unseen.
+export function StatusGlyph({state, finished, className}: {state: InstanceState; finished?: number; className?: string}) {
+  const lately = useHubTime((now) => finishedLately(finished, now));
   const box = cn("size-5 shrink-0", className);
+  if (state === "idle" && lately) {
+    return (
+      <svg viewBox="0 0 20 20" aria-hidden="true" className={box} data-glyph-finished>
+        <circle cx="10" cy="10" r="6.5" className="fill-none stroke-state-ready" strokeWidth="1.8" />
+        <path d="M7.2 10.2l1.9 1.9 3.8-4" className="fill-none stroke-state-ready" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
   switch (state) {
     case "needs-you":
       return (

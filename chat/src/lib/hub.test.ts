@@ -1,6 +1,6 @@
 import {describe, expect, test} from "bun:test";
 import {idleInstance as instance, summary} from "./hub-fixtures";
-import {applyHubEvent, chatURL, hasRun, hubRoot, instanceState, needsYou, parseHubEvent, sortInstances, stateLabel, usagePercent} from "./hub";
+import {applyHubEvent, chatURL, finishedAt, finishedLately, hasRun, hubRoot, RECENTLY_FINISHED, instanceState, needsYou, parseHubEvent, sortInstances, stateLabel, usagePercent} from "./hub";
 import {countFilters} from "./hub-filter";
 import {activity} from "./hub-format";
 
@@ -84,6 +84,21 @@ describe("hub", () => {
     expect(hasRun(instance("a", {work: {last_24h_seconds: 0, last_7d_seconds: 0}}))).toBe(false);
     expect(hasRun(instance("a", {work: {last_24h_seconds: 0, last_7d_seconds: 60}}))).toBe(true);
     expect(hasRun(instance("a", {work: {last_24h_seconds: 0, last_7d_seconds: 0, working_since: "2026-11-01T09:00:00Z"}}))).toBe(true);
+  });
+
+  test("an idle agent that has run finished when it last changed, green for half an hour", () => {
+    const ran = {summary: summary({tasks: 2}), changed_at: "2026-11-08T10:00:00Z"};
+    const at = Date.parse("2026-11-08T10:00:00Z");
+    expect(finishedAt(instance("a", ran))).toBe(at);
+    // Not one that never ran, nor one that works or needs you.
+    expect(finishedAt(instance("a", {summary: summary({tasks: 0}), changed_at: "2026-11-08T10:00:00Z"}))).toBeUndefined();
+    expect(finishedAt(instance("a", {...ran, state: "working"}))).toBeUndefined();
+    expect(finishedLately(at, at + 60_000)).toBe(true);
+    expect(finishedLately(at, at + RECENTLY_FINISHED - 1)).toBe(true);
+    expect(finishedLately(at, at + RECENTLY_FINISHED)).toBe(false);
+    expect(finishedLately(undefined, at)).toBe(false);
+    // Outside a clock the time is 0: never lately.
+    expect(finishedLately(at, 0)).toBe(false);
   });
 
 });

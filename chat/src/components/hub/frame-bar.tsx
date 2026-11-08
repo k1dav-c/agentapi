@@ -7,6 +7,7 @@ import {Button} from "@/components/ui/button";
 import {HEADER_ACTIONS_ID} from "@/app/header";
 import {fromFrame, messageFromHub, openFromFrame, type FrameInstance} from "@/lib/hub-frame";
 import {cn} from "@/lib/utils";
+import {HubClock} from "./clock";
 import {setFrameFavorites} from "./frame-favorites";
 import {MachineSwitch} from "./machine-tabs";
 import {StatusGlyph, stateTone} from "./status-glyph";
@@ -70,7 +71,11 @@ export function FrameBar() {
         </p>
       </div>
       {instance?.machine && (
-        <MachineSwitch agents={instance.machine} current={instance.id} onOpen={(id) => window.parent.postMessage(openFromFrame(id), window.location.origin)} />
+        // A clock of its own: the chat in the frame has none, and the
+        // switch greys a lately finished agent on time.
+        <HubClock fast={false}>
+          <MachineSwitch agents={instance.machine} current={instance.id} onOpen={(id) => window.parent.postMessage(openFromFrame(id), window.location.origin)} />
+        </HubClock>
       )}
       {/* The chat's actions (search, terminal, Explorer) render here. */}
       <div id={HEADER_ACTIONS_ID} className="flex shrink-0 items-center gap-0.5" />

@@ -15,7 +15,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {agentDisplayName, parseAgentType} from "@/lib/agents";
-import {displayName, instanceState, stateLabel, usagePercent, type HubInstance} from "@/lib/hub";
+import {displayName, finishedAt, instanceState, stateLabel, usagePercent, type HubInstance} from "@/lib/hub";
 import {activity, formatAgo} from "@/lib/hub-format";
 import {groupOf, type HubGroup} from "@/lib/hub-groups";
 import {formatUSD, spendTitle, spendTotals, tokenTotals} from "@/lib/hub-spend";
@@ -111,7 +111,7 @@ export const InstanceRow = memo(function InstanceRow({instance, order, selected,
           aria-label={`${displayName(instance)}, ${stateLabel(instance)}${ago ? `, ${ago}` : ""}: ${doing.text}${olderThanHub(instance, hubVersion) ? ". Older than the hub" : ""}${update ? `. ${updateBadge(update).title}` : ""}${pinned ? ". Pinned" : ""}${group ? `. Group: ${group}` : ""}`}
           className="flex min-w-0 flex-1 items-start gap-3 rounded-xl py-3 pr-1 pl-3.5 text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
         >
-          <StatusGlyph state={state} className="mt-[3px]" />
+          <StatusGlyph state={state} finished={finishedAt(instance)} className="mt-[3px]" />
           <span className="min-w-0 flex-1">
             <span className="flex items-baseline gap-2">
               <span className="min-w-0 truncate text-[15px] leading-6 font-medium">{displayName(instance)}</span>
