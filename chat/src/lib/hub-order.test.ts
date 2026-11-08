@@ -1,35 +1,15 @@
 import {describe, expect, test} from "bun:test";
+import {hubInstance, summary as baseSummary} from "./hub-fixtures";
 import {groupInstances, machinesInOrder, type HubAgent, type HubInstance, type Summary} from "./hub";
 import {changedAt, listSections, movePin, parseListOrder, pinnedKey, pinOf, recentAgent, recentKey, sortPinned, sortRecent, storedView, type ListSection} from "./hub-order";
 
-const summary = (overrides: Partial<Summary> = {}): Summary =>
-  ({
-    instance: {id: "x", server_id: "s", agent_type: "claude", transport: "native"},
-    status: "stable",
-    lifecycle: "ready",
-    attention: "none",
-    title: "",
-    pending_requests: 0,
-    queued_messages: 0,
-    tasks: 0,
-    unread: false,
-    seen_at: "2026-10-26T00:00:00Z",
-    ...overrides,
-  }) as Summary;
+const summary = (overrides: Partial<Summary> = {}): Summary => baseSummary({seen_at: "2026-10-26T00:00:00Z", ...overrides});
 
 // No agent picked: every agent.
 const none = new Set<HubAgent>();
 
-const instance = (id: string, overrides: Partial<HubInstance> = {}): HubInstance => ({
-  id,
-  url: `http://${id}`,
-  source: "webhook",
-  last_seen: "2026-11-01T08:00:00Z",
-  connection: "connected",
-  summary: summary(),
-  state: "idle",
-  ...overrides,
-});
+const instance = (id: string, overrides: Partial<HubInstance> = {}): HubInstance =>
+  hubInstance(id, {last_seen: "2026-11-01T08:00:00Z", summary: summary(), ...overrides});
 
 // An instance the hub recorded a change of at minute m past 9:00.
 const changed = (id: string, m: number, overrides: Partial<HubInstance> = {}) =>

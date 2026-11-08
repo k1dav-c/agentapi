@@ -1,5 +1,6 @@
 import {describe, expect, test} from "bun:test";
-import type {HubInstance, InstanceUpdate, Summary} from "./hub";
+import type {HubInstance, InstanceUpdate} from "./hub";
+import {hubInstance, summary, update} from "./hub-fixtures";
 import {
   cancelRequest,
   cancelUpdate,
@@ -18,26 +19,15 @@ import {
   type Fetcher,
 } from "./hub-update";
 
-const update = (overrides: Partial<InstanceUpdate> = {}): InstanceUpdate => ({allowed: true, state: "idle", keeps_conversation: true, ...overrides});
-
 // An instance on host that runs version; its summary's update as given,
 // none (null) for an AgentAPI from before updates through the API.
 const instance = (id: string, given: Partial<InstanceUpdate> | null, overrides: Partial<HubInstance> & {version?: string} = {}): HubInstance => {
   const {version = "2.0.0", ...rest} = overrides;
-  const summary = {
+  const reported = summary({
     instance: {id, server_id: "s", agent_type: "claude", transport: "native", agentapi_version: version},
-    status: "stable",
-    lifecycle: "ready",
-    attention: "none",
-    title: "",
-    pending_requests: 0,
-    queued_messages: 0,
-    tasks: 0,
-    unread: false,
-    seen_at: "2026-11-01T00:00:00Z",
     ...(given ? {update: update(given)} : {}),
-  } as Summary;
-  return {id, url: `http://${id}`, server_id: "s", hostname: "dev-1", agentapi_version: version, source: "webhook", last_seen: "2026-11-01T00:00:00Z", connection: "connected", state: "idle", summary, ...rest};
+  });
+  return hubInstance(id, {server_id: "s", hostname: "dev-1", agentapi_version: version, summary: reported, ...rest});
 };
 
 const BLOCKED =

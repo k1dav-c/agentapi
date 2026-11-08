@@ -1,31 +1,12 @@
 import {describe, expect, test} from "bun:test";
+import {hubInstance, summary as baseSummary} from "./hub-fixtures";
 import {activity, agentLabel, agentOf, agentsIn, countAgents, matchesAgents, nothingMatches, parseAgents, shownAgents, toggleAgent, compareVersions, countedSpends, countedTokens, currentSpend, formatTokens, formatUSD, tokenTotals, tokensTitle, instanceVersion, olderThanHub, parseVersion, spendTitle, spendTotals, shortError, applyHubEvent, chatURL, countFilters, formatAgo, formatElapsed, matchesSearch, activeAgent, groupByMachine, groupInstances, hasRun, hostPrefix, sameMachine, tabOrder, groupNames, hubRoot, machineOf, machineSubtotals, sharedVersion, instanceState, needsYou, sortInstances, stateLabel, usagePercent, versionTitle, versionTotals, formatWork, workSeconds, workTitle, workTotals, type HubInstance, type Spend, type Summary} from "./hub";
 
-const summary = (overrides: Partial<Summary> = {}): Summary =>
-  ({
-    instance: {id: "x", server_id: "s", agent_type: "claude", transport: "native"},
-    status: "stable",
-    lifecycle: "ready",
-    attention: "none",
-    title: "",
-    pending_requests: 0,
-    queued_messages: 0,
-    tasks: 0,
-    unread: false,
-    seen_at: "2026-10-26T00:00:00Z",
-    ...overrides,
-  }) as Summary;
+// Seen on 26 October, with an idle summary.
+const summary = (overrides: Partial<Summary> = {}): Summary => baseSummary({seen_at: "2026-10-26T00:00:00Z", ...overrides});
 
-const instance = (id: string, overrides: Partial<HubInstance> = {}): HubInstance => ({
-  id,
-  url: `http://${id}`,
-  source: "webhook",
-  last_seen: "2026-10-26T00:00:00Z",
-  connection: "connected",
-  summary: summary(),
-  state: "idle",
-  ...overrides,
-});
+const instance = (id: string, overrides: Partial<HubInstance> = {}): HubInstance =>
+  hubInstance(id, {last_seen: "2026-10-26T00:00:00Z", summary: summary(), ...overrides});
 
 describe("hub", () => {
   test("a row shows the state the hub worked out", () => {
@@ -150,7 +131,7 @@ describe("hub", () => {
   });
 
   test("a muted instance waits out of the way until what it waits for changes", () => {
-    const login = summary({attention: "login", login_required: {message: "Codex is not logged in."} as Summary["login_required"]});
+    const login = summary({attention: "login", login_required: {agent: "codex", command: "codex login", message: "Codex is not logged in."}});
     const muted = instance("a", {state: "muted", summary: login, muted: "login"});
     expect(stateLabel(muted)).toBe("Muted · Needs login");
     expect(activity(muted)).toMatchObject({label: "Muted", text: "Codex is not logged in.", tone: "muted"});
@@ -307,15 +288,8 @@ describe("hub", () => {
 
 const workNow = Date.parse("2026-11-03T12:00:00Z");
 
-const worker = (id: string, work?: HubInstance["work"]): HubInstance => ({
-  id,
-  url: `http://${id}`,
-  source: "webhook",
-  last_seen: "2026-11-03T00:00:00Z",
-  connection: "connected",
-  state: work?.working_since ? "working" : "idle",
-  work,
-});
+const worker = (id: string, work?: HubInstance["work"]): HubInstance =>
+  hubInstance(id, {last_seen: "2026-11-03T00:00:00Z", state: work?.working_since ? "working" : "idle", work});
 
 describe("work time", () => {
   test("formats compactly, rounded down", () => {

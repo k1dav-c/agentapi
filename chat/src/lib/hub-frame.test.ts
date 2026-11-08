@@ -1,21 +1,17 @@
 import {describe, expect, test} from "bun:test";
 import type {HubInstance} from "./hub";
+import {hubInstance} from "./hub-fixtures";
 import {favoritesFromHub, favoritesToFrame, frameInstance, frameMessage, fromFrame, instanceFromHub, onFrameMessage, openFromFrame, toFrame, type FromFrame} from "./hub-frame";
 
 const ORIGIN = "http://hub.test";
 
-const instance: HubInstance = {
-  id: "dev-1:3284",
+const instance: HubInstance = hubInstance("dev-1:3284", {
   name: "checkout-api",
-  url: "http://dev-1:3284",
   hostname: "dev-1",
   agent_type: "claude",
   agentapi_version: "2.1.0",
-  source: "webhook",
   last_seen: "2026-11-01T09:59:00Z",
-  connection: "connected",
-  state: "idle",
-};
+});
 
 describe("frameMessage", () => {
   test("takes messages of the protocol from the same origin", () => {

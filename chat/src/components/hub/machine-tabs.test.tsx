@@ -1,24 +1,15 @@
 import {describe, expect, test} from "bun:test";
 import {renderToStaticMarkup} from "react-dom/server";
 import type {HubInstance} from "@/lib/hub";
+import {hubInstance, summary} from "@/lib/hub-fixtures";
 import {InstanceBar} from "./instance-bar";
 import {AgentTabMark, machineAgents, MachineSwitch, shortAgent} from "./machine-tabs";
 
-const on = (id: string, hostname: string | undefined, agentType: string, overrides: Partial<HubInstance> = {}): HubInstance => ({
-  id,
-  name: "home",
-  url: `http://${id}`,
-  hostname,
-  agent_type: agentType,
-  source: "webhook",
-  last_seen: "2026-11-01T09:59:00Z",
-  connection: "connected",
-  state: "idle",
-  ...overrides,
-});
+const on = (id: string, hostname: string | undefined, agentType: string, overrides: Partial<HubInstance> = {}): HubInstance =>
+  hubInstance(id, {name: "home", hostname, agent_type: agentType, last_seen: "2026-11-01T09:59:00Z", ...overrides});
 
 const all = [
-  on("dev-1:2", "dev-1", "codex", {state: "needs-you", summary: {attention: "request"} as HubInstance["summary"]}),
+  on("dev-1:2", "dev-1", "codex", {state: "needs-you", summary: summary({attention: "request"})}),
   on("dev-1:1", "dev-1", "claude", {state: "working"}),
   on("dev-1:3", "dev-1", "pi"),
   on("dev-2:1", "dev-2", "claude"),
