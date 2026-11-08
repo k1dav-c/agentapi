@@ -89,6 +89,11 @@ const (
 	// MetaRetryWait holds the failed turn that waits to be tried again, as
 	// JSON.
 	MetaRetryWait = "retry_wait"
+	// MetaState holds the part of the conversation's state that survives a
+	// restart (agentstate.StoredState: the settings chosen, a limit stop, a
+	// retry wait) as one JSON object with a version; see storedState. A
+	// reset keeps it.
+	MetaState = "conversation_state"
 	// MetaWebhook holds the webhook settings changed through the API, as
 	// JSON. A reset keeps them.
 	MetaWebhook = "webhook"
@@ -453,6 +458,9 @@ func minWriterOf(version int) int {
 func (d *DB) Load() (Snapshot, error) {
 	snap := Snapshot{Meta: map[string]string{}}
 	if err := d.loadMeta(&snap); err != nil {
+		return snap, err
+	}
+	if err := d.migrateState(&snap); err != nil {
 		return snap, err
 	}
 	if err := scanRows(d, "messages", "SELECT seq, data FROM messages ORDER BY id", func(m conv.Message, seq uint64) {
