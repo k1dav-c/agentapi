@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- `agentapi update --allow-update` also writes `allow-update: true` into the config file before
+  `--restart`, so the restarted AgentAPIs take updates from a hub from then on. Under `sudo` it
+  writes the file of the user who ran `sudo` and leaves it theirs; `--config` names another file.
+
 ## v3.7.5
 
 ### Changes

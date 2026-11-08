@@ -1882,6 +1882,7 @@ agentapi update            # download and install the latest version
 agentapi update --check    # only check if an update is available
 agentapi update --force    # update even if already at the latest version
 agentapi update --restart  # then restart the running AgentAPIs into it
+agentapi update --restart --allow-update  # and let a hub update them from now on
 ```
 
 Release binaries are verified against the release's `checksums.txt` SHA-256 manifest before the
@@ -1896,6 +1897,13 @@ when the binary is already up to date too: another update may have replaced it. 
 install in `/usr/local/bin`), it restarts the AgentAPIs of the user who ran `sudo`, from that user's
 registry. The hub isn't one of them: restart it with its service manager, such as
 `systemctl restart agentapi-hub`.
+
+`--allow-update` also writes `allow-update: true` into the config file (`--config`, by default
+`~/.agentapi/config.yaml` of the user who ran `sudo`, which stays theirs), before `--restart`, so
+the restarted AgentAPIs take updates from a [hub](docs/hub.md#updating-from-the-hub) from then on.
+It keeps the rest of the file, as `agentapi hub join --allow-update` does. With `--check` it writes
+nothing. An older `agentapi` has no such flag: add the line to the file, then run
+`agentapi update --restart`.
 
 ### `agentapi restart`
 
