@@ -23,6 +23,7 @@ import (
 	"github.com/coder/agentapi/lib/httpapi"
 	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/logctx"
+	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/demo"
 	"github.com/coder/agentapi/lib/pricing"
 	"github.com/coder/agentapi/lib/statedb"
@@ -253,12 +254,11 @@ func serverConfig(opts serverOptions, agent *runningAgent, stateDB *statedb.DB, 
 	}
 	if !opts.printOpenAPI {
 		config.Native = httpapi.NativeConfig{
-			Factory:      agent.factory,
-			UpdateAgent:  agent.updateNative,
-			Terminal:     opts.terminal,
-			AutoContinue: opts.autoContinue,
-			RetryDelays:  opts.retryDelays,
-			Prices:       prices,
+			Factory:     agent.factory,
+			UpdateAgent: agent.updateNative,
+			Terminal:    opts.terminal,
+			Policy:      opts.policy,
+			Prices:      prices,
 		}
 		if opts.agentType == instanceapi.AgentTypePi {
 			config.Native.PiSessionDir = piSessionDir(opts.agentArgs)
@@ -618,7 +618,7 @@ func serverFlagSpecs() []flagSpec {
 		{FlagTransport, "", "native", "Deprecated: native, the only transport, which drives the agent through its own structured protocol. AgentAPI 3 has no pty", "string"},
 		{FlagTerminal, "", true, "Offer a shell in the agent's working directory to the chat (its Terminal button) and at GET /terminal", "bool"},
 		{FlagAutoContinue, "", false, "When a usage limit stops the agent's turn, continue it once the limit resets, if the agent says when", "bool"},
-		{FlagRetryDelays, "", []string{"30s", "1m", "2m", "5m*12"}, "When the agent's turn fails on an upstream error that may pass (an HTTP 5xx or 429, an overloaded API), wait this long and ask the agent to go on: one delay per retry in a row (5m*12 is 5m twelve times), after which the failure is an error. Comma-separated via flag, space-separated via AGENTAPI_RETRY_DELAYS; off (or 0) turns retries off", "stringSlice"},
+		{FlagRetryDelays, "", native.FormatDelays(native.DefaultRetryDelays()), "When the agent's turn fails on an upstream error that may pass (an HTTP 5xx or 429, an overloaded API), wait this long and ask the agent to go on: one delay per retry in a row (5m*12 is 5m twelve times), after which the failure is an error. Comma-separated via flag, space-separated via AGENTAPI_RETRY_DELAYS; off (or 0) turns retries off", "stringSlice"},
 		{FlagPrices, "", "", "JSON file of model prices per million tokens, which add to or replace the built-in ones for the sessions' API-equivalent cost (GET /sessions, GET /cost)", "string"},
 		{FlagWebhookURL, "", "", "URL the webhook events are POSTed to (by default only run.status_changed; see --webhook-events)", "string"},
 		{FlagWebhookTimeout, "", 10 * time.Second, "Timeout for each webhook delivery attempt", "duration"},

@@ -94,31 +94,20 @@ type Config struct {
 	// Settings were chosen for the session earlier (restored after AgentAPI
 	// restarted). Every agent that starts gets them.
 	Settings agentstate.Settings
-	// AutoContinue schedules a message that continues a turn a usage limit
-	// stopped for when the limit resets, if the agent says when.
-	AutoContinue bool
+	// Policy says what the conversation does by itself when a turn or the
+	// agent stops.
+	Policy
 	// LimitStop is a turn a usage limit stopped before AgentAPI restarted.
 	LimitStop *agentstate.LimitStop
-	// RetryDelays are the waits before a turn that failed on a transient
-	// upstream error (StopReasonTransient) is tried again: one per retry in
-	// a row, after which the failure is an error. Nil means 30 seconds, 2
-	// and 5 minutes; empty means none.
-	RetryDelays []time.Duration
 	// RetryWait is a failed turn that waited to be tried again before
-	// AgentAPI restarted. Without RetryDelays it is dropped.
+	// AgentAPI restarted. With retries off (Policy.RetriesOff) it is
+	// dropped.
 	RetryWait *agentstate.RetryWait
 	// PrepareRichMessage, if set, changes every rich message an adapter
 	// reports before the conversation takes it, without the conversation's
 	// lock: work that can be slow (storing the images of a tool result)
 	// holds up nothing else. It gets the conversation's own copy.
 	PrepareRichMessage func(*transcript.RichMessage)
-	// RestartDelays are the waits before the conversation starts the agent
-	// again after it exited on its own, or failed a start the conversation
-	// made by itself: one per attempt, after which it gives up and no agent
-	// runs until a restart. Once an agent ran five minutes, its exit starts
-	// with the first again. Nil means 2, 10 and 30 seconds; empty means
-	// none.
-	RestartDelays []time.Duration
 }
 
 const (
@@ -131,9 +120,6 @@ const (
 	// first of the restart delays again.
 	restartReset = 5 * time.Minute
 )
-
-// defaultRestartDelays are Config.RestartDelays' default.
-var defaultRestartDelays = []time.Duration{2 * time.Second, 10 * time.Second, 30 * time.Second}
 
 // Conversation is the conversation with an agent, through its Adapter.
 type Conversation struct {
@@ -233,15 +219,10 @@ func NewConversation(cfg Config) *Conversation {
 	if cfg.LoginRetryInterval == 0 {
 		cfg.LoginRetryInterval = defaultLoginRetryInterval
 	}
-	if cfg.RestartDelays == nil {
-		cfg.RestartDelays = defaultRestartDelays
-	}
-	if cfg.RetryDelays == nil {
-		cfg.RetryDelays = defaultRetryDelays
-	}
-	if len(cfg.RetryDelays) == 0 {
+	if cfg.RetriesOff() {
 		cfg.RetryWait = nil
 	}
+	cfg.Policy = cfg.withDefaults()
 	return &Conversation{
 		cfg:        cfg,
 		ctx:        context.Background(),

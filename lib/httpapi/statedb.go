@@ -98,7 +98,7 @@ func restoreState(config ServerConfig, db *statedb.DB, emitter *convstate.EventE
 	if err != nil {
 		logger.Warn("Ignoring the stored retry wait", "error", err)
 	}
-	if len(config.Native.RetryDelays) == 0 && config.Native.RetryDelays != nil {
+	if config.Native.RetriesOff() {
 		// Retries were turned off since: the queue doesn't wait.
 		retryWait = nil
 		db.SetRetryWait(nil)

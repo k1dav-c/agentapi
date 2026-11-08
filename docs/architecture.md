@@ -394,7 +394,7 @@ type Factory func(resume Resume) (Adapter, error)
   failed, Pi's `auto_retry_end` without success, or text `IsTransientError`
   matches. Usage limits and login problems are classified first. The
   conversation keeps a `RetryWait` with the next retry's time
-  (`Config.RetryDelays`, `--retry-delays`), warns instead of reporting an
+  (`Policy.RetryDelays`, `--retry-delays`), warns instead of reporting an
   error, and holds the queue (`HoldsQueue`). `ContinueIfDue` sends
   `ContinuePrompt` on the queue's tick once it is due; if that turn fails the
   same way, the next delay follows (the hold it continued counts them), and after the

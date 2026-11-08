@@ -117,7 +117,7 @@ const (
 	// StopReasonTransient: the turn failed on an upstream error that may
 	// pass (an HTTP 5xx or 429, an overloaded API, a dropped connection)
 	// after the agent's own retries; TurnResult.Error is what the agent
-	// said. The conversation tries the turn again later (Config.RetryDelays).
+	// said. The conversation tries the turn again later (Policy.RetryDelays).
 	StopReasonTransient = "transient"
 )
 

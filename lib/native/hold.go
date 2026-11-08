@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"time"
 
 	"github.com/coder/agentapi/lib/agentstate"
@@ -35,10 +34,6 @@ const ContinuePrompt = "Continue from where you left off."
 // moment after. A continuation the agent refused is tried again after it
 // too.
 const continueMargin = time.Minute
-
-// defaultRetryDelays are Config.RetryDelays' default (--retry-delays
-// 30s,1m,2m,5m*12): 15 retries, about an hour in all.
-var defaultRetryDelays = append([]time.Duration{30 * time.Second, time.Minute, 2 * time.Minute}, slices.Repeat([]time.Duration{5 * time.Minute}, 12)...)
 
 // clone returns a copy of *p, or nil for nil.
 func clone[T any](p *T) *T {
@@ -321,18 +316,6 @@ func retriesOutText(result TurnResult, retries int) string {
 		times = "time"
 	}
 	return fmt.Sprintf("%s AgentAPI tried again %d %s and gave up.", result.Error, retries, times)
-}
-
-// formatDelay writes a retry delay the way a flag gives it: 30s, 2m, 1m30s.
-func formatDelay(d time.Duration) string {
-	d = d.Round(time.Second)
-	switch {
-	case d >= time.Minute && d%time.Minute == 0:
-		return fmt.Sprintf("%dm", d/time.Minute)
-	case d < time.Minute:
-		return fmt.Sprintf("%ds", d/time.Second)
-	}
-	return fmt.Sprintf("%dm%ds", d/time.Minute, (d%time.Minute)/time.Second)
 }
 
 // RetryNow tries the failed turn that waits now, as the retry it waits

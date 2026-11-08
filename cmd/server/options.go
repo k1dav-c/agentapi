@@ -19,6 +19,7 @@ import (
 
 	"github.com/coder/agentapi/lib/httpmw"
 	"github.com/coder/agentapi/lib/instanceapi"
+	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/registry"
 	"github.com/coder/agentapi/lib/webhook"
 )
@@ -54,11 +55,8 @@ type serverOptions struct {
 	// the --state-file).
 	stateDB  string
 	terminal bool
-	// autoContinue continues a turn a usage limit stopped once it resets.
-	autoContinue bool
-	// retryDelays are the waits before a turn that failed on a transient
-	// upstream error is tried again; empty (not nil) tries none again.
-	retryDelays []time.Duration
+	// policy is the conversation's: --auto-continue and --retry-delays.
+	policy native.Policy
 	// prices is a JSON file of model prices that adds to the built-in ones.
 	prices  string
 	webhook webhook.Config
@@ -102,13 +100,13 @@ func loadServerOptions(flags flagSource, args []string) (serverOptions, error) {
 		initialPrompt:  flags.GetString(FlagInitialPrompt),
 		// One setting in the config file serves every server of the user,
 		// each with its own file (also pidFile).
-		stateDB:      expandHome(instanceapi.ExpandPlaceholders(flags.GetString(FlagStateDB), port)),
-		terminal:     flags.GetBool(FlagTerminal),
-		autoContinue: flags.GetBool(FlagAutoContinue),
-		prices:       expandHome(flags.GetString(FlagPrices)),
-		name:         flags.GetString(FlagName),
-		registryDir:  expandHome(flags.GetString(FlagRegistryDir)),
-		allowUpdate:  flags.GetBool(FlagAllowUpdate),
+		stateDB:     expandHome(instanceapi.ExpandPlaceholders(flags.GetString(FlagStateDB), port)),
+		terminal:    flags.GetBool(FlagTerminal),
+		policy:      native.Policy{AutoContinue: flags.GetBool(FlagAutoContinue)},
+		prices:      expandHome(flags.GetString(FlagPrices)),
+		name:        flags.GetString(FlagName),
+		registryDir: expandHome(flags.GetString(FlagRegistryDir)),
+		allowUpdate: flags.GetBool(FlagAllowUpdate),
 		webhook: webhook.Config{
 			URL:             flags.GetString(FlagWebhookURL),
 			Timeout:         flags.GetDuration(FlagWebhookTimeout),
@@ -152,7 +150,7 @@ func loadServerOptions(flags flagSource, args []string) (serverOptions, error) {
 	}
 	// Unset, the conversation's default (the flag's) applies.
 	if flags.IsSet(FlagRetryDelays) {
-		if opts.retryDelays, err = parseRetryDelays(flags.GetStringSlice(FlagRetryDelays)); err != nil {
+		if opts.policy.RetryDelays, err = parseRetryDelays(flags.GetStringSlice(FlagRetryDelays)); err != nil {
 			return serverOptions{}, fmt.Errorf("invalid --%s: %w", FlagRetryDelays, err)
 		}
 	}

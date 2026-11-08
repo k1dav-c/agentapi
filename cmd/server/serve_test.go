@@ -19,6 +19,7 @@ import (
 	"github.com/coder/agentapi/lib/httpapi"
 	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/logctx"
+	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/nativetest"
 	"github.com/coder/agentapi/lib/registry"
 )
@@ -47,7 +48,7 @@ func serveNativeWith(ctx context.Context, t *testing.T, factory *nativetest.Fact
 	registryDir := t.TempDir()
 	config := httpapi.ServerConfig{
 		AgentType:      instanceapi.AgentTypeClaude,
-		Native:         httpapi.NativeConfig{Factory: factory.New, RestartDelays: []time.Duration{time.Millisecond, time.Millisecond}},
+		Native:         httpapi.NativeConfig{Factory: factory.New, Policy: native.Policy{RestartDelays: []time.Duration{time.Millisecond, time.Millisecond}}},
 		Bind:           "127.0.0.1",
 		ChatBasePath:   "/chat",
 		AllowedHosts:   []string{"*"},

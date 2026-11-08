@@ -13,7 +13,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/coder/quartz"
 	"github.com/danielgtaylor/huma/v2"
@@ -139,22 +138,16 @@ type NativeConfig struct {
 	// UpdateAgent, if set, updates the agent's CLI before a restart starts
 	// a new one (Codex, Pi).
 	UpdateAgent func(context.Context)
-	// AutoContinue continues a turn a usage limit stopped once the limit
-	// resets.
-	AutoContinue bool
 	// Prices price the model calls of the agent's sessions; nil is the
 	// built-in prices.
 	Prices *pricing.Table
 	// PiSessionDir is the --session-dir Pi runs with, where its session
 	// logs are; empty without one.
 	PiSessionDir string
-	// RestartDelays are native.Config.RestartDelays: the waits before an
-	// agent that exited is started again. Nil is the default.
-	RestartDelays []time.Duration
-	// RetryDelays are native.Config.RetryDelays: the waits before a turn
-	// that failed on a transient upstream error is tried again. Nil is the
-	// default; empty tries none again.
-	RetryDelays []time.Duration
+	// Policy is the conversation's: whether it continues a turn a usage
+	// limit stopped, and how long it waits before it tries a failed turn
+	// again or starts an agent that exited again.
+	native.Policy
 }
 
 // CheckConfig returns an error NewServer would return for config before it
@@ -396,8 +389,7 @@ func newNativeConversation(config ServerConfig, restored restoredState, emitter 
 		Settings:          restored.settings,
 		LimitStop:         restored.limitStop,
 		RetryWait:         restored.retryWait,
-		RetryDelays:       config.Native.RetryDelays,
-		AutoContinue:      config.Native.AutoContinue,
+		Policy:            config.Native.Policy,
 		InitialMessages:   restored.messages,
 		InitialPrompt:     config.InitialPrompt,
 		InitialPromptSent: config.InitialPromptSent,
@@ -405,7 +397,6 @@ func newNativeConversation(config ServerConfig, restored restoredState, emitter 
 		Observer:          observer,
 		Logger:            logger,
 		Clock:             config.Clock,
-		RestartDelays:     config.Native.RestartDelays,
 		PrepareRichMessage: func(msg *transcript.RichMessage) {
 			uploads.storeRichImages(msg, logger)
 		},

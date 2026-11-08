@@ -67,7 +67,7 @@ func TestLimitStopTakesTheResetOfTheReachedLimit(t *testing.T) {
 
 func TestLimitStopWithoutResetHoldsTheQueueUntilDismissed(t *testing.T) {
 	clock := quartz.NewMock(t)
-	c, factory, _ := start(t, nil, native.Config{Clock: clock, AutoContinue: true})
+	c, factory, _ := start(t, nil, native.Config{Clock: clock, Policy: native.Policy{AutoContinue: true}})
 	limitTurn(t, c, factory.Last().Sink(), native.TurnResult{Error: "You're out of usage credits"})
 
 	ls := c.LimitStop()
@@ -85,7 +85,7 @@ func TestLimitStopWithoutResetHoldsTheQueueUntilDismissed(t *testing.T) {
 
 func TestAutoContinueAfterTheReset(t *testing.T) {
 	clock := quartz.NewMock(t)
-	c, factory, _ := start(t, nil, native.Config{Clock: clock, AutoContinue: true})
+	c, factory, _ := start(t, nil, native.Config{Clock: clock, Policy: native.Policy{AutoContinue: true}})
 	a := factory.Last()
 	resets := clock.Now().Add(time.Hour)
 	limitTurn(t, c, a.Sink(), native.TurnResult{Error: "limit", ResetsAt: &resets})

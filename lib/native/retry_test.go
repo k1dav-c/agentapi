@@ -26,7 +26,7 @@ func transientResult() native.TurnResult {
 
 func TestTransientFailureIsTriedAgain(t *testing.T) {
 	clock := quartz.NewMock(t)
-	c, factory, rec := start(t, nil, native.Config{Clock: clock, RetryDelays: retryDelays})
+	c, factory, rec := start(t, nil, native.Config{Clock: clock, Policy: native.Policy{RetryDelays: retryDelays}})
 	a := factory.Last()
 	stopped := clock.Now()
 
@@ -85,7 +85,7 @@ func TestTransientFailureIsTriedAgain(t *testing.T) {
 
 func TestRetryThatWorksStartsTheCountAgain(t *testing.T) {
 	clock := quartz.NewMock(t)
-	c, factory, _ := start(t, nil, native.Config{Clock: clock, RetryDelays: retryDelays})
+	c, factory, _ := start(t, nil, native.Config{Clock: clock, Policy: native.Policy{RetryDelays: retryDelays}})
 	a := factory.Last()
 
 	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "work"}))
@@ -104,7 +104,7 @@ func TestRetryThatWorksStartsTheCountAgain(t *testing.T) {
 
 func TestUserMessageReplacesTheRetry(t *testing.T) {
 	clock := quartz.NewMock(t)
-	c, factory, rec := start(t, nil, native.Config{Clock: clock, RetryDelays: retryDelays})
+	c, factory, rec := start(t, nil, native.Config{Clock: clock, Policy: native.Policy{RetryDelays: retryDelays}})
 	a := factory.Last()
 	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "work"}))
 	a.Sink().TurnCompleted(transientResult())
@@ -123,7 +123,7 @@ func TestUserMessageReplacesTheRetry(t *testing.T) {
 
 func TestRetryNowAndCancel(t *testing.T) {
 	clock := quartz.NewMock(t)
-	c, factory, _ := start(t, nil, native.Config{Clock: clock, RetryDelays: retryDelays})
+	c, factory, _ := start(t, nil, native.Config{Clock: clock, Policy: native.Policy{RetryDelays: retryDelays}})
 	a := factory.Last()
 	assert.ErrorIs(t, c.RetryNow(context.Background()), native.ErrNoRetryWait)
 	assert.ErrorIs(t, c.CancelRetry(), native.ErrNoRetryWait)
@@ -151,7 +151,7 @@ func TestRetryDelaysOff(t *testing.T) {
 	clock := quartz.NewMock(t)
 	stopped := clock.Now()
 	restored := &agentstate.RetryWait{Message: "502", StoppedAt: stopped, Attempt: 1, Attempts: 3, RetryAt: stopped}
-	c, factory, rec := start(t, nil, native.Config{Clock: clock, RetryDelays: []time.Duration{}, RetryWait: restored})
+	c, factory, rec := start(t, nil, native.Config{Clock: clock, Policy: native.Policy{RetryDelays: []time.Duration{}}, RetryWait: restored})
 	assert.Nil(t, c.RetryWait(), "a restored wait goes without retries")
 
 	require.NoError(t, c.StartTurn(context.Background(), native.Input{Text: "work"}))
@@ -164,7 +164,7 @@ func TestRestoredRetryWaitGoesOn(t *testing.T) {
 	clock := quartz.NewMock(t)
 	stopped := clock.Now().Add(-time.Hour)
 	restored := &agentstate.RetryWait{Message: claudeFailed502, StoppedAt: stopped, Attempt: 2, Attempts: 3, RetryAt: stopped.Add(2 * time.Minute)}
-	c, factory, _ := start(t, nil, native.Config{Clock: clock, RetryDelays: retryDelays, RetryWait: restored})
+	c, factory, _ := start(t, nil, native.Config{Clock: clock, Policy: native.Policy{RetryDelays: retryDelays}, RetryWait: restored})
 	require.NotNil(t, c.RetryWait(), "restored from the state database")
 	assert.True(t, c.HoldsQueue(clock.Now()))
 

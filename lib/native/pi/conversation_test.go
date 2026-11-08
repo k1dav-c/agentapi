@@ -37,7 +37,7 @@ func newConvFixture(t *testing.T) *convFixture {
 		},
 		Logger: logger,
 		// The fake Pi runs once.
-		RestartDelays: []time.Duration{},
+		Policy: native.Policy{RestartDelays: []time.Duration{}},
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(func() {

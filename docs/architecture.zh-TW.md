@@ -313,7 +313,7 @@ type Factory func(resume Resume) (Adapter, error)
   停止原因結束：HTTP 5xx 或 429（Claude Code 的 `api_error_status`、Codex `codexErrorInfo` 的
   `httpStatusCode`）、Codex 的 `serverOverloaded`、連線失敗、Pi 沒有成功的 `auto_retry_end`，或
   `IsTransientError` 比對到的文字。用量限制和登入問題會先判斷。對話會記下一個 `RetryWait`，含下次
-  重試的時間（`Config.RetryDelays`、`--retry-delays`），以警告而不是錯誤回報，並讓佇列等待
+  重試的時間（`Policy.RetryDelays`、`--retry-delays`），以警告而不是錯誤回報，並讓佇列等待
   （`HoldsQueue`）。時間到了，`ContinueIfDue` 會在佇列的派送迴圈中送出 `ContinuePrompt`；這個回合又
   以同樣方式失敗時，改等下一個間隔（從它接續的暫停計數），最後一次也失敗就當成錯誤。新回合開始時
   等待結束；`RetryNow` 和 `CancelRetry` 對應 `POST` 和 `DELETE /retry`。
