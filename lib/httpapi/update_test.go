@@ -200,7 +200,7 @@ func (u *updateServer) onDisk() string {
 func TestUpdate_Off(t *testing.T) {
 	t.Parallel()
 	u := newUpdateServer(t, updateOptions{off: true})
-	assert.Equal(t, instanceapi.UpdateStatus{State: instanceapi.UpdateStateIdle}, u.update())
+	assert.Equal(t, instanceapi.UpdateStatus{State: instanceapi.UpdateStateIdle, KeepsSession: true}, u.update())
 	code, _, detail := u.post("")
 	assert.Equal(t, http.StatusForbidden, code)
 	assert.Contains(t, detail, "--allow-update")
@@ -214,14 +214,14 @@ func TestUpdate_Off(t *testing.T) {
 func TestUpdate_UpToDate(t *testing.T) {
 	t.Parallel()
 	u := newUpdateServer(t, updateOptions{running: "2.2.0", latest: "2.2.0"})
-	assert.Equal(t, instanceapi.UpdateStatus{Allowed: true, State: instanceapi.UpdateStateIdle}, u.update())
+	assert.Equal(t, instanceapi.UpdateStatus{Allowed: true, State: instanceapi.UpdateStateIdle, KeepsSession: true}, u.update())
 	code, body, _ := u.post("")
 	require.Equal(t, http.StatusOK, code)
 	assert.Equal(t, httpapi.UpdateResponseBody{State: instanceapi.UpdateStateIdle, UpToDate: true}, body)
 	assert.Equal(t, 1, u.release.Lookups())
 	assert.Zero(t, u.release.Downloads())
 	assert.Zero(t, u.restarts.Load())
-	assert.Equal(t, instanceapi.UpdateStatus{Allowed: true, State: instanceapi.UpdateStateIdle}, u.update())
+	assert.Equal(t, instanceapi.UpdateStatus{Allowed: true, State: instanceapi.UpdateStateIdle, KeepsSession: true}, u.update())
 
 	// No body is fine too.
 	code, body, _ = u.request(http.MethodPost, "")
@@ -235,6 +235,7 @@ func TestUpdate_WaitsForTheAgent(t *testing.T) {
 	t.Parallel()
 	u := newUpdateServer(t, updateOptions{stateDB: true})
 	assert.True(t, u.update().KeepsConversation)
+	assert.True(t, u.update().KeepsSession)
 	u.busy()
 	code, body, _ := u.post("")
 	require.Equal(t, http.StatusAccepted, code)
@@ -291,6 +292,9 @@ func TestUpdate_DoesntWaitForAnAgentThatExited(t *testing.T) {
 func TestUpdate_Now(t *testing.T) {
 	t.Parallel()
 	u := newUpdateServer(t, updateOptions{})
+	// Without a state database, Claude Code's session carries over.
+	assert.False(t, u.update().KeepsConversation)
+	assert.True(t, u.update().KeepsSession)
 	u.busy()
 	code, body, _ := u.post(httpapi.UpdateWhenNow)
 	require.Equal(t, http.StatusAccepted, code)
@@ -318,7 +322,7 @@ func TestUpdate_CancelAndRepeat(t *testing.T) {
 	code, body, _ = u.request(http.MethodDelete, "")
 	require.Equal(t, http.StatusOK, code)
 	assert.Equal(t, httpapi.UpdateResponseBody{State: instanceapi.UpdateStateIdle}, body)
-	assert.Equal(t, instanceapi.UpdateStatus{Allowed: true, State: instanceapi.UpdateStateIdle}, u.update())
+	assert.Equal(t, instanceapi.UpdateStatus{Allowed: true, State: instanceapi.UpdateStateIdle, KeepsSession: true}, u.update())
 	u.idle()
 	time.Sleep(200 * time.Millisecond)
 	assert.Zero(t, u.restarts.Load(), "cancelled")
@@ -346,7 +350,7 @@ func TestUpdate_ProgramOnDiskIsNewer(t *testing.T) {
 	assert.Equal(t, "2.2.0", body.Target)
 	require.Eventually(t, func() bool { return u.restarts.Load() == 1 }, 10*time.Second, 5*time.Millisecond)
 	assert.Zero(t, u.release.Downloads())
-	assert.Equal(t, instanceapi.UpdateStatus{Allowed: true, State: instanceapi.UpdateStateRestarting, Target: "2.2.0"}, u.update())
+	assert.Equal(t, instanceapi.UpdateStatus{Allowed: true, State: instanceapi.UpdateStateRestarting, Target: "2.2.0", KeepsSession: true}, u.update())
 }
 
 // A summary client sees each state of the update.
@@ -405,7 +409,7 @@ func TestUpdate_Failures(t *testing.T) {
 		code, body, _ := u.request(http.MethodDelete, "")
 		require.Equal(t, http.StatusOK, code)
 		assert.Equal(t, instanceapi.UpdateStateIdle, body.State)
-		assert.Equal(t, instanceapi.UpdateStatus{Allowed: true, State: instanceapi.UpdateStateIdle}, u.update())
+		assert.Equal(t, instanceapi.UpdateStatus{Allowed: true, State: instanceapi.UpdateStateIdle, KeepsSession: true}, u.update())
 	})
 	t.Run("lookup", func(t *testing.T) {
 		t.Parallel()

@@ -85,7 +85,7 @@ func TestUpdateThroughTheAPI(t *testing.T) {
 	var summary instanceapi.SummaryBody
 	getJSON(t, base+"/summary", &summary)
 	require.NotNil(t, summary.Update)
-	assert.Equal(t, instanceapi.UpdateStatus{Allowed: true, State: instanceapi.UpdateStateIdle, KeepsConversation: true}, *summary.Update)
+	assert.Equal(t, instanceapi.UpdateStatus{Allowed: true, State: instanceapi.UpdateStateIdle, KeepsConversation: true, KeepsSession: true}, *summary.Update)
 	resp, err := http.Post(base+"/message", "application/json", strings.NewReader(`{"content":"hello","type":"user"}`))
 	require.NoError(t, err)
 	_ = resp.Body.Close()
@@ -114,7 +114,7 @@ func TestUpdateThroughTheAPI(t *testing.T) {
 	assert.Equal(t, "2.2.0", status.Version)
 	assert.Equal(t, conversation, messages(t, base), "the state database kept the conversation")
 	getJSON(t, base+"/summary", &summary)
-	assert.Equal(t, instanceapi.UpdateStatus{Allowed: true, State: instanceapi.UpdateStateIdle, KeepsConversation: true}, *summary.Update)
+	assert.Equal(t, instanceapi.UpdateStatus{Allowed: true, State: instanceapi.UpdateStateIdle, KeepsConversation: true, KeepsSession: true}, *summary.Update)
 	written, err := os.ReadFile(pidFile)
 	require.NoError(t, err)
 	assert.Equal(t, strconv.Itoa(pid), strings.TrimSpace(string(written)), "the PID file stays valid")

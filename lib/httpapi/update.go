@@ -144,14 +144,15 @@ type updateCheck struct {
 }
 
 // newUpdater returns the server's updater, which reports its status in the
-// summary from now on.
-func newUpdater(config UpdateConfig, logger *slog.Logger, emitter *convstate.EventEmitter, keepsConversation bool) *updater {
+// summary from now on. keepsConversation and keepsSession say what a
+// restart keeps (UpdateStatus).
+func newUpdater(config UpdateConfig, logger *slog.Logger, emitter *convstate.EventEmitter, keepsConversation, keepsSession bool) *updater {
 	if config.Version == "" {
 		config.Version = version.Version
 	}
 	u := &updater{config: config, logger: logger, emitter: emitter}
 	u.running, _ = selfupdate.ParseVersion(config.Version)
-	u.status = instanceapi.UpdateStatus{Allowed: config.Allowed, State: instanceapi.UpdateStateIdle, KeepsConversation: keepsConversation}
+	u.status = instanceapi.UpdateStatus{Allowed: config.Allowed, State: instanceapi.UpdateStateIdle, KeepsConversation: keepsConversation, KeepsSession: keepsSession}
 	if config.Allowed {
 		program, blocked := u.program()
 		u.status.Blocked = blocked
@@ -506,7 +507,8 @@ func (s *Server) registerUpdateRoutes() {
 			"can't replace its program (the message and the summary's update.blocked say why and how to fix it) " +
 			"or stops; 502 when the latest release can't be looked up. Every change of the state sends " +
 			"summary_update. With --state-db the conversation and the agent's session carry over the restart; " +
-			"without it the conversation starts anew."
+			"without it the agent resumes its session, whose conversation is read back from the agent's session log " +
+			"(Claude Code, Codex and Pi), and the queue, the open requests and the settings chosen start anew."
 		o.Responses = map[string]*huma.Response{
 			"200": {Description: "AgentAPI runs the latest release already."},
 		}
