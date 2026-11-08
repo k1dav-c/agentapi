@@ -3,9 +3,11 @@
 import {ArrowLeft, ArrowRight, Search, X} from "lucide-react";
 import {Button} from "../ui/button";
 import {isImeComposing} from "@/lib/keys";
-import {uiCopy} from "@/lib/ui-copy";
-import type {TaskFilter} from "@/lib/task-timeline";
+import {TASK_STATUS_META, type TaskFilter, type TaskStatus} from "@/lib/task-timeline";
 import type {useTaskSearch} from "./use-task-search";
+
+// The states the filter offers, in its order.
+const FILTER_STATUSES: TaskStatus[] = ["running", "queued", "failed", "limited", "completed"];
 
 // The transcript's search bar, stuck to its top: the query, the filter,
 // how many tasks show (and matches), moving between the matching tasks.
@@ -52,13 +54,12 @@ export function TaskSearchBar({
             onChange={(event) => setTaskFilter(event.target.value as TaskFilter)}
             className="min-h-8 rounded-md border bg-card px-2 text-xs outline-none focus:ring-2 focus:ring-ring"
           >
-            <option value="all">{uiCopy.taskToolbar.all}</option>
-            <option value="running">{uiCopy.taskToolbar.running}</option>
-            <option value="queued">{uiCopy.taskToolbar.queued}</option>
-            <option value="failed">{uiCopy.taskToolbar.failed}</option>
-            <option value="limited">{uiCopy.taskToolbar.limited}</option>
-            <option value="completed">{uiCopy.taskToolbar.completed}</option>
-            <option value="tool-error">{uiCopy.taskToolbar.toolErrors}</option>
+            <option value="all">All tasks</option>
+            {/* The states as the tasks' badges name them. */}
+            {FILTER_STATUSES.map((status) => (
+              <option key={status} value={status}>{TASK_STATUS_META[status].label}</option>
+            ))}
+            <option value="tool-error">Tool errors</option>
           </select>
         </label>
         <span className="text-xs tabular-nums text-muted-foreground" role="status">

@@ -4,7 +4,6 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {HighlightedText} from "../highlighted-text";
 import { ArrowDown, ChevronRight, FileDiff, FileText, Wrench } from "lucide-react";
 import { Button } from "../ui/button";
-import { uiCopy } from "@/lib/ui-copy";
 import { describeToolCall } from "@/lib/tool-call-view";
 import type { ToolCall } from "@/lib/task-timeline";
 import {useChatSelector, type ChatState} from "../chat-provider";
@@ -374,7 +373,7 @@ export function ToolCallGroup({
       <header className="flex items-center justify-between gap-2">
         <span className="flex min-w-0 items-center gap-1.5 text-xs font-medium">
           <Wrench className="size-3 shrink-0 text-muted-foreground" />
-          <span>{uiCopy.tools.groupLabel(toolCalls.length)}</span>
+          <span>{toolCalls.length} consecutive tool calls</span>
         </span>
         <Button
           type="button"
@@ -388,7 +387,7 @@ export function ToolCallGroup({
           }
           aria-expanded={allOpen}
         >
-          {allOpen ? uiCopy.tools.collapseAll : uiCopy.tools.expandAll}
+          {allOpen ? "Collapse all" : "Expand all"}
         </Button>
       </header>
       <div className="space-y-1.5">

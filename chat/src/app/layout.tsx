@@ -7,7 +7,6 @@ import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ViewportGuard } from "@/components/viewport-guard";
-import {defaultLocale, uiCopy} from "@/lib/ui-copy";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -21,7 +20,7 @@ const geistMono = Geist_Mono({
 
 // The tab title is rendered by ChatProvider: it follows the agent's state.
 export const metadata: Metadata = {
-  description: uiCopy.metadata.description,
+  description: "Chat with and control your remote coding agent.",
 };
 
 export const viewport: Viewport = {
@@ -40,7 +39,7 @@ export default function RootLayout({
   return (
     // The font variables go on <html>: Tailwind sets font-family there, and
     // a variable defined only on <body> left the page in the system font.
-    <html lang={defaultLocale} className={`${geistSans.variable} ${geistMono.variable}`} suppressHydrationWarning>
+    <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`} suppressHydrationWarning>
       <body className="antialiased">
         <ThemeProvider
           attribute="class"
