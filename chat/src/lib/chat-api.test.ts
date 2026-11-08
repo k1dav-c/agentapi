@@ -1,5 +1,5 @@
 import {afterEach, describe, expect, test} from "bun:test";
-import {createChatAPI, httpURL, mergeCost, type CostReport} from "./chat-api";
+import {createChatAPI, httpURL, mergeCost, route, type CostReport} from "./chat-api";
 import {resetAuthState, setSignInHandler} from "./auth";
 import {ApiError} from "./error-utils";
 import {json, mockFetch, restoreFetch} from "@/test/fetch";
@@ -210,5 +210,27 @@ describe("mergeCost", () => {
     expect(mergeCost(known, report({calls: [call(5), call(6)], from: 0, total_calls: 2})).calls.map((c) => c.usd)).toEqual([5, 6]);
     expect(mergeCost(known, report({agent_session_id: "other", calls: [call(7)], from: 1, total_calls: 2})).calls.map((c) => c.usd)).toEqual([7]);
     expect(mergeCost(null, report({calls: [call(8)], total_calls: 1})).calls.map((c) => c.usd)).toEqual([8]);
+  });
+});
+
+describe("route", () => {
+  test("fills in the route's parameters and adds the query, URI-encoded", () => {
+    expect(route("GET", "/status")).toEqual({method: "GET", path: "/status"});
+    expect(route("POST", "/requests/{id}/respond", {id: "a/b"})).toEqual({method: "POST", path: "/requests/a%2Fb/respond"});
+    expect(route("GET", "/files/content", undefined, {path: "src/a b.go", line: undefined})).toEqual({method: "GET", path: "/files/content?path=src%2Fa%20b.go"});
+    expect(route("GET", "/cost", undefined, {from: 3, digest: "x&y"}).path).toBe("/cost?from=3&digest=x%26y");
+  });
+
+  test("takes only the routes and methods openapi.json has", () => {
+    // Checked by tsc, not run.
+    const unchecked = () => {
+      // @ts-expect-error: no such route.
+      route("GET", "/no-such-route");
+      // @ts-expect-error: /status has no POST.
+      route("POST", "/status");
+      // @ts-expect-error: the route has an {id}.
+      route("PUT", "/queue/{id}");
+    };
+    expect(unchecked).toBeFunction();
   });
 });
