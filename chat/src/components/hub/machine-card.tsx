@@ -9,12 +9,12 @@ import {activeAgent, sharedVersion, tabOrder, type HubMachine} from "@/lib/hub-m
 import {formatUSD, spendTitle, spendTotals, tokenTotals} from "@/lib/hub-spend";
 import {instanceVersion, olderThanHub} from "@/lib/hub-version";
 import {changedAt, recentAgent, type ListOrder} from "@/lib/hub-order";
+import {MAX_TAB_PICKS, readHubSetting, writeHubSetting, type TabPick} from "@/lib/hub-settings";
 import {shownUpdate, updateBadge} from "@/lib/hub-update";
 import {cn} from "@/lib/utils";
 import {useHubTime} from "./clock";
 import {activityTone, agentName, RowMenu, RowWork, UsageBar, type RowActions} from "./instance-row";
 import {AgentTabMark, shortAgent} from "./machine-tabs";
-import {readStorage, writeStorage} from "./storage";
 import {stateTone} from "./status-glyph";
 import {UpdateChip} from "./update-chip";
 import {VersionTag} from "./version-tag";
@@ -39,42 +39,20 @@ export interface MachineCardProps {
   actions: RowActions;
 }
 
-// Where the browser keeps the tab picked on each card and when, the latest
+// keepPick remembers the tab picked on a card, in the browser, the latest
 // last, so a reload shows the same ones; it forgets the oldest past
-// MAX_PICKS. A pick from before it kept when has none.
-const picksKey = "agentapi.hub.machine-tabs";
-const MAX_PICKS = 200;
-
-// A tab picked: the agent, and when (milliseconds since the epoch).
-type Pick = {id: string; at?: number};
-
-// readPicks is the tabs picked, as the browser keeps them.
-function readPicks(): Map<string, Pick> {
-  const stored = readStorage<unknown>(picksKey, []);
-  const picks = new Map<string, Pick>();
-  if (!Array.isArray(stored)) return picks;
-  for (const entry of stored) {
-    if (!Array.isArray(entry) || typeof entry[0] !== "string" || typeof entry[1] !== "string") continue;
-    picks.set(entry[0], {id: entry[1], at: typeof entry[2] === "number" ? entry[2] : undefined});
-  }
-  return picks;
-}
-
-// keepPick remembers the tab picked on a card, in the browser too.
-function keepPick(card: string, pick: Pick) {
-  const kept = readPicks();
+// MAX_TAB_PICKS.
+function keepPick(card: string, pick: TabPick) {
+  const kept = new Map(readHubSetting("tabPicks"));
   const was = kept.get(card);
   if (was?.id === pick.id && was.at === pick.at) return;
   kept.delete(card);
   kept.set(card, pick);
   for (const oldest of kept.keys()) {
-    if (kept.size <= MAX_PICKS) break;
+    if (kept.size <= MAX_TAB_PICKS) break;
     kept.delete(oldest);
   }
-  writeStorage(
-    picksKey,
-    [...kept].map(([key, {id, at}]) => (at === undefined ? [key, id] : [key, id, at])),
-  );
+  writeHubSetting("tabPicks", kept);
 }
 
 // useActiveAgent is the agent a card shows (activeAgent; in the recent
@@ -82,7 +60,7 @@ function keepPick(card: string, pick: Pick) {
 // the agent open beside the list becomes one of its own.
 function useActiveAgent(card: string, machine: HubMachine, order: ListOrder, selected?: string): [string, (id: string) => void] {
   const onCard = selected && machine.instances.some((instance) => instance.id === selected) ? selected : undefined;
-  const [picked, setPicked] = useState<Pick | undefined>(() => (onCard ? {id: onCard, at: Date.now()} : readPicks().get(card)));
+  const [picked, setPicked] = useState<TabPick | undefined>(() => (onCard ? {id: onCard, at: Date.now()} : readHubSetting("tabPicks").get(card)));
   const [opened, setOpened] = useState(onCard);
   if (onCard !== opened) {
     setOpened(onCard);

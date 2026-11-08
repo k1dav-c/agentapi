@@ -4,7 +4,7 @@ import type {HubInstance, Summary} from "./hub";
 import type {HubAgent} from "./hub-filter";
 import {groupInstances} from "./hub-groups";
 import {machinesInOrder} from "./hub-machines";
-import {changedAt, listSections, movePin, parseListOrder, pinnedKey, pinOf, recentAgent, recentKey, sortPinned, sortRecent, storedView, type ListSection} from "./hub-order";
+import {changedAt, listSections, movePin, parseListOrder, pinnedKey, pinOf, recentAgent, recentKey, sortPinned, sortRecent, type ListSection} from "./hub-order";
 
 const summary = (overrides: Partial<Summary> = {}): Summary => baseSummary({seen_at: "2026-10-26T00:00:00Z", ...overrides});
 
@@ -30,15 +30,6 @@ describe("parseListOrder", () => {
     for (const stored of [null, undefined, "", " recent", "Recent", "machines", '"recent"', "flat", "null", "undefined", "[]"]) {
       expect(parseListOrder(stored)).toBe("groups");
     }
-  });
-});
-
-describe("storedView", () => {
-  test("the order and By machine as a browser stored them", () => {
-    expect(storedView("recent", "true")).toEqual({order: "recent", byMachine: true});
-    expect(storedView("groups", "false")).toEqual({order: "groups", byMachine: false});
-    expect(storedView(null, null)).toEqual({order: "groups", byMachine: false});
-    expect(storedView("recent", "yes")).toEqual({order: "recent", byMachine: false});
   });
 });
 

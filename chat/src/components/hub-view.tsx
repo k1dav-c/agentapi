@@ -5,11 +5,12 @@ import {Bell, BellOff, Plus, Search, Settings, X} from "lucide-react";
 import {ModeToggle} from "@/components/mode-toggle";
 import {Button} from "@/components/ui/button";
 import {chatURL, displayName, hubRoot} from "@/lib/hub";
-import {agentsIn, countAgents, countFilters, matchesAgents, nothingMatches, parseAgents, shownAgents, type HubAgent, type HubFilter} from "@/lib/hub-filter";
+import {agentsIn, countAgents, countFilters, matchesAgents, nothingMatches, shownAgents, type HubFilter} from "@/lib/hub-filter";
 import {groupNames, groupOf} from "@/lib/hub-groups";
 import {hostPrefix, machineOf} from "@/lib/hub-machines";
 import {formatUSD, spendTitle, spendTotals} from "@/lib/hub-spend";
 import {listSections, movePin, pinOf, sortPinned} from "@/lib/hub-order";
+import {useHubSetting} from "@/lib/hub-settings";
 import {useStableCallback} from "@/lib/use-stable-callback";
 import {cn} from "@/lib/utils";
 import {HubMark} from "./hub/brand";
@@ -25,7 +26,6 @@ import {ByMachineToggle, ListOrderSwitch, useListView} from "./hub/list-order";
 import {Onboarding, Overview} from "./hub/overview";
 import {HubSettings, type SettingsSection} from "./hub/settings";
 import {SignIn} from "./hub/sign-in";
-import {readStorage, writeStorage} from "./hub/storage";
 import {useHubTab} from "./hub/tab-icon";
 import {cancelFromHub} from "./hub/update";
 import {useHubActions} from "./hub/use-hub-actions";
@@ -33,12 +33,6 @@ import {useHubFrame} from "./hub/use-hub-frame";
 import {useHubKeys} from "./hub/use-hub-keys";
 import {useHubStream} from "./hub/use-hub-stream";
 import {useNeedsYou} from "./hub/use-needs-you";
-
-// Where the browser keeps which groups are folded, whether to notify, and
-// the agents the list is filtered by.
-const collapsedKey = "agentapi.hub.collapsed";
-const notifyKey = "agentapi.hub.notify";
-const agentsKey = "agentapi.hub.agents";
 
 // agentDepth is how many agents opened from the hub lead to the page of the
 // browser's history in state: 0 for the list. A page an older hub opened
@@ -59,13 +53,13 @@ export function HubView() {
     typeof window === "undefined" ? undefined : decodeURIComponent(window.location.hash.slice(1)) || undefined,
   );
   const [filter, setFilter] = useState<HubFilter>("all");
-  const [picked, setPicked] = useState<Set<HubAgent>>(() => parseAgents(readStorage<unknown>(agentsKey, [])));
+  const [picked, pickAgents] = useHubSetting("agents");
   const [query, setQuery] = useState("");
   const [adding, setAdding] = useState(false);
   const [naming, setNaming] = useState<Naming | null>(null);
   const [settings, setSettings] = useState<SettingsSection | null>(null);
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set(readStorage<string[]>(collapsedKey, [])));
-  const [notify, setNotify] = useState<boolean>(() => readStorage(notifyKey, false));
+  const [collapsed, setCollapsed] = useHubSetting("collapsed");
+  const [notify, setNotify] = useHubSetting("notify");
   const search = useRef<HTMLInputElement>(null);
   const listWidth = useListWidth();
   const {order, setOrder, byMachine, setByMachine} = useListView();
@@ -175,31 +169,24 @@ export function HubView() {
     },
   });
 
-  const pickAgents = useCallback((next: Set<HubAgent>) => {
-    setPicked(next);
-    writeStorage(agentsKey, [...next]);
-  }, []);
-
-  const changeCollapsed = useCallback((change: (next: Set<string>) => void) => {
-    setCollapsed((previous) => {
-      const next = new Set(previous);
-      change(next);
-      writeStorage(collapsedKey, [...next]);
-      return next;
-    });
-  }, []);
+  const changeCollapsed = useCallback(
+    (change: (next: Set<string>) => void) =>
+      setCollapsed((previous) => {
+        const next = new Set(previous);
+        change(next);
+        return next;
+      }),
+    [setCollapsed],
+  );
 
   const toggleNotify = async () => {
     if (notify) {
       setNotify(false);
-      writeStorage(notifyKey, false);
       return;
     }
     if (typeof Notification === "undefined") return;
     const permission = Notification.permission === "default" ? await Notification.requestPermission() : Notification.permission;
-    const on = permission === "granted";
-    setNotify(on);
-    writeStorage(notifyKey, on);
+    setNotify(permission === "granted");
   };
 
   // Forget closes the agent once the hub forgot it.

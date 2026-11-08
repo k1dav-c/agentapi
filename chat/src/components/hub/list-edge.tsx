@@ -1,19 +1,9 @@
 "use client";
 
 import {useCallback, useEffect, useRef, useState} from "react";
-import {DEFAULT_LIST_WIDTH, MIN_LIST_WIDTH, clampListWidth, keyListWidth, maxListWidth, parseListWidth} from "@/lib/hub-list-width";
+import {DEFAULT_LIST_WIDTH, MIN_LIST_WIDTH, clampListWidth, keyListWidth, maxListWidth} from "@/lib/hub-list-width";
+import {readHubSetting, writeHubSetting} from "@/lib/hub-settings";
 import {cn} from "@/lib/utils";
-
-// Where the browser keeps the list's width.
-const widthKey = "agentapi.hub.list-width";
-
-function storedWidth(): number {
-  try {
-    return parseListWidth(localStorage.getItem(widthKey));
-  } catch {
-    return DEFAULT_LIST_WIDTH;
-  }
-}
 
 export type ListWidth = {
   width: number;
@@ -26,7 +16,7 @@ export type ListWidth = {
 // browser keeps, fitted to the window as it resizes. A narrower window
 // doesn't change the one kept, so the list widens again with the window.
 export function useListWidth(): ListWidth {
-  const [chosen, setChosen] = useState(storedWidth);
+  const [chosen, setChosen] = useState(() => readHubSetting("listWidth"));
   const [windowWidth, setWindowWidth] = useState(() => (typeof window === "undefined" ? 0 : window.innerWidth));
   useEffect(() => {
     const onResize = () => setWindowWidth(window.innerWidth);
@@ -37,10 +27,7 @@ export function useListWidth(): ListWidth {
   const resize = useCallback((width: number, keep: boolean) => {
     const fitted = clampListWidth(width, window.innerWidth);
     setChosen(fitted);
-    if (!keep) return;
-    try {
-      localStorage.setItem(widthKey, String(fitted));
-    } catch {}
+    if (keep) writeHubSetting("listWidth", fitted);
   }, []);
   return {width: clampListWidth(chosen, windowWidth), max: maxListWidth(windowWidth), resize};
 }

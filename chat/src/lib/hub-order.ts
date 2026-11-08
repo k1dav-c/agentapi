@@ -18,12 +18,6 @@ export function parseListOrder(stored: string | null | undefined): ListOrder {
   return stored === "recent" ? "recent" : "groups";
 }
 
-// storedView reads the order and By machine a browser stored (order,
-// byMachine: "true" or "false").
-export function storedView(order: string | null | undefined, byMachine: string | null | undefined): {order: ListOrder; byMachine: boolean} {
-  return {order: parseListOrder(order), byMachine: byMachine === "true"};
-}
-
 // timeOf reads a timestamp: none for one that is missing or doesn't parse,
 // and for Go's zero time (0001-01-01), the last_seen of an instance the hub
 // never heard from.
