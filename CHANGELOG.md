@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Internal
+
+- The hub page's types come from the hub's own schema instead of hand-written copies of the Go
+  types: `make gen` writes `lib/hub/hub-schema.json` (`hub.Schema`, from the Go types through
+  huma's registry, with `HubLimits`) and `bun run gen:api` writes `chat/src/lib/hub-schema.ts`
+  from it; a Go test and a chat test fail while either is stale. One `parseHubEvent` reads the
+  event stream, and the frame's messages are checked field by field in both directions.
+- The hub keeps its favorites as the first of its settings, `"settings": {"favorites": [...]}` in
+  `instances.json`, still version 1. It writes the top-level `"favorites"` too for this release,
+  which hubs of 3.5 to 3.7 read, and reads `settings` first, else those, so going back and forth
+  keeps them. The store's events say their kind. The stream's event keeps its name, `favorites`.
+- `chat/src/lib/hub.ts` is split by topic (groups, machines, filters, what a row says, spend,
+  work time, versions); `HubView` is split into hooks and parts, and the rows take what they share
+  from a context. The page's browser settings go through one typed module, in the formats they
+  had. The stored list order "machines", which no release wrote, is no longer migrated. The tests
+  share their builders, in the chat and in `lib/hub`.
+
 ## v3.7.3
 
 ### Internal
