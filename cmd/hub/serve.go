@@ -16,6 +16,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/coder/agentapi/lib/dispatch"
 	"github.com/coder/agentapi/lib/httpmw"
 	"github.com/coder/agentapi/lib/hub"
 	"github.com/coder/agentapi/lib/logctx"
@@ -38,6 +39,8 @@ func serveCmd() *cobra.Command {
 		statePath     string
 		allowedHosts  []string
 		logLevel      string
+		dispatchToken string
+		githubApp     string
 	)
 	cmd := &cobra.Command{
 		Use:   "serve",
@@ -53,6 +56,7 @@ func serveCmd() *cobra.Command {
 			token = firstSet(token, os.Getenv("AGENTAPI_HUB_TOKEN"))
 			secret = firstSet(secret, os.Getenv("AGENTAPI_HUB_SECRET"))
 			instanceToken = firstSet(instanceToken, os.Getenv("AGENTAPI_HUB_INSTANCE_TOKEN"), os.Getenv("AGENTAPI_API_TOKEN"))
+			dispatchToken = firstSet(dispatchToken, os.Getenv("AGENTAPI_HUB_DISPATCH_TOKEN"))
 			if statePath == "" {
 				home, err := os.UserHomeDir()
 				if err != nil {
@@ -77,9 +81,20 @@ func serveCmd() *cobra.Command {
 				return err
 			}
 			port = listener.Addr().(*net.TCPAddr).Port
+			dir := filepath.Dir(statePath)
+			d, err := dispatch.New(dispatch.Config{
+				StatePath: filepath.Join(dir, "dispatch.json"), AppPath: firstSet(githubApp, filepath.Join(dir, "github-app.json")),
+				Secret: secret, DispatchToken: dispatchToken, Logger: logger,
+			})
+			if err != nil {
+				_ = listener.Close()
+				return err
+			}
+			// Its last changes, on any way out.
+			defer d.Close()
 			h, err := hub.New(hub.Config{
 				Token: token, NoToken: noToken, Secret: secret, InstanceToken: instanceToken, Bind: bind, Port: port,
-				StatePath: statePath, AllowedHosts: allowedHosts, Logger: logger,
+				StatePath: statePath, AllowedHosts: allowedHosts, Logger: logger, Dispatch: d,
 			})
 			if err != nil {
 				_ = listener.Close()
@@ -145,6 +160,8 @@ func serveCmd() *cobra.Command {
 	cmd.Flags().StringVar(&secret, "secret", "", "Secret the AgentAPIs sign their events with, as given to agentapi hub join (default $AGENTAPI_HUB_SECRET); required")
 	cmd.Flags().StringVar(&instanceToken, "instance-token", "", "API token sent to the AgentAPIs (default $AGENTAPI_HUB_INSTANCE_TOKEN, else $AGENTAPI_API_TOKEN)")
 	cmd.Flags().StringVar(&statePath, "state", "", "File that keeps the instances (default ~/.agentapi/hub/instances.json)")
+	cmd.Flags().StringVar(&dispatchToken, "dispatch-token", "", "Token a client (a GitHub workflow's runner) calls POST /api/dispatch with, and nothing else (default $AGENTAPI_HUB_DISPATCH_TOKEN)")
+	cmd.Flags().StringVar(&githubApp, "github-app-file", "", "The hub's GitHub App, which /github/connect registers (default github-app.json next to --state)")
 	cmd.Flags().StringVar(&logLevel, "log-level", "", "Least important level to log: "+logctx.LevelNames+" (default $AGENTAPI_HUB_LOG_LEVEL, else info)")
 	cmd.Flags().StringSliceVar(&allowedHosts, "allowed-hosts", nil, "Names browsers open the hub by, besides IP addresses and localhost, which always work (hostnames only, comma-separated; '*' for any); without it the hub answers to any name")
 	return cmd
