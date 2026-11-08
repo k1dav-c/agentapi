@@ -203,6 +203,30 @@ func invokingUser(getenv func(string) string, euid, uid int, lookup func(string)
 	return owner{name: name, uid: uid, home: home}, nil
 }
 
+// User is who ran agentapi, as InvokingUser finds them.
+type User struct {
+	Name     string
+	UID, GID int
+	// Home is empty when it can't be found.
+	Home string
+}
+
+// InvokingUser returns who ran agentapi: under sudo the user who ran sudo
+// rather than root, with their group from SUDO_GID.
+func InvokingUser() (User, error) {
+	o, err := invokingUser(os.Getenv, os.Geteuid(), os.Getuid(), user.Lookup, os.UserHomeDir)
+	if err != nil {
+		return User{}, err
+	}
+	gid := os.Getgid()
+	if o.uid != os.Getuid() {
+		if id, err := strconv.Atoi(os.Getenv("SUDO_GID")); err == nil {
+			gid = id
+		}
+	}
+	return User{Name: o.name, UID: o.uid, GID: gid, Home: o.home}, nil
+}
+
 // process is what the system says of a running process.
 type process struct {
 	uid  int
