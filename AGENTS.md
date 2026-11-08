@@ -7,7 +7,7 @@ Use these commands and conventions when changing AgentAPI.
 - `make build` - Build the binary to `out/agentapi` (includes chat UI build)
 - `make embed` - Build the chat UI and embed it into Go
 - `go build -o out/agentapi main.go` - Build the Go binary with existing embedded assets, without rebuilding the chat UI
-- `make gen` (`go generate ./...`) - Generate OpenAPI schema and version info
+- `make gen` (`go generate ./...`) - Generate the OpenAPI schema, the hub's schema (`lib/hub/hub-schema.json`) and version info
 - `make fmt` - Format Go code with gofumpt
 - `make lint` - Run all linters (Go, TypeScript, shellcheck, actionlint)
 
@@ -18,6 +18,10 @@ Use these commands and conventions when changing AgentAPI.
 - After `make gen`, run `bun run gen:api` in `chat/` and commit
   `chat/src/lib/api-schema.ts`, which contains the chat's API types. A chat test
   checks that they match `openapi.json`.
+- The hub's wire types (its API is plain chi, not huma) are generated too: `make gen` writes
+  `lib/hub/hub-schema.json` from the Go types (`hub.Schema`; `TestHubSchema` checks it), and
+  `bun run gen:api` writes `chat/src/lib/hub-schema.ts` from it, with `hubLimits`, the limits the
+  hub page checks. Commit both; a chat test checks the second.
 - Don't write the schema with `go run main.go server --print-openapi dummy > openapi.json`:
   that escapes `<` and `>` in descriptions as `\u003c` / `\u003e`, while
   `make gen` doesn't. The Release workflow runs `make gen` and fails with
@@ -69,7 +73,7 @@ protocols (the native transport).
 - `lib/pricing/` - Model prices per million tokens (built-in `prices.json`, `--prices` file) and per-call cost calculation; `scripts/prices.mjs` compares `prices.json` with Pi's model registry
 - `lib/statedb/` - SQLite persistence of conversations (`--state-db`; a deprecated `--state-file` is imported into it); the stored state is one versioned meta value, `conversation_state` (`state.go`)
 - `lib/instanceapi/` - The contract with clients that watch many AgentAPIs: who an instance is (with its `AgentType`), its summary, the webhook envelope and signature, and the state a hub shows; it imports only `lib/agentstate` and `lib/util`
-- `lib/hub/` - `agentapi hub serve`: a server that watches many AgentAPIs, built on `lib/instanceapi` and `lib/httpmw` rather than `lib/httpapi` (signed webhooks, summary streams, a proxy that opens any of them in the chat, the addresses machines join it by, the favorite prompts its page keeps)
+- `lib/hub/` - `agentapi hub serve`: a server that watches many AgentAPIs, built on `lib/instanceapi` and `lib/httpmw` rather than `lib/httpapi` (signed webhooks, summary streams, a proxy that opens any of them in the chat, the addresses machines join it by, the favorite prompts among the settings its page keeps, and `hub-schema.json`, the generated schema of its wire types)
 - `lib/sse/` - Server-sent events as the HTML standard defines them (`Reader`, `Write`), for the hub's streams
 - `lib/netaddr/` - The machine's IPv4 addresses: those other machines may reach (the hub's join URLs), and the one on the route to a host (`{ip}` in `--public-url`)
 - `lib/userconfig/` - The user's settings file (`~/.agentapi/config.yaml`), which `agentapi server` reads and `agentapi hub join` writes

@@ -35,6 +35,8 @@ fmt: fmt/go
 fmt/go:
 	go tool mvdan.cc/gofumpt -w -l .
 
+# openapi.json, lib/hub/hub-schema.json (the hub's wire types) and the version;
+# then run `bun run gen:api` in chat/ for the chat's types of both.
 .PHONY: gen
 gen:
 	go generate ./...

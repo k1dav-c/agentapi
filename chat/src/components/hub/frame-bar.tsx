@@ -5,7 +5,7 @@ import {ArrowLeft, ExternalLink, X} from "lucide-react";
 import {AgentMark} from "@/components/agent-mark";
 import {Button} from "@/components/ui/button";
 import {HEADER_ACTIONS_ID} from "@/app/header";
-import {favoritesFromHub, fromFrame, instanceFromHub, openFromFrame, type FrameInstance} from "@/lib/hub-frame";
+import {fromFrame, messageFromHub, openFromFrame, type FrameInstance} from "@/lib/hub-frame";
 import {cn} from "@/lib/utils";
 import {setFrameFavorites} from "./frame-favorites";
 import {MachineSwitch} from "./machine-tabs";
@@ -22,10 +22,9 @@ export function FrameBar() {
   const [instance, setInstance] = useState<FrameInstance>();
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
-      const told = instanceFromHub(event, window.parent);
-      if (told) setInstance(told);
-      const favorites = favoritesFromHub(event, window.parent);
-      if (favorites) setFrameFavorites(favorites);
+      const message = messageFromHub(event, window.parent);
+      if (message?.type === "instance") setInstance(message.instance);
+      else if (message?.type === "favorites") setFrameFavorites(message.favorites);
     };
     window.addEventListener("message", onMessage);
     // On every load of the chat, a reload too: the hub answers each.

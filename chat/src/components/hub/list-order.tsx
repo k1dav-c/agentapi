@@ -1,50 +1,19 @@
 "use client";
 
-import {useCallback, useState} from "react";
 import {History, ListTree, Server, type LucideIcon} from "lucide-react";
-import {storedView, type ListOrder} from "@/lib/hub-order";
+import type {ListOrder} from "@/lib/hub-order";
+import {useHubSetting} from "@/lib/hub-settings";
 import {cn} from "@/lib/utils";
-
-// Where the browser keeps the list's order, and whether by machine.
-const orderKey = "agentapi.hub.list-order";
-const byMachineKey = "agentapi.hub.by-machine";
-
-// storedListView reads them; an order of "machines" from an earlier build
-// is kept again as the groups by machine.
-function storedListView(): {order: ListOrder; byMachine: boolean} {
-  try {
-    const order = localStorage.getItem(orderKey);
-    const view = storedView(order, localStorage.getItem(byMachineKey));
-    if (order === "machines") {
-      localStorage.setItem(orderKey, view.order);
-      localStorage.setItem(byMachineKey, String(view.byMachine));
-    }
-    return view;
-  } catch {
-    return {order: "groups", byMachine: false};
-  }
-}
-
-function keep(key: string, value: string) {
-  try {
-    localStorage.setItem(key, value);
-  } catch {}
-}
 
 // useListView is the order of the hub's list this browser keeps (its
 // groups, or the latest change first) and whether it puts each machine's
 // agents together.
-export function useListView(): {order: ListOrder; setOrder: (order: ListOrder) => void; byMachine: boolean; setByMachine: (on: boolean) => void} {
-  const [view, setView] = useState(storedListView);
-  const setOrder = useCallback((order: ListOrder) => {
-    setView((previous) => ({...previous, order}));
-    keep(orderKey, order);
-  }, []);
-  const setByMachine = useCallback((byMachine: boolean) => {
-    setView((previous) => ({...previous, byMachine}));
-    keep(byMachineKey, String(byMachine));
-  }, []);
-  return {...view, setOrder, setByMachine};
+export type HubListView = {order: ListOrder; setOrder: (order: ListOrder) => void; byMachine: boolean; setByMachine: (on: boolean) => void};
+
+export function useListView(): HubListView {
+  const [order, setOrder] = useHubSetting("listOrder");
+  const [byMachine, setByMachine] = useHubSetting("byMachine");
+  return {order, setOrder, byMachine, setByMachine};
 }
 
 const orders: {id: ListOrder; label: string; title: string; Icon: LucideIcon}[] = [

@@ -1,44 +1,38 @@
 import {describe, expect, test} from "bun:test";
 import {renderToStaticMarkup} from "react-dom/server";
 import type {HubInstance, Summary} from "@/lib/hub";
+import {hubInstance, summary} from "@/lib/hub-fixtures";
 import type {ListOrder} from "@/lib/hub-order";
 import {FixedHubClock} from "./clock";
 import {InstanceRow, agentName} from "./instance-row";
+import {HubListContext, pinPlace} from "./list-context";
 
 // Finished at 9:40, which the hub saw at 9:41; in the group Client work.
-const finished: HubInstance = {
-  id: "dev-1:3284",
+const finished: HubInstance = hubInstance("dev-1:3284", {
   name: "checkout-api",
-  url: "http://dev-1:3284",
   hostname: "dev-1",
   agent_type: "claude",
-  source: "webhook",
   last_seen: "2026-11-01T09:59:00Z",
   changed_at: "2026-11-01T09:41:00Z",
-  connection: "connected",
   group: "Client work",
   state: "unread",
-  summary: {
-    instance: {id: "dev-1:3284", server_id: "s", agent_type: "claude", transport: "native"},
-    status: "stable",
-    lifecycle: "ready",
-    attention: "none",
+  summary: summary({
     title: "Deploy the release",
-    pending_requests: 0,
-    queued_messages: 0,
     tasks: 1,
     unread: true,
     seen_at: "2026-11-01T09:00:00Z",
     task: {id: 1, status: "completed", prompt: "Deploy the release", started_at: "2026-11-01T09:30:00Z", ended_at: "2026-11-01T09:40:00Z", errors: [], steered: []},
-  } as Summary,
-};
+  }),
+});
 
 const actions = {select() {}, forget() {}, group() {}, newGroup() {}, mute() {}, pin() {}, move() {}};
 
 const row = (order: ListOrder, target: HubInstance = finished, pinned?: {first: boolean; last: boolean}) =>
   renderToStaticMarkup(
     <FixedHubClock now={Date.parse("2026-11-01T10:00:00Z")}>
-      <InstanceRow instance={target} hubVersion="2.1.0" root="" groups={["Client work"]} order={order} selected={false} pinned={pinned} actions={actions} />
+      <HubListContext.Provider value={{hubVersion: "2.1.0", root: "", groups: ["Client work"], prefix: "", actions}}>
+        <InstanceRow instance={target} order={order} selected={false} pinned={pinned && pinPlace(pinned.first, pinned.last)} />
+      </HubListContext.Provider>
     </FixedHubClock>,
   );
 
@@ -101,7 +95,7 @@ describe("InstanceRow's work time", () => {
     expect(row("groups")).not.toContain("data-hub-work");
     expect(row("groups", {...finished, work: {last_24h_seconds: 0, last_7d_seconds: 0}})).not.toContain("data-hub-work");
     // A usage limit's bar takes the room.
-    const limited = {...working, summary: {...finished.summary, usage: {rate_limits: [{used_percent: 80}]}} as Summary};
+    const limited = {...working, summary: summary({...finished.summary, usage: {rate_limits: [{id: "five_hour", label: "5h", used_percent: 80}]}})};
     const limitedRow = row("groups", limited);
     expect(limitedRow).toContain("Usage limit 80% used");
     expect(limitedRow).not.toContain("data-hub-work");
@@ -110,7 +104,7 @@ describe("InstanceRow's work time", () => {
 
 describe("InstanceRow's spend", () => {
   const spend = {day_usd: 4.2, week_usd: 30, scope: "s1", updated_at: "2026-11-01T09:59:00Z"};
-  const spending = (s: Summary["spend"]): HubInstance => ({...finished, summary: {...finished.summary, spend: s} as Summary});
+  const spending = (s: Summary["spend"]): HubInstance => ({...finished, summary: summary({...finished.summary, spend: s})});
 
   test("its title and screen reader text say the tokens of the last 24 hours", () => {
     const tokens = {input: 1_000, output: 400_000, cache_write: 200_000, cache_read: 2_800_000, total: 3_401_000};

@@ -3,8 +3,9 @@
 import {useState} from "react";
 import {ArrowRight, Eye, EyeOff, TriangleAlert} from "lucide-react";
 import {Button} from "@/components/ui/button";
-import {ConstellationScene, HubMark} from "./brand";
+import type {HubWire} from "@/lib/hub";
 import {cn} from "@/lib/utils";
+import {ConstellationScene, HubMark} from "./brand";
 
 // SignIn trades the hub token for the hub's session cookie.
 export function SignIn({root, onSignedIn}: {root: string; onSignedIn: () => void}) {
@@ -26,7 +27,7 @@ export function SignIn({root, onSignedIn}: {root: string; onSignedIn: () => void
       method: "POST",
       credentials: "same-origin",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({token: token.trim()}),
+      body: JSON.stringify({token: token.trim()} satisfies HubWire["SignInBody"]),
     }).catch(() => undefined);
     setBusy(false);
     if (response?.ok) return onSignedIn();

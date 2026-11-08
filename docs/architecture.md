@@ -81,7 +81,7 @@ emitter. Handlers call the conversation and read state from the emitter.
 | `lib/native/procutil` | Child process groups and graceful shutdown |
 | `lib/statedb/` | SQLite persistence for `--state-db`, and the import of a `--state-file` |
 | `lib/instanceapi/` | The contract between an AgentAPI and the clients that watch many: who it is (`WebhookInstance`, in its webhook events, summary and registry entry, with its `AgentType`), its summary, the webhook envelope with its signature (`Sign`, `Verify`), and the state a hub shows of each instance (`StateOf`). It imports only `lib/agentstate` and `lib/util` |
-| `lib/hub/` | `agentapi hub serve`, over `lib/instanceapi` and `lib/httpmw` rather than the server: the instances, the groups and pins set on its page, when each last changed what its row shows and when the hub saw each working (`store.go`, `work.go`, kept in a file by `persist.go`), the favorite prompts (`favorites.go`, `GET`/`PUT /api/favorites`, in the same file), the signed webhook receiver (`webhook.go`), each instance's summary stream (`watch.go`), sign-in, the browser's event stream and the proxy to the instances (`hub.go`, `proxy.go`), where machines join it (`join.go`: its addresses for `GET /api/join` and the startup log); the user guide is [hub.md](hub.md) |
+| `lib/hub/` | `agentapi hub serve`, over `lib/instanceapi` and `lib/httpmw` rather than the server: the instances, the groups and pins set on its page, when each last changed what its row shows and when the hub saw each working (`store.go`, `work.go`, kept in a file by `persist.go`), the favorite prompts (`favorites.go`, `GET`/`PUT /api/favorites`, among the hub's settings in the same file), the schema of its wire types (`schema.go`, `hub-schema.json`, for the page's types), the signed webhook receiver (`webhook.go`), each instance's summary stream (`watch.go`), sign-in, the browser's event stream and the proxy to the instances (`hub.go`, `proxy.go`), where machines join it (`join.go`: its addresses for `GET /api/join` and the startup log); the user guide is [hub.md](hub.md) |
 | `lib/sse/` | Server-sent events as the HTML standard defines them: a reader (data: lines joined, comments skipped, CR, LF or CRLF line ends) and a writer, used by the hub for the instances' summary streams and the browser's stream. `lib/httpapi` writes its streams with huma's `sse` |
 | `lib/netaddr/` | The machine's IPv4 addresses: those other machines may reach it at (the hub's join URLs), and the one it reaches a host from (`Resolver`, for `{ip}` in `--public-url`) |
 | `lib/userconfig/` | The user's settings file, `~/.agentapi/config.yaml`: flags by name, read by `agentapi server`, written by `agentapi hub` |
@@ -682,9 +682,13 @@ read to `instances.json.bak`. A file that doesn't parse is moved aside (`.corrup
 hub starts empty; one of a newer version stops the hub instead. An older hub moves the envelope aside
 as damaged, so going back to one takes `jq .instances` first ([hub.md](hub.md#files)). Fields added
 inside version 1, such as each instance's work time (`work`: the spans of the last 7 days, written
-only when a span starts or ends), are ones an older hub of the envelope ignores. So are the favorites,
-`"favorites": [...]` next to `instances`; such a hub drops them at its next write, and the `.bak` it
-made keeps them. The delivery
+only when a span starts or ends), are ones an older hub of the envelope ignores. So are the hub's
+settings, `"settings": {"favorites": [...]}` next to `instances` (`hubSettings`, changed through
+`store.updateSettings`); such a hub drops them at its next write, and the `.bak` it made keeps them.
+This release writes the favorites a second time at the top level, `"favorites": [...]`, where hubs
+of 3.5 to 3.7 read them, and reads `settings` first, else those: a downgrade keeps the favorites,
+and what that hub changes in them is what this one reads after it. A new version instead would
+make every older hub refuse the file. The delivery
 IDs of the webhook events it took, each until its signature no longer holds, go the same way into
 `instances.deliveries.json`, so a copy replayed after a restart is refused too.
 
@@ -928,9 +932,16 @@ the chat says `ready` and when they change; the chat asks for `back`, `cancel-up
 agent of the machine) and `manage-favorites`, which opens the hub's settings. Each side ignores a
 message it doesn't know, so a chat and a hub of different versions get along: without `favorites`
 the composer shows no ☆. `/chat/hub/` is the
-hub's page (`components/hub-view.tsx`, its parts and hooks in `components/hub/`, its logic in
-`lib/hub.ts`, the changes it makes through `lib/hub-api.ts`), which `agentapi hub serve` serves with
-the same build.
+hub's page (`components/hub-view.tsx`, its parts and hooks in `components/hub/`, the rows' shared
+props in `HubListContext`; its logic in `lib/hub.ts`, the instance, its state and the stream's
+events, and beside it `lib/hub-groups.ts`, `hub-machines.ts`, `hub-filter.ts`, `hub-format.ts`,
+`hub-spend.ts`, `hub-work.ts`, `hub-version.ts` and `hub-order.ts`; the changes it makes through
+`lib/hub-api.ts`; what the browser keeps through `lib/hub-settings.ts`), which `agentapi hub serve`
+serves with the same build. The hub's API isn't huma's: its wire types are generated, `make gen`
+writing `lib/hub/hub-schema.json` from the Go types (`hub.Schema`) and `bun run gen:api` writing
+`lib/hub-schema.ts` from it, with `hubLimits`, the limits the page checks; `parseHubEvent` reads
+each event of `/api/events`. The frame's messages are read field by field, `parseToFrame` in the
+chat and `parseFromFrame` in the hub.
 
 - `components/chat-provider.tsx` composes the client state and API operations.
   Actions and API calls come from `useChatActions()`, an object that never

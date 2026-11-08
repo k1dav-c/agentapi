@@ -2,7 +2,10 @@
 
 import {ArrowRight, CircleCheck, ClipboardList, Gauge, KeyRound, MessageCircleQuestion, ShieldQuestion} from "lucide-react";
 import {AgentMark} from "@/components/agent-mark";
-import {activity, displayName, formatAgo, formatElapsed, instanceState, instanceVersion, type HubFilter, type HubInstance, type InstanceState} from "@/lib/hub";
+import {displayName, instanceState, type HubInstance, type InstanceState} from "@/lib/hub";
+import type {HubFilter} from "@/lib/hub-filter";
+import {activity, formatAgo, formatElapsed} from "@/lib/hub-format";
+import {instanceVersion} from "@/lib/hub-version";
 import {cn} from "@/lib/utils";
 import {useHubTime} from "./clock";
 import {Constellation} from "./brand";

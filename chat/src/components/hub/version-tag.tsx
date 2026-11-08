@@ -1,4 +1,4 @@
-import {versionRelation, versionTitle} from "@/lib/hub";
+import {versionRelation, versionTitle} from "@/lib/hub-version";
 import {cn} from "@/lib/utils";
 
 // OlderMark marks a version older than the hub's.

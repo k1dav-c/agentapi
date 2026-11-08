@@ -5,31 +5,12 @@
 
 import {Fragment} from "react";
 import {AgentMark} from "@/components/agent-mark";
-import {
-  countedSpends,
-  countedTokens,
-  displayName,
-  formatTokens,
-  formatUSD,
-  formatWork,
-  groupSubtotals,
-  machineOf,
-  machineSubtotals,
-  parseVersion,
-  spendTitle,
-  spendTotals,
-  tokenKinds,
-  tokensTitle,
-  tokenTotals,
-  versionTotals,
-  workSeconds,
-  workTitle,
-  workTotals,
-  type GroupSubtotal,
-  type HubInstance,
-  type MachineSubtotal,
-  type VersionRelation,
-} from "@/lib/hub";
+import {displayName, type HubInstance} from "@/lib/hub";
+import {groupSubtotals, type GroupSubtotal} from "@/lib/hub-groups";
+import {machineOf, machineSubtotals, type MachineSubtotal} from "@/lib/hub-machines";
+import {countedSpends, countedTokens, formatTokens, formatUSD, spendTitle, spendTotals, tokenKinds, tokensTitle, tokenTotals} from "@/lib/hub-spend";
+import {parseVersion, versionTotals, type VersionRelation} from "@/lib/hub-version";
+import {formatWork, workSeconds, workTitle, workTotals} from "@/lib/hub-work";
 import {olderUpdates} from "@/lib/hub-update";
 import {cn} from "@/lib/utils";
 import {useHubTime} from "./clock";

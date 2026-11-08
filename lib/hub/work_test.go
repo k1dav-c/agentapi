@@ -161,7 +161,7 @@ func TestWorkTimeAcrossRestarts(t *testing.T) {
 		Instances *[]storedInstance `json:"instances"`
 	}{&kept}))
 	kept[0].LastSeen = clock.Now().Add(-30 * time.Minute)
-	killed, err := encodeState(kept, nil)
+	killed, err := encodeState(kept, hubSettings{})
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(path, killed, 0o600))
 	after, err := newStore(path, logger, clock)
@@ -192,7 +192,7 @@ func TestWorkTimeFiles(t *testing.T) {
 	var old struct {
 		Version   int `json:"version"`
 		Instances []struct {
-			record
+			Record
 			Stopped  bool   `json:"stopped,omitempty"`
 			Activity string `json:"activity,omitempty"`
 		} `json:"instances"`

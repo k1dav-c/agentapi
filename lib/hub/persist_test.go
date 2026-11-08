@@ -2,9 +2,11 @@ package hub
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -165,35 +167,93 @@ func TestStateKeepsTheConfirmedURL(t *testing.T) {
 	assert.Equal(t, "http://dev:9", instance.URL, "one kept by an earlier hub stays where it was")
 }
 
-// The file keeps the favorites next to the instances. One edited by hand
+// setFavorites keeps list as the store's favorites.
+func setFavorites(t *testing.T, s *store, list []Favorite) {
+	t.Helper()
+	_, err := s.updateSettings(func(settings *hubSettings) error {
+		settings.Favorites = list
+		return nil
+	})
+	require.NoError(t, err)
+}
+
+// The file keeps the hub's settings next to the instances, and its
+// favorites where a hub of 3.5 to 3.7 reads them too. One edited by hand
 // with favorites the API refuses starts without them, and with its
 // instances; one without favorites (a hub before 3.5) starts with none.
-func TestStateKeepsTheFavorites(t *testing.T) {
+func TestStateKeepsTheSettings(t *testing.T) {
 	logger := slog.New(slog.DiscardHandler)
 	path := filepath.Join(t.TempDir(), "instances.json")
 	s, err := newStore(path, logger, quartz.NewMock(t))
 	require.NoError(t, err)
-	assert.Equal(t, []Favorite{}, s.getFavorites(), "none in a new file")
-	s.setFavorites([]Favorite{{ID: "a", Title: "Review", Text: "Review the diff."}})
+	assert.Equal(t, []Favorite{}, s.getSettings().Favorites, "none in a new file")
+	review := []Favorite{{ID: "a", Title: "Review", Text: "Review the diff."}}
+	setFavorites(t, s, review)
 	require.NoError(t, s.close())
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	var file struct {
+		Version  int `json:"version"`
+		Settings struct {
+			Favorites []Favorite `json:"favorites"`
+		} `json:"settings"`
+		Favorites []Favorite `json:"favorites"`
+	}
+	require.NoError(t, json.Unmarshal(data, &file))
+	assert.Equal(t, 1, file.Version, "an older hub still reads it")
+	assert.Equal(t, review, file.Settings.Favorites)
+	assert.Equal(t, review, file.Favorites, "where a hub of 3.5 to 3.7 reads them")
 
 	again, err := newStore(path, logger, quartz.NewMock(t))
 	require.NoError(t, err)
-	assert.Equal(t, []Favorite{{ID: "a", Title: "Review", Text: "Review the diff."}}, again.getFavorites())
+	assert.Equal(t, review, again.getSettings().Favorites)
 	require.NoError(t, again.close())
 
-	for name, content := range map[string]string{
-		"refused": `{"version": 1, "instances": [{"id": "dev:1", "url": "http://dev:1"}], "favorites": [{"id": "a", "text": ""}]}`,
-		"older":   `{"version": 1, "instances": [{"id": "dev:1", "url": "http://dev:1"}]}`,
+	for name, test := range map[string]struct {
+		content   string
+		favorites []Favorite
+	}{
+		// A hub of 3.5 to 3.7 wrote it, or ran after this one.
+		"favorites only": {`{"version": 1, "instances": [{"id": "dev:1", "url": "http://dev:1"}], "favorites": [{"id": "b", "text": "Old"}]}`, []Favorite{{ID: "b", Text: "Old"}}},
+		"settings first": {`{"version": 1, "instances": [{"id": "dev:1", "url": "http://dev:1"}], "settings": {"favorites": [{"id": "c", "text": "New"}]}, "favorites": [{"id": "b", "text": "Old"}]}`, []Favorite{{ID: "c", Text: "New"}}},
+		"no favorites":   {`{"version": 1, "instances": [{"id": "dev:1", "url": "http://dev:1"}], "settings": {"favorites": []}, "favorites": [{"id": "b", "text": "Old"}]}`, []Favorite{}},
+		"refused":        {`{"version": 1, "instances": [{"id": "dev:1", "url": "http://dev:1"}], "favorites": [{"id": "a", "text": ""}]}`, []Favorite{}},
+		"refused too":    {`{"version": 1, "instances": [{"id": "dev:1", "url": "http://dev:1"}], "settings": {"favorites": [{"id": "a b", "text": "x"}]}}`, []Favorite{}},
+		"older":          {`{"version": 1, "instances": [{"id": "dev:1", "url": "http://dev:1"}]}`, []Favorite{}},
 	} {
-		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+		require.NoError(t, os.WriteFile(path, []byte(test.content), 0o600))
 		s, err := newStore(path, logger, quartz.NewMock(t))
 		require.NoError(t, err, name)
-		assert.Equal(t, []Favorite{}, s.getFavorites(), name)
+		assert.Equal(t, test.favorites, s.getSettings().Favorites, name)
 		_, ok := s.get("dev:1")
 		assert.True(t, ok, "%s: its instances", name)
 		require.NoError(t, s.close())
 	}
+}
+
+// A change of the settings that fails changes nothing and tells no one;
+// one that changes nothing tells no one either.
+func TestUpdateSettings(t *testing.T) {
+	s, err := newStore("", slog.New(slog.DiscardHandler), quartz.NewMock(t))
+	require.NoError(t, err)
+	_, _, events := s.subscribe()
+	review := []Favorite{{ID: "a", Text: "Review the diff."}}
+	setFavorites(t, s, review)
+	event := <-events
+	assert.Equal(t, storeEvent{Kind: eventSettings, Settings: hubSettings{Favorites: review}}, event)
+
+	kept, err := s.updateSettings(func(settings *hubSettings) error {
+		settings.Favorites = nil
+		return errors.New("refused")
+	})
+	assert.EqualError(t, err, "refused")
+	assert.Equal(t, review, kept.Favorites)
+	setFavorites(t, s, slices.Clone(review))
+	setFavorites(t, s, nil)
+	event = <-events
+	assert.Equal(t, storeEvent{Kind: eventSettings, Settings: hubSettings{Favorites: []Favorite{}}}, event, "the next event is the next change; none is []")
+	assert.Equal(t, []Favorite{}, s.getSettings().Favorites)
 }
 
 func TestNormalizeFavorites(t *testing.T) {

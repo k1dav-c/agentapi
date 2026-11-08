@@ -1,5 +1,5 @@
 import {describe, expect, test} from "bun:test";
-import {agentDepth} from "./hub-view";
+import {agentDepth} from "./use-hub-history";
 
 describe("agentDepth", () => {
   test("the agents opened that lead to a page of the history", () => {

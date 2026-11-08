@@ -1,39 +1,25 @@
 import {describe, expect, test} from "bun:test";
 import {renderToStaticMarkup} from "react-dom/server";
 import {Dialog} from "@/components/ui/dialog";
-import type {HubInstance, InstanceUpdate, Summary} from "@/lib/hub";
+import type {HubInstance, InstanceUpdate} from "@/lib/hub";
+import {hubInstance, summary, update} from "@/lib/hub-fixtures";
 import {InstanceRow} from "./instance-row";
+import {HubListContext} from "./list-context";
 import {UpdateDialogBody} from "./update";
 import {UpdateChip, UpdateStatus} from "./update-chip";
 
-const update = (overrides: Partial<InstanceUpdate> = {}): InstanceUpdate => ({allowed: true, state: "idle", keeps_conversation: true, ...overrides});
-
-const instance = (given: Partial<InstanceUpdate> | null, overrides: Partial<HubInstance> = {}): HubInstance => ({
-  id: "dev-1:3284",
-  name: "checkout-api",
-  url: "http://dev-1:3284",
-  server_id: "s",
-  hostname: "dev-1",
-  agentapi_version: "2.0.0",
-  source: "webhook",
-  last_seen: "2026-11-01T00:00:00Z",
-  connection: "connected",
-  state: "idle",
-  summary: {
-    instance: {id: "dev-1:3284", server_id: "s", agent_type: "claude", transport: "native", agentapi_version: "2.0.0"},
-    status: "stable",
-    lifecycle: "ready",
-    attention: "none",
-    title: "",
-    pending_requests: 0,
-    queued_messages: 0,
-    tasks: 0,
-    unread: false,
-    seen_at: "2026-11-01T00:00:00Z",
-    ...(given ? {update: update(given)} : {}),
-  } as Summary,
-  ...overrides,
-});
+const instance = (given: Partial<InstanceUpdate> | null, overrides: Partial<HubInstance> = {}): HubInstance =>
+  hubInstance("dev-1:3284", {
+    name: "checkout-api",
+    server_id: "s",
+    hostname: "dev-1",
+    agentapi_version: "2.0.0",
+    summary: summary({
+      instance: {id: "dev-1:3284", server_id: "s", agent_type: "claude", transport: "native", agentapi_version: "2.0.0"},
+      ...(given ? {update: update(given)} : {}),
+    }),
+    ...overrides,
+  });
 
 // The text of html, without its tags; a machine's name, in an element of
 // its own (data-hub-host), reads as part of its sentence.
@@ -134,7 +120,9 @@ describe("UpdateDialogBody", () => {
 describe("InstanceRow", () => {
   const row = (target: HubInstance) =>
     renderToStaticMarkup(
-      <InstanceRow instance={target} hubVersion="2.1.0" root="" groups={[]} order="groups" selected={false} actions={{select() {}, forget() {}, group() {}, newGroup() {}, mute() {}, pin() {}, move() {}}} />,
+      <HubListContext.Provider value={{hubVersion: "2.1.0", root: "", groups: [], prefix: "", actions: {select() {}, forget() {}, group() {}, newGroup() {}, mute() {}, pin() {}, move() {}}}}>
+        <InstanceRow instance={target} order="groups" selected={false} />
+      </HubListContext.Provider>,
     );
 
   test("shows an update under way, and says it to a screen reader", () => {

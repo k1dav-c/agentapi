@@ -1,21 +1,12 @@
 import {describe, expect, test} from "bun:test";
 import {renderToStaticMarkup} from "react-dom/server";
-import type {HubInstance, InstanceUpdate, Summary} from "@/lib/hub";
+import type {HubInstance, InstanceUpdate} from "@/lib/hub";
+import {hubInstance, summary, update} from "@/lib/hub-fixtures";
 import {FixedHubClock} from "./clock";
 import {SpendCard, TokensCard, VersionsCard, WorkCard} from "./overview-cards";
 
-const running = (id: string, version: string, hostname: string, overrides: Partial<HubInstance> = {}): HubInstance => ({
-  id,
-  url: `http://${id}`,
-  server_id: "s",
-  hostname,
-  agentapi_version: version,
-  source: "webhook",
-  last_seen: "2026-11-01T00:00:00Z",
-  connection: "connected",
-  state: "idle",
-  ...overrides,
-});
+const running = (id: string, version: string, hostname: string, overrides: Partial<HubInstance> = {}): HubInstance =>
+  hubInstance(id, {server_id: "s", hostname, agentapi_version: version, ...overrides});
 
 // The text of html, without its tags; a machine's name, in an element of
 // its own (data-hub-host), reads as part of its sentence.
@@ -63,21 +54,12 @@ describe("VersionsCard", () => {
   });
 
   // An instance whose summary says how it updates through its API.
-  const updating = (id: string, version: string, hostname: string, update: Partial<InstanceUpdate>): HubInstance =>
+  const updating = (id: string, version: string, hostname: string, given: Partial<InstanceUpdate>): HubInstance =>
     running(id, version, hostname, {
-      summary: {
+      summary: summary({
         instance: {id, server_id: "s", agent_type: "claude", transport: "native", agentapi_version: version},
-        status: "stable",
-        lifecycle: "ready",
-        attention: "none",
-        title: "",
-        pending_requests: 0,
-        queued_messages: 0,
-        tasks: 0,
-        unread: false,
-        seen_at: "2026-11-01T00:00:00Z",
-        update: {allowed: true, state: "idle", keeps_conversation: true, ...update},
-      } as Summary,
+        update: update(given),
+      }),
     });
 
   test("the older agents it can update get a button; the others, why, and how to update them by hand", () => {
@@ -166,19 +148,10 @@ describe("TokensCard", () => {
   // An instance whose spend says n tokens of each kind today, 10n this week.
   const using = (id: string, n: number, scope: string, overrides: Partial<HubInstance> = {}, updated_at = "2026-11-03T11:00:00Z"): HubInstance =>
     running(id, "2.4.0", "dev-1", {
-      summary: {
+      summary: summary({
         instance: {id, server_id: "s", agent_type: "claude", transport: "native", agentapi_version: "2.4.0"},
-        status: "stable",
-        lifecycle: "ready",
-        attention: "none",
-        title: "",
-        pending_requests: 0,
-        queued_messages: 0,
-        tasks: 0,
-        unread: false,
-        seen_at: "2026-11-01T00:00:00Z",
         spend: {day_usd: n, week_usd: 10 * n, scope, updated_at, day_tokens: tokens(n), week_tokens: tokens(10 * n)},
-      } as Summary,
+      }),
       ...overrides,
     });
   const card = (instances: HubInstance[]) => text(renderToStaticMarkup(<TokensCard instances={instances} onOpen={() => {}} />));
@@ -223,19 +196,10 @@ describe("SpendCard", () => {
   const spending = (id: string, hostname: string, week: number, scope: string, overrides: Partial<HubInstance> = {}): HubInstance =>
     running(id, "2.4.0", hostname, {
       agent_type: "claude",
-      summary: {
+      summary: summary({
         instance: {id, server_id: "s", agent_type: "claude", transport: "native", agentapi_version: "2.4.0"},
-        status: "stable",
-        lifecycle: "ready",
-        attention: "none",
-        title: "",
-        pending_requests: 0,
-        queued_messages: 0,
-        tasks: 0,
-        unread: false,
-        seen_at: "2026-11-01T00:00:00Z",
         spend: {day_usd: week / 10, week_usd: week, scope, updated_at: "2026-11-03T11:00:00Z"},
-      } as Summary,
+      }),
       ...overrides,
     });
   const card = (instances: HubInstance[]) => text(renderToStaticMarkup(<SpendCard instances={instances} onOpen={() => {}} />));

@@ -4,6 +4,7 @@
 // like any other; a call throws HubAPIError when the hub refuses it or
 // doesn't answer.
 
+import type {HubWire} from "./hub";
 import {parseFavorites, type Favorite, type FavoriteDraft} from "./hub-favorites";
 import type {Fetcher} from "./hub-update";
 
@@ -19,11 +20,9 @@ export class HubAPIError extends Error {
   }
 }
 
-export interface InstanceChange {
-  pinned?: boolean;
-  group?: string;
-  muted?: boolean;
-}
+// InstanceChange is what PATCH /api/instances/{id} sets; the rest is left
+// as it is.
+export type InstanceChange = HubWire["InstanceChange"];
 
 export function createHubAPI(root: string, fetcher: Fetcher = (url, init) => fetch(url, init)) {
   const call = async (path: string, init: RequestInit): Promise<Response | undefined> => {
@@ -35,7 +34,7 @@ export function createHubAPI(root: string, fetcher: Fetcher = (url, init) => fet
     }
     if (response.ok) return response;
     // The hub's own errors, or huma's.
-    const body = (await response.json().catch(() => null)) as {error?: string; detail?: string; title?: string} | null;
+    const body = (await response.json().catch(() => null)) as (Partial<HubWire["ErrorBody"]> & {detail?: string; title?: string}) | null;
     throw new HubAPIError(body?.error || body?.detail || body?.title || `The hub answered ${response.status}.`, response.status);
   };
   const json = (method: string, body: unknown): RequestInit => ({method, headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
@@ -49,12 +48,12 @@ export function createHubAPI(root: string, fetcher: Fetcher = (url, init) => fet
     // Forgets an instance the hub doesn't follow now.
     forgetInstance: (id: string) => done(call(instance(id), {method: "DELETE"})),
     // The order of all the pinned instances (PUT /api/pins).
-    setPins: (ids: string[]) => done(call("/api/pins", json("PUT", {ids}))),
+    setPins: (ids: string[]) => done(call("/api/pins", json("PUT", {ids} satisfies HubWire["PinsBody"]))),
     // Replaces the favorites (PUT /api/favorites), and returns them as the
     // hub keeps them: those sent without an ID have one.
     setFavorites: async (favorites: FavoriteDraft[]): Promise<Favorite[]> => {
       const response = await call("/api/favorites", json("PUT", {favorites}));
-      const body = (await response?.json().catch(() => null)) as {favorites?: unknown} | null;
+      const body = (await response?.json().catch(() => null)) as Partial<Record<keyof HubWire["FavoritesBody"], unknown>> | null;
       const kept = parseFavorites(body?.favorites);
       if (!kept) throw new HubAPIError("The hub's answer has no favorites.", response?.status ?? 0);
       return kept;

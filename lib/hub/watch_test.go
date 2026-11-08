@@ -23,7 +23,7 @@ func TestReadSummariesJoinsDataLines(t *testing.T) {
 	require.NoError(t, err)
 	h.ctx = t.Context()
 	var got []instanceapi.SummaryBody
-	_, err = h.readSummaries(t.Context(), Instance{record: record{WebhookInstance: instanceapi.WebhookInstance{ID: "dev:1", URL: instance.URL}}}, func(s instanceapi.SummaryBody) {
+	_, err = h.readSummaries(t.Context(), Instance{Record: Record{WebhookInstance: instanceapi.WebhookInstance{ID: "dev:1", URL: instance.URL}}}, func(s instanceapi.SummaryBody) {
 		got = append(got, s)
 	})
 	require.NoError(t, err)

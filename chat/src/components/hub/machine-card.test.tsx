@@ -1,40 +1,27 @@
 import {describe, expect, test} from "bun:test";
 import {renderToStaticMarkup} from "react-dom/server";
-import type {HubInstance, HubMachine, Summary} from "@/lib/hub";
+import type {HubInstance, Summary} from "@/lib/hub";
+import type {HubMachine} from "@/lib/hub-machines";
+import {hubInstance, summary as baseSummary} from "@/lib/hub-fixtures";
 import type {ListOrder} from "@/lib/hub-order";
 import {FixedHubClock} from "./clock";
+import {HubListContext} from "./list-context";
 import {MachineCard} from "./machine-card";
 
-const summary = (overrides: Partial<Summary> = {}): Summary =>
-  ({
-    instance: {id: "x", server_id: "s", agent_type: "claude", transport: "native"},
-    status: "stable",
-    lifecycle: "ready",
-    attention: "none",
-    title: "",
-    pending_requests: 0,
-    queued_messages: 0,
-    tasks: 1,
-    unread: false,
-    seen_at: "2026-11-01T09:00:00Z",
-    ...overrides,
-  }) as Summary;
+// One task so far, seen at 9:00.
+const summary = (overrides: Partial<Summary> = {}): Summary => baseSummary({tasks: 1, seen_at: "2026-11-01T09:00:00Z", ...overrides});
 
 // An agent on dev-1, in the directory home, running AgentAPI 3.1.0.
-const agent = (port: number, agentType: string, overrides: Partial<HubInstance> = {}): HubInstance => ({
-  id: `dev-1:${port}`,
-  name: "home",
-  url: `http://dev-1:${port}`,
-  hostname: "dev-1",
-  agent_type: agentType,
-  agentapi_version: "3.1.0",
-  source: "webhook",
-  last_seen: "2026-11-01T09:59:00Z",
-  connection: "connected",
-  state: "idle",
-  summary: summary({title: "Nothing to do"}),
-  ...overrides,
-});
+const agent = (port: number, agentType: string, overrides: Partial<HubInstance> = {}): HubInstance =>
+  hubInstance(`dev-1:${port}`, {
+    name: "home",
+    hostname: "dev-1",
+    agent_type: agentType,
+    agentapi_version: "3.1.0",
+    last_seen: "2026-11-01T09:59:00Z",
+    summary: summary({title: "Nothing to do"}),
+    ...overrides,
+  });
 
 const claude = agent(3284, "claude", {
   state: "unread",
@@ -54,7 +41,9 @@ const card = (instances: HubInstance[], selected?: string, hostname = "dev-1", o
   const section = order === "recent" ? " recent" : "Group";
   return renderToStaticMarkup(
     <FixedHubClock now={Date.parse("2026-11-01T10:00:00Z")}>
-      <MachineCard card={`${section}\nhost ${hostname}`} machine={machine} prefix={prefix} order={order} hubVersion="3.1.0" root="" groups={[]} selected={selected} actions={actions} />
+      <HubListContext.Provider value={{hubVersion: "3.1.0", root: "", groups: [], prefix, actions}}>
+        <MachineCard card={`${section}\nhost ${hostname}`} machine={machine} order={order} selected={selected} />
+      </HubListContext.Provider>
     </FixedHubClock>,
   );
 };
@@ -119,7 +108,7 @@ describe("MachineCard", () => {
   });
 
   test("the tabs keep their order (by agent) whatever needs you", () => {
-    const asks = agent(3285, "codex", {state: "needs-you", summary: summary({attention: "request", request: {id: "r", kind: "approval", title: "Run it", created_at: "2026-11-01T09:59:00Z"} as Summary["request"]})});
+    const asks = agent(3285, "codex", {state: "needs-you", summary: summary({attention: "request", request: {id: "r", kind: "approval", title: "Run it", created_at: "2026-11-01T09:59:00Z"}})});
     expect(tabs(card([asks, claude]))).toEqual(["dev-1:3284", "*dev-1:3285"]);
   });
 

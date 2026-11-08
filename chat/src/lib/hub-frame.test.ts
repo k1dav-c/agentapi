@@ -1,56 +1,49 @@
 import {describe, expect, test} from "bun:test";
 import type {HubInstance} from "./hub";
-import {favoritesFromHub, favoritesToFrame, frameInstance, frameMessage, fromFrame, instanceFromHub, onFrameMessage, openFromFrame, toFrame, type FromFrame} from "./hub-frame";
+import {hubInstance} from "./hub-fixtures";
+import {favoritesToFrame, frameInstance, fromFrame, messageFromFrame, messageFromHub, openFromFrame, parseFromFrame, parseToFrame, readyAgain, toFrame, type FrameInstance} from "./hub-frame";
 
 const ORIGIN = "http://hub.test";
 
-const instance: HubInstance = {
-  id: "dev-1:3284",
+const instance: HubInstance = hubInstance("dev-1:3284", {
   name: "checkout-api",
-  url: "http://dev-1:3284",
   hostname: "dev-1",
   agent_type: "claude",
   agentapi_version: "2.1.0",
-  source: "webhook",
   last_seen: "2026-11-01T09:59:00Z",
-  connection: "connected",
-  state: "idle",
-};
+});
 
-describe("frameMessage", () => {
-  test("takes messages of the protocol from the same origin", () => {
-    expect(frameMessage({origin: ORIGIN, data: fromFrame("ready")}, ORIGIN)).toEqual({source: "agentapi.hub", type: "ready"});
+describe("the chat's messages to the hub", () => {
+  const frame = {};
+  const from = (data: unknown, source: unknown = frame, origin = ORIGIN) => messageFromFrame({origin, data, source: source as MessageEventSource}, frame, ORIGIN);
+
+  test("each ask, and open with the agent's ID", () => {
+    for (const ask of ["ready", "back", "cancel-update", "manage-favorites"] as const) expect(from(fromFrame(ask))).toEqual({source: "agentapi.hub", type: ask});
+    expect(from(openFromFrame("b"))).toEqual({source: "agentapi.hub", type: "open", id: "b"});
   });
 
-  test("ignores other origins, other messages and what isn't an object", () => {
-    expect(frameMessage({origin: "http://evil.test", data: fromFrame("ready")}, ORIGIN)).toBeUndefined();
-    expect(frameMessage({origin: ORIGIN, data: {source: "someone", type: "ready"}}, ORIGIN)).toBeUndefined();
-    expect(frameMessage({origin: ORIGIN, data: "ready"}, ORIGIN)).toBeUndefined();
-    expect(frameMessage({origin: ORIGIN, data: null}, ORIGIN)).toBeUndefined();
+  test("only from the frame's chat, of the same origin, in the protocol", () => {
+    expect(from(fromFrame("ready"), {})).toBeUndefined();
+    expect(from(fromFrame("ready"), frame, "http://evil.test")).toBeUndefined();
+    expect(messageFromFrame({origin: ORIGIN, data: fromFrame("ready"), source: null}, null, ORIGIN)).toBeUndefined();
+    for (const data of [{source: "someone", type: "ready"}, {source: "agentapi.hub", type: "other"}, {source: "agentapi.hub", type: "open", id: 7}, {source: "agentapi.hub", type: "open", id: ""}, "ready", null, []]) {
+      expect(parseFromFrame(data)).toBeUndefined();
+    }
   });
 });
 
 describe("the hub's side", () => {
-  const ready = fromFrame("ready") as FromFrame;
-
   test("each ready of the same chat counts, so the hub tells it the instance again", () => {
-    const first = onFrameMessage(undefined, ready, "a").framed;
+    const first = readyAgain(undefined, "a");
     expect(first).toEqual({instance: "a", ready: 1});
     // The chat reloaded: a new state, which the hub posts its info again for.
-    const again = onFrameMessage(first, ready, "a").framed;
+    const again = readyAgain(first, "a");
     expect(again).toEqual({instance: "a", ready: 2});
     expect(again).not.toBe(first);
   });
 
   test("another instance's chat starts over", () => {
-    expect(onFrameMessage({instance: "a", ready: 3}, ready, "b").framed).toEqual({instance: "b", ready: 1});
-  });
-
-  test("back and cancel-update are asks, which leave the frame as it is", () => {
-    const framed = {instance: "a", ready: 1};
-    expect(onFrameMessage(framed, fromFrame("back"), "a")).toEqual({framed, ask: "back"});
-    expect(onFrameMessage(framed, fromFrame("cancel-update"), "a")).toEqual({framed, ask: "cancel-update"});
-    expect(onFrameMessage(framed, {source: "agentapi.hub", type: "other"} as unknown as FromFrame, "a")).toEqual({framed});
+    expect(readyAgain({instance: "a", ready: 3}, "b")).toEqual({instance: "b", ready: 1});
   });
 
   test("the info it posts", () => {
@@ -85,53 +78,67 @@ describe("the hub's side", () => {
     expect(frameInstance(instance, {hubVersion: "", agent: "", tab: "t", machine: agents.slice(0, 1)}).machine).toBeUndefined();
   });
 
-  test("open is an ask for another agent, with its ID", () => {
-    const framed = {instance: "a", ready: 1};
-    expect(onFrameMessage(framed, openFromFrame("b"), "a")).toEqual({framed, open: "b"});
-    expect(onFrameMessage(framed, {source: "agentapi.hub", type: "open", id: 7} as unknown as FromFrame, "a")).toEqual({framed});
-    expect(onFrameMessage(framed, {source: "agentapi.hub", type: "open", id: ""} as FromFrame, "a")).toEqual({framed});
-  });
 });
 
-describe("the chat's side (FrameBar)", () => {
+describe("the hub's messages to the chat (FrameBar)", () => {
   const parent = {};
-  const told = toFrame({id: "dev-1:3284", name: "checkout-api", state: "idle", label: "Idle", tab: "t"});
+  const from = (data: unknown, source: unknown = parent, origin = ORIGIN) => messageFromHub({origin, data, source: source as MessageEventSource}, parent, ORIGIN);
+  const told = frameInstance(instance, {hubVersion: "2.2.0", agent: "Claude Code", tab: "t"});
 
-  test("takes the instance from the page that frames it", () => {
-    expect(instanceFromHub({origin: ORIGIN, data: told, source: parent as MessageEventSource}, parent, ORIGIN)).toEqual(told.instance);
+  test("the instance, as the hub tells it", () => {
+    expect(from(toFrame(told))).toEqual(toFrame(told));
+    const full: FrameInstance = {
+      ...told,
+      lastKnown: true,
+      update: {allowed: true, state: "failed", keeps_conversation: true, error: "no network"},
+      machine: [
+        {id: "a", name: "home", state: "working", label: "Working", ran: true, agentType: "claude", agent: "Claude Code"},
+        {id: "b", name: "home", state: "idle", label: "Idle"},
+      ],
+    };
+    expect(from(toFrame(full))).toEqual(toFrame(full));
   });
 
-  test("ignores another window, another origin and the chat's own messages", () => {
-    expect(instanceFromHub({origin: ORIGIN, data: told, source: {} as MessageEventSource}, parent, ORIGIN)).toBeUndefined();
-    expect(instanceFromHub({origin: "http://evil.test", data: told, source: parent as MessageEventSource}, parent, ORIGIN)).toBeUndefined();
-    expect(instanceFromHub({origin: ORIGIN, data: fromFrame("ready"), source: parent as MessageEventSource}, parent, ORIGIN)).toBeUndefined();
+  test("only from the page that frames it, of the same origin, in the protocol", () => {
+    expect(from(toFrame(told), {})).toBeUndefined();
+    expect(from(toFrame(told), parent, "http://evil.test")).toBeUndefined();
+    expect(from(fromFrame("ready"))).toBeUndefined();
+    expect(from({source: "someone", type: "instance", instance: told})).toBeUndefined();
+  });
+
+  test("an instance without its ID, name, label or tab is none; the rest is checked field by field", () => {
+    for (const missing of ["id", "name", "label", "tab"]) {
+      const rest: Record<string, unknown> = {...told};
+      delete rest[missing];
+      expect(parseToFrame({source: "agentapi.hub", type: "instance", instance: rest})).toBeUndefined();
+    }
+    const odd = parseToFrame({
+      source: "agentapi.hub",
+      type: "instance",
+      instance: {id: "a", name: "a", label: "Rebooting", tab: "t", state: "rebooting", hostname: 7, lastKnown: "yes", update: {state: 1}, machine: [{id: "x"}, "y"], extra: true},
+    });
+    expect(odd).toEqual(toFrame({id: "a", name: "a", state: "unknown", label: "Rebooting", tab: "t"}));
   });
 });
 
 describe("favorites", () => {
   const parent = {};
-  const from = (data: unknown, source: unknown = parent, origin = ORIGIN) => favoritesFromHub({origin, data, source: source as MessageEventSource}, parent, ORIGIN);
+  const from = (data: unknown, source: unknown = parent, origin = ORIGIN) => messageFromHub({origin, data, source: source as MessageEventSource}, parent, ORIGIN);
 
   test("the chat takes them from the page that frames it, leaving out what isn't one", () => {
     const told = favoritesToFrame([
       {id: "a", title: "Review", text: "Review the diff."},
       {id: "b", text: "Write the tests first."},
     ]);
-    expect(from(told)).toEqual(told.favorites);
-    expect(from({source: "agentapi.hub", type: "favorites", favorites: [{id: "a", text: "x"}, {id: 2, text: "y"}, {id: "c"}, null, {id: "a", text: "twice"}]})).toEqual([{id: "a", text: "x"}]);
-    expect(from({source: "agentapi.hub", type: "favorites", favorites: []})).toEqual([]);
+    expect(from(told)).toEqual(told);
+    expect(from({source: "agentapi.hub", type: "favorites", favorites: [{id: "a", text: "x"}, {id: 2, text: "y"}, {id: "c"}, null, {id: "a", text: "twice"}]})).toEqual(favoritesToFrame([{id: "a", text: "x"}]));
+    expect(from({source: "agentapi.hub", type: "favorites", favorites: []})).toEqual(favoritesToFrame([]));
   });
 
-  test("ignores another window, another origin, other messages and a list that isn't one", () => {
+  test("ignores another window, another origin and a list that isn't one", () => {
     const told = favoritesToFrame([{id: "a", text: "x"}]);
     expect(from(told, {})).toBeUndefined();
     expect(from(told, parent, "http://evil.test")).toBeUndefined();
-    expect(from(toFrame({id: "a", name: "a", state: "idle", label: "Idle", tab: "t"}))).toBeUndefined();
     expect(from({source: "agentapi.hub", type: "favorites", favorites: "x"})).toBeUndefined();
-  });
-
-  test("manage-favorites is an ask of the chat", () => {
-    const framed = {instance: "a", ready: 1};
-    expect(onFrameMessage(framed, fromFrame("manage-favorites"), "a")).toEqual({framed, ask: "manage-favorites"});
   });
 });

@@ -134,14 +134,28 @@ func writeFileAtomic(path string, data []byte) error {
 // reads too; such a hub takes the envelope for damaged (see readState).
 const stateVersion = 1
 
-// stateFile is the file of instances.
+// stateFile is the file of instances, and of the hub's settings.
 type stateFile struct {
 	Version   int              `json:"version"`
 	Instances []storedInstance `json:"instances"`
-	// Favorites are the prompts kept on the hub. A hub before 3.5 reads
-	// the file and ignores them, and its next write leaves them out; the
-	// .bak it makes as it starts still has them.
+	// Settings are the hub's settings, since 3.8. A new field rather than
+	// a new version: a hub that doesn't know a version refuses to start.
+	Settings *hubSettings `json:"settings,omitempty"`
+	// Favorites are the favorites as a hub of 3.5 to 3.7 keeps them, which
+	// this hub writes too, so one run after it keeps them. Such a hub
+	// leaves Settings out of its next write, and this one reads Favorites
+	// then. A hub before 3.5 ignores both; the .bak it makes as it starts
+	// still has them.
 	Favorites []Favorite `json:"favorites,omitempty"`
+}
+
+// settings are the hub's settings the file keeps: Settings, or those of
+// a hub that kept only its favorites.
+func (f stateFile) settings() hubSettings {
+	if f.Settings != nil {
+		return *f.Settings
+	}
+	return hubSettings{Favorites: f.Favorites}
 }
 
 // errDamaged is a file of instances that doesn't parse.
@@ -182,12 +196,13 @@ func decodeState(path string, data []byte) (stateFile, error) {
 	return file, nil
 }
 
-// encodeState is the file of instances, with the favorites.
-func encodeState(stored []storedInstance, favorites []Favorite) ([]byte, error) {
+// encodeState is the file of instances, with the settings.
+func encodeState(stored []storedInstance, settings hubSettings) ([]byte, error) {
 	if stored == nil {
 		stored = []storedInstance{}
 	}
-	return json.MarshalIndent(stateFile{Version: stateVersion, Instances: stored, Favorites: favorites}, "", "  ")
+	settings = settings.clone()
+	return json.MarshalIndent(stateFile{Version: stateVersion, Instances: stored, Settings: &settings, Favorites: settings.Favorites}, "", "  ")
 }
 
 // readState returns the file kept in path, and keeps a copy of the

@@ -764,7 +764,8 @@ cd ~/.agentapi/hub && jq .instances instances.json > instances.json.new && mv in
 每個實例的工作時間是同一個 version 1 裡多出來的欄位（`work`）。2.3 和 2.4 的 hub 會略過它，下次寫入
 檔案時就把它丟掉。3.0.1 以前的 hub 對 `confirmed_url`（hub 最後一次讀到實例摘要的網址）也一樣，
 3.5 以前的 hub 對我的最愛（和 `instances` 並列的 `"favorites": [...]`）也一樣。改回這種 hub 之後，
-它啟動時留下的 `.bak` 仍保有我的最愛。
+它啟動時留下的 `.bak` 仍保有我的最愛。這個版本把我的最愛存在 `"settings": {"favorites": [...]}`，
+也照樣寫一份在 `"favorites"`，也就是 3.5 到 3.7 的 hub 讀取的位置，所以改回這些版本時我的最愛還在。
 
 ## 限制
 

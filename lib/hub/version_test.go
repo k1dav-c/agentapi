@@ -21,7 +21,7 @@ import (
 // version, which comes with the list and the first event of the stream.
 // Signing in doesn't need it, so /api/session doesn't say it.
 func TestHubVersion(t *testing.T) {
-	hubSrv := startHub(t, "")
+	hubSrv := startHubWith(t, following(""), true)
 	var list struct {
 		Instances  []hub.Instance `json:"instances"`
 		HubVersion *string        `json:"hub_version"`
@@ -114,7 +114,7 @@ func (f *fakeAgentAPI) restart(serverID, agentapiVersion string) {
 // none).
 func TestHubVersionFollowsRestartInPlace(t *testing.T) {
 	instance := startFakeAgentAPI(t, "dev-1:3284", "run-1", "1.8.1")
-	hubSrv := startHub(t, "")
+	hubSrv := startHubWith(t, following(""), true)
 	started := func(delivery, serverID, agentapiVersion string) map[string]any {
 		return map[string]any{
 			"id": delivery, "type": "instance.started", "created_at": time.Now(),
@@ -181,7 +181,7 @@ func TestHubShowsAnAgentAPI2(t *testing.T) {
 		<-r.Context().Done()
 	}))
 	t.Cleanup(instance.Close)
-	hubSrv := startHub(t, "")
+	hubSrv := startHubWith(t, following(""), true)
 	started := map[string]any{
 		"id": "a2", "type": "instance.started", "created_at": time.Now(),
 		"instance": map[string]any{"id": "dev-2:3284", "server_id": "s2", "url": instance.URL, "agent_type": "aider", "transport": "pty"},

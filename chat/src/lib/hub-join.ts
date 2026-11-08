@@ -3,13 +3,15 @@
 // URL picked, the command to run on the machine and a prompt for an agent
 // there.
 
+import type {HubWire} from "./hub";
+
 // JoinURL is a URL machines join the hub by, with the interface of its
 // address on the hub's machine; none for the address the hub binds.
-export type JoinURL = {url: string; interface?: string};
+export type JoinURL = HubWire["JoinURL"];
 
 // JoinInfo is GET /api/join. Only a hub with a token sends its secret
 // (secret_shown): one without would show it to everyone who reaches it.
-export type JoinInfo = {urls: JoinURL[]; secret?: string; secret_shown: boolean};
+export type JoinInfo = HubWire["JoinInfo"];
 
 // fetchJoinInfo asks the hub each time the page shows the steps, so the
 // page holds the secret only while it shows them.

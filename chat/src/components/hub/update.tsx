@@ -7,7 +7,8 @@ import {CopyCommand} from "@/components/copy-command";
 import {Button} from "@/components/ui/button";
 import {Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle} from "@/components/ui/dialog";
 import {DropdownMenuItem, DropdownMenuSeparator} from "@/components/ui/dropdown-menu";
-import {displayName, instanceState, instanceVersion, versionRelation, type HubInstance} from "@/lib/hub";
+import {displayName, instanceState, type HubInstance} from "@/lib/hub";
+import {instanceVersion, versionRelation} from "@/lib/hub-version";
 import {
   ALLOW_UPDATE_LINE,
   STATE_DB_LINE,

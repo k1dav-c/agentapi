@@ -2,34 +2,21 @@
 
 import {memo, useCallback, useEffect, useId, useRef, useState} from "react";
 import {Folder, Server} from "lucide-react";
-import {
-  activeAgent,
-  activity,
-  displayName,
-  formatAgo,
-  formatUSD,
-  hasRun,
-  groupOf,
-  instanceState,
-  instanceVersion,
-  olderThanHub,
-  sharedVersion,
-  spendTitle,
-  spendTotals,
-  stateLabel,
-  tabOrder,
-  tokenTotals,
-  usagePercent,
-  type HubInstance,
-  type HubMachine,
-} from "@/lib/hub";
+import {displayName, hasRun, instanceState, stateLabel, usagePercent, type HubInstance} from "@/lib/hub";
+import {activity, formatAgo} from "@/lib/hub-format";
+import {groupOf} from "@/lib/hub-groups";
+import {activeAgent, sharedVersion, tabOrder, type HubMachine} from "@/lib/hub-machines";
+import {formatUSD, spendTitle, spendTotals, tokenTotals} from "@/lib/hub-spend";
+import {instanceVersion, olderThanHub} from "@/lib/hub-version";
 import {changedAt, recentAgent, type ListOrder} from "@/lib/hub-order";
+import {MAX_TAB_PICKS, readHubSetting, writeHubSetting, type TabPick} from "@/lib/hub-settings";
 import {shownUpdate, updateBadge} from "@/lib/hub-update";
+import {useStableCallback} from "@/lib/use-stable-callback";
 import {cn} from "@/lib/utils";
 import {useHubTime} from "./clock";
-import {activityTone, agentName, RowMenu, RowWork, UsageBar, type RowActions} from "./instance-row";
+import {activityTone, agentName, RowMenu, RowWork, UsageBar} from "./instance-row";
+import {useHubList} from "./list-context";
 import {AgentTabMark, shortAgent} from "./machine-tabs";
-import {readStorage, writeStorage} from "./storage";
 import {stateTone} from "./status-glyph";
 import {UpdateChip} from "./update-chip";
 import {VersionTag} from "./version-tag";
@@ -39,57 +26,27 @@ export interface MachineCardProps {
   // a machine with agents in two groups has a card in each.
   card: string;
   machine: HubMachine;
-  // prefix is the start most machines' names share (hostPrefix), dimmed.
-  prefix: string;
   // order is the list's: in the recent order the card shows its latest
   // change, and its agents' changes.
   order: ListOrder;
-  // hubVersion is the hub's own version, which marks the older instances.
-  hubVersion: string;
-  // root is the hub's address, whose proxy takes the instance's update.
-  root: string;
-  groups: string[];
   // selected is the instance open beside the list, if any.
   selected?: string;
-  actions: RowActions;
 }
 
-// Where the browser keeps the tab picked on each card and when, the latest
+// keepPick remembers the tab picked on a card, in the browser, the latest
 // last, so a reload shows the same ones; it forgets the oldest past
-// MAX_PICKS. A pick from before it kept when has none.
-const picksKey = "agentapi.hub.machine-tabs";
-const MAX_PICKS = 200;
-
-// A tab picked: the agent, and when (milliseconds since the epoch).
-type Pick = {id: string; at?: number};
-
-// readPicks is the tabs picked, as the browser keeps them.
-function readPicks(): Map<string, Pick> {
-  const stored = readStorage<unknown>(picksKey, []);
-  const picks = new Map<string, Pick>();
-  if (!Array.isArray(stored)) return picks;
-  for (const entry of stored) {
-    if (!Array.isArray(entry) || typeof entry[0] !== "string" || typeof entry[1] !== "string") continue;
-    picks.set(entry[0], {id: entry[1], at: typeof entry[2] === "number" ? entry[2] : undefined});
-  }
-  return picks;
-}
-
-// keepPick remembers the tab picked on a card, in the browser too.
-function keepPick(card: string, pick: Pick) {
-  const kept = readPicks();
+// MAX_TAB_PICKS.
+function keepPick(card: string, pick: TabPick) {
+  const kept = new Map(readHubSetting("tabPicks"));
   const was = kept.get(card);
   if (was?.id === pick.id && was.at === pick.at) return;
   kept.delete(card);
   kept.set(card, pick);
   for (const oldest of kept.keys()) {
-    if (kept.size <= MAX_PICKS) break;
+    if (kept.size <= MAX_TAB_PICKS) break;
     kept.delete(oldest);
   }
-  writeStorage(
-    picksKey,
-    [...kept].map(([key, {id, at}]) => (at === undefined ? [key, id] : [key, id, at])),
-  );
+  writeHubSetting("tabPicks", kept);
 }
 
 // useActiveAgent is the agent a card shows (activeAgent; in the recent
@@ -97,7 +54,7 @@ function keepPick(card: string, pick: Pick) {
 // the agent open beside the list becomes one of its own.
 function useActiveAgent(card: string, machine: HubMachine, order: ListOrder, selected?: string): [string, (id: string) => void] {
   const onCard = selected && machine.instances.some((instance) => instance.id === selected) ? selected : undefined;
-  const [picked, setPicked] = useState<Pick | undefined>(() => (onCard ? {id: onCard, at: Date.now()} : readPicks().get(card)));
+  const [picked, setPicked] = useState<TabPick | undefined>(() => (onCard ? {id: onCard, at: Date.now()} : readHubSetting("tabPicks").get(card)));
   const [opened, setOpened] = useState(onCard);
   if (onCard !== opened) {
     setOpened(onCard);
@@ -122,8 +79,10 @@ function splitHost(hostname: string, prefix: string): {start: string; rest: stri
 // they spent in the last 24 hours), and the agent of the tab picked
 // (AgentPanel).
 // A tab opens its agent; the arrows move between the tabs, and on the panel
-// switch it without opening.
-export function MachineCard({card, machine, prefix, order, hubVersion, root, groups, selected, actions}: MachineCardProps) {
+// switch it without opening. What every card shares comes from
+// HubListContext; the start most machines' names share is dimmed.
+export const MachineCard = memo(function MachineCard({card, machine, order, selected}: MachineCardProps) {
+  const {hubVersion, prefix, actions} = useHubList();
   const {hostname, instances} = machine;
   const version = sharedVersion(instances);
   const lastKnown = instances.every((instance) => instance.connection !== "connected");
@@ -150,6 +109,9 @@ export function MachineCard({card, machine, prefix, order, hubVersion, root, gro
     pick(tabs[next].id);
     if (focus) list.current?.querySelectorAll<HTMLElement>("[role=tab]")[next]?.focus();
   };
+  // The panel's arrows: one function for as long as the card is there, so
+  // the panel renders again only when its own props change.
+  const stepPanel = useStableCallback((by: -1 | 1) => step(by, false));
   const keys = {ArrowLeft: -1, ArrowRight: 1, Home: "first", End: "last"} as const;
   return (
     <li className="px-2 py-1" data-hub-card>
@@ -232,28 +194,21 @@ export function MachineCard({card, machine, prefix, order, hubVersion, root, gro
         <div role="tabpanel" id={`${id}-panel`} aria-labelledby={tabID(active)} className="px-1 pb-1">
           <AgentPanel
             instance={current}
-            hubVersion={hubVersion}
-            root={root}
-            groups={groups}
             named={!hostname.toLowerCase().includes(displayName(current).toLowerCase())}
             versioned={!version}
             selected={current.id === selected}
             recent={recent}
             latest={current === instances[0]}
-            actions={actions}
-            onStep={(by) => step(by, false)}
+            onStep={stepPanel}
           />
         </div>
       </div>
     </li>
   );
-}
+});
 
 interface AgentPanelProps {
   instance: HubInstance;
-  hubVersion: string;
-  root: string;
-  groups: string[];
   // named: the panel names its instance, as the machine's name doesn't say
   // it; versioned: it shows its version, as its machine's agents don't
   // share one.
@@ -265,7 +220,6 @@ interface AgentPanelProps {
   // its group; none for the card's latest, whose age the header shows.
   recent: boolean;
   latest: boolean;
-  actions: RowActions;
   // onStep shows the agent of the tab before (-1) or after (1).
   onStep: (by: -1 | 1) => void;
 }
@@ -274,100 +228,88 @@ interface AgentPanelProps {
 // spent and worked, opened as an InstanceRow is, with the same menu. The
 // list's keys step to it as to a row; the left and right arrows show the
 // card's other agents.
-const AgentPanel = memo(
-  function AgentPanel({instance, hubVersion, root, groups, named, versioned, selected, recent, latest, actions, onStep}: AgentPanelProps) {
-    const state = instanceState(instance);
-    const summary = instance.summary;
-    const usage = usagePercent(summary);
-    const usageShown = usage !== undefined && usage >= 60;
-    const agent = agentName(instance) || "Agent";
-    const doing = activity(instance);
-    const ago = useHubTime((now) => (recent && latest ? "" : formatAgo(recent ? changedAt(instance) : doing.since, now)));
-    const group = recent ? groupOf(instance) : "";
-    const spend = summary?.spend;
-    const lastKnown = instance.connection !== "connected";
-    const version = instanceVersion(instance);
-    const update = shownUpdate(instance);
-    const id = instance.id;
-    return (
-      <div className="group/row relative">
-        <div className={cn("flex items-stretch rounded-lg transition-colors", selected ? "bg-accent ring-1 ring-border" : "hover:bg-accent/60")}>
-          {selected && <span aria-hidden="true" className="absolute inset-y-2.5 left-0 w-[3px] rounded-r-full bg-state-working" />}
-          <button
-            type="button"
-            data-hub-row={id}
-            onClick={() => actions.select(id)}
-            onKeyDown={(event) => {
-              if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-              event.preventDefault();
-              onStep(event.key === "ArrowLeft" ? -1 : 1);
-            }}
-            aria-current={selected ? "true" : undefined}
-            aria-label={`${agent}, ${displayName(instance)}, ${stateLabel(instance)}${ago ? `, ${ago}` : ""}: ${doing.text}${olderThanHub(instance, hubVersion) ? ". Older than the hub" : ""}${update ? `. ${updateBadge(update).title}` : ""}`}
-            className="flex min-w-0 flex-1 flex-col rounded-lg py-1.5 pr-1 pl-2.5 text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
-          >
-            <span className={cn("block w-full truncate text-[13px] leading-5", activityTone[doing.tone])}>
-              {doing.label && (
-                <>
-                  <span className={cn("font-medium", stateTone[state])}>{doing.label}</span>
-                  <span className="text-muted-foreground/60"> · </span>
-                </>
-              )}
-              {doing.text}
-            </span>
-            <span className="flex w-full min-w-0 items-center gap-2 text-xs leading-5 text-muted-foreground">
-              {named && (
-                <span className="min-w-0 truncate" title={displayName(instance)}>
-                  {displayName(instance)}
-                </span>
-              )}
-              {versioned && version && <VersionTag version={version} hubVersion={hubVersion} lastKnown={lastKnown} />}
-              {summary && summary.queued_messages > 0 && (
-                <span className="shrink-0 rounded-full bg-muted px-1.5 py-px font-medium text-foreground/80">{summary.queued_messages} queued</span>
-              )}
-              {spend && spend.week_usd > 0 && (
-                <span
-                  className={cn("shrink-0 tabular-nums", lastKnown && "opacity-55")}
-                  title={spendTitle(spend.day_usd, spend.week_usd, lastKnown, spend.day_tokens?.total)}
-                  data-spend-last-known={lastKnown || undefined}
-                >
-                  <span className="sr-only">{spendTitle(spend.day_usd, spend.week_usd, lastKnown, spend.day_tokens?.total)}</span>
-                  <span aria-hidden="true">
-                    {formatUSD(spend.day_usd)}
-                    <span className="text-muted-foreground/60">/24h</span>
-                  </span>
-                </span>
-              )}
-              {/* The usage limit's bar needs the room more. */}
-              {usageShown ? <UsageBar percent={usage} /> : <RowWork instance={instance} />}
-              {group && (
-                <span className="min-w-0 truncate" title={`Group: ${group}`}>
-                  <Folder className="mr-1 inline size-3 align-[-2px]" aria-hidden="true" />
-                  {group}
-                </span>
-              )}
-              {ago && <span className="ml-auto shrink-0 tabular-nums">{ago}</span>}
-            </span>
-            {update && (
-              <span className="mt-1 flex text-xs">
-                <UpdateChip update={update} />
+const AgentPanel = memo(function AgentPanel({instance, named, versioned, selected, recent, latest, onStep}: AgentPanelProps) {
+  const {hubVersion, actions} = useHubList();
+  const state = instanceState(instance);
+  const summary = instance.summary;
+  const usage = usagePercent(summary);
+  const usageShown = usage !== undefined && usage >= 60;
+  const agent = agentName(instance) || "Agent";
+  const doing = activity(instance);
+  const ago = useHubTime((now) => (recent && latest ? "" : formatAgo(recent ? changedAt(instance) : doing.since, now)));
+  const group = recent ? groupOf(instance) : "";
+  const spend = summary?.spend;
+  const lastKnown = instance.connection !== "connected";
+  const version = instanceVersion(instance);
+  const update = shownUpdate(instance);
+  const id = instance.id;
+  return (
+    <div className="group/row relative">
+      <div className={cn("flex items-stretch rounded-lg transition-colors", selected ? "bg-accent ring-1 ring-border" : "hover:bg-accent/60")}>
+        {selected && <span aria-hidden="true" className="absolute inset-y-2.5 left-0 w-[3px] rounded-r-full bg-state-working" />}
+        <button
+          type="button"
+          data-hub-row={id}
+          onClick={() => actions.select(id)}
+          onKeyDown={(event) => {
+            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+            event.preventDefault();
+            onStep(event.key === "ArrowLeft" ? -1 : 1);
+          }}
+          aria-current={selected ? "true" : undefined}
+          aria-label={`${agent}, ${displayName(instance)}, ${stateLabel(instance)}${ago ? `, ${ago}` : ""}: ${doing.text}${olderThanHub(instance, hubVersion) ? ". Older than the hub" : ""}${update ? `. ${updateBadge(update).title}` : ""}`}
+          className="flex min-w-0 flex-1 flex-col rounded-lg py-1.5 pr-1 pl-2.5 text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        >
+          <span className={cn("block w-full truncate text-[13px] leading-5", activityTone[doing.tone])}>
+            {doing.label && (
+              <>
+                <span className={cn("font-medium", stateTone[state])}>{doing.label}</span>
+                <span className="text-muted-foreground/60"> · </span>
+              </>
+            )}
+            {doing.text}
+          </span>
+          <span className="flex w-full min-w-0 items-center gap-2 text-xs leading-5 text-muted-foreground">
+            {named && (
+              <span className="min-w-0 truncate" title={displayName(instance)}>
+                {displayName(instance)}
               </span>
             )}
-          </button>
-          <RowMenu instance={instance} hubVersion={hubVersion} root={root} groups={groups} actions={actions} className="size-8" />
-        </div>
+            {versioned && version && <VersionTag version={version} hubVersion={hubVersion} lastKnown={lastKnown} />}
+            {summary && summary.queued_messages > 0 && (
+              <span className="shrink-0 rounded-full bg-muted px-1.5 py-px font-medium text-foreground/80">{summary.queued_messages} queued</span>
+            )}
+            {spend && spend.week_usd > 0 && (
+              <span
+                className={cn("shrink-0 tabular-nums", lastKnown && "opacity-55")}
+                title={spendTitle(spend.day_usd, spend.week_usd, lastKnown, spend.day_tokens?.total)}
+                data-spend-last-known={lastKnown || undefined}
+              >
+                <span className="sr-only">{spendTitle(spend.day_usd, spend.week_usd, lastKnown, spend.day_tokens?.total)}</span>
+                <span aria-hidden="true">
+                  {formatUSD(spend.day_usd)}
+                  <span className="text-muted-foreground/60">/24h</span>
+                </span>
+              </span>
+            )}
+            {/* The usage limit's bar needs the room more. */}
+            {usageShown ? <UsageBar percent={usage} /> : <RowWork instance={instance} />}
+            {group && (
+              <span className="min-w-0 truncate" title={`Group: ${group}`}>
+                <Folder className="mr-1 inline size-3 align-[-2px]" aria-hidden="true" />
+                {group}
+              </span>
+            )}
+            {ago && <span className="ml-auto shrink-0 tabular-nums">{ago}</span>}
+          </span>
+          {update && (
+            <span className="mt-1 flex text-xs">
+              <UpdateChip update={update} />
+            </span>
+          )}
+        </button>
+        <RowMenu instance={instance} className="size-8" />
       </div>
-    );
-  },
-  (a, b) =>
-    a.instance === b.instance &&
-    a.hubVersion === b.hubVersion &&
-    a.root === b.root &&
-    a.groups === b.groups &&
-    a.named === b.named &&
-    a.versioned === b.versioned &&
-    a.selected === b.selected &&
-    a.recent === b.recent &&
-    a.latest === b.latest &&
-    a.actions === b.actions,
-);
+    </div>
+  );
+});

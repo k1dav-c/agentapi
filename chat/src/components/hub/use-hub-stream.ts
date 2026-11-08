@@ -1,8 +1,8 @@
 "use client";
 
 import {useEffect, useState} from "react";
-import {applyHubEvent, type HubEvent, type HubInstance} from "@/lib/hub";
-import {parseFavorites, type Favorite} from "@/lib/hub-favorites";
+import {applyHubEvent, hubEventNames, parseHubEvent, type HubEventName, type HubInstance} from "@/lib/hub";
+import type {Favorite} from "@/lib/hub-favorites";
 import {checkHubSession, type HubSession} from "@/lib/hub-session";
 import {getReconnectDelay} from "@/lib/reconnect";
 import {useEventSource} from "../use-event-source";
@@ -53,22 +53,18 @@ export function useHubStream(root: string) {
     withCredentials: true,
     staleAfter: STALE_STREAM_MS,
     listeners: () => {
-      const on = (type: HubEvent["type"]) => (message: MessageEvent<string>) => {
-        const data = JSON.parse(message.data);
-        const event: HubEvent =
-          type === "instances"
-            ? {type, instances: data.instances ?? [], hubVersion: data.hub_version ?? ""}
-            : type === "instance"
-              ? {type, instance: data}
-              : {type, id: data.id};
-        if (event.type === "instances") setHubVersion(event.hubVersion ?? "");
+      // An event that isn't what its name says is left out.
+      const on = (type: HubEventName) => (message: MessageEvent<string>) => {
+        const event = parseHubEvent(type, message.data);
+        if (!event) return;
+        if (event.type === "favorites") {
+          setFavorites(event.favorites);
+          return;
+        }
+        if (event.type === "instances") setHubVersion(event.hubVersion);
         setInstances((previous) => applyHubEvent(previous, event));
       };
-      const onFavorites = (message: MessageEvent<string>) => {
-        const list = parseFavorites((JSON.parse(message.data) as {favorites?: unknown}).favorites);
-        if (list) setFavorites(list);
-      };
-      return {instances: on("instances"), instance: on("instance"), removed: on("removed"), favorites: onFavorites};
+      return Object.fromEntries(hubEventNames.map((type) => [type, on(type)]));
     },
     onOpen: () => setUnreachable(false),
     // EventSource hides the status: a session that expired comes back as a

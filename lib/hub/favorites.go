@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -33,9 +32,11 @@ const (
 )
 
 // favoritesBody is GET and PUT /api/favorites, and the favorites event of
-// the browser's stream.
+// the browser's stream, which tells of a change of the hub's settings: the
+// favorites are all of them for now. The event keeps its name, so a page
+// open from before a change of the hub's settings still reads it.
 type favoritesBody struct {
-	Favorites []Favorite `json:"favorites"`
+	Favorites []Favorite `json:"favorites" nullable:"false"`
 }
 
 // favoritesError is a list of favorites the hub refuses, in words for the
@@ -105,7 +106,7 @@ func normalizeFavorites(list []Favorite) ([]Favorite, error) {
 
 // getFavorites answers the favorites, in their order (GET /api/favorites).
 func (h *Hub) getFavorites(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, favoritesBody{Favorites: h.store.getFavorites()})
+	writeJSON(w, http.StatusOK, favoritesBody{Favorites: h.store.getSettings().Favorites})
 }
 
 // setFavorites replaces the favorites (PUT /api/favorites): {"favorites":
@@ -119,34 +120,14 @@ func (h *Hub) setFavorites(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "send {\"favorites\": [{\"title\": ..., \"text\": ...}, ...]}")
 		return
 	}
-	list, err := normalizeFavorites(body.Favorites)
+	settings, err := h.store.updateSettings(func(s *hubSettings) error {
+		list, err := normalizeFavorites(body.Favorites)
+		s.Favorites = list
+		return err
+	})
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, favoritesBody{Favorites: h.store.setFavorites(list)})
-}
-
-// getFavorites returns a copy of the favorites.
-func (s *store) getFavorites() []Favorite {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return slices.Clone(s.favorites)
-}
-
-// setFavorites keeps list as the favorites, and tells the subscribers when
-// it changes them.
-func (s *store) setFavorites(list []Favorite) []Favorite {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if list == nil {
-		list = []Favorite{}
-	}
-	if slices.Equal(list, s.favorites) {
-		return slices.Clone(list)
-	}
-	s.favorites = list
-	s.changedLocked()
-	s.notifyLocked(storeEvent{Favorites: slices.Clone(list)})
-	return slices.Clone(list)
+	writeJSON(w, http.StatusOK, favoritesBody{Favorites: settings.Favorites})
 }

@@ -1,5 +1,11 @@
 package instanceapi
 
+import (
+	"github.com/danielgtaylor/huma/v2"
+
+	"github.com/coder/agentapi/lib/util"
+)
+
 // Connection is how a client's watch of an instance's summary stream goes.
 type Connection string
 
@@ -10,6 +16,12 @@ const (
 	// ConnectionStopped: the instance said it stopped (instance.stopped).
 	ConnectionStopped Connection = "stopped"
 )
+
+var ConnectionValues = []Connection{ConnectionConnecting, ConnectionConnected, ConnectionUnreachable, ConnectionStopped}
+
+func (c Connection) Schema(r huma.Registry) *huma.Schema {
+	return util.OpenAPISchema(r, "Connection", ConnectionValues)
+}
 
 // State is what a client that watches many AgentAPIs shows of one, the
 // most pressing first: it needs you, works, finished a task you haven't
@@ -26,6 +38,14 @@ const (
 	StateUnreachable State = "unreachable"
 	StateStopped     State = "stopped"
 )
+
+// StateValues are the states, the most pressing first. A client from
+// before a new one shows it as unknown.
+var StateValues = []State{StateNeedsYou, StateWorking, StateUnread, StateIdle, StateMuted, StateConnecting, StateUnreachable, StateStopped}
+
+func (s State) Schema(r huma.Registry) *huma.Schema {
+	return util.OpenAPISchema(r, "State", StateValues)
+}
 
 // StateOf is the state of an instance whose summary stream is in
 // connection, with its latest summary (nil before the first) and muted,
