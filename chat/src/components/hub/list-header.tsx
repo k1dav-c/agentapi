@@ -1,6 +1,6 @@
 "use client";
 
-import {Bell, BellOff, Plus, Search, Settings, X} from "lucide-react";
+import {Bell, BellOff, CircleDot, Plus, Search, Settings, X} from "lucide-react";
 import {ModeToggle} from "@/components/mode-toggle";
 import {Button} from "@/components/ui/button";
 import type {ConnectionStatus} from "@/lib/event-source";
@@ -21,6 +21,8 @@ export interface HubListHeaderProps {
   onToggleNotify: () => void;
   onSettings: () => void;
   onAdd: () => void;
+  // onIssues opens the issue dispatch.
+  onIssues: () => void;
   search: React.RefObject<HTMLInputElement | null>;
   filters: ListFilters;
   view: HubListView;
@@ -30,7 +32,7 @@ export interface HubListHeaderProps {
 // live, what the agents spent today, notifications, the theme, the
 // settings and Add; the search, the list's order and By machine; and the
 // state and agent chips.
-export function HubListHeader({status, unreachable, spend, notify, onToggleNotify, onSettings, onAdd, search, filters, view}: HubListHeaderProps) {
+export function HubListHeader({status, unreachable, spend, notify, onToggleNotify, onSettings, onAdd, onIssues, search, filters, view}: HubListHeaderProps) {
   const connected = status === "connected";
   const {counts, query, setQuery} = filters;
   return (
@@ -70,6 +72,9 @@ export function HubListHeader({status, unreachable, spend, notify, onToggleNotif
           {notify ? <Bell className="size-4 text-foreground" /> : <BellOff className="size-4" />}
         </Button>
         <ModeToggle />
+        <Button variant="ghost" size="icon" className="size-9 rounded-full text-muted-foreground" aria-label="Issues" title="Issues: hand GitHub issues to agents" onClick={onIssues}>
+          <CircleDot className="size-4" />
+        </Button>
         <Button variant="ghost" size="icon" className="size-9 rounded-full text-muted-foreground" aria-label="Hub settings" title="Hub settings" onClick={onSettings}>
           <Settings className="size-4" />
         </Button>

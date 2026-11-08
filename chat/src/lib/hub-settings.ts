@@ -67,6 +67,7 @@ export type HubSettings = {
   listOrder: ListOrder;
   byMachine: boolean;
   listWidth: number;
+  issuesRepo: string;
 };
 export type HubSettingName = keyof HubSettings;
 
@@ -86,6 +87,8 @@ export const hubSettings: {readonly [N in HubSettingName]: Setting<HubSettings[N
   // The list's width in pixels, as a number; clamped to the window where
   // it is used.
   listWidth: {key: "agentapi.hub.list-width", parse: parseListWidth, serialize: String},
+  // The repository the Issues dialog showed last, as owner/name.
+  issuesRepo: {key: "agentapi.hub.issues-repo", parse: (stored) => (stored && /^[\w.-]+\/[\w.-]+$/.test(stored) ? stored : ""), serialize: (value) => value},
 };
 
 // readHubSetting is what the browser keeps of a setting, or its default.

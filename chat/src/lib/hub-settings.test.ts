@@ -13,6 +13,7 @@ const stored: Record<string, string> = {
   "agentapi.hub.list-order": "recent",
   "agentapi.hub.by-machine": "true",
   "agentapi.hub.list-width": "420",
+  "agentapi.hub.issues-repo": "acme/widget",
 };
 
 const read: HubSettings = {
@@ -26,6 +27,7 @@ const read: HubSettings = {
   listOrder: "recent",
   byMachine: true,
   listWidth: 420,
+  issuesRepo: "acme/widget",
 };
 
 const defaults: HubSettings = {
@@ -36,6 +38,7 @@ const defaults: HubSettings = {
   listOrder: "groups",
   byMachine: false,
   listWidth: 360,
+  issuesRepo: "",
 };
 
 const names = Object.keys(hubSettings) as HubSettingName[];
