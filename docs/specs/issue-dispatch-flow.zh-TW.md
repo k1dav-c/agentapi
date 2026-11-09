@@ -2,7 +2,7 @@
 
 > 對應 PR [k1dav-c/agentapi#81](https://github.com/k1dav-c/agentapi/pull/81)（`feat/issue-dispatch`）的階段 1～3，設計細節見 [issue-dispatch.zh-TW.md](issue-dispatch.zh-TW.md)。
 >
-> 截圖來自本機的測試環境：真的 hub 與 launcher，agent 用 `native-demo` 假扮 Claude Code 和 Codex，GitHub 換成本機的 bare repo 加上假的 GitHub API，所以 repo 是 `acme/widget`。
+> Issues 頁的截圖是 hub 的頁面配上固定的測試資料（三台主機、`acme/web`、`acme/api`、`acme/infra` 的 issue 與 job），見 [docs/screenshots/README.md](../screenshots/README.md)。`dispatch-chat.png` 與 `dispatch-github-connect.png` 來自本機的測試環境：真的 hub 與 launcher，agent 用 `native-demo` 假扮 Claude Code 和 Codex，GitHub 換成本機的 bare repo 加上假的 GitHub API，所以 repo 是 `acme/widget`。
 
 ## 1. 架構
 
@@ -19,7 +19,7 @@ flowchart LR
     subgraph HUB["hub（agentapi hub serve）"]
       dispatch["dispatch<br/>/api/dispatch"]
       ghsvc["GitHub App 金鑰<br/>/api/github/token"]
-      ui["Issues 對話框"]
+      ui["Issues 頁"]
       list["instance 清單、chat 代理"]
     end
     subgraph HOST["主機（每台一個）"]
@@ -85,11 +85,15 @@ sequenceDiagram
   Note over H: job 狀態 → review
 ```
 
-也可以不經 GitHub 的 label，在 hub 的 Issues 對話框開工。上方是在線的主機和 GitHub App，下面列出 repo 的 open issue：#12 在 review、已有 PR #21；#14 失敗；#13、#15 還沒交辦，選 agent 和主機後按 Assign。
+也可以不經 GitHub 的 label，在 hub 的 Issues 頁開工（標題列的 ◎ 或 `i`）。看板依階段排列，需要你處理的在最前面：失敗的 #9、等你核准的 #7、待 review 的 #12；To do 裡還沒交辦的 issue 按 **Assign**，就交給按鈕上標示的 agent 和主機。
 
-![Issues 對話框](../screenshots/dispatch-issues.png)
+![Issues 頁](../screenshots/dispatch-issues.png)
 
-New issue 會在 GitHub 開一個 issue，勾 Assign to 就直接交給 agent：
+Assign 旁邊的箭頭列出每個 agent 能接的主機，接不了的附上原因：
+
+![交辦選單](../screenshots/dispatch-assign.png)
+
+New issue 會在 GitHub 開一個 issue，打開 Assign to 就直接交給 agent：
 
 ![New issue](../screenshots/dispatch-new-issue.png)
 
@@ -113,12 +117,16 @@ sequenceDiagram
     H->>L: POST /jobs/{key}/message（隨機圍欄包住你的內容）
     L->>J: POST /message
   else 在 hub 上直接對話
-    U->>H: Issues → Open chat，或從清單打開 instance
+    U->>H: Issues → Open chat 或送訊息，或從清單打開 instance
     H->>J: 代理 chat（hub 帶 instance token）
   end
   J->>GH: 修改、push 到同一個分支、在 PR 留言摘要
   U->>GH: Approve、merge
 ```
+
+在 Issues 點開 issue，時間軸會列出每次 run，以及送給 agent 的每則訊息：從 hub 送的，以及從 GitHub 轉來的 review 和 `/agent` 留言（hub 每個 job 保留最近 50 則）。
+
+![issue 的詳細資料](../screenshots/dispatch-review.png)
 
 在 hub 按 Open chat，看到的就是 job 的對話。GitHub 上的 review 轉進來時，hub 用隨機的 BEGIN／END 標記包住 reviewer 寫的內容，告訴 agent 那是使用者提供的資料、不是指示：
 
@@ -142,13 +150,13 @@ sequenceDiagram
   Note over H: job 狀態 → done（保留 30 天）
 ```
 
-在 hub 按 Stop 會先確認，因為 worktree 和分支（本機與 GitHub）都會刪掉：
+在 Issues 的詳細資料按 Stop 會先確認，因為 worktree 和分支（本機與 GitHub）都會刪掉：
 
 ![Stop 確認](../screenshots/dispatch-confirm-stop.png)
 
 ## 5. 換 agent
 
-在 issue 加上另一個 `agent:<type>` label，或在 Issues 對話框選 agent 後按 Switch（會先確認）。
+在 issue 加上另一個 `agent:<type>` label，或在 Issues 的詳細資料按 Switch agent 選 agent（會先確認）。
 
 ```mermaid
 sequenceDiagram
@@ -184,7 +192,7 @@ flowchart TB
 
 沒有 GitHub App 時照樣能派工，只是 job 用主機自己的憑證（SSH key、`gh auth login`），hub 也不留言、不刪分支。接上 App 之前，也可以在 launcher 設 `github-token-file`，讓所有 job 共用一個 token 先跑起來。
 
-還沒接上 App 時，Issues 對話框會提示 Connect GitHub，此時要貼 issue 的網址或 `owner/repo#12` 開工：
+還沒接上 App 時，Issues 頁會提示 Connect GitHub，此時要貼 issue 的網址或 `owner/repo#12` 開工：
 
 ![還沒接上 GitHub](../screenshots/dispatch-no-github.png)
 
@@ -212,7 +220,7 @@ stateDiagram-v2
   done --> working: 再開工（新的一輪）
 ```
 
-AgentAPI 在 10 分鐘內退出 5 次，launcher 就不再重啟，job 標為 failed，並附上 log 的位置。Retry 用原本的 agent 重來，也可以選另一個 agent 按 Switch：
+AgentAPI 在 10 分鐘內退出 5 次，launcher 就不再重啟，job 標為 failed，並附上 log 的位置（可複製）。Retry 用原本的 agent 重來，也可以按 Switch agent 換一個：
 
 ![失敗的 job](../screenshots/dispatch-failed.png)
 
@@ -220,17 +228,19 @@ AgentAPI 在 10 分鐘內退出 5 次，launcher 就不再重啟，job 標為 fa
 
 | 想做的事 | 在 GitHub | 在 hub |
 |---|---|---|
-| 交給 agent | issue 加 `agent` 或 `agent:claude`／`codex`／`pi` | Issues → 選 issue → Assign |
-| 開新 issue 並交辦 | — | Issues → New issue（勾 Assign） |
-| 回饋修改 | PR review（非 approve），或 `/agent <內容>` | Issues → 送訊息，或 Open chat 直接對話 |
-| 換 agent | 加另一個 `agent:<type>` label | 選 agent → Switch → 確認 |
-| 重試失敗的 job | 把 label 拿掉再加回去 | Retry |
-| 結束 | 關閉或 merge PR | Stop → 確認 |
-| 看花費 | PR 關閉時的花費彙總留言 | Issues 裡每個 job 的金額 |
+| 交給 agent | issue 加 `agent` 或 `agent:claude`／`codex`／`pi` | Issues（◎ 或 `i`）→ 卡片上的 Assign，或旁邊的箭頭選 agent 與主機 |
+| 開新 issue 並交辦 | — | Issues → New issue（打開 Assign to） |
+| 回饋修改 | PR review（非 approve），或 `/agent <內容>` | issue 的詳細資料 → 最下面的輸入框，或 Open chat 直接對話 |
+| 換 agent | 加另一個 `agent:<type>` label | 詳細資料 → Switch agent → 確認 |
+| 重試失敗的 job | 把 label 拿掉再加回去 | 卡片或詳細資料的 Retry |
+| 結束 | 關閉或 merge PR | 詳細資料 → Stop → 確認 |
+| 看花費 | PR 關閉時的花費彙總留言 | 卡片上的金額，詳細資料裡每次 run 的金額 |
+| 看哪些需要你 | — | ◎ 上的數字；清單上處理 issue 的 agent 標出 issue 與 PR |
 
 ## 9. 還沒完成
 
 - [ ] 用真實的 GitHub 走一次：Connect GitHub、安裝 App、內網 runner、bot 身分開 PR。
 - [ ] 階段 4：Coder template 自動啟動 launcher，並修掉 template 的既有問題（Gemini、`--state-db`、instance token、binary 位置）。
-- [ ] 畫面：instance 清單上標出 job 和 PR、依 repo 自動分組、每次 run 的明細頁。
+- [x] 畫面：instance 清單上標出 job 和 PR（點了在 Issues 開啟），每次 run 的明細（Issues 詳細資料的時間軸）。
+- [ ] 畫面：instance 清單依 repo 自動分組。
 - [ ] `agentapi host install` 在真的 systemd 上跑一次。

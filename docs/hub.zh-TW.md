@@ -511,22 +511,103 @@ AgentAPI 正在更新時，上方那一列也會顯示進度，還在等任務�
 **Manage favorites…** 會開啟 hub 設定的我的最愛區。還沒有任何一項時選單照樣出現，裡面只有這個連結。
 單獨開啟的聊天介面（新分頁，或 AgentAPI 自己的網址）沒有 ☆。
 
+### Issues
+
+![Issues：依階段排列的看板，需要你處理的排最前面](screenshots/dispatch-issues.png)
+
+**Issues** 把 GitHub issue 交給你各台主機上的 agent，背後是 hub 的
+[issue 派工](specs/issue-dispatch.zh-TW.md)（[流程圖解](specs/issue-dispatch-flow.zh-TW.md)）。按標題列
+的 ◎ 或 `i`，會在總覽的位置開啟它；◎ 上的數字是需要你處理的 issue 數：失敗的 job、等你 review 的
+PR，以及在等你回應的 agent。再按一次 ◎、按 `Esc`，或在手機上按返回箭頭就會關閉。
+
+這一頁把目前範圍內各 repo 的 issue 放在同一個看板上。大標題說明有多少需要你處理，下一行是各階段的
+數量。再下面的長條依比例顯示 To do、In progress、In review、Done 各有幾個 issue；In progress 另外標出
+其中有幾個在等你、幾個失敗。接著是有 launcher 回報的主機：是否在線、job 數與上限（●●●○）、能跑的
+agent。最後依區塊列出 issue：
+
+- **Needs you**：失敗的 job，接著是在等你回應（核准、問題）的 agent，再來是等你 review 的 PR。
+- **Working**：正在工作的 agent，做最久的排前面，各自附上正在做的事。
+- **To do**：還沒有 agent 處理的 open issue。
+- **Done**：已完成或已停止的，最新的在前；超過三個時按 **Show all** 展開。
+
+每張卡片顯示 issue 編號、狀態和標題，負責的 agent 與主機、PR、各次 run 的花費與次數，以及這個狀態
+下該做的那件事：**Assign**、**Answer**、**Review #21**、**Retry**。卡片換狀態時，會移到新的區塊。主機
+和 job 有變動時，hub 會透過串流推給頁面；3.12 以前的 hub 不會推送，這時頁面每 10 秒自己讀一次。
+
+上方的 repo 選單決定看板的範圍。**Recent repositories** 顯示 hub 的 GitHub App 看得到的 repo 中，最近
+有 push 或變動的 20 個的 open issue，以及所有 repo 的 job。選一個 repo 就只看它的 issue；超過八個時
+有搜尋框可以找。頁面會記住你的選擇。
+
+#### 交辦 issue
+
+![issue 可以交給哪些 agent 和主機](screenshots/dispatch-assign.png)
+
+**Assign** 把 issue 交給按鈕上標示的 agent 和主機：也就是 hub 自己會挑的主機（先挑有這個 repo 的，
+再挑最不忙的）和它的預設 agent；如果你上次手動選過某個 agent，就改用能跑它的主機。旁邊的箭頭會列出
+每個 agent 和能接這個 issue 的主機，接不了的主機以灰色列出並附上原因：離線、已滿、沒有這個 agent，
+或沒有這個 repo 也不允許 clone。從這裡選的主機就會接到 issue。焦點所在的卡片按 `a` 即可交辦。沒有
+主機能接時，按鈕會說明原因。
+
+#### issue 的詳細資料
+
+| 等 review 的 issue | 失敗的 job |
+| --- | --- |
+| ![等 review 的 issue 的詳細資料，以及送給它的訊息](screenshots/dispatch-review.png) | ![失敗的 job：原因、log 與 Retry](screenshots/dispatch-failed.png) |
+
+點卡片會開啟 issue 的詳細資料：寬螢幕上出現在看板旁邊，窄螢幕上蓋在看板上面。最上面的區塊用一句話
+說明 issue 的狀態，附上 agent 正在做什麼或問了什麼，以及可以做的事：**Retry with …**、**Answer in the
+chat**、**Review #…**、**Open chat**；再下面是 **Switch agent**（保留分支、worktree 和 PR）與
+**Stop**（會刪除分支）。兩者都會先確認：
+
+| Switch agent | Stop |
+| --- | --- |
+| ![換 agent 前先確認](screenshots/dispatch-confirm-switch.png) | ![Stop 前先確認](screenshots/dispatch-confirm-stop.png) |
+
+接著是這個 job 的花費、run 數、agent 工作時間和 token 數，以及由新到舊的時間軸：每次 run（agent 與
+主機、執行時間、花費、怎麼結束），和每則送給 agent 的訊息，不論來自這一頁，還是 GitHub 上的 review 或
+`/agent` 留言。hub 為每個 job 保留最近 50 則訊息。**On the machine** 列出分支和 worktree，可以複製。
+agent 還在工作時，可以從最下面的輸入框傳訊息給它（⌘/Ctrl+Enter 送出）。
+
+#### 清單上的列
+
+![清單上處理 issue 的 agent，各自標出它的 issue](screenshots/dispatch-list.png)
+
+處理 issue 的 agent，在清單上那一列下方會有一個標籤：issue 目前的階段和 PR；如果這一列不是以 issue
+命名，就直接顯示 issue。點標籤會在 Issues 開啟這個 issue。
+
+#### 開新 issue，以及沒有 GitHub 的 hub
+
+**New issue**（或 `n`）會以 hub 的 App 身分，在選定的 repo 開一個 issue；打開 **Assign to** 時，會立刻
+交給 agent（⌘/Ctrl+Enter 送出）。
+
+![還沒接上 GitHub 時的 Issues](screenshots/dispatch-no-github.png)
+
+hub 還沒有 GitHub App 時，Issues 會顯示 **Connect GitHub**，從 manifest 為你的帳號或組織建立一個 App。
+沒有 App 也能用 issue 的代號（`owner/repo#12` 或 issue 網址）開工，這時主機用自己的 GitHub 登入。
+沒有任何主機裝了 launcher 時，頁面會顯示安裝指令。
+
+| 手機上的看板 | 手機上的 issue |
+| --- | --- |
+| ![手機上的 Issues](screenshots/dispatch-phone.png) | ![手機上 issue 的詳細資料](screenshots/dispatch-phone-detail.png) |
+
 ### 快捷鍵與通知
 
 | 按鍵 | 作用 |
 | --- | --- |
 | `/` | 搜尋 |
+| `i` | 開啟 [Issues](#issues) |
 | `j`、`k`（或方向鍵） | 在各列之間移動（[依主機](#依主機)時是在卡片之間） |
 | ←、→ | [依主機](#依主機)時：換成卡片的其他 agent |
 | `Enter` | 開啟該列 |
 | `p` | 釘選或取消釘選該列（見[釘選](#釘選)） |
-| `Esc` | 清除搜尋，或回到總覽 |
+| `Esc` | 清除搜尋，或往回一層：從 Issues 開啟的 agent 回到 Issues，再回到總覽 |
 
 在桌面上，拖曳清單的邊緣，或把焦點移到邊緣再按 ← 或 →，可以調整清單的寬度；每個瀏覽器各自記住
 調整後的寬度，在邊緣按兩下則恢復預設。
 
-`/` 和 `Esc` 在 hub 頁面的任何地方都有效；`j`、`k`、方向鍵和 `p` 只在焦點位於清單或沒有焦點時有效，
-所以在其他地方，方向鍵照常捲動總覽。在開啟的聊天介面裡，按鍵會交給聊天介面。鈴鐺按鈕會請瀏覽器
+`/`、`i` 和 `Esc` 在 hub 頁面上輸入框以外的任何地方都有效；`j`、`k`、方向鍵和 `p` 只在焦點位於清單或沒有焦點時有效，
+所以在其他地方，方向鍵照常捲動總覽。在 Issues 裡，`j`、`k` 在卡片之間移動，`Enter` 開啟，`a` 交辦，
+`c` 開啟它的聊天介面，`n` 開新 issue，`r` 重新讀取 issue。在開啟的聊天介面裡，按鍵會交給聊天介面。鈴鐺按鈕會請瀏覽器
 在 hub 分頁位於背景、有 agent 開始需要你時通知你；螢幕閱讀器也會即時讀出同樣的訊息。
 
 ### 在手機上
@@ -748,7 +829,13 @@ hub 透過環境變數中的 proxy（`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`�
 | `PUT /api/pins` | `{"ids": […]}` 由上而下排定釘選實例的順序。必須列出每個釘選的實例各一次，不能有其他實例；不符合時回 409，並在 `ids` 附上目前釘選實例的順序，例如這段期間有人釘選、取消釘選或移除了實例；hub 沒有的實例回 404 |
 | `GET /api/favorites` | [我的最愛](#我的最愛)，依排列順序：`{"favorites": [{"id", "title", "text"}, …]}`；沒有標題的項目沒有 `title` |
 | `PUT /api/favorites` | `{"favorites": […]}` 依這個順序整份取代。最多 100 項；標題最多 100 字、只能一行；內容不能空白，最多 20,000 字；ID 為 1 到 64 個英文字母、數字、`-` 或 `_`，不能重複。沒有 ID 的項目由 hub 指定一個；回應是 hub 保存後的清單。hub 不接受的清單回 400，什麼都不改 |
-| `GET /api/events` | Server-sent events：先送 `instances`（全部實例和 `hub_version`，格式同 `GET /api/instances`）和 `favorites`（格式同 `GET /api/favorites`），再送 `instance`（某個實例有頁面看得到的變動，或工作時間變動滿一分鐘；最後聯絡時間只在它離線時才算）、`removed`（`{"id"}`）、`favorites`（有變動時送出全部），以及每 15 秒一次的 `heartbeat` |
+| `GET /api/events` | Server-sent events：先送 `instances`（全部實例和 `hub_version`，格式同 `GET /api/instances`）和 `favorites`（格式同 `GET /api/favorites`），再送 `instance`（某個實例有頁面看得到的變動，或工作時間變動滿一分鐘；最後聯絡時間只在它離線時才算）、`removed`（`{"id"}`）、`favorites`（有變動時送出全部）、`dispatch`（[issue 派工](#issues)的主機和 job，格式同 `GET /api/hosts` 和 `GET /api/jobs`，一開始和每次變動時送出），以及每 15 秒一次的 `heartbeat` |
+| `GET /api/hosts` | 有 launcher 回報的主機：能跑的 agent、有的 repo、job 與上限，以及是否在線（`online`） |
+| `GET /api/jobs` | 各 job（一個 issue 的工作）：狀態、agent 與主機、PR、各次 run 與花費，以及最近 50 則送給 agent 的訊息（`messages`：`at`；`source` 為 `hub`、`review` 或 `comment`；`author`、`agent`；`text`，最多 2,000 字） |
+| `GET /api/github` | hub 的 GitHub App（若有）及安裝在哪些帳號 |
+| `GET /api/github/repos` | App 看得到的 repo，最近有 push 或變動的在前（`pushed_at`、`updated_at`） |
+| `GET /api/github/issues?repo=` | repo 的 open issue；`POST` 開新 issue，帶 `assign` 時直接開工 |
+| `POST /api/dispatch` | 開工、傳訊息、連結 PR、停止（`action`：`start`、`send`、`link_pr`、`stop`）；也接受 `--dispatch-token` |
 | `GET /api/join` | 主機加入 hub 用的資訊：`urls` 的每一項是一個 webhook 網址（`url`）和這個位址所在的網路介面（`interface`；`--bind` 的位址沒有），順序和啟動時的 log 相同；只有設了 token 的 hub 才會附上 secret（`secret`，並帶 `secret_shown: true`） |
 | `/i/{id}/…` | 透過 hub 存取實例自己的 API 和聊天介面；頁面用 `POST /i/{id}/update` 更新實例，用 `DELETE` 取消 |
 
@@ -764,6 +851,8 @@ hub 透過環境變數中的 proxy（`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`�
 | `~/.agentapi/hub/instances.json` | `agentapi hub serve` | hub 記得的實例、它們的群組和釘選、各自最近一次變動的時間、最近 7 天各自工作的區段、hub 最後一次讀到各自摘要的網址，以及手動加入的實例的 token；還有[我的最愛](#我的最愛) |
 | `~/.agentapi/hub/instances.json.bak` | `agentapi hub serve` | hub 上次啟動時看到的實例檔案 |
 | `~/.agentapi/hub/instances.deliveries.json` | `agentapi hub serve` | hub 處理過、簽章仍有效的事件的 delivery ID，用來拒絕重送的事件 |
+| `~/.agentapi/hub/dispatch.json` | `agentapi hub serve` | [issue 派工](#issues)的主機（含 launcher 的 token）和 job：各次 run、花費與最近 50 則訊息 |
+| `~/.agentapi/hub/github-app.json` | `agentapi hub serve` | hub 的 GitHub App 與它的私鑰 |
 
 `instances.json` 的格式是 `{"version": 1, "instances": [...]}`。2.2 以前的 hub 只寫、也只讀陣列：
 現在的 hub 讀得懂舊格式，但舊 hub 會把新格式當成損壞的檔案放到一旁，從空的清單開始。要改回舊

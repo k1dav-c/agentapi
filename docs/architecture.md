@@ -82,6 +82,7 @@ emitter. Handlers call the conversation and read state from the emitter.
 | `lib/statedb/` | SQLite persistence for `--state-db`, and the import of a `--state-file` |
 | `lib/instanceapi/` | The contract between an AgentAPI and the clients that watch many: who it is (`WebhookInstance`, in its webhook events, summary and registry entry, with its `AgentType`), its summary, the webhook envelope with its signature (`Sign`, `Verify`), and the state a hub shows of each instance (`StateOf`). It imports only `lib/agentstate` and `lib/util` |
 | `lib/hub/` | `agentapi hub serve`, over `lib/instanceapi` and `lib/httpmw` rather than the server: the instances, the groups and pins set on its page, when each last changed what its row shows and when the hub saw each working (`store.go`, `work.go`, kept in a file by `persist.go`), the favorite prompts (`favorites.go`, `GET`/`PUT /api/favorites`, among the hub's settings in the same file), the schema of its wire types (`schema.go`, `hub-schema.json`, for the page's types), the signed webhook receiver (`webhook.go`), each instance's summary stream (`watch.go`), sign-in, the browser's event stream and the proxy to the instances (`hub.go`, `proxy.go`), where machines join it (`join.go`: its addresses for `GET /api/join` and the startup log); the user guide is [hub.md](hub.md) |
+| `lib/dispatch/` | The hub's issue dispatch, which `lib/hub` mounts: the machines whose launchers report (`host.*` events), the jobs with their runs' costs (`task.*` events) and the last 50 messages their agents were sent (`send`, from the hub's page, a review or an `/agent` comment), `POST /api/dispatch`, the GitHub App, kept in `dispatch.json` and `github-app.json`. `Subscribe` and `Board` give the hub's stream the machines and jobs after each change (its `dispatch` event); the spec is [issue-dispatch.zh-TW.md](specs/issue-dispatch.zh-TW.md) |
 | `lib/sse/` | Server-sent events as the HTML standard defines them: a reader (data: lines joined, comments skipped, CR, LF or CRLF line ends) and a writer, used by the hub for the instances' summary streams and the browser's stream. `lib/httpapi` writes its streams with huma's `sse` |
 | `lib/netaddr/` | The machine's IPv4 addresses: those other machines may reach it at (the hub's join URLs), and the one it reaches a host from (`Resolver`, for `{ip}` in `--public-url`) |
 | `lib/userconfig/` | The user's settings file, `~/.agentapi/config.yaml`: flags by name, read by `agentapi server`, written by `agentapi hub` |
@@ -949,7 +950,13 @@ props in `HubListContext`; its logic in `lib/hub.ts`, the instance, its state an
 events, and beside it `lib/hub-groups.ts`, `hub-machines.ts`, `hub-filter.ts`, `hub-format.ts`,
 `hub-spend.ts`, `hub-work.ts`, `hub-version.ts` and `hub-order.ts`; the changes it makes through
 `lib/hub-api.ts`; what the browser keeps through `lib/hub-settings.ts`), which `agentapi hub serve`
-serves with the same build. The hub's API isn't huma's: its wire types are generated, `make gen`
+serves with the same build. Its Issues page (`components/hub/issues/`: the view, its cards, the
+detail with the runs' timeline, the assign menu; `use-dispatch.ts` reads GitHub and acts) works on
+the board model of `lib/hub-issues.ts` (the cards by section, the suggested agent and machine, the
+timeline), with the dispatch's calls in `lib/hub-dispatch.ts`. The machines and jobs come with the
+stream's `dispatch` event, which also feeds the badge on the Issues button and the rows' chips of
+the agents of issues (`HubListContext.jobs`); from a hub without it, the page reads them every 10
+seconds. The hub's API isn't huma's: its wire types are generated, `make gen`
 writing `lib/hub/hub-schema.json` from the Go types (`hub.Schema`) and `bun run gen:api` writing
 `lib/hub-schema.ts` from it, with `hubLimits`, the limits the page checks; `parseHubEvent` reads
 each event of `/api/events`. The frame's messages are read field by field, `parseToFrame` in the

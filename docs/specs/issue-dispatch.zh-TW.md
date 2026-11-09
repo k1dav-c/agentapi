@@ -247,9 +247,13 @@ hub 畫面的 **+**（加入主機）同時列出這三行。
                        "end_reason": "replaced | stopped | failed",
                        "cost": {"usd": 1.23, "tokens": {"input": 0, "output": 0, "cache_write": 0, "cache_read": 0},
                                 "calls": 42, "tasks": 3, "work_seconds": 1800}}],
-             "cost_comment_id": 0}]
+             "cost_comment_id": 0,
+             "messages": [{"at": "...", "source": "hub | review | comment", "author": "dave", "agent": "claude",
+                           "text": "...", "review_state": "changes_requested", "comments": 2}]}]
 }
 ```
+
+`messages` 是送給這個 job 的 agent 的訊息（`send`），由舊到新，最多保留 50 則，每則文字最多 2,000 字。`source` 是來源：`hub`（登入 hub 的瀏覽器，不記 author）、`review`（帶 `review_state` 的 send）、`comment`（`/agent` 留言）。帶 dispatch token 的請求一律不算 `hub`，即使 hub 沒有開登入。舊的 `dispatch.json` 沒有這個欄位，照樣讀得進來。
 
 GitHub App 另外存在 `~/.agentapi/hub/github-app.json`（0600，不併入 `instances.json`）：
 
@@ -271,11 +275,12 @@ GitHub App 另外存在 `~/.agentapi/hub/github-app.json`（0600，不併入 `in
 | GET | `/github/callback` | session + state | manifest 跳轉回來（§6.1） |
 | GET | `/github/setup` | session + state | 安裝完成跳轉回來（§6.2） |
 | DELETE | `/api/github` | session | 移除 hub 保存的 App（不刪 GitHub 上的 App） |
-| GET | `/api/github/repos` | session | App 可存取的 repo |
+| GET | `/api/github/repos` | session | App 可存取的 repo，最近 push 或變動的在前（`pushed_at`、`updated_at`） |
 | GET | `/api/github/issues?repo=` | session | 列 open issue |
 | POST | `/api/github/issues` | session | 建立 issue，可同時 Assign（§5.6） |
 | POST | `/api/github/token` | launcher 簽章 | §4.5 |
 
+- hub 的瀏覽器串流（`GET /api/events`）多了 `dispatch` 事件：主機與 job 的完整內容（同 `/api/hosts`、`/api/jobs`），一開始送一次，之後每次變動再送（短時間內的多次變動合併成一次）；主機因漏掉 heartbeat 而離線時，hub 自己的 heartbeat 也會送一次。3.12 以前的頁面不聽這個事件。
 - 新增 `--dispatch-token`（`AGENTAPI_HUB_DISPATCH_TOKEN`）：只能呼叫 `/api/dispatch`。
 - `/api/github/token`：簽章以 secret 驗證，並以簽章本身去重（delivery ID 不在簽章內）；另須帶該主機的 host token。只發給在該主機上進行中（不含 failed）、用 hub 憑證的 job。
 - `host.*` 事件：已知主機在線時，若事件的 host token 與 hub 記的不同就拒絕，避免其他持有 secret 的機器冒名；主機離線超過 3 次 heartbeat 後才接受新的 token（重灌的機器）。
@@ -320,16 +325,17 @@ starting ──► working ──► review ──► done
 
 ### 5.5 畫面
 
-都在 **Issues** 對話框（hub 標題列的 ◎ 按鈕）：
+hub 的 **Issues** 頁（標題列的 ◎，或按 `i`）取代總覽的位置；操作說明見 [docs/hub.zh-TW.md 的 Issues](../hub.zh-TW.md#issues)。
 
-1. **Machines**：各主機是否在線、job 數／上限、能跑的 agent。
-2. **GitHub**：沒有 App 時是 **Connect GitHub**（可填組織）；有 App 時顯示 App 名稱、安裝的帳號，與調整 repository 的連結。移除 App 目前只有 API（`DELETE /api/github`）。
-3. **Issues**：選 repo → 列 open issue 與各自的 job（狀態、agent、主機、PR、花費合計、run 數、**Open chat**）。沒有 job 的 issue 選 agent 與主機（只列能接的，沒 repo 的標「clones」）後 **Assign**；進行中的 job 可以送訊息、**Switch agent**（§5.7）、**Stop**。
-4. **New issue**：建立 issue，可勾選直接 Assign（§5.6）。
-5. **Other work going on**：不在目前 repo 列表裡、仍在進行的 job。
-6. 沒有 App 時：以 `owner/repo#n` 或 issue 網址開工。
+1. **看板**：依階段分成 Needs you（失敗、agent 在等你、待 review）、Working、To do、Done。上方是各階段的數量條（To do、In progress、In review、Done，In progress 另外標出等你與失敗的數量）和主機列（在線、job 數與上限、agent）。
+2. **範圍**：最近 push 或變動的 20 個 repo（`/api/github/repos` 已依此排序），或單一 repo（可搜尋）；job 一律顯示全部 repo 的。
+3. **Assign**：一鍵交給建議的 agent 與主機（hub 的挑法，或上次手動選的 agent）；選單列出每個 agent 能接的主機，接不了的附上原因（離線、已滿、沒有該 agent、沒有 repo 也不能 clone）。
+4. **詳細資料**：狀態與主要動作（Retry、Answer、Review、Open chat），Switch agent（§5.7）與 Stop（都要確認），花費統計，run 與訊息的時間軸（§5.1 的 `messages`），分支與 worktree，送訊息給 agent。
+5. **即時更新**：主機與 job 來自 `dispatch` 事件；舊 hub 沒有這個事件時每 10 秒讀一次。
+6. **徽章與清單**：◎ 上的數字是需要你處理的 issue 數；處理 issue 的 agent 在清單上的那一列標出 issue 的階段和 PR，點了在 Issues 開啟。
+7. **New issue**（§5.6），沒有 App 時的 **Connect GitHub**，以及以 `owner/repo#n` 或網址開工；沒有 launcher 時顯示安裝指令。
 
-尚未做：instance 列上標出 job key 與 PR、依 repo 自動分組、每次 run 的明細頁。
+尚未做：instance 清單依 repo 自動分組。
 
 ### 5.6 在 hub 建立 issue
 
@@ -648,7 +654,7 @@ jobs:
 ### 階段 3：GitHub Actions 與畫面（已實作，2026-11-08）
 
 - [x] reusable workflow 與 caller、runner 架設說明（`examples/issue-dispatch/`）；actionlint 通過；以假的 hub 與 GitHub API 跑過五種事件與 hub 拒絕時的留言，issue 標題與留言裡的 `$(…)` 不會被執行。
-- [x] hub 畫面的 Issues 對話框（標題列的 ◎ 按鈕）：機器、GitHub App 的狀態與 Connect、repo 的 open issue 與各自的 job（狀態、agent、主機、PR、花費、Open chat）、Assign（選 agent 與主機）、送訊息、換 agent、Stop、New issue（可直接 Assign）；沒有 GitHub App 時以 `owner/repo#n` 或 issue 網址開工。以 headless Chromium 在真的 hub + launcher 上點過開工、送訊息、Open chat、Stop。
+- [x] hub 的 Issues 頁（3.12 起取代對話框，見 §5.5）。原本的對話框（標題列的 ◎ 按鈕）：機器、GitHub App 的狀態與 Connect、repo 的 open issue 與各自的 job（狀態、agent、主機、PR、花費、Open chat）、Assign（選 agent 與主機）、送訊息、換 agent、Stop、New issue（可直接 Assign）；沒有 GitHub App 時以 `owner/repo#n` 或 issue 網址開工。以 headless Chromium 在真的 hub + launcher 上點過開工、送訊息、Open chat、Stop。
 - [x] 機器的 job 數與挑主機時的空位，算入 hub 剛開、主機下一次 heartbeat 還沒回報的 job。
 - [ ] 在真的 GitHub 上：加 `agent:claude` label 後開出 bot 身分的 PR、review 與 `/agent` 轉送、PR 關閉後刪分支與花費留言、加 `agent:codex` 換 agent（需要 GitHub App 與內網 runner）。
 

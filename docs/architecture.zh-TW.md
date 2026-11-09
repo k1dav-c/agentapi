@@ -81,6 +81,7 @@ flowchart TB
 | `lib/statedb/` | `--state-db` 的 SQLite 持久保存，以及 `--state-file` 的匯入 |
 | `lib/instanceapi/` | AgentAPI 和同時監看多個 AgentAPI 的客戶端之間的約定：它是誰（`WebhookInstance`，出現在 webhook 事件、摘要和登記檔中，含它的 `AgentType`）、它的摘要、webhook 的外層格式和簽章（`Sign`、`Verify`），以及 hub 對每個實例顯示的狀態（`StateOf`）。它只匯入 `lib/agentstate` 和 `lib/util` |
 | `lib/hub/` | `agentapi hub serve`，建立在 `lib/instanceapi` 和 `lib/httpmw` 上，不經過伺服器：實例、頁面上設定的群組和釘選、每個實例這一列顯示的內容最近一次變動的時間，以及 hub 看到它工作的區段（`store.go`、`work.go`，由 `persist.go` 保存在檔案中）、我的最愛提示（`favorites.go`，`GET`／`PUT /api/favorites`，屬於 hub 的設定，保存在同一個檔案）、傳輸型別的 schema（`schema.go`、`hub-schema.json`，給頁面的型別用）、有簽章的 webhook 接收端（`webhook.go`）、每個實例的摘要串流（`watch.go`）、登入、瀏覽器的事件串流，以及到實例的代理（`hub.go`、`proxy.go`），還有主機怎麼加入（`join.go`：`GET /api/join` 和啟動 log 列出的位址）；使用說明見 [hub.zh-TW.md](hub.zh-TW.md) |
+| `lib/dispatch/` | hub 的 issue 派工，由 `lib/hub` 掛上：有 launcher 回報的主機（`host.*` 事件）、job 與各次 run 的花費（`task.*` 事件）和最近 50 則送給 agent 的訊息（`send`，來自 hub 的頁面、review 或 `/agent` 留言）、`POST /api/dispatch`、GitHub App，保存在 `dispatch.json` 和 `github-app.json`。`Subscribe` 與 `Board` 讓 hub 的串流在每次變動後送出主機和 job（`dispatch` 事件）；規格見 [issue-dispatch.zh-TW.md](specs/issue-dispatch.zh-TW.md) |
 | `lib/sse/` | 依 HTML 標準讀寫 server-sent events：讀取端（合併多行 data:、略過註解、行尾可為 CR、LF 或 CRLF）和寫入端，hub 用它讀實例的摘要串流、寫給瀏覽器的串流。`lib/httpapi` 則用 huma 的 `sse` 寫它的串流 |
 | `lib/netaddr/` | 這台主機的 IPv4 位址：其他主機連得到的位址（hub 的加入網址），以及連到某台主機時使用的位址（`Resolver`，供 `--public-url` 的 `{ip}` 使用） |
 | `lib/userconfig/` | 使用者的設定檔 `~/.agentapi/config.yaml`：以旗標名稱設定，`agentapi server` 讀取、`agentapi hub` 寫入 |
@@ -715,7 +716,11 @@ AgentAPI 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
 `HubListContext`；邏輯在 `lib/hub.ts`，也就是實例、它的狀態和串流的事件，旁邊還有 `lib/hub-groups.ts`、
 `hub-machines.ts`、`hub-filter.ts`、`hub-format.ts`、`hub-spend.ts`、`hub-work.ts`、`hub-version.ts`
 和 `hub-order.ts`；所做的變更經由 `lib/hub-api.ts`；瀏覽器保存的設定經由 `lib/hub-settings.ts`），由
-`agentapi hub serve` 以同一份建置提供。hub 的 API 不是用 huma 寫的，它的傳輸型別是產生出來的：
+`agentapi hub serve` 以同一份建置提供。它的 Issues 頁（`components/hub/issues/`：頁面、卡片、含 run
+時間軸的詳細資料、交辦選單；`use-dispatch.ts` 讀 GitHub 並執行動作）建立在 `lib/hub-issues.ts` 的看板
+模型上（依區塊排列的卡片、建議的 agent 與主機、時間軸），派工的呼叫在 `lib/hub-dispatch.ts`。主機和 job
+隨串流的 `dispatch` 事件送來，Issues 按鈕上的數字和清單上處理 issue 的 agent 的標籤
+（`HubListContext.jobs`）也用它；hub 沒有這個事件時，頁面每 10 秒自己讀一次。hub 的 API 不是用 huma 寫的，它的傳輸型別是產生出來的：
 `make gen` 從 Go 型別（`hub.Schema`）寫出 `lib/hub/hub-schema.json`，`bun run gen:api` 再從它寫出
 `lib/hub-schema.ts`，連同頁面要檢查的上限 `hubLimits`；`/api/events` 的每個事件都由 `parseHubEvent`
 讀取。框架之間的訊息逐欄檢查：聊天介面用 `parseToFrame`，hub 用 `parseFromFrame`。
