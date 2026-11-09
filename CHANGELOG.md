@@ -9,6 +9,9 @@
   moves them into it, or drops the copies 3.7.3 to 3.15 wrote, and deletes them. AgentAPI 3.7.2
   or earlier opened on the file afterwards starts without those settings, limit stop and retry
   wait; the conversation is kept.
+- The hub no longer writes its favorites a second time at the top level of `instances.json`, where
+  hubs of 3.5 to 3.7 read them; it still reads them there when the file has no `settings`. Going
+  back to such a hub starts it without favorites.
 
 ## v3.15.1
 

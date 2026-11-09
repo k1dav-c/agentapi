@@ -1029,9 +1029,10 @@ Each instance's work time is an extra field (`work`) inside the same version 1. 
 ignores it, and drops it the next time it writes the file. So does a hub before 3.0.1 with
 `confirmed_url`, the URL where the hub last read the instance's summary, and a hub before 3.5 with
 the favorites (`"favorites": [...]` next to `instances`). After going back to such a hub, the
-`.bak` it made as it started still has them. This release keeps the favorites in `"settings":
-{"favorites": [...]}` and in `"favorites"` too, which a hub of 3.5 to 3.7 reads, so going back to
-one keeps them.
+`.bak` it made as it started still has them. The hub keeps the favorites in `"settings":
+{"favorites": [...]}`, and reads the top-level `"favorites"` of a hub of 3.5 to 3.7 when there are
+no settings. Hubs of 3.8 to 3.15 wrote that copy too; this one doesn't, so a hub of 3.5 to 3.7 run
+on its file starts without favorites; the `.bak` it makes as it starts keeps them for this one.
 
 ## Limits
 

@@ -697,10 +697,9 @@ inside version 1, such as each instance's work time (`work`: the spans of the la
 only when a span starts or ends), are ones an older hub of the envelope ignores. So are the hub's
 settings, `"settings": {"favorites": [...]}` next to `instances` (`hubSettings`, changed through
 `store.updateSettings`); such a hub drops them at its next write, and the `.bak` it made keeps them.
-This release writes the favorites a second time at the top level, `"favorites": [...]`, where hubs
-of 3.5 to 3.7 read them, and reads `settings` first, else those: a downgrade keeps the favorites,
-and what that hub changes in them is what this one reads after it. A new version instead would
-make every older hub refuse the file. The delivery
+Hubs of 3.5 to 3.7 kept the favorites at the top level, `"favorites": [...]`, which the hub reads
+when `settings` is missing; 3.8 to 3.15 wrote that copy too, and later hubs don't. A new version
+instead would make every older hub refuse the file. The delivery
 IDs of the webhook events it took, each until its signature no longer holds, go the same way into
 `instances.deliveries.json`, so a copy replayed after a restart is refused too.
 

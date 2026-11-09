@@ -177,8 +177,8 @@ func setFavorites(t *testing.T, s *store, list []Favorite) {
 	require.NoError(t, err)
 }
 
-// The file keeps the hub's settings next to the instances, and its
-// favorites where a hub of 3.5 to 3.7 reads them too. One edited by hand
+// The file keeps the hub's settings next to the instances, and reads the
+// favorites a hub of 3.5 to 3.7 kept at the top level. One edited by hand
 // with favorites the API refuses starts without them, and with its
 // instances; one without favorites (a hub before 3.5) starts with none.
 func TestStateKeepsTheSettings(t *testing.T) {
@@ -198,12 +198,12 @@ func TestStateKeepsTheSettings(t *testing.T) {
 		Settings struct {
 			Favorites []Favorite `json:"favorites"`
 		} `json:"settings"`
-		Favorites []Favorite `json:"favorites"`
+		Favorites *[]Favorite `json:"favorites"`
 	}
 	require.NoError(t, json.Unmarshal(data, &file))
 	assert.Equal(t, 1, file.Version, "an older hub still reads it")
 	assert.Equal(t, review, file.Settings.Favorites)
-	assert.Equal(t, review, file.Favorites, "where a hub of 3.5 to 3.7 reads them")
+	assert.Nil(t, file.Favorites, "no second copy at the top level")
 
 	again, err := newStore(path, logger, quartz.NewMock(t))
 	require.NoError(t, err)

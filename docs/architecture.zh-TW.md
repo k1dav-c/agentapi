@@ -523,9 +523,8 @@ hub（`lib/hub`，`persist.go`）把實例保存在 JSON 檔案裡，格式是
 加上的欄位，例如每個實例的工作時間（`work`：最近 7 天的區段，只在區段開始或結束時寫入），讀得懂這個
 格式的舊 hub 會略過。hub 的設定（和 `instances` 並列的 `"settings": {"favorites": [...]}`，即
 `hubSettings`，經由 `store.updateSettings` 修改）也一樣：這種 hub 下次寫入時會丟掉它，它留下的 `.bak`
-則還保有。這個版本會在最上層再寫一份我的最愛（`"favorites": [...]`），也就是 3.5 到 3.7 的 hub 讀取的
-位置；讀取時先看 `settings`，沒有才用它。所以降版後我的最愛還在，那個 hub 對它們的修改，升回來後也
-讀得到。改用新的版本號反而會讓所有舊 hub 拒絕這個檔案。hub 處理過的
+則還保有。3.5 到 3.7 的 hub 把我的最愛放在最上層（`"favorites": [...]`），沒有 `settings` 時 hub 會讀它；
+3.8 到 3.15 也會在最上層多寫一份，之後的版本不再寫。改用新的版本號反而會讓所有舊 hub 拒絕這個檔案。hub 處理過的
 webhook 事件的 delivery ID 也以同樣方式寫入 `instances.deliveries.json`，保留到各自的簽章失效，所以
 重新啟動後重送的事件同樣會被拒絕。
 
