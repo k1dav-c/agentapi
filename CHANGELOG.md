@@ -1,5 +1,12 @@
 # Changelog
 
+## v3.12.1
+
+### Fixes
+
+- The hub's Issues page is as wide as the overview it takes the place of, so the page keeps its
+  edges when Issues opens.
+
 ## v3.12.0
 
 ### Features
