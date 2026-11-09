@@ -1,110 +1,31 @@
 "use client";
 
-import {useCallback, useEffect, useMemo, useRef, useState} from "react";
+import {useEffect, useState} from "react";
 import {ArrowRight, ArrowUpRight, Building2, Github, KeyRound, ListChecks, RefreshCw, RotateCcw, Trash2, TriangleAlert, Unplug, User} from "lucide-react";
 import {toast} from "sonner";
 import {Button} from "@/components/ui/button";
 import {Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle} from "@/components/ui/dialog";
-import {hubCall, hubErrorText} from "@/lib/hub-api";
-import {createDispatchAPI, type GitHubRepo, type GitHubStatus} from "@/lib/hub-dispatch";
+import {hubErrorText} from "@/lib/hub-api";
+import type {GitHubStatus} from "@/lib/hub-dispatch";
+import type {ReposLoad} from "@/lib/hub-github-store";
 import {appSettingsURL, connectURL, installationURL, orgName, ownerOrg, reposOf, selectionLabel, type GitHubInstallation} from "@/lib/hub-github";
 import {cn} from "@/lib/utils";
 import {fieldClass} from "./dialogs";
 import {ConnectGitHub} from "./issues/setup";
-import type {Load} from "./issues/use-dispatch";
-
-// The repositories the hub lists for the app: not asked (no installation),
-// on their way, listed, or the hub couldn't.
-export type ReposLoad = {state: "none"} | {state: "loading"} | {state: "ready"; value: GitHubRepo[]} | {state: "failed"; error: string};
+import type {Load} from "@/lib/load";
+import {useHubGitHub} from "./use-hub-github";
 
 // How many repositories an installation names before "+N".
 const named = 4;
 
-// useGitHubSettings reads the hub's GitHub App and the repositories it is
-// on, again when the page shows again (back from GitHub, where they
-// change); changed is told when what it read differs from before.
-export function useGitHubSettings(root: string, changed?: () => void) {
-  const api = useMemo(() => createDispatchAPI(root), [root]);
-  const [status, setStatus] = useState<Load<GitHubStatus>>({state: "loading"});
-  const [repos, setRepos] = useState<ReposLoad>({state: "none"});
-  const [reading, setReading] = useState(false);
-  const last = useRef<string | null>(null);
-  const latest = useRef(changed);
-  latest.current = changed;
-  const busy = useRef(false);
-  // Whether a read went through: a later one that fails keeps it, and says so.
-  const shown = useRef(false);
-
-  const read = useCallback(async () => {
-    if (busy.current) return;
-    busy.current = true;
-    setReading(true);
-    try {
-      const next = await api.github();
-      setStatus({state: "ready", value: next});
-      shown.current = true;
-      let names: string[] = [];
-      if (next.connected && (next.installations ?? []).length > 0) {
-        setRepos((previous) => (previous.state === "ready" ? previous : {state: "loading"}));
-        try {
-          const list = await api.repos();
-          names = list.map((repo) => repo.full_name);
-          setRepos({state: "ready", value: list});
-        } catch (error) {
-          setRepos({state: "failed", error: hubErrorText(error)});
-        }
-      } else {
-        setRepos({state: "none"});
-      }
-      const key = JSON.stringify([next, names]);
-      if (last.current !== null && last.current !== key) latest.current?.();
-      last.current = key;
-    } catch (error) {
-      if (shown.current) toast.error("Couldn't read the hub's GitHub setup again", {description: hubErrorText(error)});
-      else setStatus({state: "failed", error: hubErrorText(error)});
-    } finally {
-      busy.current = false;
-      setReading(false);
-    }
-  }, [api]);
-
-  useEffect(() => {
-    void read();
-    const onShow = () => {
-      if (document.visibilityState === "visible") void read();
-    };
-    window.addEventListener("focus", onShow);
-    document.addEventListener("visibilitychange", onShow);
-    return () => {
-      window.removeEventListener("focus", onShow);
-      document.removeEventListener("visibilitychange", onShow);
-    };
-  }, [read]);
-
-  const disconnect = useCallback(async () => {
-    await hubCall(root)("/api/github", {method: "DELETE"});
-    await read();
-  }, [root, read]);
-
-  return {status, repos, reading, read, disconnect};
-}
-
 // GitHubSettings is the GitHub section of the hub's settings: the hub's
 // GitHub App, where it is installed and on which repositories, and the
 // ways to change that on GitHub, connect another app, or disconnect.
-// activeJobs is how many jobs at work push with the app's tokens.
-export function GitHubSettings({
-  root,
-  activeJobs = 0,
-  onChanged,
-  headingRef,
-}: {
-  root: string;
-  activeJobs?: number;
-  onChanged?: () => void;
-  headingRef?: React.Ref<HTMLHeadingElement>;
-}) {
-  const github = useGitHubSettings(root, onChanged);
+// activeJobs is how many jobs at work push with the app's tokens. What it
+// reads, and a disconnect, is the Issues page's too (useHubGitHub).
+export function GitHubSettings({root, activeJobs = 0, headingRef}: {root: string; activeJobs?: number; headingRef?: React.Ref<HTMLHeadingElement>}) {
+  const github = useHubGitHub(root);
+  const shown = github.status.state === "ready";
   return (
     <GitHubSettingsView
       root={root}
@@ -113,11 +34,12 @@ export function GitHubSettings({
       reading={github.reading}
       activeJobs={activeJobs}
       headingRef={headingRef}
-      onRetry={() => void github.read()}
-      onDisconnect={async () => {
-        await github.disconnect();
-        onChanged?.();
+      onRetry={async () => {
+        // What it read stays: a toast says this read failed.
+        const why = await github.read();
+        if (why && shown) toast.error("Couldn't read the hub's GitHub setup again", {description: why});
       }}
+      onDisconnect={github.disconnect}
     />
   );
 }

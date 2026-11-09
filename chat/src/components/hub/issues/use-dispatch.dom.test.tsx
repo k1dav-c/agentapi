@@ -75,3 +75,58 @@ describe("useDispatch's jobs", () => {
     expect(hook.result.current.jobs).toEqual([job()]);
   });
 });
+
+describe("useDispatch's GitHub", () => {
+  // Each test its own hub: the page keeps one GitHub App per hub.
+  let hubs = 0;
+  const app = (installed: boolean) => ({connected: true, slug: "app", installations: installed ? [{id: 1, account: "acme", repository_selection: "all", avatar_url: ""}] : []});
+
+  test("read again as the page shows again: the app installed on GitHub meanwhile shows", async () => {
+    const root = `/hub${++hubs}`;
+    let installed = false;
+    routeFetch({[`${root}/api/github`]: () => json(app(installed)), [`${root}/api/github/repos`]: () => json({repos: []})});
+    const hook = await renderHook(() => useDispatch(root, {hosts: [], jobs: []}), {});
+    unmount = hook.unmount;
+    await settle();
+    const installations = () => {
+      const status = hook.result.current.github;
+      return status.state === "ready" ? (status.value.installations ?? []).length : -1;
+    };
+    expect(installations()).toBe(0);
+    installed = true;
+    await act(async () => void window.dispatchEvent(new Event("focus")));
+    await settle();
+    expect(installations()).toBe(1);
+  });
+
+  test("issues read for an earlier scope that answer late are dropped", async () => {
+    const root = `/hub${++hubs}`;
+    const waiting: ((ok: boolean) => void)[] = [];
+    routeFetch({
+      [`${root}/api/github`]: () => json(app(true)),
+      [`${root}/api/github/repos`]: () => json({repos: [{full_name: "acme/a"}, {full_name: "acme/b"}]}),
+      [`${root}/api/github/issues`]: async (call) => {
+        const repo = new URL(call.url, "http://hub.test").searchParams.get("repo")!;
+        const ok = await new Promise<boolean>((resolve) => waiting.push(resolve));
+        return ok ? json({issues: [{number: 1, title: repo, html_url: "", labels: [], state: "open", body: "", user: {login: "me"}}]}) : json({message: "GitHub said no"}, 502);
+      },
+    });
+    const hook = await renderHook(() => useDispatch(root, {hosts: [], jobs: []}), {});
+    unmount = hook.unmount;
+    await settle();
+    // All (a and b) is being read; then b alone, which reads fine.
+    await act(async () => hook.result.current.setScope("acme/b"));
+    await settle();
+    const [a, b, bAlone] = waiting;
+    await act(async () => bAlone(true));
+    await settle();
+    // The read of All, late, when b failed.
+    await act(async () => {
+      a(true);
+      b(false);
+    });
+    await settle();
+    expect(hook.result.current.issuesError).toBe("");
+    expect(hook.result.current.reading).toBe(false);
+  });
+});

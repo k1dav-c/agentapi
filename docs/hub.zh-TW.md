@@ -519,7 +519,7 @@ AgentAPI 正在更新時，上方那一列也會顯示進度，還在等任務�
 的身分推分支、開 PR。在 Issues 頁上，**Issues** 旁的 App 名稱，以及 repo 選單最下面的
 **GitHub settings…**，也會開到這裡。分頁上有 App 的名稱（連到它在 GitHub 的頁面）和擁有它的帳號或組織；
 下面列出安裝了 App 的每個帳號，附上大頭貼、**All repositories** 或選了幾個 repo，以及前幾個 repo 的名稱。
-hub 的頁面重新顯示時會再讀一次，所以從 GitHub 切回來就看得到改動。
+hub 的頁面重新顯示時，這個分頁和 Issues 頁都會再讀一次，所以從 GitHub 切回來就看得到改動。
 
 - **Choose repositories** 在新分頁開啟 GitHub，可以把 App 裝到其他帳號，或改選已安裝帳號的 repo。帳號旁的
   **Change** 直接開到那個帳號的安裝設定。

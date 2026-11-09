@@ -1,6 +1,6 @@
 "use client";
 
-import {useCallback, useEffect, useMemo, useState} from "react";
+import {useCallback, useEffect, useMemo, useRef, useState} from "react";
 import {toast} from "sonner";
 import {HubAPIError, hubErrorText} from "@/lib/hub-api";
 import {
@@ -13,18 +13,15 @@ import {
   type DispatchHost,
   type DispatchJob,
   type GitHubIssue,
-  type GitHubRepo,
-  type GitHubStatus,
 } from "@/lib/hub-dispatch";
 import type {DispatchBoard} from "@/lib/hub";
 import {useHubSetting} from "@/lib/hub-settings";
+import type {Load} from "@/lib/load";
+import {useHubGitHub} from "../use-hub-github";
 
 // The most repositories whose issues All reads: the latest pushed or
 // changed, as the hub lists them.
 export const recentRepos = 20;
-
-// Load is a read that is under way, went through, or failed.
-export type Load<T> = {state: "loading"} | {state: "ready"; value: T} | {state: "failed"; error: string};
 
 // IssueTarget is the issue an action is on.
 export interface IssueTarget {
@@ -63,15 +60,14 @@ function refusal(error: unknown): {title?: string; description: string} {
 // useDispatch reads the dispatch while the Issues view is open: the hub's
 // GitHub App, its repositories and their open issues, and the machines and
 // the jobs from live (the hub's stream; undefined until its first dispatch
-// event); and does what the view asks of them.
-// githubChanges counts the changes to the app made elsewhere (the hub's
-// settings): each reads it again.
-export function useDispatch(root: string, live?: DispatchBoard, githubChanges = 0) {
+// event); and does what the view asks of them. The app is the hub
+// settings' too (useHubGitHub): a change to it there shows here.
+export function useDispatch(root: string, live?: DispatchBoard) {
   const api = useMemo(() => createDispatchAPI(root), [root]);
   const [scope, setScope] = useHubSetting("issuesRepo");
   const [preferred, setPreferred] = useHubSetting("issuesAgent");
-  const [github, setGitHub] = useState<Load<GitHubStatus>>({state: "loading"});
-  const [repos, setRepos] = useState<GitHubRepo[]>([]);
+  const app = useHubGitHub(root);
+  const repos = useMemo(() => (app.repos.state === "ready" ? app.repos.value : []), [app.repos]);
   const [issues, setIssues] = useState<ReadonlyMap<string, GitHubIssue[]>>(new Map());
   // The repositories whose issues are being read, and those that failed.
   const [reading, setReading] = useState(false);
@@ -86,23 +82,26 @@ export function useDispatch(root: string, live?: DispatchBoard, githubChanges = 
   // The keys of the issues an action is under way on.
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
 
-  const readGitHub = useCallback(async () => {
-    try {
-      const status = await api.github();
-      setGitHub({state: "ready", value: status});
-      if (status.connected) setRepos(await api.repos());
-    } catch (e) {
-      setGitHub({state: "failed", error: hubErrorText(e)});
-    }
-  }, [api]);
-
   // The repositories whose issues the scope shows.
   const repoNames = useMemo(() => repos.map((repo) => repo.full_name), [repos]);
-  const scoped = useMemo(() => (scope && repoNames.includes(scope) ? [scope] : repoNames.slice(0, recentRepos)), [scope, repoNames]);
+  // The same list while the names are: the app read again (as the page
+  // shows again) doesn't read their issues again.
+  const scopedNames = (scope && repoNames.includes(scope) ? [scope] : repoNames.slice(0, recentRepos)).join("\n");
+  const scoped = useMemo(() => (scopedNames ? scopedNames.split("\n") : []), [scopedNames]);
+  // The latest read of the issues: an earlier one that answers late is
+  // dropped.
+  const latestRead = useRef(0);
   const readIssues = useCallback(async () => {
-    if (scoped.length === 0) return;
+    // No repositories (none yet, or the app disconnected): no read under
+    // way counts any more.
+    const seq = ++latestRead.current;
+    if (scoped.length === 0) {
+      setReading(false);
+      return;
+    }
     setReading(true);
     const results = await Promise.allSettled(scoped.map((repo) => api.issues(repo)));
+    if (seq !== latestRead.current) return;
     setIssues((previous) => {
       const next = new Map(previous);
       results.forEach((result, i) => {
@@ -115,9 +114,6 @@ export function useDispatch(root: string, live?: DispatchBoard, githubChanges = 
     setReading(false);
   }, [api, scoped]);
 
-  useEffect(() => {
-    void readGitHub();
-  }, [readGitHub, githubChanges]);
   useEffect(() => {
     void readIssues();
   }, [readIssues]);
@@ -203,8 +199,8 @@ export function useDispatch(root: string, live?: DispatchBoard, githubChanges = 
     setScope,
     preferred,
     setPreferred,
-    github,
-    retryGitHub: readGitHub,
+    github: app.status,
+    retryGitHub: app.read,
     repos,
     issues,
     reading,

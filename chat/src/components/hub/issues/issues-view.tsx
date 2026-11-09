@@ -79,7 +79,6 @@ export function IssuesView({
   onSelect,
   onClose,
   onOpenChat,
-  githubChanges = 0,
   onGitHubSettings,
 }: {
   root: string;
@@ -93,13 +92,10 @@ export function IssuesView({
   onSelect: (key: string | null) => void;
   onClose: () => void;
   onOpenChat: (instanceID: string) => void;
-  // Counts the changes to the hub's GitHub App in the settings: each reads
-  // it again.
-  githubChanges?: number;
   // Opens the hub settings at GitHub.
   onGitHubSettings?: () => void;
 }) {
-  const d = useDispatch(root, live, githubChanges);
+  const d = useDispatch(root, live);
   const hosts: DispatchHost[] = useMemo(() => (d.hosts.state === "ready" ? d.hosts.value : []), [d.hosts]);
   const status = d.github.state === "ready" ? d.github.value : undefined;
   const connected = !!status?.connected;

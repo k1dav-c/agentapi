@@ -1,8 +1,9 @@
 import {describe, expect, test} from "bun:test";
 import {renderToStaticMarkup} from "react-dom/server";
 import type {GitHubRepo, GitHubStatus} from "@/lib/hub-dispatch";
-import type {Load} from "./issues/use-dispatch";
-import {GitHubSettingsView, type ReposLoad} from "./github-settings";
+import type {ReposLoad} from "@/lib/hub-github-store";
+import type {Load} from "@/lib/load";
+import {GitHubSettingsView} from "./github-settings";
 
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replaceAll("&#x27;", "'").replaceAll("&amp;", "&").replace(/\s+/g, " ");
 const render = (status: Load<GitHubStatus>, repos: ReposLoad = {state: "none"}) =>

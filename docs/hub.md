@@ -601,8 +601,8 @@ The **GitHub** tab of **Hub settings** shows the hub's GitHub App, which lists t
 the app's name beside **Issues**, and **GitHub settings…** at the foot of the repository menu, open
 it too. It has the app's name, linked to its page on GitHub, and the account or organization that
 owns it. Below, each account the app is installed on has its picture, **All repositories** or how
-many were selected, and their first names. The section reads the app again when the hub's page
-shows again, so coming back from GitHub is enough to see a change.
+many were selected, and their first names. The section and the Issues page read the app again when
+the hub's page shows again, so coming back from GitHub is enough to see a change.
 
 - **Choose repositories** opens GitHub in a new tab, where you install the app on another account
   or pick the repositories of one it is on. **Change** beside an account goes straight to its

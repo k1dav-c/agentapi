@@ -136,5 +136,7 @@ export function createDispatchAPI(root: string, fetcher: Fetcher = (url, init) =
     issues: async (repo: string) => (await call<HubWire["DispatchIssuesBody"]>(`/api/github/issues?repo=${encodeURIComponent(repo)}`)).issues ?? [],
     dispatch: (request: DispatchRequest) => call<DispatchResponse>("/api/dispatch", post(request)),
     createIssue: (request: CreateIssueRequest) => call<CreateIssueResponse>("/api/github/issues", post(request)),
+    // The hub forgets its GitHub App.
+    disconnect: async () => void (await fetchHub("/api/github", {method: "DELETE"})),
   };
 }

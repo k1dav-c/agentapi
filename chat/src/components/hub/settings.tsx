@@ -20,8 +20,7 @@ const sections: {id: SettingsSection; label: string; icon: React.ReactNode}[] = 
 // HubSettings is the dialog of the settings kept on the hub, which every
 // browser signed in to it shares: the favorites, and the hub's GitHub App.
 // section is the one it opens at; null is closed. activeJobs is how many
-// jobs at work push with the app's tokens; onGitHubChanged is told when
-// the app or where it is installed changed.
+// jobs at work push with the app's tokens.
 export function HubSettings({
   root,
   section,
@@ -29,7 +28,6 @@ export function HubSettings({
   favorites,
   onFavoritesSaved,
   activeJobs,
-  onGitHubChanged,
 }: {
   root: string;
   section: SettingsSection | null;
@@ -37,7 +35,6 @@ export function HubSettings({
   favorites: Favorite[] | undefined;
   onFavoritesSaved: (favorites: Favorite[]) => void;
   activeJobs?: number;
-  onGitHubChanged?: () => void;
 }) {
   const editor = useRef<{open: boolean; cancel: () => void} | null>(null);
   const headings = useRef<Partial<Record<SettingsSection, HTMLHeadingElement | null>>>({});
@@ -111,7 +108,6 @@ export function HubSettings({
               <GitHubSettings
                 root={root}
                 activeJobs={activeJobs}
-                onChanged={onGitHubChanged}
                 headingRef={(heading) => {
                   headings.current.github = heading;
                 }}
