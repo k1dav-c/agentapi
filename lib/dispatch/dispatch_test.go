@@ -1288,3 +1288,111 @@ func TestAuthLauncher(t *testing.T) {
 		assert.True(t, jsonapi.IsCode(err, test.code), "%s: %v", name, err)
 	}
 }
+
+// What a task event of a job's AgentAPI does to the job, by its state.
+func TestTaskEventByState(t *testing.T) {
+	for _, test := range []struct {
+		state     JobState
+		pr        bool
+		event     string
+		want      JobState
+		costTasks int
+	}{
+		{JobStarting, false, "task.started", JobWorking, 0},
+		{JobWorking, false, "task.started", JobWorking, 0},
+		{JobReview, false, "task.started", JobWorking, 0},
+		{JobFailed, false, "task.started", JobFailed, 0},
+		{JobStarting, false, "task.completed", JobWorking, 1},
+		{JobWorking, false, "task.completed", JobWorking, 1},
+		{JobWorking, true, "task.completed", JobReview, 1},
+		{JobWorking, true, "task.failed", JobReview, 1},
+		{JobReview, true, "task.completed", JobReview, 1},
+		{JobFailed, false, "task.completed", JobFailed, 1},
+		{JobWorking, false, "task.queued", JobWorking, 0},
+	} {
+		name := fmt.Sprintf("%s pr=%v %s", test.state, test.pr, test.event)
+		s, now := newService(t, nil)
+		job := &Job{Key: "acme/widget#1", Host: "a", State: test.state, UpdatedAt: now.Add(-time.Hour), Runs: []Run{{InstanceID: "a~acme~widget~1", StartedAt: now.Add(-time.Hour)}}}
+		if test.pr {
+			job.PRURL = "https://github.com/acme/widget/pull/2"
+		}
+		s.mu.Lock()
+		s.jobs[job.Key] = job
+		s.mu.Unlock()
+		s.TaskEvent("a~acme~widget~1", test.event, json.RawMessage(`{"duration_seconds": 3}`))
+		s.TaskEvent("b~acme~widget~1", "task.started", nil) // another instance's
+		got := s.job(job.Key)
+		assert.Equal(t, test.want, got.State, name)
+		assert.Equal(t, test.costTasks, got.Runs[0].Cost.Tasks, name)
+	}
+
+	// The runs that ended get nothing.
+	for _, state := range []JobState{JobDone, JobStopped} {
+		s, now := newService(t, nil)
+		job := &Job{Key: "acme/widget#1", Host: "a", State: state, Runs: []Run{{InstanceID: "a~acme~widget~1", StartedAt: now.Add(-time.Hour), EndedAt: now.Add(-time.Minute)}}}
+		s.mu.Lock()
+		s.jobs[job.Key] = job
+		s.mu.Unlock()
+		s.TaskEvent("a~acme~widget~1", "task.started", nil)
+		s.TaskEvent("a~acme~widget~1", "task.completed", nil)
+		got := s.job(job.Key)
+		assert.Equal(t, state, got.State)
+		assert.Zero(t, got.Runs[0].Cost.Tasks)
+	}
+}
+
+// What a machine's report does to each of its jobs the hub knows, by the
+// job's state and what the machine reports of it.
+func TestReconcileByState(t *testing.T) {
+	const key = "acme/widget#1"
+	for _, test := range []struct {
+		state JobState
+		// reported is the launcher's state of the job, "" for none.
+		reported host.JobState
+		want     JobState
+		// stop is the launcher's stop the hub sends, "" for none.
+		stop string
+	}{
+		{JobStarting, "", JobStarting, ""},
+		{JobWorking, "", JobFailed, ""},
+		{JobReview, "", JobFailed, ""},
+		{JobFailed, "", JobFailed, ""},
+		{JobDone, "", JobDone, ""},
+		{JobStopped, "", JobDone, ""},
+		{JobWorking, host.JobRunning, JobWorking, ""},
+		{JobReview, host.JobRestarting, JobReview, ""},
+		{JobWorking, host.JobFailed, JobFailed, ""},
+		{JobReview, host.JobFailed, JobFailed, ""},
+		{JobFailed, host.JobRunning, JobFailed, ""},
+		{JobStopped, host.JobRunning, JobStopped, "acme~widget~1?"},
+		{JobDone, host.JobRunning, JobDone, "acme~widget~1?keep_worktree=true&keep_state=true"},
+	} {
+		name := fmt.Sprintf("%s, reported %q", test.state, test.reported)
+		s, now := newService(t, nil)
+		l := newFakeLauncher(t, "a")
+		if test.reported != "" {
+			l.jobs[key] = host.JobInfo{Key: key, Agent: "claude", InstanceID: "a~acme~widget~1", State: test.reported, Error: "it exited"}
+		}
+		s.mu.Lock()
+		s.jobs[key] = &Job{Key: key, Host: "a", Agent: "claude", State: test.state, UpdatedAt: now.Add(-time.Hour), Runs: []Run{{InstanceID: "a~acme~widget~1", StartedAt: now.Add(-time.Hour)}}}
+		s.mu.Unlock()
+		join(t, s, l, "claude")
+		got := s.job(key)
+		assert.Equal(t, test.want, got.State, name)
+		if test.want == JobFailed && test.state != JobFailed {
+			assert.NotEmpty(t, got.Error, name)
+		}
+		if test.stop == "" {
+			time.Sleep(10 * time.Millisecond)
+			l.mu.Lock()
+			assert.Empty(t, l.stops, name)
+			l.mu.Unlock()
+			continue
+		}
+		assert.Eventually(t, func() bool {
+			l.mu.Lock()
+			defer l.mu.Unlock()
+			return slices.Equal(l.stops, []string{test.stop})
+		}, 5*time.Second, 10*time.Millisecond, name)
+	}
+}
