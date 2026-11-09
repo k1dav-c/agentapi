@@ -41,8 +41,8 @@ Every job runs on a self-hosted runner (labels `self-hosted`, `linux`, `x64`), s
 GitHub Actions minutes ran out; nothing tests macOS or Windows. It runs as a user of its own,
 `ghrunner`, without sudo, so a job can't reach the files of the machine's own AgentAPIs and hub,
 as the systemd service `actions.runner.k1dav-c-agentapi.<machine>`
-(`/home/ghrunner/actions-runner`). The jobs need `gcc` (the race detector), `shellcheck`, `file`
-and `gh` on the machine; the workflows set up Go and Bun themselves.
+(`/home/ghrunner/actions-runner`). The jobs need `gcc` (the race detector), `shellcheck`, `file`,
+`unzip` (to set up Bun) and `gh` on the machine; the workflows set up Go and Bun themselves.
 
 The repository is public, so a pull request from a fork runs no job (its code would run on the
 runner's machine), and the repository asks for approval before an outside contributor's workflows
