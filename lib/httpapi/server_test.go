@@ -1085,8 +1085,8 @@ func TestServer_UploadLeavesNoTemporaryFiles(t *testing.T) {
 	assert.Empty(t, left)
 }
 
-// A body far larger than the limit is refused without being parsed into
-// temporary files.
+// A body far larger than the limit is refused as too large (huma's 413)
+// without being parsed into temporary files.
 func TestServer_UploadTooLarge(t *testing.T) {
 	t.Parallel()
 	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -1100,7 +1100,7 @@ func TestServer_UploadTooLarge(t *testing.T) {
 	require.NoError(t, err)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
-	assert.Equal(t, http.StatusBadRequest, uploadFile(t, ts.URL, make([]byte, uploadLimit+2<<20)))
+	assert.Equal(t, http.StatusRequestEntityTooLarge, uploadFile(t, ts.URL, make([]byte, uploadLimit+2<<20)))
 }
 
 func TestServer_Stop_Idempotency(t *testing.T) {
