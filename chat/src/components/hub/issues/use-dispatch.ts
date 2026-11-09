@@ -118,14 +118,16 @@ export function useDispatch(root: string, live?: DispatchBoard) {
     void readIssues();
   }, [readIssues]);
 
-  const hosts: Load<DispatchHost[]> = live ? {state: "ready", value: live.hosts} : {state: "loading"};
+  // The same while the machines are: the cards' suggestions with them.
+  const liveHosts = live?.hosts;
+  const hosts = useMemo<Load<DispatchHost[]>>(() => (liveHosts ? {state: "ready", value: liveHosts} : {state: "loading"}), [liveHosts]);
   const jobs = useMemo(() => withAnswers(streamed ?? [], answered), [streamed, answered]);
 
   // A job the hub answered with goes on the board at once, before the
   // stream tells of it.
-  const merge = (job: DispatchJob | undefined) => {
+  const merge = useCallback((job: DispatchJob | undefined) => {
     if (job) setAnswered((all) => new Map(all).set(job.key, job));
-  };
+  }, []);
 
   // run does an action on key's issue and says how it went; it resolves to
   // what the hub answered, undefined if it didn't go through.
@@ -148,51 +150,56 @@ export function useDispatch(root: string, live?: DispatchBoard) {
     }
   }, []);
 
-  const actions: DispatchActions = {
-    assign: async ({repo, number}, agent, host) => {
-      const key = jobKey(repo, number);
-      const response = await run(key, `assign ${key}`, `${key} went to ${agent ? agentLabel(agent) : "the machine's default agent"}${host ? ` on ${host}` : ""}`, () =>
-        api.dispatch({action: "start", repo, issue: number, agent, host}),
-      );
-      merge(response?.job);
-      return response !== undefined;
-    },
-    retry: async (job) => {
-      const response = await run(job.key, `retry ${job.key}`, `${agentLabel(job.agent)} starts ${job.key} again`, () =>
-        api.dispatch({action: "start", repo: job.repo, issue: job.issue, agent: job.agent}),
-      );
-      merge(response?.job);
-      return response !== undefined;
-    },
-    switchTo: async (job, agent) => {
-      setPreferred(agent);
-      const response = await run(job.key, `switch ${job.key} to ${agentLabel(agent)}`, `${agentLabel(agent)} takes over ${job.key}`, () =>
-        api.dispatch({action: "start", repo: job.repo, issue: job.issue, agent}),
-      );
-      merge(response?.job);
-      return response !== undefined;
-    },
-    stop: async (job) => {
-      const response = await run(job.key, `stop ${job.key}`, `Stopped ${job.key}`, () => api.dispatch({action: "stop", repo: job.repo, issue: job.issue}));
-      merge(response?.job);
-      return response !== undefined;
-    },
-    send: async (job, message) => {
-      const response = await run(job.key, `send ${job.key} a message`, `Sent to ${agentLabel(job.agent)}`, () =>
-        api.dispatch({action: "send", repo: job.repo, issue: job.issue, message, author: "hub"}),
-      );
-      merge(response?.job);
-      return response !== undefined;
-    },
-    createIssue: async (request) => {
-      const response = await run(`new ${request.repo}`, `open the issue in ${request.repo}`, `Opened the issue in ${request.repo}`, () => api.createIssue(request));
-      if (!response) return undefined;
-      merge(response.job);
-      setIssues((all) => new Map(all).set(request.repo, [response.issue, ...(all.get(request.repo) ?? []).filter((i) => i.number !== response.issue.number)]));
-      return response.issue;
-    },
-    refresh: () => void readIssues(),
-  };
+  // The same actions while the page's API and scope are, so a memoized
+  // card doesn't render again for them.
+  const actions = useMemo<DispatchActions>(
+    () => ({
+      assign: async ({repo, number}, agent, host) => {
+        const key = jobKey(repo, number);
+        const response = await run(key, `assign ${key}`, `${key} went to ${agent ? agentLabel(agent) : "the machine's default agent"}${host ? ` on ${host}` : ""}`, () =>
+          api.dispatch({action: "start", repo, issue: number, agent, host}),
+        );
+        merge(response?.job);
+        return response !== undefined;
+      },
+      retry: async (job) => {
+        const response = await run(job.key, `retry ${job.key}`, `${agentLabel(job.agent)} starts ${job.key} again`, () =>
+          api.dispatch({action: "start", repo: job.repo, issue: job.issue, agent: job.agent}),
+        );
+        merge(response?.job);
+        return response !== undefined;
+      },
+      switchTo: async (job, agent) => {
+        setPreferred(agent);
+        const response = await run(job.key, `switch ${job.key} to ${agentLabel(agent)}`, `${agentLabel(agent)} takes over ${job.key}`, () =>
+          api.dispatch({action: "start", repo: job.repo, issue: job.issue, agent}),
+        );
+        merge(response?.job);
+        return response !== undefined;
+      },
+      stop: async (job) => {
+        const response = await run(job.key, `stop ${job.key}`, `Stopped ${job.key}`, () => api.dispatch({action: "stop", repo: job.repo, issue: job.issue}));
+        merge(response?.job);
+        return response !== undefined;
+      },
+      send: async (job, message) => {
+        const response = await run(job.key, `send ${job.key} a message`, `Sent to ${agentLabel(job.agent)}`, () =>
+          api.dispatch({action: "send", repo: job.repo, issue: job.issue, message, author: "hub"}),
+        );
+        merge(response?.job);
+        return response !== undefined;
+      },
+      createIssue: async (request) => {
+        const response = await run(`new ${request.repo}`, `open the issue in ${request.repo}`, `Opened the issue in ${request.repo}`, () => api.createIssue(request));
+        if (!response) return undefined;
+        merge(response.job);
+        setIssues((all) => new Map(all).set(request.repo, [response.issue, ...(all.get(request.repo) ?? []).filter((i) => i.number !== response.issue.number)]));
+        return response.issue;
+      },
+      refresh: () => void readIssues(),
+    }),
+    [api, run, merge, setPreferred, readIssues],
+  );
 
   return {
     scope: scope && repoNames.includes(scope) ? scope : "",

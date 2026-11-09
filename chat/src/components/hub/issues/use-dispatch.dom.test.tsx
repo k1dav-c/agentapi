@@ -130,3 +130,20 @@ describe("useDispatch's GitHub", () => {
     expect(hook.result.current.reading).toBe(false);
   });
 });
+
+describe("useDispatch, rendered again", () => {
+  test("the same actions and machines while nothing they hold changed, for the cards' memo", async () => {
+    routeFetch({"/hub-same/api/github": () => json({connected: false, installations: []})});
+    const live: DispatchBoard = {hosts: [], jobs: [job()]};
+    const hook = await renderHook(({live}: {live?: DispatchBoard; n: number}) => useDispatch("/hub-same", live), {live, n: 0});
+    unmount = hook.unmount;
+    await settle();
+    const {actions, hosts} = hook.result.current;
+    await hook.rerender({live, n: 1});
+    expect(hook.result.current.actions).toBe(actions);
+    expect(hook.result.current.hosts).toBe(hosts);
+    // Another dispatch event, with the same machines.
+    await hook.rerender({live: {...live, jobs: [job({state: "review"})]}, n: 2});
+    expect(hook.result.current.hosts).toBe(hosts);
+  });
+});

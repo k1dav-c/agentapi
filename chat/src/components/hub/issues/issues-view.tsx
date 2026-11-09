@@ -89,7 +89,7 @@ export function IssuesView({
   // The issue open in the detail (owner/repo#n), which a list row's chip
   // opens too.
   selectedKey: string | null;
-  onSelect: (key: string | null) => void;
+  onSelect: React.Dispatch<React.SetStateAction<string | null>>;
   onClose: () => void;
   onOpenChat: (instanceID: string) => void;
   // Opens the hub settings at GitHub.
@@ -128,11 +128,14 @@ export function IssuesView({
   }, [selectedKey]);
 
   // Who a tap on Assign gives an issue of each repository to.
+  // The same while the repositories, the machines and the agent preferred
+  // are, whatever the cards do.
+  const cardRepos = [...new Set(cards.map((card) => card.repo))].join("\n");
   const suggestions = useMemo(() => {
     const out = new Map<string, Option | undefined>();
-    for (const card of cards) if (!out.has(card.repo)) out.set(card.repo, suggest(hosts, card.repo, d.preferred));
+    for (const repo of cardRepos ? cardRepos.split("\n") : []) out.set(repo, suggest(hosts, repo, d.preferred));
     return out;
-  }, [cards, hosts, d.preferred]);
+  }, [cardRepos, hosts, d.preferred]);
 
   const {actions: dispatch, setPreferred} = d;
   const assignCard = useCallback(
@@ -142,20 +145,18 @@ export function IssuesView({
     },
     [dispatch, setPreferred],
   );
-  const selectedRef = useRef(selectedKey);
-  selectedRef.current = selectedKey;
-  const latestDispatch = useRef(dispatch);
-  latestDispatch.current = dispatch;
+  // The same while what they call is, so the cards don't render again.
   const cardActions = useMemo<CardActions>(
     () => ({
-      select: (key) => setSelectedKey(key === selectedRef.current ? null : key),
+      // The card open already closes.
+      select: (key) => setSelectedKey((open) => (open === key ? null : key)),
       assign: assignCard,
-      retry: (card) => card.job && void latestDispatch.current.retry(card.job),
+      retry: (card) => card.job && void dispatch.retry(card.job),
       openChat: onOpenChat,
     }),
-    [assignCard, onOpenChat, setSelectedKey],
+    [assignCard, dispatch, onOpenChat, setSelectedKey],
   );
-  const detailActions: DetailActions = {...dispatch, openChat: onOpenChat, assignCard};
+  const detailActions = useMemo<DetailActions>(() => ({...dispatch, openChat: onOpenChat, assignCard}), [dispatch, onOpenChat, assignCard]);
 
   const jump = (section: SectionID) => {
     if (section === "done") setAllDone(true);
