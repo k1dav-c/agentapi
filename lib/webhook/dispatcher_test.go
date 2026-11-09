@@ -4,10 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -134,29 +132,45 @@ func TestWebhookSend(t *testing.T) {
 	assert.Empty(t, receivedHeader.Get("X-AgentAPI-Signature-256"))
 }
 
-// The receiver's answer is read, so its connection takes the next delivery.
-func TestWebhookSendReusesTheConnection(t *testing.T) {
+// The receiver's answer is read to its end before it is closed, so its
+// connection takes the next delivery.
+func TestWebhookSendReadsTheAnswer(t *testing.T) {
 	t.Parallel()
-	var connections atomic.Int32
-	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = io.WriteString(w, `{"ok": true, "note": "`+strings.Repeat("x", 1000)+`"}`)
-	}))
-	server.Config.ConnState = func(_ net.Conn, state http.ConnState) {
-		if state == http.StateNew {
-			connections.Add(1)
-		}
-	}
-	server.Start()
-	defer server.Close()
-	dispatcher, err := New(Config{URL: server.URL}, slog.New(slog.DiscardHandler), instanceapi.AgentTypeClaude, quartz.NewReal())
+	dispatcher, err := New(Config{URL: "http://receiver.test/hooks"}, slog.New(slog.DiscardHandler), instanceapi.AgentTypeClaude, quartz.NewReal())
 	require.NoError(t, err)
-	client := &http.Client{}
-	for i := range 3 {
-		event := instanceapi.WebhookEvent{ID: fmt.Sprint("delivery-", i), CreatedAt: time.Now()}
-		_, err = dispatcher.send(t.Context(), dispatcher.config, client, event, []byte(`{}`))
-		require.NoError(t, err)
+	for _, status := range []int{http.StatusOK, http.StatusServiceUnavailable} {
+		body := &answerBody{Reader: strings.NewReader(`{"ok": true, "note": "` + strings.Repeat("x", 1000) + `"}`)}
+		client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: status, Status: http.StatusText(status), Body: body, Request: r, Header: http.Header{}}, nil
+		})}
+		event := instanceapi.WebhookEvent{ID: "delivery-1", CreatedAt: time.Now()}
+		_, _ = dispatcher.send(t.Context(), dispatcher.config, client, event, []byte(`{}`))
+		assert.True(t, body.closed, status)
+		assert.True(t, body.readToEnd, "read before it was closed (%d)", status)
 	}
-	assert.Equal(t, int32(1), connections.Load())
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// answerBody records whether it was read to its end before Close.
+type answerBody struct {
+	io.Reader
+	eof, readToEnd, closed bool
+}
+
+func (b *answerBody) Read(p []byte) (int, error) {
+	n, err := b.Reader.Read(p)
+	if err == io.EOF {
+		b.eof = true
+	}
+	return n, err
+}
+
+func (b *answerBody) Close() error {
+	b.readToEnd, b.closed = b.eof, true
+	return nil
 }
 
 func TestWebhookSendRejectsNonSuccessfulResponse(t *testing.T) {
