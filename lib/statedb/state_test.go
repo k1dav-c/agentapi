@@ -91,7 +91,7 @@ func oldDB(t *testing.T, values map[string]string) string {
 }
 
 // A database of AgentAPI 3.7.2 has its state moved into conversation_state
-// on its first open; the old keys stay, written as before.
+// on its first open, and the old keys are deleted.
 func TestStoredStateMigratesTheOldKeys(t *testing.T) {
 	path := oldDB(t, map[string]string{
 		"settings":   `{"permission_mode":"plan","model":"sonnet"}`,
@@ -108,52 +108,66 @@ func TestStoredStateMigratesTheOldKeys(t *testing.T) {
 	assert.Equal(t, "You've hit your limit", got.LimitStop.Message)
 	assert.True(t, got.LimitStop.ResetsAt.Equal(time.Date(2027, 1, 15, 0, 0, 0, 0, time.UTC)))
 	assert.Nil(t, got.RetryWait)
+	for _, key := range []string{"settings", "limit_stop", "retry_wait"} {
+		assert.NotContains(t, snap.Meta, key)
+	}
 	require.NoError(t, db.Close())
 
 	meta := metaRows(t, path)
 	assert.JSONEq(t, `{"version":1,"settings":{"permission_mode":"plan","model":"sonnet"},"limit_stop":{"message":"You've hit your limit","stopped_at":"2023-11-14T22:13:20Z","resets_at":"2027-01-15T08:00:00+08:00"}}`, meta[statedb.MetaState])
-	assert.JSONEq(t, `{"permission_mode":"plan","model":"sonnet"}`, meta["settings"])
-	assert.NotEmpty(t, meta["limit_stop"])
-	assert.Empty(t, meta["retry_wait"])
+	for _, key := range []string{"settings", "limit_stop", "retry_wait"} {
+		assert.NotContains(t, meta, key, "the old keys are deleted")
+	}
 
-	// Opened again, it reads the same.
+	// Opened again, it reads the same and changes nothing.
 	db = open(t, path)
-	defer func() { _ = db.Close() }()
 	snap, err = db.Load()
 	require.NoError(t, err)
 	again, err := snap.StoredState()
 	require.NoError(t, err)
 	assert.Equal(t, got.Settings, again.Settings)
 	assert.True(t, again.LimitStop.ResetsAt.Equal(*got.LimitStop.ResetsAt))
+	require.NoError(t, db.Close())
+	assert.Equal(t, meta[statedb.MetaState], metaRows(t, path)[statedb.MetaState])
 }
 
-// AgentAPI 3.7.2 opened on a database a newer one wrote finds its keys;
-// what it changes there wins over conversation_state, which it doesn't
-// know, when a newer AgentAPI opens the file again.
-func TestStoredStateSurvivesADowngrade(t *testing.T) {
+// SetStoredState writes conversation_state alone.
+func TestStoredStateWritesNoOldKeys(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.db")
 	db := open(t, path)
 	db.SetMeta(statedb.MetaAgentType, "claude")
-	db.SetStoredState(agentstate.StoredState{
-		Settings:  agentstate.Settings{Model: "opus"},
-		RetryWait: &agentstate.RetryWait{Message: "API Error: 502", StoppedAt: time.Unix(1700000000, 0).UTC(), Attempt: 1, Attempts: 3, RetryAt: time.Unix(1700000030, 0).UTC()},
-	})
+	db.SetStoredState(agentstate.StoredState{Settings: agentstate.Settings{Model: "opus"}})
 	require.NoError(t, db.Close())
 	meta := metaRows(t, path)
-	assert.JSONEq(t, `{"model":"opus"}`, meta["settings"], "the old keys are written too")
-	assert.Contains(t, meta["retry_wait"], "API Error: 502")
-	assert.Empty(t, meta["limit_stop"])
+	assert.JSONEq(t, `{"version":1,"settings":{"model":"opus"}}`, meta[statedb.MetaState])
+	for _, key := range []string{"settings", "limit_stop", "retry_wait"} {
+		assert.NotContains(t, meta, key)
+	}
+}
 
-	// The older AgentAPI cancelled the retry and changed the model.
-	setMetaRows(t, path, map[string]string{"retry_wait": "", "settings": `{"model":"haiku"}`})
+// AgentAPI 3.7.3 to 3.15 wrote the old keys next to conversation_state,
+// and AgentAPI 3.7.2 may have changed them since. conversation_state wins,
+// and the old keys are deleted.
+func TestStoredStateKeepsTheObjectOverOldKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	db := open(t, path)
+	db.SetMeta(statedb.MetaAgentType, "claude")
+	db.SetStoredState(agentstate.StoredState{Settings: agentstate.Settings{Model: "opus"}})
+	require.NoError(t, db.Close())
+	setMetaRows(t, path, map[string]string{"settings": `{"model":"haiku"}`, "limit_stop": "", "retry_wait": `{"message":"API Error: 502"}`})
+
 	db = open(t, path)
-	defer func() { _ = db.Close() }()
 	snap, err := db.Load()
 	require.NoError(t, err)
 	got, err := snap.StoredState()
 	require.NoError(t, err)
-	assert.Equal(t, agentstate.StoredState{Settings: agentstate.Settings{Model: "haiku"}}, got)
-	assert.JSONEq(t, `{"version":1,"settings":{"model":"haiku"}}`, snap.Meta[statedb.MetaState], "it is moved again")
+	assert.Equal(t, agentstate.StoredState{Settings: agentstate.Settings{Model: "opus"}}, got)
+	require.NoError(t, db.Close())
+	meta := metaRows(t, path)
+	assert.JSONEq(t, `{"version":1,"settings":{"model":"opus"}}`, meta[statedb.MetaState])
+	for _, key := range []string{"settings", "limit_stop", "retry_wait"} {
+		assert.NotContains(t, meta, key)
+	}
 }
 
 func TestStoredStateThatCantBeRead(t *testing.T) {
@@ -167,20 +181,21 @@ func TestStoredStateThatCantBeRead(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, agentstate.StoredState{Settings: agentstate.Settings{Model: "opus"}}, got)
 	require.NoError(t, db.Close())
-	assert.Empty(t, metaRows(t, path)["retry_wait"])
+	assert.NotContains(t, metaRows(t, path), "retry_wait")
 
-	// A broken object is read from the old keys.
+	// A broken object reads as no stored state, and stays.
 	setMetaRows(t, path, map[string]string{statedb.MetaState: "{"})
 	db = open(t, path)
 	snap, err = db.Load()
 	require.NoError(t, err)
 	got, err = snap.StoredState()
-	require.NoError(t, err)
-	assert.Equal(t, agentstate.StoredState{Settings: agentstate.Settings{Model: "opus"}}, got)
+	assert.ErrorContains(t, err, "decode the stored conversation state")
+	assert.Equal(t, agentstate.StoredState{}, got)
 	require.NoError(t, db.Close())
+	assert.Equal(t, "{", metaRows(t, path)[statedb.MetaState])
 
-	// An object of a newer version is left as it is; the old keys, which
-	// the newer AgentAPI writes too, are read.
+	// An object of a newer version is left as it is, and reads as no
+	// stored state.
 	newer := `{"version":2,"settings":{"model":"next"}}`
 	setMetaRows(t, path, map[string]string{statedb.MetaState: newer})
 	db = open(t, path)
@@ -189,6 +204,6 @@ func TestStoredStateThatCantBeRead(t *testing.T) {
 	require.NoError(t, err)
 	got, err = snap.StoredState()
 	assert.ErrorContains(t, err, "a newer AgentAPI stored the conversation state")
-	assert.Equal(t, agentstate.Settings{Model: "opus"}, got.Settings)
+	assert.Equal(t, agentstate.StoredState{}, got)
 	assert.Equal(t, newer, snap.Meta[statedb.MetaState])
 }

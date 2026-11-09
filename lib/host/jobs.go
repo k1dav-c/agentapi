@@ -9,7 +9,10 @@ import (
 	"slices"
 	"time"
 
+	"github.com/danielgtaylor/huma/v2"
+
 	"github.com/coder/agentapi/lib/atomicfile"
+	"github.com/coder/agentapi/lib/util"
 )
 
 // JobState is what a job's AgentAPI is doing, as the launcher sees it.
@@ -30,6 +33,12 @@ const (
 	// JobStopping is a job the launcher is stopping.
 	JobStopping JobState = "stopping"
 )
+
+var JobStateValues = []JobState{JobStarting, JobRunning, JobRestarting, JobFailed, JobStopping}
+
+func (JobState) Schema(r huma.Registry) *huma.Schema {
+	return util.OpenAPISchema(r, "LauncherJobState", JobStateValues)
+}
 
 // GitUser is who a job's commits are by.
 type GitUser struct {

@@ -1700,6 +1700,9 @@ agentapi hub leave
 `AGENTAPI_HUB_SECRET`）用來檢查 AgentAPI 的事件，`--instance-token`（或
 `AGENTAPI_HUB_INSTANCE_TOKEN`，否則 `AGENTAPI_API_TOKEN`）會送給它們，`--state` 保存實例，
 `--port` 和 `--bind` 設定監聽位置，`--allowed-hosts` 是瀏覽器可以用來開啟 hub 的名稱（不設定時任何名稱都可以），`--log-level`（或 `AGENTAPI_HUB_LOG_LEVEL`）設定要記錄多少。
+[issue 派工](docs/hub.zh-TW.md#issues)用到的是 `--dispatch-token`（或 `AGENTAPI_HUB_DISPATCH_TOKEN`）：
+用戶端（GitHub workflow 的 runner）只能拿它呼叫 `POST /api/dispatch`；以及 `--github-app-file`：
+hub 的 GitHub App 存放的檔案（預設是 `--state` 旁的 `github-app.json`）。
 
 `join` 把 hub 的 webhook 寫進 `~/.agentapi/config.yaml`，並套用到正在執行、已登記的 AgentAPI。
 `--secret`（或 `AGENTAPI_HUB_SECRET`）為事件簽章，`--events` 選擇事件（預設 `instance.*`，hub 只需要
@@ -1708,6 +1711,54 @@ agentapi hub leave
 `--api-token`（或 `AGENTAPI_API_TOKEN`）會送給需要 token 的實例，`--config` 和 `--registry-dir`
 可指定其他檔案。當下無法修改的 AgentAPI，會在重新啟動時套用設定檔。`--allow-update` 會另外寫入
 `allow-update: true`，AgentAPI 重新啟動後，hub 就能[透過 API 更新它們](#透過-api-更新)；`leave` 會保留這個設定。
+
+### `agentapi host`
+
+在已加入 hub 的主機上執行 [issue 派工](docs/hub.zh-TW.md#issues)的 launcher：hub 每派一個 GitHub
+issue 到這台主機，它就在該 issue 分支的 git worktree 裡啟動一個 AgentAPI，之後再停掉。整套派工的
+架設見 [examples/issue-dispatch](examples/issue-dispatch/README.md)。
+
+```bash
+agentapi hub join http://hub.vpn:3290/hooks --secret "$HUB_SECRET" --public-url 'http://{ip}:{port}'
+echo "$INSTANCE_TOKEN" > ~/.agentapi/instance.token && chmod 600 ~/.agentapi/instance.token
+agentapi host install --now
+agentapi host status
+```
+
+| 指令 | 參數 | 作用 |
+| --- | --- | --- |
+| `serve` | `--config`、`--log-level`（`info`） | 在前景執行 launcher |
+| `status` | `--config` | 顯示 launcher、它的 hub、agent、repo 和 job |
+| `install` | `--config`、`--now` | 寫入 `~/.config/systemd/user/agentapi-host.service`（執行 `agentapi host serve`）並啟用；`--now` 會一併啟動，已在執行就重新啟動。再執行一次會重寫 unit，例如程式搬了位置之後 |
+| `uninstall` | | 停用、停止並移除這個 service；job 的 AgentAPI 繼續執行，檔案也都保留 |
+
+service 設了 `KillMode=process`：重新啟動或停止 launcher 時，job 的 AgentAPI 繼續執行，由下一個
+launcher 接手。`install` 需要 systemd user instance；登出後 user service 會停止時，它會提醒你，
+用 `sudo loginctl enable-linger <user>` 讓它們繼續執行。
+
+launcher 讀 `agentapi hub join` 寫入的 `webhook-url` 和 `webhook-secret`，以及
+`~/.agentapi/config.yaml` 的 `host` 區段（`--config` 可指定其他檔案，launcher 的檔案放在它旁邊）：
+
+```yaml
+host:
+  port: 3291                    # launcher 的 API，hub 會呼叫它
+  bind: ""                      # 所有介面；建議設成 VPN 位址
+  public-url: http://{ip}:3291  # hub 連回 launcher 的網址
+  workdir: ~/work               # clone 和 worktree 的位置
+  scan: [~/work, ~/src]         # 找既有 repo 的目錄（深度 2）
+  ports: 4100-4199              # job 的 AgentAPI 用的 port
+  max-jobs: 4
+  agents: [claude, codex]       # 預設為已安裝的（claude、codex、pi）
+  agent: claude                 # 派工沒指定 agent 時用的 agent
+  clone: true                   # 沒有的 repo 是否自動 clone
+```
+
+| 檔案 | 內容 |
+| --- | --- |
+| `~/.agentapi/host.token` | hub 呼叫 launcher 用的 token，第一次啟動時產生。hub 會把主機名稱綁定到它：換了 token 的 launcher（檔案被刪、主機重灌）要等 hub 上執行 `DELETE /api/hosts/{name}` 後才能加入（見[疑難排解](docs/hub.zh-TW.md#疑難排解)） |
+| `~/.agentapi/instance.token` | 所有 job 的 AgentAPI 共用的 API token，必須等於 hub 的 `--instance-token` |
+| `~/.agentapi/host.sock` | job 的 `git` 和 `gh` 向 launcher 拿 GitHub token 的地方 |
+| `~/.agentapi/jobs.json`、`~/.agentapi/jobs/` | job 清單，以及各 job 的狀態資料庫、log 和 `gh` shim |
 
 ## HTTP API 參考
 

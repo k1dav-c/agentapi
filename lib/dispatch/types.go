@@ -10,7 +10,10 @@ import (
 	"slices"
 	"time"
 
+	"github.com/danielgtaylor/huma/v2"
+
 	"github.com/coder/agentapi/lib/host"
+	"github.com/coder/agentapi/lib/util"
 )
 
 // Action is what a dispatch asks for.
@@ -22,6 +25,12 @@ const (
 	ActionLinkPR Action = "link_pr"
 	ActionStop   Action = "stop"
 )
+
+var ActionValues = []Action{ActionStart, ActionSend, ActionLinkPR, ActionStop}
+
+func (Action) Schema(r huma.Registry) *huma.Schema {
+	return util.OpenAPISchema(r, "DispatchAction", ActionValues)
+}
 
 // JobState is where an issue's work is.
 type JobState string
@@ -37,12 +46,18 @@ const (
 	JobStopped JobState = "stopped"
 )
 
+var JobStateValues = []JobState{JobStarting, JobWorking, JobReview, JobFailed, JobDone, JobStopped}
+
+func (JobState) Schema(r huma.Registry) *huma.Schema {
+	return util.OpenAPISchema(r, "DispatchJobState", JobStateValues)
+}
+
 // ended reports whether a job's work ended; a start begins a new round.
 func (s JobState) ended() bool { return s == JobDone || s == JobStopped }
 
 // Request is POST /api/dispatch.
 type Request struct {
-	Action Action `json:"action" enum:"start,send,link_pr,stop"`
+	Action Action `json:"action"`
 	// DeliveryID makes a dispatch sent again (a workflow run again) count
 	// once.
 	DeliveryID string `json:"delivery_id,omitempty"`
@@ -110,7 +125,7 @@ type Job struct {
 	Host          string   `json:"host"`
 	Agent         string   `json:"agent"`
 	InstanceID    string   `json:"instance_id"`
-	State         JobState `json:"state" enum:"starting,working,review,failed,done,stopped"`
+	State         JobState `json:"state"`
 	Error         string   `json:"error,omitempty"`
 	IssueURL      string   `json:"issue_url"`
 	PRURL         string   `json:"pr_url,omitempty"`
@@ -141,10 +156,16 @@ const (
 	SourceComment MessageSource = "comment"
 )
 
+var MessageSourceValues = []MessageSource{SourceHub, SourceReview, SourceComment}
+
+func (MessageSource) Schema(r huma.Registry) *huma.Schema {
+	return util.OpenAPISchema(r, "DispatchMessageSource", MessageSourceValues)
+}
+
 // Message is a message a job's agent was sent.
 type Message struct {
 	At     time.Time     `json:"at"`
-	Source MessageSource `json:"source" enum:"hub,review,comment"`
+	Source MessageSource `json:"source"`
 	// Author is the GitHub login of a review or comment.
 	Author string `json:"author,omitempty"`
 	// Agent is the agent it went to.

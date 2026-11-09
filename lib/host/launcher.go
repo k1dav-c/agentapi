@@ -53,12 +53,6 @@ const (
 // maxRestarts, about eight minutes in all before it fails.
 var restartDelays = [maxRestarts]time.Duration{5 * time.Second, 15 * time.Second, 45 * time.Second, 2 * time.Minute, 5 * time.Minute}
 
-// Error is a request the launcher refuses, with the HTTP status and a code
-// clients tell apart.
-type Error = jsonapi.Error
-
-var errorf = jsonapi.Errorf
-
 // Launcher starts and stops the jobs of a machine.
 type Launcher struct {
 	config Config
@@ -136,9 +130,6 @@ func New(config Config, logger *slog.Logger) (*Launcher, error) {
 }
 
 var errUnsupportedPlatform = errors.New("agentapi host runs on Linux and macOS")
-
-// HostToken is the token the hub calls the launcher with.
-func (l *Launcher) HostToken() string { return l.hostToken }
 
 // credentialsMode is where a job's git and gh get their token: the hub
 // (CredentialsHub) when it asks and the launcher reports to one, else the
@@ -384,15 +375,15 @@ func (l *Launcher) Start(ctx context.Context, req StartRequest) (JobInfo, bool, 
 	ctx = context.WithoutCancel(ctx)
 	owner, name, err := ParseRepo(req.Repo)
 	if err != nil {
-		return JobInfo{}, false, errorf(http.StatusBadRequest, "bad_request", "%v", err)
+		return JobInfo{}, false, jsonapi.Errorf(http.StatusBadRequest, "bad_request", "%v", err)
 	}
 	if req.Issue <= 0 {
-		return JobInfo{}, false, errorf(http.StatusBadRequest, "bad_request", "issue is a positive number")
+		return JobInfo{}, false, jsonapi.Errorf(http.StatusBadRequest, "bad_request", "issue is a positive number")
 	}
 	key := Key{Owner: owner, Name: name, Issue: req.Issue}
 	agent := cmp.Or(req.Agent, l.config.Agent)
 	if !slices.Contains(l.config.Agents, agent) {
-		return JobInfo{}, false, errorf(http.StatusUnprocessableEntity, "agent_unavailable", "this machine doesn't run %q (it runs %v)", agent, l.config.Agents)
+		return JobInfo{}, false, jsonapi.Errorf(http.StatusUnprocessableEntity, "agent_unavailable", "this machine doesn't run %q (it runs %v)", agent, l.config.Agents)
 	}
 	defer l.locks.lock("job:" + key.String())()
 
@@ -461,7 +452,7 @@ func (l *Launcher) restart(ctx context.Context, job *Job, agent string, req Star
 	l.mu.Unlock()
 	if state != JobFailed {
 		if current != agent {
-			return JobInfo{}, false, errorf(http.StatusConflict, "job_active",
+			return JobInfo{}, false, jsonapi.Errorf(http.StatusConflict, "job_active",
 				"%s runs %s here; stop it, keeping the worktree, to switch to %s", job.Key, current, agent)
 		}
 		return l.info(job), false, nil
@@ -470,7 +461,7 @@ func (l *Launcher) restart(ctx context.Context, job *Job, agent string, req Star
 	if l.activeLocked() >= l.config.MaxJobs {
 		n := l.activeLocked()
 		l.mu.Unlock()
-		return JobInfo{}, false, errorf(http.StatusConflict, "capacity", "this machine runs %d jobs, its most", n)
+		return JobInfo{}, false, jsonapi.Errorf(http.StatusConflict, "capacity", "this machine runs %d jobs, its most", n)
 	}
 	// An AgentAPI the launcher lost track of mustn't hold the port.
 	if alive(job.PID, job.InstanceID) {
@@ -529,7 +520,7 @@ func (l *Launcher) reserve(key Key, mode, agent string) (port int, release func(
 	l.mu.Lock()
 	if n := l.activeLocked(); n >= l.config.MaxJobs {
 		l.mu.Unlock()
-		return 0, nil, errorf(http.StatusConflict, "capacity", "this machine runs %d jobs, its most", n)
+		return 0, nil, jsonapi.Errorf(http.StatusConflict, "capacity", "this machine runs %d jobs, its most", n)
 	}
 	l.reserved[key.String()] = reservation{mode: mode, agent: agent}
 	l.mu.Unlock()
@@ -558,7 +549,7 @@ func (l *Launcher) prepare(ctx context.Context, key Key, req StartRequest, mode 
 	}
 	env := l.gitEnv(key, req.GitUser, mode)
 	if _, err := git(ctx, repoDir, env, "fetch", "--quiet", "origin"); err != nil {
-		return "", "", "", errorf(http.StatusBadGateway, "git_failed", "%v", err)
+		return "", "", "", jsonapi.Errorf(http.StatusBadGateway, "git_failed", "%v", err)
 	}
 	base = cmp.Or(req.DefaultBranch, defaultBranch(ctx, repoDir))
 	worktree = filepath.Join(repoDir+worktreesSuffix, strconv.Itoa(key.Issue))
@@ -576,7 +567,7 @@ func (l *Launcher) failStart(job *Job, err error) (JobInfo, bool, error) {
 	l.fail(job, err)
 	l.saveLocked()
 	l.mu.Unlock()
-	return JobInfo{}, false, errorf(http.StatusInternalServerError, "start_failed", "start %s: %v", job.Key, err)
+	return JobInfo{}, false, jsonapi.Errorf(http.StatusInternalServerError, "start_failed", "start %s: %v", job.Key, err)
 }
 
 func (l *Launcher) info(job *Job) JobInfo {
@@ -605,11 +596,11 @@ func (l *Launcher) repoDir(ctx context.Context, key Key, mode string) (string, e
 		return dir, nil
 	}
 	if !l.config.CloneMissing() {
-		return "", errorf(http.StatusUnprocessableEntity, "repo_missing", "this machine has no clone of %s", key.Repo())
+		return "", jsonapi.Errorf(http.StatusUnprocessableEntity, "repo_missing", "this machine has no clone of %s", key.Repo())
 	}
 	dir = filepath.Join(l.config.Workdir, key.Owner, key.Name)
 	if _, err := os.Stat(dir); err == nil {
-		return "", errorf(http.StatusConflict, "repo_conflict", "%s exists but isn't a clone of %s", dir, key.Repo())
+		return "", jsonapi.Errorf(http.StatusConflict, "repo_conflict", "%s exists but isn't a clone of %s", dir, key.Repo())
 	}
 	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
 		return "", err
@@ -625,7 +616,7 @@ func (l *Launcher) repoDir(ctx context.Context, key Key, mode string) (string, e
 	}
 	l.logger.Info("Cloning a repository", "repo", key.Repo(), "dir", dir)
 	if _, err := git(ctx, tmp, l.gitEnv(key, nil, mode), "clone", "--quiet", remote, "."); err != nil {
-		return "", errorf(http.StatusBadGateway, "clone_failed", "%v", err)
+		return "", jsonapi.Errorf(http.StatusBadGateway, "clone_failed", "%v", err)
 	}
 	if err := os.Rename(tmp, dir); err != nil {
 		return "", err
@@ -653,7 +644,7 @@ func ensureWorktree(ctx context.Context, repoDir, path, branch, base string, env
 	if _, err := os.Stat(path); err == nil {
 		head, err := git(ctx, path, nil, "rev-parse", "--abbrev-ref", "HEAD")
 		if err != nil || head != branch {
-			return errorf(http.StatusConflict, "worktree_conflict", "%s exists and isn't a worktree on %s", path, branch)
+			return jsonapi.Errorf(http.StatusConflict, "worktree_conflict", "%s exists and isn't a worktree on %s", path, branch)
 		}
 		return nil
 	}
@@ -674,10 +665,10 @@ func ensureWorktree(ctx context.Context, repoDir, path, branch, base string, env
 	case has("refs/remotes/origin/" + base):
 		args = []string{"worktree", "add", "--quiet", "--no-track", "-b", branch, path, "origin/" + base}
 	default:
-		return errorf(http.StatusUnprocessableEntity, "no_base_branch", "origin has no branch %s to start %s from", base, branch)
+		return jsonapi.Errorf(http.StatusUnprocessableEntity, "no_base_branch", "origin has no branch %s to start %s from", base, branch)
 	}
 	if _, err := git(ctx, repoDir, env, args...); err != nil {
-		return errorf(http.StatusConflict, "worktree_failed", "%v", err)
+		return jsonapi.Errorf(http.StatusConflict, "worktree_failed", "%v", err)
 	}
 	return nil
 }
@@ -699,7 +690,7 @@ func (l *Launcher) freePort() (int, error) {
 			return port, nil
 		}
 	}
-	return 0, errorf(http.StatusConflict, "no_port", "no port of %d-%d is free", l.config.firstPort, l.config.lastPort)
+	return 0, jsonapi.Errorf(http.StatusConflict, "no_port", "no port of %d-%d is free", l.config.firstPort, l.config.lastPort)
 }
 
 // portFree reports whether this machine can listen on port.
@@ -861,7 +852,7 @@ type MessageRequest struct {
 // AgentAPI's answer.
 func (l *Launcher) Message(ctx context.Context, key Key, req MessageRequest) (int, []byte, error) {
 	if strings.TrimSpace(req.Content) == "" {
-		return 0, nil, errorf(http.StatusBadRequest, "bad_request", "content is empty")
+		return 0, nil, jsonapi.Errorf(http.StatusBadRequest, "bad_request", "content is empty")
 	}
 	l.mu.Lock()
 	job := l.store.get(key.String())
@@ -871,10 +862,10 @@ func (l *Launcher) Message(ctx context.Context, key Key, req MessageRequest) (in
 	}
 	l.mu.Unlock()
 	if job == nil {
-		return 0, nil, errorf(http.StatusNotFound, "job_not_found", "no job %s on this machine", key)
+		return 0, nil, jsonapi.Errorf(http.StatusNotFound, "job_not_found", "no job %s on this machine", key)
 	}
 	if state == JobFailed || state == JobStopping {
-		return 0, nil, errorf(http.StatusConflict, "job_not_running", "job %s is %s", key, state)
+		return 0, nil, jsonapi.Errorf(http.StatusConflict, "job_not_running", "job %s is %s", key, state)
 	}
 	payload := map[string]string{"content": req.Content, "type": "user"}
 	if req.DispatchMode != "" {
@@ -883,7 +874,7 @@ func (l *Launcher) Message(ctx context.Context, key Key, req MessageRequest) (in
 	body, _ := json.Marshal(payload)
 	resp, err := l.instanceRequest(ctx, job, http.MethodPost, "/message", body)
 	if err != nil {
-		return 0, nil, errorf(http.StatusBadGateway, "instance_unreachable", "job %s: %v", key, err)
+		return 0, nil, jsonapi.Errorf(http.StatusBadGateway, "instance_unreachable", "job %s: %v", key, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	answer, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -905,7 +896,7 @@ func (l *Launcher) Stop(ctx context.Context, key Key, opts StopOptions) error {
 	job := l.store.get(key.String())
 	if job == nil {
 		l.mu.Unlock()
-		return errorf(http.StatusNotFound, "job_not_found", "no job %s on this machine", key)
+		return jsonapi.Errorf(http.StatusNotFound, "job_not_found", "no job %s on this machine", key)
 	}
 	job.State = JobStopping
 	pid, marker := job.PID, job.InstanceID
@@ -913,33 +904,10 @@ func (l *Launcher) Stop(ctx context.Context, key Key, opts StopOptions) error {
 	l.saveLocked()
 	l.mu.Unlock()
 
-	if alive(pid, marker) {
-		if err := terminate(pid); err != nil {
-			l.logger.Warn("Couldn't stop a job's AgentAPI", "job", key.String(), "pid", pid, "error", err)
-		}
-		deadline := l.now().Add(stopTimeout)
-		for alive(pid, marker) && l.now().Before(deadline) {
-			time.Sleep(200 * time.Millisecond)
-		}
-		if alive(pid, marker) {
-			l.logger.Warn("A job's AgentAPI didn't stop; killing it", "job", key.String(), "pid", pid)
-			kill(pid)
-		}
-	}
+	l.stopProcess(key, pid, marker)
 	var errs []error
 	if !opts.KeepWorktree {
-		defer l.locks.lock("repo:" + key.Repo())()
-		if _, err := os.Stat(worktree); err == nil {
-			if _, err := git(ctx, repo, nil, "worktree", "remove", "--force", worktree); err != nil {
-				errs = append(errs, err)
-			}
-		}
-		_, _ = git(ctx, repo, nil, "worktree", "prune")
-		if _, err := git(ctx, repo, nil, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err == nil {
-			if _, err := git(ctx, repo, nil, "branch", "--quiet", "-D", branch); err != nil {
-				errs = append(errs, err)
-			}
-		}
+		errs = l.removeWorktree(ctx, key, repo, worktree, branch)
 	}
 	files := l.config.jobFiles(key)
 	if opts.KeepState {
@@ -954,9 +922,46 @@ func (l *Launcher) Stop(ctx context.Context, key Key, opts StopOptions) error {
 	l.mu.Unlock()
 	l.logger.Info("Stopped a job", "job", key.String(), "kept_worktree", opts.KeepWorktree, "kept_state", opts.KeepState)
 	if err := errors.Join(errs...); err != nil {
-		return errorf(http.StatusInternalServerError, "cleanup_failed", "stopped %s, but: %v", key, err)
+		return jsonapi.Errorf(http.StatusInternalServerError, "cleanup_failed", "stopped %s, but: %v", key, err)
 	}
 	return nil
+}
+
+// stopProcess stops a job's AgentAPI, pid if marker still names it: it
+// asks, then kills it after stopTimeout.
+func (l *Launcher) stopProcess(key Key, pid int, marker string) {
+	if !alive(pid, marker) {
+		return
+	}
+	if err := terminate(pid); err != nil {
+		l.logger.Warn("Couldn't stop a job's AgentAPI", "job", key.String(), "pid", pid, "error", err)
+	}
+	deadline := l.now().Add(stopTimeout)
+	for alive(pid, marker) && l.now().Before(deadline) {
+		time.Sleep(200 * time.Millisecond)
+	}
+	if alive(pid, marker) {
+		l.logger.Warn("A job's AgentAPI didn't stop; killing it", "job", key.String(), "pid", pid)
+		kill(pid)
+	}
+}
+
+// removeWorktree removes a job's worktree and its local branch from repo.
+func (l *Launcher) removeWorktree(ctx context.Context, key Key, repo, worktree, branch string) []error {
+	defer l.locks.lock("repo:" + key.Repo())()
+	var errs []error
+	if _, err := os.Stat(worktree); err == nil {
+		if _, err := git(ctx, repo, nil, "worktree", "remove", "--force", worktree); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	_, _ = git(ctx, repo, nil, "worktree", "prune")
+	if _, err := git(ctx, repo, nil, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err == nil {
+		if _, err := git(ctx, repo, nil, "branch", "--quiet", "-D", branch); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errs
 }
 
 // Jobs are the launcher's jobs, with those being prepared (a clone, a
@@ -1139,11 +1144,11 @@ func (l *Launcher) token(ctx context.Context, key Key, caller int) (Token, error
 		mode, owner = r.mode, os.Getpid()
 	} else {
 		l.mu.Unlock()
-		return Token{}, errorf(http.StatusNotFound, "job_not_found", "no job %s runs on this machine", key)
+		return Token{}, jsonapi.Errorf(http.StatusNotFound, "job_not_found", "no job %s runs on this machine", key)
 	}
 	l.mu.Unlock()
 	if caller != 0 && !descendsFrom(caller, owner) {
-		return Token{}, errorf(http.StatusForbidden, "not_the_job", "process %d doesn't run in job %s", caller, key)
+		return Token{}, jsonapi.Errorf(http.StatusForbidden, "not_the_job", "process %d doesn't run in job %s", caller, key)
 	}
 	var creds Credentials
 	switch mode {
@@ -1152,11 +1157,11 @@ func (l *Launcher) token(ctx context.Context, key Key, caller int) (Token, error
 	case credentialsFile:
 		creds = l.files
 	default:
-		return Token{}, errorf(http.StatusServiceUnavailable, "no_credentials", "job %s uses this machine's own GitHub credentials", key)
+		return Token{}, jsonapi.Errorf(http.StatusServiceUnavailable, "no_credentials", "job %s uses this machine's own GitHub credentials", key)
 	}
 	token, err := creds.Token(ctx, key)
 	if err != nil {
-		return Token{}, errorf(http.StatusBadGateway, "token_failed", "%v", err)
+		return Token{}, jsonapi.Errorf(http.StatusBadGateway, "token_failed", "%v", err)
 	}
 	return token, nil
 }

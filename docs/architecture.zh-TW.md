@@ -60,7 +60,7 @@ flowchart TB
 
 | 路徑 | 內容 |
 | --- | --- |
-| `main.go`、`cmd/` | Cobra CLI：`server`（旗標、agent 類型、啟動 agent、訊號、原地重新啟動）、`list`（已登記的 AgentAPI 和它們的摘要）、`hub`（`serve`：hub；`join`、`leave`、`status`：設定檔和執行中 AgentAPI 的 hub webhook）、`restart`（讓已登記的 AgentAPI 原地重新啟動），以及 `update`（會驗證 checksum 的自我更新） |
+| `main.go`、`cmd/` | Cobra CLI：`server`（旗標、agent 類型、啟動 agent、訊號、原地重新啟動）、`list`（已登記的 AgentAPI 和它們的摘要）、`hub`（`serve`：hub；`join`、`leave`、`status`：設定檔和執行中 AgentAPI 的 hub webhook）、`restart`（讓已登記的 AgentAPI 原地重新啟動）、`update`（會驗證 checksum 的自我更新），以及 `host`（`cmd/host`：issue 派工的 launcher，`serve`、`status`，以及安裝與移除 systemd user service 的 `install`、`uninstall`，另有 job 執行的隱藏指令 `git-credential`、`gh-token`） |
 | `lib/httpapi/` | HTTP 伺服器：路由與處理常式、佇列、token 驗證、CORS、事件串流、檔案／終端機／webhook 端點；由它把下面三個套件接起來 |
 | `lib/httpmw/` | 伺服器和 hub 共用的 HTTP 元件：`Host` 檢查與 `--allowed-hosts`、`--allowed-origins`、`--bind` 的解析、跨來源防護、壓縮，以及嵌入的聊天介面的檔案伺服器（`lib/httpmw/chat/`） |
 | `lib/convstate/` | 用戶端讀取的對話狀態，不碰 HTTP：`EventEmitter`（變更以 epoch 和 seq 編號、訂閱與重播）、它推導出的任務和摘要、伺服器最後回報的佇列，以及它把每個變更交給的 `Persister` |
@@ -82,6 +82,10 @@ flowchart TB
 | `lib/instanceapi/` | AgentAPI 和同時監看多個 AgentAPI 的客戶端之間的約定：它是誰（`WebhookInstance`，出現在 webhook 事件、摘要和登記檔中，含它的 `AgentType`）、它的摘要、webhook 的外層格式和簽章（`Sign`、`Verify`），以及 hub 對每個實例顯示的狀態（`StateOf`）。它只匯入 `lib/agentstate` 和 `lib/util` |
 | `lib/hub/` | `agentapi hub serve`，建立在 `lib/instanceapi` 和 `lib/httpmw` 上，不經過伺服器：實例、頁面上設定的群組和釘選、每個實例這一列顯示的內容最近一次變動的時間，以及 hub 看到它工作的區段（`store.go`、`work.go`，由 `persist.go` 保存在檔案中）、我的最愛提示（`favorites.go`，`GET`／`PUT /api/favorites`，屬於 hub 的設定，保存在同一個檔案）、傳輸型別的 schema（`schema.go`、`hub-schema.json`，給頁面的型別用）、有簽章的 webhook 接收端（`webhook.go`）、每個實例的摘要串流（`watch.go`）、登入、瀏覽器的事件串流，以及到實例的代理（`hub.go`、`proxy.go`），還有主機怎麼加入（`join.go`：`GET /api/join` 和啟動 log 列出的位址）；使用說明見 [hub.zh-TW.md](hub.zh-TW.md) |
 | `lib/dispatch/` | hub 的 issue 派工，由 `lib/hub` 掛上：有 launcher 回報的主機（`host.*` 事件；主機名稱綁定第一次帶來的 launcher token）、job 與各次 run 的花費（`task.*` 事件）和最近 50 則送給 agent 的訊息（`send`，來自 hub 的頁面、review 或 `/agent` 留言）、`POST /api/dispatch`（`start` 在 job 進入 `starting` 時就回應，hub 在背景呼叫 launcher，並記下這次啟動直到有結果；沒收到回應時從主機下一次回報接回）、GitHub App，保存在 `dispatch.json` 和 `github-app.json`。`Subscribe` 與 `Board` 讓 hub 的串流在每次變動後送出主機和 job（`dispatch` 事件）；規格見 [issue-dispatch.zh-TW.md](specs/issue-dispatch.zh-TW.md) |
+| `lib/host/` | `agentapi host`，每台主機上的 launcher：設定（設定檔的 `host` 區段）、它有或會 clone 的 repo、hub 每啟動一個 job 就建一個 git worktree 和一個 AgentAPI（結束後重新啟動，記在 `jobs.json`）、給 hub 呼叫且需要 token 的 API（`server.go`）、送給 hub 的 `host.*` 事件與 heartbeat（`hub.go`），以及經由 unix socket 交給 job 的 `git`、`gh` 的 GitHub token（`credentials.go`） |
+| `lib/github/` | hub 的 GitHub App，只依賴標準函式庫：以 manifest 註冊、App 的 JWT、限單一 repo（快取到到期前 5 分鐘）或整個安裝的 installation token，以及派工以 App 身分呼叫的 REST API |
+| `lib/jsonapi/` | hub、派工和 launcher 共用的 JSON 工具：讀取 body（最多 1 MiB）、寫出回應，以及 `Error`：帶 HTTP 狀態和代碼的拒絕，回應為 `{"code", "message", "error"}` |
+| `lib/hub/schemagen` | `go generate` 執行的指令，依 `hub.Schema` 寫出 `lib/hub/hub-schema.json` |
 | `lib/sse/` | 依 HTML 標準讀寫 server-sent events：讀取端（合併多行 data:、略過註解、行尾可為 CR、LF 或 CRLF）和寫入端，hub 用它讀實例的摘要串流、寫給瀏覽器的串流。`lib/httpapi` 則用 huma 的 `sse` 寫它的串流 |
 | `lib/netaddr/` | 這台主機的 IPv4 位址：其他主機連得到的位址（hub 的加入網址），以及連到某台主機時使用的位址（`Resolver`，供 `--public-url` 的 `{ip}` 使用） |
 | `lib/userconfig/` | 使用者的設定檔 `~/.agentapi/config.yaml`：以旗標名稱設定，`agentapi server` 讀取、`agentapi hub` 寫入 |
@@ -107,6 +111,9 @@ flowchart TB
 - `lib/native` 與各 adapter、`lib/statedb` → `lib/agentstate`：只有伺服器會用到 `lib/native`
 - `cmd/hub`、`lib/hub` → `lib/instanceapi`、`lib/httpmw`（它不匯入本儲存庫的任何套件）：hub
   不會連同伺服器一起編譯
+- `lib/hub` → `lib/dispatch` → `lib/host`、`lib/github`、`lib/jsonapi`：派工使用 launcher 的型別；
+  `lib/github` 和 `lib/jsonapi` 不匯入本儲存庫的任何套件
+- `cmd/host` → `lib/host` → `lib/instanceapi`、`lib/jsonapi`：launcher 不會連同伺服器或 hub 一起編譯
 
 ## 啟動與關閉
 
@@ -499,11 +506,11 @@ context 結束，避免不再讀取的 agent 佔住 `s.mu`。
 - `conversation_state` 把為工作階段選擇的設定、用量限制造成的停止和等待重試的失敗回合存成一個
   JSON 物件：`{"version": 1, "settings": {...}, "limit_stop": {...}, "retry_wait": {...}}`；
   重設時保留。新增欄位不改版本，較舊的 AgentAPI 讀它認得的部分；會誤導舊版的改變才提高版本，
-  遇到更高版本的 AgentAPI 不動這個物件，改讀舊的 key。3.7.2 以前這三項各有一個 key（`settings`、
-  `limit_stop`、`retry_wait`），第一次開啟這種檔案時會搬進 `conversation_state`。接下來一個版本
-  仍會在同一次寫入中一併寫舊的 key，所以用較舊的 AgentAPI 開啟檔案，仍讀得到用量限制停止、重試
-  等待和設定；它在舊 key 上做的改變，下次由較新的 AgentAPI 開啟時會以舊 key 為準（舊 key 和物件
-  不一致）。之後的版本會停止寫入舊的 key。
+  遇到更高版本的 AgentAPI 不動這個物件，啟動時不帶保存的狀態。3.7.2 以前這三項各有一個 key
+  （`settings`、`limit_stop`、`retry_wait`），第一次開啟這種檔案時，會在同一個交易裡搬進
+  `conversation_state` 並刪除舊 key。3.7.3 到 3.15.1 會在物件旁一併寫舊 key；以物件為準，開啟時
+  刪除舊 key。用 3.7.2 以前的 AgentAPI 開啟較新的檔案，會讀不到保存的設定、用量限制停止和重試
+  等待（對話仍在），它存下的這些也不會被讀取。
 - 較舊的 AgentAPI 不認得的資料，它重設或移除訊息時也不會清掉。還原時，訊息已不存在或已換成
   另一則的任務會被丟棄；訊息資料列無法讀取的任務也一樣。
 - 上傳的檔案放在 `<state-db>.uploads`，與資料庫一起保留（沒有狀態資料庫時放在暫存目錄，停止時
@@ -523,9 +530,8 @@ hub（`lib/hub`，`persist.go`）把實例保存在 JSON 檔案裡，格式是
 加上的欄位，例如每個實例的工作時間（`work`：最近 7 天的區段，只在區段開始或結束時寫入），讀得懂這個
 格式的舊 hub 會略過。hub 的設定（和 `instances` 並列的 `"settings": {"favorites": [...]}`，即
 `hubSettings`，經由 `store.updateSettings` 修改）也一樣：這種 hub 下次寫入時會丟掉它，它留下的 `.bak`
-則還保有。這個版本會在最上層再寫一份我的最愛（`"favorites": [...]`），也就是 3.5 到 3.7 的 hub 讀取的
-位置；讀取時先看 `settings`，沒有才用它。所以降版後我的最愛還在，那個 hub 對它們的修改，升回來後也
-讀得到。改用新的版本號反而會讓所有舊 hub 拒絕這個檔案。hub 處理過的
+則還保有。3.5 到 3.7 的 hub 把我的最愛放在最上層（`"favorites": [...]`），沒有 `settings` 時 hub 會讀它；
+3.8 到 3.15.1 也會在最上層多寫一份，之後的版本不再寫。改用新的版本號反而會讓所有舊 hub 拒絕這個檔案。hub 處理過的
 webhook 事件的 delivery ID 也以同樣方式寫入 `instances.deliveries.json`，保留到各自的簽章失效，所以
 重新啟動後重送的事件同樣會被拒絕。
 

@@ -339,7 +339,7 @@ func TestDispatchWithoutGitHub(t *testing.T) {
 	assert.Equal(t, "stopped", resp.Job.Runs[0].EndReason)
 
 	_, err = s.Dispatch(ctx, Request{Action: ActionSend, Repo: "acme/widget", Issue: 12, Message: "x"})
-	assert.True(t, isCode(err, "job_ended"))
+	assert.True(t, jsonapi.IsCode(err, "job_ended"))
 
 	// The dispatch keeps it all.
 	s.Flush()
@@ -348,6 +348,13 @@ func TestDispatchWithoutGitHub(t *testing.T) {
 	defer again.Close()
 	assert.Equal(t, JobDone, again.job("acme/widget#12").State)
 	assert.Len(t, again.Hosts(), 1)
+}
+
+// pickHost is pickHostLocked with s.mu held.
+func (s *Service) pickHost(key host.Key, agent, want string) (Host, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.pickHostLocked(key, agent, want, nil)
 }
 
 func TestPickHost(t *testing.T) {
@@ -366,9 +373,9 @@ func TestPickHost(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "b", h.Hostname, "the one that runs the agent, cloning")
 	_, err = s.pickHost(key, "pi", "")
-	assert.True(t, isCode(err, "no_host"))
+	assert.True(t, jsonapi.IsCode(err, "no_host"))
 	_, err = s.pickHost(key, "codex", "a")
-	assert.True(t, isCode(err, "agent_unavailable"))
+	assert.True(t, jsonapi.IsCode(err, "agent_unavailable"))
 
 	// A job the hub started counts before the machine's next heartbeat
 	// says so.
@@ -376,12 +383,12 @@ func TestPickHost(t *testing.T) {
 	require.NoError(t, err)
 	s.waitStarts()
 	_, err = s.pickHost(key, "codex", "")
-	assert.True(t, isCode(err, "no_host"), "b is full")
+	assert.True(t, jsonapi.IsCode(err, "no_host"), "b is full")
 	assert.Equal(t, 1, s.Hosts()[1].Active)
 
 	*now = now.Add(4 * time.Minute)
 	_, err = s.pickHost(key, "", "a")
-	assert.True(t, isCode(err, "host_offline"), "missed three heartbeats")
+	assert.True(t, jsonapi.IsCode(err, "host_offline"), "missed three heartbeats")
 }
 
 func TestDispatchWithGitHubApp(t *testing.T) {
@@ -417,7 +424,7 @@ func TestDispatchWithGitHubApp(t *testing.T) {
 
 	// A repository the app isn't on is refused.
 	_, err = s.Dispatch(ctx, Request{Action: ActionStart, Repo: "acme/other", Issue: 1})
-	assert.True(t, isCode(err, "github_not_installed"))
+	assert.True(t, jsonapi.IsCode(err, "github_not_installed"))
 
 	started := startJob(t, s, Request{Repo: "acme/widget", Issue: 12, Agent: "claude"})
 	start := l.starts[0]
@@ -478,7 +485,7 @@ func TestDispatchWithGitHubApp(t *testing.T) {
 	_, err = s.Dispatch(ctx, Request{Action: ActionLinkPR, Repo: "acme/widget", Issue: 12, PRURL: "https://github.com/acme/widget/pull/34"})
 	require.NoError(t, err)
 	replaced, err := s.Dispatch(ctx, Request{Action: ActionStart, Repo: "acme/widget", Issue: 12, Agent: "codex", Replace: ptr(false)})
-	assert.True(t, isCode(err, "job_active"))
+	assert.True(t, jsonapi.IsCode(err, "job_active"))
 	assert.Empty(t, replaced.Job.Key)
 	replaced = startJob(t, s, Request{Repo: "acme/widget", Issue: 12, Agent: "codex"})
 	assert.Equal(t, []string{"acme~widget~12?keep_worktree=true&keep_state=true"}, l.stops)
@@ -1011,9 +1018,9 @@ func TestStartAnswersAtOnce(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, again.Created)
 	_, err = s.Dispatch(context.Background(), Request{Action: ActionSend, Repo: "acme/widget", Issue: 12, Message: "hi"})
-	assert.True(t, isCode(err, "job_starting"))
+	assert.True(t, jsonapi.IsCode(err, "job_starting"))
 	_, err = s.Dispatch(context.Background(), Request{Action: ActionStart, Repo: "acme/widget", Issue: 12, Agent: "codex"})
-	assert.True(t, isCode(err, "job_starting"))
+	assert.True(t, jsonapi.IsCode(err, "job_starting"))
 
 	close(l.gate)
 	s.waitStarts()
@@ -1122,7 +1129,7 @@ func TestStopWhileStarting(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, JobDone, stopped.Job.State)
 	_, err = s.Dispatch(context.Background(), Request{Action: ActionStart, Repo: "acme/widget", Issue: 12})
-	assert.True(t, isCode(err, "job_busy"))
+	assert.True(t, jsonapi.IsCode(err, "job_busy"))
 
 	close(l.gate)
 	s.waitStarts()
@@ -1179,7 +1186,7 @@ func TestConcurrentStartsSpread(t *testing.T) {
 	refused := 0
 	for _, err := range errs {
 		if err != nil {
-			assert.True(t, isCode(err, "no_host"), err)
+			assert.True(t, jsonapi.IsCode(err, "no_host"), err)
 			refused++
 		}
 	}
@@ -1212,4 +1219,180 @@ func TestCapacityRefusalTriesAnother(t *testing.T) {
 	assert.Equal(t, JobFailed, job.State)
 	assert.Equal(t, "a", job.Host)
 	assert.Contains(t, job.Error, "its most")
+}
+
+// A dispatch without a state file drops old jobs and delivery IDs too,
+// which the browsers' stream would carry on otherwise.
+func TestPruneWithoutStateFile(t *testing.T) {
+	now := time.Date(2026, 11, 8, 10, 0, 0, 0, time.UTC)
+	s, err := New(Config{Secret: "hub-secret", GitHub: github.NewClient(), Now: func() time.Time { return now }, Location: time.UTC})
+	require.NoError(t, err)
+	t.Cleanup(s.Close)
+
+	s.mu.Lock()
+	s.jobs["acme/widget#1"] = &Job{Key: "acme/widget#1", State: JobDone, UpdatedAt: now.Add(-keepJobs - time.Hour)}
+	s.jobs["acme/widget#2"] = &Job{Key: "acme/widget#2", State: JobFailed, UpdatedAt: now.Add(-keepJobs + time.Hour)}
+	s.jobs["acme/widget#3"] = &Job{Key: "acme/widget#3", State: JobWorking, UpdatedAt: now.Add(-keepJobs - time.Hour)}
+	s.deliveries["old"] = now.Add(-deliveryTTL - time.Minute)
+	s.deliveries["new"] = now
+	s.saveLocked()
+	s.mu.Unlock()
+
+	var keys []string
+	for _, j := range s.Board().Jobs {
+		keys = append(keys, j.Key)
+	}
+	assert.ElementsMatch(t, []string{"acme/widget#2", "acme/widget#3"}, keys)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	assert.Equal(t, map[string]time.Time{"new": now}, s.deliveries)
+}
+
+// authLauncher takes a token request signed with the hub's secret, once,
+// from the machine whose launcher's token it carries.
+func TestAuthLauncher(t *testing.T) {
+	s, _ := newService(t, nil)
+	l := newFakeLauncher(t, "pve-1")
+	join(t, s, l, "claude")
+	request := func(hostname, job, secret, bearer string, ago int, body string) *http.Request {
+		if body == "" {
+			data, _ := json.Marshal(host.HubTokenRequest{Hostname: hostname, Job: job})
+			body = string(data)
+		}
+		req := httptest.NewRequest(http.MethodPost, host.HubTokenPath, strings.NewReader(body))
+		ts := strconv.FormatInt(s.config.Now().Unix()-int64(ago), 10)
+		req.Header.Set(instanceapi.HeaderTimestamp, ts)
+		req.Header.Set(instanceapi.HeaderSignature, instanceapi.Sign(secret, ts, []byte(body)))
+		req.Header.Set("Authorization", "Bearer "+bearer)
+		return req
+	}
+
+	hostname, key, err := s.authLauncher(request("pve-1", "acme~widget~12", "hub-secret", l.token, 1, ""))
+	require.NoError(t, err)
+	assert.Equal(t, "pve-1", hostname)
+	assert.Equal(t, host.Key{Owner: "acme", Name: "widget", Issue: 12}, key)
+
+	for name, test := range map[string]struct {
+		req  *http.Request
+		code string
+	}{
+		"sent again":         {request("pve-1", "acme~widget~12", "hub-secret", l.token, 1, ""), "replayed"},
+		"another secret":     {request("pve-1", "acme~widget~12", "wrong", l.token, 2, ""), "unauthorized"},
+		"too old":            {request("pve-1", "acme~widget~12", "hub-secret", l.token, 3600, ""), "unauthorized"},
+		"not JSON":           {request("", "", "hub-secret", l.token, 3, "{"), "bad_request"},
+		"a bad job":          {request("pve-1", "acme/widget#0", "hub-secret", l.token, 4, ""), "bad_request"},
+		"another token":      {request("pve-1", "acme~widget~12", "hub-secret", "wrong", 5, ""), "unauthorized"},
+		"an unknown machine": {request("pve-2", "acme~widget~12", "hub-secret", l.token, 6, ""), "unauthorized"},
+	} {
+		_, _, err := s.authLauncher(test.req)
+		assert.True(t, jsonapi.IsCode(err, test.code), "%s: %v", name, err)
+	}
+}
+
+// What a task event of a job's AgentAPI does to the job, by its state.
+func TestTaskEventByState(t *testing.T) {
+	for _, test := range []struct {
+		state     JobState
+		pr        bool
+		event     string
+		want      JobState
+		costTasks int
+	}{
+		{JobStarting, false, "task.started", JobWorking, 0},
+		{JobWorking, false, "task.started", JobWorking, 0},
+		{JobReview, false, "task.started", JobWorking, 0},
+		{JobFailed, false, "task.started", JobFailed, 0},
+		{JobStarting, false, "task.completed", JobWorking, 1},
+		{JobWorking, false, "task.completed", JobWorking, 1},
+		{JobWorking, true, "task.completed", JobReview, 1},
+		{JobWorking, true, "task.failed", JobReview, 1},
+		{JobReview, true, "task.completed", JobReview, 1},
+		{JobFailed, false, "task.completed", JobFailed, 1},
+		{JobWorking, false, "task.queued", JobWorking, 0},
+	} {
+		name := fmt.Sprintf("%s pr=%v %s", test.state, test.pr, test.event)
+		s, now := newService(t, nil)
+		job := &Job{Key: "acme/widget#1", Host: "a", State: test.state, UpdatedAt: now.Add(-time.Hour), Runs: []Run{{InstanceID: "a~acme~widget~1", StartedAt: now.Add(-time.Hour)}}}
+		if test.pr {
+			job.PRURL = "https://github.com/acme/widget/pull/2"
+		}
+		s.mu.Lock()
+		s.jobs[job.Key] = job
+		s.mu.Unlock()
+		s.TaskEvent("a~acme~widget~1", test.event, json.RawMessage(`{"duration_seconds": 3}`))
+		s.TaskEvent("b~acme~widget~1", "task.started", nil) // another instance's
+		got := s.job(job.Key)
+		assert.Equal(t, test.want, got.State, name)
+		assert.Equal(t, test.costTasks, got.Runs[0].Cost.Tasks, name)
+	}
+
+	// The runs that ended get nothing.
+	for _, state := range []JobState{JobDone, JobStopped} {
+		s, now := newService(t, nil)
+		job := &Job{Key: "acme/widget#1", Host: "a", State: state, Runs: []Run{{InstanceID: "a~acme~widget~1", StartedAt: now.Add(-time.Hour), EndedAt: now.Add(-time.Minute)}}}
+		s.mu.Lock()
+		s.jobs[job.Key] = job
+		s.mu.Unlock()
+		s.TaskEvent("a~acme~widget~1", "task.started", nil)
+		s.TaskEvent("a~acme~widget~1", "task.completed", nil)
+		got := s.job(job.Key)
+		assert.Equal(t, state, got.State)
+		assert.Zero(t, got.Runs[0].Cost.Tasks)
+	}
+}
+
+// What a machine's report does to each of its jobs the hub knows, by the
+// job's state and what the machine reports of it.
+func TestReconcileByState(t *testing.T) {
+	const key = "acme/widget#1"
+	for _, test := range []struct {
+		state JobState
+		// reported is the launcher's state of the job, "" for none.
+		reported host.JobState
+		want     JobState
+		// stop is the launcher's stop the hub sends, "" for none.
+		stop string
+	}{
+		{JobStarting, "", JobStarting, ""},
+		{JobWorking, "", JobFailed, ""},
+		{JobReview, "", JobFailed, ""},
+		{JobFailed, "", JobFailed, ""},
+		{JobDone, "", JobDone, ""},
+		{JobStopped, "", JobDone, ""},
+		{JobWorking, host.JobRunning, JobWorking, ""},
+		{JobReview, host.JobRestarting, JobReview, ""},
+		{JobWorking, host.JobFailed, JobFailed, ""},
+		{JobReview, host.JobFailed, JobFailed, ""},
+		{JobFailed, host.JobRunning, JobFailed, ""},
+		{JobStopped, host.JobRunning, JobStopped, "acme~widget~1?"},
+		{JobDone, host.JobRunning, JobDone, "acme~widget~1?keep_worktree=true&keep_state=true"},
+	} {
+		name := fmt.Sprintf("%s, reported %q", test.state, test.reported)
+		s, now := newService(t, nil)
+		l := newFakeLauncher(t, "a")
+		if test.reported != "" {
+			l.jobs[key] = host.JobInfo{Key: key, Agent: "claude", InstanceID: "a~acme~widget~1", State: test.reported, Error: "it exited"}
+		}
+		s.mu.Lock()
+		s.jobs[key] = &Job{Key: key, Host: "a", Agent: "claude", State: test.state, UpdatedAt: now.Add(-time.Hour), Runs: []Run{{InstanceID: "a~acme~widget~1", StartedAt: now.Add(-time.Hour)}}}
+		s.mu.Unlock()
+		join(t, s, l, "claude")
+		got := s.job(key)
+		assert.Equal(t, test.want, got.State, name)
+		if test.want == JobFailed && test.state != JobFailed {
+			assert.NotEmpty(t, got.Error, name)
+		}
+		if test.stop == "" {
+			time.Sleep(10 * time.Millisecond)
+			l.mu.Lock()
+			assert.Empty(t, l.stops, name)
+			l.mu.Unlock()
+			continue
+		}
+		assert.Eventually(t, func() bool {
+			l.mu.Lock()
+			defer l.mu.Unlock()
+			return slices.Equal(l.stops, []string{test.stop})
+		}, 5*time.Second, 10*time.Millisecond, name)
+	}
 }

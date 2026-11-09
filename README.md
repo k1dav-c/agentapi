@@ -1989,7 +1989,10 @@ instead skips signing in, for a hub behind a sign-in of its own such as a Coder 
 `AGENTAPI_HUB_INSTANCE_TOKEN`, else `AGENTAPI_API_TOKEN`) is sent to them, `--state` keeps the
 instances, `--port` and `--bind` set where it listens, `--allowed-hosts` the names browsers may
 open it by (any without it), and `--log-level` (or
-`AGENTAPI_HUB_LOG_LEVEL`) how much it logs.
+`AGENTAPI_HUB_LOG_LEVEL`) how much it logs. For the [issue dispatch](docs/hub.md#issues),
+`--dispatch-token` (or `AGENTAPI_HUB_DISPATCH_TOKEN`) is the token a client (a GitHub workflow's
+runner) calls `POST /api/dispatch` with, and nothing else, and `--github-app-file` the file of the
+hub's GitHub App (default `github-app.json` next to `--state`).
 
 `join` writes the hub's webhook into `~/.agentapi/config.yaml` and applies it to the registered
 AgentAPIs running now. `--secret` (or `AGENTAPI_HUB_SECRET`) signs the events, `--events` picks them
@@ -2000,6 +2003,56 @@ a token, and `--config` and `--registry-dir` name other files. An AgentAPI that 
 update now applies the file when it restarts. `--allow-update` also writes `allow-update: true`, so
 the hub can [update the AgentAPIs through their API](#updating-through-the-api) once they restart;
 `leave` keeps it.
+
+### `agentapi host`
+
+Run the launcher of the [issue dispatch](docs/hub.md#issues) on a machine that joined a hub: it
+starts an AgentAPI for each GitHub issue the hub dispatches here, in a git worktree on the issue's
+branch, and stops it again. [examples/issue-dispatch](examples/issue-dispatch/README.md) sets up
+the whole dispatch.
+
+```bash
+agentapi hub join http://hub.vpn:3290/hooks --secret "$HUB_SECRET" --public-url 'http://{ip}:{port}'
+echo "$INSTANCE_TOKEN" > ~/.agentapi/instance.token && chmod 600 ~/.agentapi/instance.token
+agentapi host install --now
+agentapi host status
+```
+
+| Command | Flags | Does |
+| --- | --- | --- |
+| `serve` | `--config`, `--log-level` (`info`) | Runs the launcher in the foreground |
+| `status` | `--config` | Shows the launcher, its hub, agents and repositories, and its jobs |
+| `install` | `--config`, `--now` | Writes `~/.config/systemd/user/agentapi-host.service` (`agentapi host serve`) and enables it; `--now` also starts it, or restarts it if it runs. Running it again rewrites the unit, as after the program moved |
+| `uninstall` | | Disables, stops and removes the service; the jobs' AgentAPIs keep running, and their files stay |
+
+The service has `KillMode=process`: restarting or stopping the launcher leaves the jobs' AgentAPIs
+running, and the next launcher takes them over. `install` needs a systemd user instance; when your
+services stop at logout, it says so, and `sudo loginctl enable-linger <user>` keeps them running.
+
+The launcher reads the hub's `webhook-url` and `webhook-secret`, which `agentapi hub join` writes,
+and the `host` section of `~/.agentapi/config.yaml` (`--config` names another file; the launcher
+keeps its files next to it):
+
+```yaml
+host:
+  port: 3291                    # the launcher's API, which the hub calls
+  bind: ""                      # all interfaces; better the VPN address
+  public-url: http://{ip}:3291  # where the hub reaches it
+  workdir: ~/work               # clones and worktrees
+  scan: [~/work, ~/src]         # where it looks for repositories it has (two levels deep)
+  ports: 4100-4199              # the jobs' AgentAPIs
+  max-jobs: 4
+  agents: [claude, codex]       # default: those installed (claude, codex, pi)
+  agent: claude                 # an issue's agent when the dispatch names none
+  clone: true                   # clone a repository it doesn't have
+```
+
+| File | Holds |
+| --- | --- |
+| `~/.agentapi/host.token` | The token the hub calls the launcher with, made on first start. The hub pins the machine's name to it: a launcher with a new one (the file deleted, the machine set up again) joins only after `DELETE /api/hosts/{name}` on the hub ([Troubleshooting](docs/hub.md#troubleshooting)) |
+| `~/.agentapi/instance.token` | The API token of every job's AgentAPI; it must be the hub's `--instance-token` |
+| `~/.agentapi/host.sock` | Where the jobs' `git` and `gh` get their GitHub token from the launcher |
+| `~/.agentapi/jobs.json`, `~/.agentapi/jobs/` | The jobs, and each one's state database, log and `gh` shim |
 
 ## HTTP API reference
 

@@ -141,11 +141,9 @@ type stateFile struct {
 	// Settings are the hub's settings, since 3.8. A new field rather than
 	// a new version: a hub that doesn't know a version refuses to start.
 	Settings *hubSettings `json:"settings,omitempty"`
-	// Favorites are the favorites as a hub of 3.5 to 3.7 keeps them, which
-	// this hub writes too, so one run after it keeps them. Such a hub
-	// leaves Settings out of its next write, and this one reads Favorites
-	// then. A hub before 3.5 ignores both; the .bak it makes as it starts
-	// still has them.
+	// Favorites are the favorites as a hub of 3.5 to 3.7 kept them, read
+	// when Settings is missing. Hubs of 3.8 to 3.15 wrote them too; this
+	// one doesn't.
 	Favorites []Favorite `json:"favorites,omitempty"`
 }
 
@@ -202,7 +200,7 @@ func encodeState(stored []storedInstance, settings hubSettings) ([]byte, error) 
 		stored = []storedInstance{}
 	}
 	settings = settings.clone()
-	return json.MarshalIndent(stateFile{Version: stateVersion, Instances: stored, Settings: &settings, Favorites: settings.Favorites}, "", "  ")
+	return json.MarshalIndent(stateFile{Version: stateVersion, Instances: stored, Settings: &settings}, "", "  ")
 }
 
 // readState returns the file kept in path, and keeps a copy of the

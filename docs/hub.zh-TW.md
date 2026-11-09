@@ -811,9 +811,29 @@ AgentAPI 的 log 會記下傳送失敗的 webhook。
 | `--bind` | 所有介面 | 監聽的位址，例如 VPN 位址 |
 | `--allowed-hosts` | 任何名稱 | 瀏覽器開啟 hub 用的名稱，IP 位址和 `localhost` 以外（以逗號分隔，`*` 表示任何名稱）；實例的事件不受限制 |
 | `--log-level` | `AGENTAPI_HUB_LOG_LEVEL`，否則 `info` | 記錄的最低層級：`debug`、`info`、`warn` 或 `error` |
+| `--dispatch-token` | `AGENTAPI_HUB_DISPATCH_TOKEN` | 用戶端（GitHub workflow 的 runner）呼叫 `POST /api/dispatch` 用的 token，不能做別的事（見 [Issues](#issues)） |
+| `--github-app-file` | `--state` 旁的 `github-app.json` | hub 的 GitHub App，由 `/github/connect` 註冊 |
 
 hub 透過環境變數中的 proxy（`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`）連到實例。連線 30 秒內沒建立（TLS
 交握 10 秒）、回應的標頭 15 秒內沒來，就放棄；摘要串流和經 proxy 開啟的頁面則一直保持連線。
+
+### `agentapi host`
+
+[Issues](#issues) 透過每台主機上的 launcher（`agentapi host`）啟動 job：它用主機的 webhook 設定
+（`agentapi hub join`）向 hub 回報，hub 派一個 issue 到這台主機，它就啟動一個 AgentAPI。在每台主機上：
+
+```sh
+agentapi hub join http://<hub>:3290/hooks --secret "$HUB_SECRET" --public-url 'http://{ip}:{port}'
+echo "$INSTANCE_TOKEN" > ~/.agentapi/instance.token && chmod 600 ~/.agentapi/instance.token  # hub 的 --instance-token
+agentapi host install --now  # 裝成 systemd user service；agentapi host serve 則在前景執行
+agentapi host status
+```
+
+launcher 的設定（`~/.agentapi/config.yaml` 的 `host` 區段）、它的檔案和 `agentapi host uninstall`
+見 [CLI 參考](../README.zh-TW.md#agentapi-host)；[examples/issue-dispatch](../examples/issue-dispatch/README.md)
+另外說明 hub 的 dispatch token、GitHub App 和 workflow 的架設。hub 會把主機名稱綁定到它第一次帶來的
+launcher token（`~/.agentapi/host.token`）：重灌過、或 token 檔被刪掉的主機，要先在 hub 上執行
+`DELETE /api/hosts/{name}` 才能以原名稱加入（見[疑難排解](#疑難排解)）。
 
 ### `agentapi hub join`、`leave`、`status`
 
@@ -873,7 +893,9 @@ hub 透過環境變數中的 proxy（`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`�
 | `/i/{id}/…` | 透過 hub 存取實例自己的 API 和聊天介面；頁面用 `POST /i/{id}/update` 更新實例，用 `DELETE` 取消 |
 
 除了 `/hooks` 和 `/api/session`，每個端點都需要 session cookie 或
-`Authorization: Bearer <hub token>`。任何回應裡都不會出現實例 token。
+`Authorization: Bearer <hub token>`。任何回應裡都不會出現實例 token。請求被拒或失敗時回
+`{"code": …, "message": …, "error": …}`：`code` 是端點自己的代碼（例如 `host_online`），或 snake
+case 的 HTTP 狀態（例如 `not_found`）；`error` 和 `message` 相同，較舊的 hub 只回這個欄位。
 
 ### 檔案
 
@@ -898,8 +920,9 @@ cd ~/.agentapi/hub && jq .instances instances.json > instances.json.new && mv in
 每個實例的工作時間是同一個 version 1 裡多出來的欄位（`work`）。2.3 和 2.4 的 hub 會略過它，下次寫入
 檔案時就把它丟掉。3.0.1 以前的 hub 對 `confirmed_url`（hub 最後一次讀到實例摘要的網址）也一樣，
 3.5 以前的 hub 對我的最愛（和 `instances` 並列的 `"favorites": [...]`）也一樣。改回這種 hub 之後，
-它啟動時留下的 `.bak` 仍保有我的最愛。這個版本把我的最愛存在 `"settings": {"favorites": [...]}`，
-也照樣寫一份在 `"favorites"`，也就是 3.5 到 3.7 的 hub 讀取的位置，所以改回這些版本時我的最愛還在。
+它啟動時留下的 `.bak` 仍保有我的最愛。hub 把我的最愛存在 `"settings": {"favorites": [...]}`；
+沒有 `settings` 時，讀 3.5 到 3.7 的 hub 寫在最上層的 `"favorites"`。3.8 到 3.15.1 的 hub 也會在最上層
+多寫一份，現在不寫了，所以用 3.5 到 3.7 的 hub 開這個檔案時沒有我的最愛；它啟動時留下的 `.bak` 仍保有，可以給新版 hub 用。
 
 ## 限制
 

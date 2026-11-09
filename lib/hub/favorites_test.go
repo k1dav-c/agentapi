@@ -87,12 +87,14 @@ func TestHubFavorites(t *testing.T) {
 	data, err := os.ReadFile(statePath)
 	require.NoError(t, err)
 	var file struct {
-		Version   int            `json:"version"`
-		Favorites []hub.Favorite `json:"favorites"`
+		Version  int `json:"version"`
+		Settings struct {
+			Favorites []hub.Favorite `json:"favorites"`
+		} `json:"settings"`
 	}
 	require.NoError(t, json.Unmarshal(data, &file))
 	assert.Equal(t, 1, file.Version, "an older hub still reads it")
-	assert.Equal(t, reordered, file.Favorites)
+	assert.Equal(t, reordered, file.Settings.Favorites)
 
 	again := startHubWith(t, hub.Config{StatePath: statePath}, false).URL
 	assert.Equal(t, reordered, getFavorites(t, again), "kept through a restart")

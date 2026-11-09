@@ -2,6 +2,7 @@ package httpapi_test
 
 import (
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"path/filepath"
 	"testing"
@@ -149,15 +150,21 @@ func TestStateDB_RestoresTheStateOfAnOlderAgentAPI(t *testing.T) {
 	require.NotNil(t, before)
 	stop(t, srv, db)
 
-	// As 3.7.2 left it: no conversation_state.
+	// As 3.7.2 left it: a key each, and no conversation_state.
 	raw, err := sql.Open("sqlite", path)
 	require.NoError(t, err)
+	var data string
+	require.NoError(t, raw.QueryRow("SELECT value FROM meta WHERE key = ?", statedb.MetaState).Scan(&data))
+	var object map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal([]byte(data), &object))
+	require.Contains(t, string(object["retry_wait"]), "Bad Gateway")
+	for key, value := range map[string]string{"settings": string(object["settings"]), "limit_stop": "", "retry_wait": string(object["retry_wait"])} {
+		_, err = raw.Exec("INSERT INTO meta(key, value) VALUES(?, ?)", key, value)
+		require.NoError(t, err)
+	}
 	_, err = raw.Exec("DELETE FROM meta WHERE key = ?", statedb.MetaState)
 	require.NoError(t, err)
-	var legacy string
-	require.NoError(t, raw.QueryRow("SELECT value FROM meta WHERE key = 'retry_wait'").Scan(&legacy))
 	require.NoError(t, raw.Close())
-	require.Contains(t, legacy, "Bad Gateway")
 
 	n, srv, db, err = persistentServer(t, path, "/work")
 	require.NoError(t, err)

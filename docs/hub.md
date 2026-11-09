@@ -937,10 +937,32 @@ failed.
 | `--bind` | all interfaces | Address to listen on, such as the VPN address |
 | `--allowed-hosts` | any | Names browsers open the hub by, besides IP addresses and `localhost` (comma-separated, `*` for any); instances' events come by any name |
 | `--log-level` | `AGENTAPI_HUB_LOG_LEVEL`, else `info` | Least important level to log: `debug`, `info`, `warn` or `error` |
+| `--dispatch-token` | `AGENTAPI_HUB_DISPATCH_TOKEN` | Token a client (a GitHub workflow's runner) calls `POST /api/dispatch` with, and nothing else ([Issues](#issues)) |
+| `--github-app-file` | `github-app.json` next to `--state` | The hub's GitHub App, which `/github/connect` registers |
 
 The hub reaches the instances through the proxy of the environment (`HTTP_PROXY`, `HTTPS_PROXY`,
 `ALL_PROXY`). It gives up connecting after 30 seconds (10 for the TLS handshake) and waiting for an
 answer's headers after 15; the summary streams and the pages it proxies stay open.
+
+### `agentapi host`
+
+[Issues](#issues) starts its jobs through a launcher on each machine, `agentapi host`, which reports
+to the hub with the machine's webhook settings (`agentapi hub join`) and starts an AgentAPI for each
+issue the hub dispatches there. On each machine:
+
+```sh
+agentapi hub join http://<hub>:3290/hooks --secret "$HUB_SECRET" --public-url 'http://{ip}:{port}'
+echo "$INSTANCE_TOKEN" > ~/.agentapi/instance.token && chmod 600 ~/.agentapi/instance.token  # the hub's --instance-token
+agentapi host install --now  # a systemd user service; agentapi host serve runs it in the foreground
+agentapi host status
+```
+
+The launcher's settings (the `host` section of `~/.agentapi/config.yaml`), its files and
+`agentapi host uninstall` are in the [CLI reference](../README.md#agentapi-host);
+[examples/issue-dispatch](../examples/issue-dispatch/README.md) sets up the hub's dispatch token,
+GitHub App and workflow too. The hub pins each machine's name to the launcher token
+(`~/.agentapi/host.token`) it first came with: a machine set up again, or whose token file was
+deleted, joins under its name only after `DELETE /api/hosts/{name}` ([Troubleshooting](#troubleshooting)).
 
 ### `agentapi hub join`, `leave`, `status`
 
@@ -1003,7 +1025,10 @@ running AgentAPIs, which then no longer follow their conversation for the webhoo
 | `/i/{id}/…` | The instance's own API and chat, through the hub; the page updates an instance with `POST /i/{id}/update` and cancels with `DELETE` |
 
 Every endpoint but `/hooks` and `/api/session` needs the session cookie or
-`Authorization: Bearer <hub token>`. Instance tokens never appear in any response.
+`Authorization: Bearer <hub token>`. Instance tokens never appear in any response. A refused or
+failed request answers `{"code": …, "message": …, "error": …}`: `code` is the route's own (such as
+`host_online`) or the HTTP status in snake case (such as `not_found`), and `error` repeats
+`message`, the only field older hubs answered on their own routes.
 
 ### Files
 
@@ -1029,9 +1054,10 @@ Each instance's work time is an extra field (`work`) inside the same version 1. 
 ignores it, and drops it the next time it writes the file. So does a hub before 3.0.1 with
 `confirmed_url`, the URL where the hub last read the instance's summary, and a hub before 3.5 with
 the favorites (`"favorites": [...]` next to `instances`). After going back to such a hub, the
-`.bak` it made as it started still has them. This release keeps the favorites in `"settings":
-{"favorites": [...]}` and in `"favorites"` too, which a hub of 3.5 to 3.7 reads, so going back to
-one keeps them.
+`.bak` it made as it started still has them. The hub keeps the favorites in `"settings":
+{"favorites": [...]}`, and reads the top-level `"favorites"` of a hub of 3.5 to 3.7 when there are
+no settings. Hubs of 3.8 to 3.15.1 wrote that copy too; this one doesn't, so a hub of 3.5 to 3.7 run
+on its file starts without favorites; the `.bak` it makes as it starts keeps them for this one.
 
 ## Limits
 

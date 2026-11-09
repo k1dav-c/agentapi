@@ -17,6 +17,12 @@ export interface components {
          * @enum {string}
          */
         Connection: "connecting" | "connected" | "unreachable" | "stopped";
+        /**
+         * DispatchAction
+         * @example start
+         * @enum {string}
+         */
+        DispatchAction: "start" | "send" | "link_pr" | "stop";
         DispatchAssign: {
             agent?: string;
             host?: string;
@@ -46,10 +52,6 @@ export interface components {
         DispatchCreateIssueResponse: {
             issue: components["schemas"]["GitHubIssue"];
             job?: components["schemas"]["DispatchJob"];
-        };
-        DispatchError: {
-            code: string;
-            message: string;
         };
         DispatchGitHubStatus: {
             connected: boolean;
@@ -119,12 +121,17 @@ export interface components {
             /** Format: int64 */
             round: number;
             runs: components["schemas"]["DispatchRun"][] | null;
-            /** @enum {string} */
-            state: "starting" | "working" | "review" | "failed" | "done" | "stopped";
+            state: components["schemas"]["DispatchJobState"];
             title?: string;
             /** Format: date-time */
             updated_at: string;
         };
+        /**
+         * DispatchJobState
+         * @example starting
+         * @enum {string}
+         */
+        DispatchJobState: "starting" | "working" | "review" | "failed" | "done" | "stopped";
         DispatchJobsBody: {
             jobs: components["schemas"]["DispatchJob"][] | null;
         };
@@ -136,16 +143,20 @@ export interface components {
             /** Format: int64 */
             comments?: number;
             review_state?: string;
-            /** @enum {string} */
-            source: "hub" | "review" | "comment";
+            source: components["schemas"]["DispatchMessageSource"];
             text: string;
         };
+        /**
+         * DispatchMessageSource
+         * @example hub
+         * @enum {string}
+         */
+        DispatchMessageSource: "hub" | "review" | "comment";
         DispatchReposBody: {
             repos: components["schemas"]["GitHubRepo"][] | null;
         };
         DispatchRequest: {
-            /** @enum {string} */
-            action: "start" | "send" | "link_pr" | "stop";
+            action: components["schemas"]["DispatchAction"];
             agent?: string;
             author?: string;
             comments?: components["schemas"]["DispatchReviewComment"][] | null;
@@ -196,7 +207,9 @@ export interface components {
             output: number;
         };
         ErrorBody: {
+            code: string;
             error: string;
+            message: string;
         };
         Favorite: {
             id: string;
@@ -348,15 +361,23 @@ export interface components {
             run: number;
             /** Format: date-time */
             started_at: string;
-            state: string;
+            state: components["schemas"]["LauncherJobState"];
             worktree: string;
         };
+        /**
+         * LauncherJobState
+         * @example starting
+         * @enum {string}
+         */
+        LauncherJobState: "starting" | "running" | "restarting" | "failed" | "stopping";
         PinsBody: {
             ids: string[];
         };
         PinsConflict: {
+            code: string;
             error: string;
             ids: string[];
+            message: string;
         };
         RemovedEvent: {
             id: string;

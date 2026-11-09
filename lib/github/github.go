@@ -487,10 +487,6 @@ func (a As) EditComment(ctx context.Context, repo string, id int64, body string)
 	return a.do(ctx, http.MethodPatch, repoPath(repo)+"/issues/comments/"+strconv.FormatInt(id, 10), map[string]string{"body": body}, nil)
 }
 
-func (a As) AddLabels(ctx context.Context, repo string, number int, labels []string) error {
-	return a.do(ctx, http.MethodPost, repoPath(repo)+"/issues/"+strconv.Itoa(number)+"/labels", map[string]any{"labels": labels}, nil)
-}
-
 // RemoveLabel removes a label; one the issue doesn't have is no error.
 func (a As) RemoveLabel(ctx context.Context, repo string, number int, label string) error {
 	err := a.do(ctx, http.MethodDelete, repoPath(repo)+"/issues/"+strconv.Itoa(number)+"/labels/"+url.PathEscape(label), nil, nil)
