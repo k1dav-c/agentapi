@@ -61,7 +61,7 @@ import {useSessionCache} from "./use-session-cache";
 import {useSessionCost} from "./use-session-cost";
 import {useTranscript} from "./use-transcript";
 import {Store, useStoreSelector} from "@/lib/store";
-import {useStableCallback} from "@/lib/use-stable-callback";
+import {useLatest, useStableCallback} from "@/lib/use-stable-callback";
 
 export type {DraftMessage, Message, RichContentBlock, RichMessage, Usage} from "@/lib/conversation";
 
@@ -299,8 +299,7 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
   // only receives what changed.
   const syncRef = useRef(new SyncTracker());
   // The requests as last rendered, for refreshRequests.
-  const requestsRef = useRef(requests);
-  requestsRef.current = requests;
+  const requestsRef = useLatest(requests);
   const {queuedMessages, refreshQueue, applyQueue, queueChanged, queueMayHaveSent, updateQueuedMessage, deleteQueuedMessage, steerQueuedMessage, reorderQueue} =
     useQueue(api, agentapiVersion);
   // Reads the requests from the REST API; see mergeListedRequests.

@@ -1,7 +1,8 @@
 "use client";
 
-import {useCallback, useEffect, useInsertionEffect, useRef, useState} from "react";
+import {useCallback, useEffect, useRef, useState} from "react";
 import {EventSourceConnection, initialConnectionState, type ConnectionState, type StreamListeners} from "@/lib/event-source";
+import {useLatest} from "@/lib/use-stable-callback";
 
 // useEventSource keeps a server-sent event stream open (see
 // EventSourceConnection) while url is set, and returns the connection's
@@ -26,10 +27,7 @@ export function useEventSource({
   onError?: () => void;
 }): ConnectionState & {reconnectNow: () => void} {
   const [state, setState] = useState(initialConnectionState);
-  const latest = useRef({listeners, onOpen, onError});
-  useInsertionEffect(() => {
-    latest.current = {listeners, onOpen, onError};
-  });
+  const latest = useLatest({listeners, onOpen, onError});
   const connection = useRef<EventSourceConnection | null>(null);
 
   useEffect(() => {
@@ -50,7 +48,7 @@ export function useEventSource({
       connection.current = null;
       setState(initialConnectionState);
     };
-  }, [url, withCredentials, staleAfter]);
+  }, [latest, url, withCredentials, staleAfter]);
 
   const reconnectNow = useCallback(() => connection.current?.reconnectNow(), []);
   return {...state, reconnectNow};

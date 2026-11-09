@@ -2,6 +2,7 @@
 
 import {useEffect, useRef, useState} from "react";
 import {messageFromFrame, readyAgain, type Framed} from "@/lib/hub-frame";
+import {useLatest} from "@/lib/use-stable-callback";
 
 // useHubFrame follows the chat in the hub's frame (lib/hub-frame.ts): the
 // open instance's chat draws the bar above itself once it is ready
@@ -24,10 +25,7 @@ export function useHubFrame({
 }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const [framed, setFramed] = useState<Framed>();
-  const latest = useRef({onBack, onCancelUpdate, onOpen, onManageFavorites});
-  useEffect(() => {
-    latest.current = {onBack, onCancelUpdate, onOpen, onManageFavorites};
-  });
+  const latest = useLatest({onBack, onCancelUpdate, onOpen, onManageFavorites});
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       const chat = frame.current;
@@ -54,6 +52,6 @@ export function useHubFrame({
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, []);
+  }, [latest]);
   return {frame, framed};
 }

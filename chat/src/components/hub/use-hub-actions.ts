@@ -1,10 +1,11 @@
 "use client";
 
-import {useCallback, useMemo, useRef} from "react";
+import {useCallback, useMemo} from "react";
 import {toast} from "sonner";
 import {displayName, type HubInstance} from "@/lib/hub";
 import {createHubAPI, hubErrorText} from "@/lib/hub-api";
 import {forgotText} from "@/lib/hub-filter";
+import {useLatest} from "@/lib/use-stable-callback";
 
 // useHubActions makes the changes the hub page asks for (lib/hub-api.ts).
 // Each comes back on the event stream, like any other; one the hub
@@ -12,8 +13,7 @@ import {forgotText} from "@/lib/hub-filter";
 // functions keep their identity: they read the latest instances.
 export function useHubActions(root: string, instances: ReadonlyMap<string, HubInstance>) {
   const api = useMemo(() => createHubAPI(root), [root]);
-  const instancesRef = useRef(instances);
-  instancesRef.current = instances;
+  const instancesRef = useLatest(instances);
   const attempt = useCallback(async (failure: (name: string) => string, id: string, change: () => Promise<void>): Promise<boolean> => {
     try {
       await change();
@@ -23,7 +23,7 @@ export function useHubActions(root: string, instances: ReadonlyMap<string, HubIn
       toast.error(failure(instance ? displayName(instance) : id), {description: hubErrorText(error)});
       return false;
     }
-  }, []);
+  }, [instancesRef]);
   return useMemo(
     () => ({
       // The instance by its ID, as the hub said last.
@@ -67,6 +67,6 @@ export function useHubActions(root: string, instances: ReadonlyMap<string, HubIn
         }
       },
     }),
-    [api, attempt],
+    [api, attempt, instancesRef],
   );
 }
