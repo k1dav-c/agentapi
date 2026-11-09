@@ -1,19 +1,12 @@
 # Changelog
 
-## v3.16.3
+## Unreleased
 
 ### Changes
 
 - The hub's session cookie holds the time it was issued, signed with the hub token, and the hub
   refuses one older than 30 days itself, where only the browser dropped it. A browser signed in to
   an older hub is signed out once and signs in again.
-- `POST /upload` answers 413 (`request body is too large`) for a body over 101 MiB, where it
-  answered 400; a file over 100 MB in a smaller body still gets 400 and
-  `file size exceeds 100MB limit`. An empty file part sent without a `Content-Type` gets 422.
-- An escaped dot segment or slash in a session id (`/sessions/%2E%2E/resume`) gets 400, an
-  invalid id, where it got 404.
-- An IPv6 address without brackets in `--allowed-hosts` is refused as not a valid host, where the
-  error said it must not include a port.
 
 ### Fixes
 
@@ -39,6 +32,34 @@
   again left one open until AgentAPI exited.
 - An interrupt Claude Code or Codex accepts after `POST /interrupt` stopped waiting for the answer
   still ends the turn within 10 seconds when the agent doesn't, where the turn could stay running.
+
+### Internal
+
+- The launcher's tests give their fake AgentAPIs ports of their own, picked at random below the
+  ephemeral ports, where every test process used 47300-47399: two test runs at once on one machine
+  (the CI runners share one) took each other's ports, and a fake that couldn't listen exited. A
+  fake that can't listen says so in its log. An agent host test no longer fails on a busy machine
+  when the fake agent takes over 10 ms to exit.
+- `agentio.Writer.Writing`, a hook only tests used, is gone (the tests' fake agents count their
+  blocked writes), and `webhook.Dispatcher.SetResolver` takes the lookups' lock.
+- The Claude, Codex and Pi adapters share where an answer to the agent's request stands
+  (`agentio.Answer`), and write their fire-and-forget answers with `agentio.WriteAsync`;
+  `statedb` runs its transactions through one helper.
+- `lib/workspacefs` tests its diffs in the package: each status, a working directory below the
+  repository's top, a file too large to compare, a symlink out, and that a repository's filters,
+  textconv and external diff don't run.
+
+## v3.16.3
+
+### Changes
+
+- `POST /upload` answers 413 (`request body is too large`) for a body over 101 MiB, where it
+  answered 400; a file over 100 MB in a smaller body still gets 400 and
+  `file size exceeds 100MB limit`. An empty file part sent without a `Content-Type` gets 422.
+- An escaped dot segment or slash in a session id (`/sessions/%2E%2E/resume`) gets 400, an
+  invalid id, where it got 404.
+- An IPv6 address without brackets in `--allowed-hosts` is refused as not a valid host, where the
+  error said it must not include a port.
 
 ### Internal
 
