@@ -79,7 +79,7 @@ emitter. Handlers call the conversation and read state from the emitter.
 | `lib/native/demo` | `native-demo`, a simulated agent for working on the chat |
 | `lib/native/nativetest` | A scriptable fake adapter for tests |
 | `lib/native/procutil` | Child process groups and graceful shutdown |
-| `lib/statedb/` | SQLite persistence for `--state-db`, and the import of a `--state-file` |
+| `lib/statedb/` | SQLite persistence for `--state-db` |
 | `lib/instanceapi/` | The contract between an AgentAPI and the clients that watch many: who it is (`WebhookInstance`, in its webhook events, summary and registry entry, with its `AgentType`), its summary, the webhook envelope with its signature (`Sign`, `Verify`), and the state a hub shows of each instance (`StateOf`). It imports only `lib/agentstate` and `lib/util` |
 | `lib/hub/` | `agentapi hub serve`, over `lib/instanceapi` and `lib/httpmw` rather than the server: the instances, the groups and pins set on its page, when each last changed what its row shows and when the hub saw each working (`store.go`, `work.go`, kept in a file by `persist.go`), the favorite prompts (`favorites.go`, `GET`/`PUT /api/favorites`, among the hub's settings in the same file), the schema of its wire types (`schema.go`, `hub-schema.json`, for the page's types), the signed webhook receiver (`webhook.go`), each instance's summary stream (`watch.go`), sign-in, the browser's event stream and the proxy to the instances (`hub.go`, `proxy.go`), where machines join it (`join.go`: its addresses for `GET /api/join` and the startup log); the user guide is [hub.md](hub.md) |
 | `lib/dispatch/` | The hub's issue dispatch, which `lib/hub` mounts: the machines whose launchers report (`host.*` events; each name pinned to the launcher token it first came with), the jobs with their runs' costs (`task.*` events) and the last 50 messages their agents were sent (`send`, from the hub's page, a review or an `/agent` comment), `POST /api/dispatch` (a start answers once its job is `starting`; the hub calls the launcher in the background and keeps the start until it ends, adopting it from the machine's next report if the answer was lost), the GitHub App, kept in `dispatch.json` and `github-app.json`. `Subscribe` and `Board` give the hub's stream the machines and jobs after each change (its `dispatch` event); the spec is [issue-dispatch.zh-TW.md](specs/issue-dispatch.zh-TW.md) |
@@ -139,15 +139,13 @@ The internal imports point one way, from the commands to the leaves:
    `instance.started`, after a configuration change, before each heartbeat
    and every 30 s. The events only read the last address found.
    The agent type is `--type`, else the agent command's name (`claude`,
-   `codex`, `pi` or `native-demo`); any other agent, and `--transport pty`,
-   is refused with a pointer to v2.5.1, the last release with the PTY
-   transport.
+   `codex`, `pi` or `native-demo`); any other agent is refused with a
+   pointer to v2.5.1, the last release with the PTY transport.
 2. `nativeFactory` builds a `native.Factory` for the agent type (Claude
    Code, Codex, Pi or `native-demo`). Each adapter checks the agent's
    arguments first and refuses the ones that conflict with its protocol.
-3. With `--state-db` (or next to a `--state-file`), `statedb.Open` opens the
-   file, takes its exclusive lock and migrates its schema; a `--state-file`
-   is imported into it if it holds no conversation yet.
+3. With `--state-db`, `statedb.Open` opens the file, takes its exclusive
+   lock and migrates its schema.
 4. `httpapi.NewServer` creates the emitter, restores the saved state (refusing
    a file written for another agent type or working directory),
    creates the conversation, registers the routes, and starts the conversation,
@@ -673,12 +671,12 @@ The queue is persisted with the conversation, on every change (`storeQueue`, fro
   AgentAPI reads as far as it knows; one that would mislead it raises the
   version, and an AgentAPI that finds a higher one leaves the object alone
   and starts without stored state. Up to 3.7.2 the three had a key each
-  (`settings`, `limit_stop`, `retry_wait`). The first open of such a file
-  moves them into `conversation_state` and deletes them, in one
-  transaction. 3.7.3 to 3.15.1 wrote the old keys next to the object; the
-  object wins and the open deletes them. AgentAPI 3.7.2 or earlier opened
-  on a newer file starts without the stored settings, limit stop and retry
-  wait (the conversation is kept), and what it stores there is ignored.
+  (`settings`, `limit_stop`, `retry_wait`), which AgentAPI 3.7.3 to 3.16
+  moved into the object on the first open; AgentAPI 4 doesn't read them, so
+  a file only 3.7.2 or earlier opened starts without the stored settings,
+  limit stop and retry wait (the conversation is kept). AgentAPI 3.7.2 or
+  earlier opened on a newer file starts without them too, and what it
+  stores there is ignored.
 - What an older AgentAPI doesn't know, its resets and truncations don't
   clear. A restored task whose message is gone or is another one now is
   dropped, as is one whose message row couldn't be read.
@@ -713,10 +711,9 @@ instead would make every older hub refuse the file. The delivery
 IDs of the webhook events it took, each until its signature no longer holds, go the same way into
 `instances.deliveries.json`, so a copy replayed after a restart is refused too.
 
-`--state-file`, the PTY transport's persistence before 1.0 (JSON written on shutdown), is
-deprecated: `cmd/server` imports it once into a state database next to it
-(`statedb.ImportStateFile`, only into an empty one), which keeps the conversation from then on;
-the agent starts a new session below it. SIGUSR1 flushes the state database.
+SIGUSR1 flushes the state database. `--state-file`, the PTY transport's persistence before 1.0
+(JSON written on shutdown), which AgentAPI 3 imported into a state database next to it, is gone
+in AgentAPI 4.
 
 ## Restarts and updates
 

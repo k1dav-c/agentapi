@@ -180,7 +180,7 @@ agentapi server --state-db ~/.agentapi/myproject.db -- codex
 agentapi server --type pi -- ./my-pi-wrapper
 ```
 
-其他 agent 或 `--transport pty` 會讓 AgentAPI 3 在啟動時停止，錯誤訊息會指出 v2.5.1。要執行
+其他 agent 會讓 AgentAPI 在啟動時停止，錯誤訊息會指出 v2.5.1。要執行
 Aider、Goose、Gemini CLI、Amp、Cursor CLI、Auggie、Amazon Q、Opencode、Copilot、Kimi Code 或其他
 終端機程式，請使用最後一個有 PTY transport 的版本 AgentAPI v2.5.1：從
 [v2.5.1 release](https://github.com/k1dav-c/agentapi/releases/tag/v2.5.1) 下載執行檔並保留它。
@@ -188,8 +188,8 @@ Aider、Goose、Gemini CLI、Amp、Cursor CLI、Auggie、Amazon Q、Opencode、C
 進新程式前會先檢查它，因此會拒絕 AgentAPI 3 並繼續提供服務；但更新已經換掉磁碟上的程式，所以在
 那個 AgentAPI 以其他方式重新啟動之前，請把 v2.5.1 放回去。
 
-`--transport` 已棄用，只接受 `native`。實驗性的 ACP transport（`--transport acp`、
-`--experimental-acp`）先前已移除，使用這些旗標時 AgentAPI 會停止並顯示錯誤。
+AgentAPI 4 沒有 `--transport` 旗標：請從指令和設定檔中拿掉。實驗性的 ACP transport
+（`--experimental-acp`）先前已移除，使用這個旗標時 AgentAPI 會停止並顯示錯誤。
 
 ## 聊天介面
 
@@ -715,10 +715,10 @@ state-db: ~/.agentapi/state/{port}.db
   webhook 參數啟動。
 - 用戶端上次顯示對話的時間（`POST /tasks/seen`）會保存下來，所以沒看過就結束的任務在重新啟動後
   仍是[未讀](#監看多個實例)。1.2 之前寫入的資料庫，任務會視為已讀。
-- `--state-file <檔案>` 是 PTY transport 在 v1.0.0 之前的保存方式，已棄用。它保存的對話會在第一次
-  啟動時匯入旁邊的狀態資料庫（同名、副檔名改為 `.db`，或由 `--state-db` 指定），之後由資料庫保存
-  對話，agent 則在它下方開始新的工作階段；不會再寫入這個檔案。`--load-state=false` 會略過匯入，`--save-state` 已沒有作用。SIGUSR1 會
-  寫入狀態資料庫尚未寫入的變更。
+- SIGUSR1 會寫入狀態資料庫尚未寫入的變更。
+- AgentAPI 4 不再讀取 `--state-file`，也就是 PTY transport 在 v1.0.0 之前的保存方式。AgentAPI 3
+  第一次帶著這個檔案啟動時，已把它匯入旁邊的狀態資料庫（同名、副檔名改為 `.db`）：請改用
+  `--state-db` 指定那個資料庫。從沒匯入過的檔案，請先用 AgentAPI 3.16 帶 `--state-file` 執行一次。
 - 使用 `--state-db` 的 AgentAPI 經 [`agentapi restart`](#agentapi-restart)（SIGUSR2）或
   `agentapi update --restart` 重新啟動後，對話和 agent 的工作階段都會保留。沒有 `--state-db`
   時會保留 agent 的工作階段，對話則從它的紀錄讀回；佇列、待回覆的請求和選擇的設定會重新開始。
@@ -1570,14 +1570,11 @@ state-db: ~/.agentapi/state/{port}.db
 | `-t`, `--type` | 由 agent 指令判斷 | agent 類型：`claude`、`codex`、`pi` 或 `native-demo`；見 [Agent](#agent) |
 | `-p`, `--port` | `3284` | 監聽的連接埠 |
 | `--bind` | 所有網路介面 | 監聽的位址；見[監聽位址](#監聽位址) |
-| `--transport` | `native` | 已棄用：`native` 是唯一的 transport；`pty` 會讓 AgentAPI 停止並顯示錯誤 |
 | `--state-db` | | 保存對話、並接續 agent 工作階段的 SQLite 檔案；`{port}` 和 `{hostname}` 會被填入；見[持久保存的工作階段](#持久保存的工作階段) |
 | `--terminal` | `true` | 給聊天介面使用、位於 agent 工作目錄的 shell；見[終端機](#終端機) |
 | `--auto-continue` | `false` | 回合因用量限制停下時，在限制重置後繼續；見[達到用量限制時](#達到用量限制時) |
 | `--retry-delays` | `30s,1m,2m,5m*12` | 回合因暫時性的 API 錯誤失敗後，每次重試前等多久（`5m*12`：重複 12 次）；`off` 關閉重試；見[暫時性的 API 錯誤](#暫時性的-api-錯誤) |
 | `--prices` | | 每百萬 tokens 模型價格的 JSON 檔，新增或取代內建價格；見[工作階段花費](#工作階段花費) |
-| `-s`, `--state-file` | | 已棄用：PTY transport 過去的保存方式，第一次啟動時匯入旁邊的狀態資料庫（可用 `--state-db` 指定其他檔案） |
-| `--load-state`, `--save-state` | | 已棄用：`--load-state=false` 會略過匯入；`--save-state` 沒有作用 |
 | `-I`, `--initial-prompt` | | 給 agent 的第一則訊息；以管線輸入時從 stdin 讀取 |
 | `-W`, `--term-width`, `-H`, `--term-height` | | 已棄用且沒有作用：PTY transport 的終端機大小 |
 | `--api-token` | 關閉 | 要求 Bearer token；不帶值時會產生隨機 token 並印出；見 [API token 驗證](#api-token-驗證) |
@@ -1587,7 +1584,7 @@ state-db: ~/.agentapi/state/{port}.db
 | `--webhook-events` | `run.status_changed` | 要送的事件：類型、群組（`task.*`）或 `*` |
 | `--webhook-secret` | | 為每次傳送簽章的 secret（`X-AgentAPI-Signature-256`） |
 | `--webhook-heartbeat` | `60s` | `instance.heartbeat` 的間隔；`0` 為關閉 |
-| `--instance-id` | `<hostname>:<port>` | 在 `GET /summary` 和每個 webhook 事件中代表這個 AgentAPI 的 ID；見[監看多個實例](#監看多個實例)（`--webhook-instance-id` 是已棄用的舊名稱） |
+| `--instance-id` | `<hostname>:<port>` | 在 `GET /summary` 和每個 webhook 事件中代表這個 AgentAPI 的 ID；見[監看多個實例](#監看多個實例) |
 | `--name` | 工作目錄的名稱 | 監看多個 AgentAPI 的用戶端顯示的名稱 |
 | `--registry` | `true` | 執行期間在登記目錄保留登記檔；見[監看多個實例](#監看多個實例) |
 | `--registry-dir` | `~/.agentapi/instances` | 登記目錄 |

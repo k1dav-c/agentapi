@@ -126,9 +126,6 @@ func runServer(ctx context.Context, logger *slog.Logger, args []string, self *se
 				logger.Error("Failed to close the state database", "error", err)
 			}
 		}()
-		if opts.stateFile != "" {
-			importStateFile(stateDB, opts, cwd, logger)
-		}
 		if self != nil {
 			self.stateDB = stateDB
 		}
@@ -503,12 +500,8 @@ const (
 	FlagAllowedOrigins         = "allowed-origins"
 	FlagExit                   = "exit"
 	FlagInitialPrompt          = "initial-prompt"
-	FlagStateFile              = "state-file"
-	FlagLoadState              = "load-state"
-	FlagSaveState              = "save-state"
 	FlagPidFile                = "pid-file"
 	FlagExperimentalACP        = "experimental-acp"
-	FlagTransport              = "transport"
 	FlagStateDB                = "state-db"
 	FlagTerminal               = "terminal"
 	FlagAutoContinue           = "auto-continue"
@@ -521,7 +514,6 @@ const (
 	FlagWebhookEvents          = "webhook-events"
 	FlagWebhookSecret          = "webhook-secret"
 	FlagWebhookHeartbeat       = "webhook-heartbeat"
-	FlagWebhookInstanceID      = "webhook-instance-id"
 	FlagInstanceID             = "instance-id"
 	FlagName                   = "name"
 	FlagRegistry               = "registry"
@@ -661,13 +653,9 @@ func serverFlagSpecs() []flagSpec {
 		// localhost:3284 is the default origin when you open the chat interface in your browser. localhost:3000 and 3001 are used during development.
 		{FlagAllowedOrigins, "o", []string{"http://localhost:3284", "http://localhost:3000", "http://localhost:3001"}, "HTTP allowed origins. Use '*' for all, comma-separated list via flag, space-separated list via AGENTAPI_ALLOWED_ORIGINS env var", "stringSlice"},
 		{FlagInitialPrompt, "I", "", "Initial prompt, sent as the first message once the agent is ready. Read from stdin if piped (e.g., echo 'prompt' | agentapi server -- claude)", "string"},
-		{FlagStateFile, "s", "", "Deprecated: use --state-db. A state file written by an earlier AgentAPI, whose conversation is imported into a state database next to it (the same name with .db, or --state-db) the first time; that database keeps the conversation from then on", "string"},
-		{FlagLoadState, "", false, "Deprecated: with --load-state=false the state file isn't imported", "bool"},
-		{FlagSaveState, "", false, "Deprecated and without effect: the state database keeps every change", "bool"},
 		{FlagPidFile, "", "", "Path to file where the server process ID will be written for shutdown scripts; {port} and {hostname} are filled in", "string"},
 		{FlagExperimentalACP, "", false, "Removed: the ACP transport is no longer available", "bool"},
 		{FlagStateDB, "", "", "Path to a SQLite file that keeps the conversation (messages, tool calls, requests, queue) when AgentAPI restarts, and the agent resumes its session. {port} and {hostname} are filled in", "string"},
-		{FlagTransport, "", "native", "Deprecated: native, the only transport, which drives the agent through its own structured protocol. AgentAPI 3 has no pty", "string"},
 		{FlagTerminal, "", true, "Offer a shell in the agent's working directory to the chat (its Terminal button) and at GET /terminal", "bool"},
 		{FlagAutoContinue, "", false, "When a usage limit stops the agent's turn, continue it once the limit resets, if the agent says when", "bool"},
 		{FlagRetryDelays, "", native.FormatDelays(native.DefaultRetryDelays()), "When the agent's turn fails on an upstream error that may pass (an HTTP 5xx or 429, an overloaded API), wait this long and ask the agent to go on: one delay per retry in a row (5m*12 is 5m twelve times), after which the failure is an error. Comma-separated via flag, space-separated via AGENTAPI_RETRY_DELAYS; off (or 0) turns retries off", "stringSlice"},
@@ -681,7 +669,6 @@ func serverFlagSpecs() []flagSpec {
 		{FlagWebhookHeartbeat, "", 60 * time.Second, "How often the instance.heartbeat webhook event is sent; 0 turns it off", "duration"},
 		{FlagInstanceID, "", "", "Identifies this AgentAPI to clients that watch many (GET /summary) and in every webhook event (default <hostname>:<port>)", "string"},
 		{FlagName, "", "", "What clients that watch many AgentAPIs call this one, in GET /summary and webhook events (default the working directory's name)", "string"},
-		{FlagWebhookInstanceID, "", "", "Deprecated: use --instance-id", "string"},
 		{FlagRegistry, "", true, "While serving, keep an entry in the registry directory, where agentapi list and clients that watch many AgentAPIs find the ones running on this machine", "bool"},
 		{FlagRegistryDir, "", "", "Registry directory (default ~/.agentapi/instances)", "string"},
 		{FlagConfig, "", "", "Settings file: agentapi server flags by name (YAML), below flags and AGENTAPI_* variables; agentapi hub join writes it (default ~/.agentapi/config.yaml)", "string"},

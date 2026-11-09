@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+### Breaking changes
+
+- `agentapi server` no longer takes the flags AgentAPI 3 kept for compatibility; each now stops
+  it at startup (`unknown flag`), and in `--validate`, so an AgentAPI 3 that runs with one and
+  updates through its API keeps serving and says why. The settings file and `AGENTAPI_*`
+  variables of the same names are ignored (the file's with a warning). `--term-width`/`-W` and
+  `--term-height`/`-H` stay, still without effect, since older Coder modules start AgentAPI with
+  them.
+  - `--transport` (only `native`, the default): drop it.
+  - `--webhook-instance-id`: use `--instance-id`.
+  - `--state-file`/`-s`, `--load-state` and `--save-state`: AgentAPI 3 imported the state file
+    into a state database next to it (the same name with `.db`) the first time it started with
+    it; start with `--state-db` on that database. A state file never imported can be, by running
+    AgentAPI 3.16 once with it.
+- A state database only AgentAPI 3.7.2 or earlier opened starts without its stored settings,
+  usage limit stop and retry wait, which AgentAPI 3.7.3 to 3.16 moved into `conversation_state`
+  on the first open; the conversation is kept. Open such a database with AgentAPI 3.16 once first
+  to keep them.
+
 ## v3.16.4
 
 ### Changes

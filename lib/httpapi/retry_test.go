@@ -138,9 +138,10 @@ func TestStateDB_KeepsTheRetryWait(t *testing.T) {
 	assert.Nil(t, n.retryWait())
 }
 
-// A state database AgentAPI 3.7.2 wrote, with the retry wait and the
-// settings in keys of their own, comes back the same.
-func TestStateDB_RestoresTheStateOfAnOlderAgentAPI(t *testing.T) {
+// A state database only AgentAPI 3.7.2 wrote, with the retry wait and the
+// settings in keys of their own, comes back without them: AgentAPI 4
+// doesn't read those keys. The conversation is kept.
+func TestStateDB_IgnoresTheStateKeysOfAnOlderAgentAPI(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.db")
 	n, srv, db, err := persistentServer(t, path, "/work")
 	require.NoError(t, err)
@@ -169,8 +170,13 @@ func TestStateDB_RestoresTheStateOfAnOlderAgentAPI(t *testing.T) {
 	n, srv, db, err = persistentServer(t, path, "/work")
 	require.NoError(t, err)
 	defer stop(t, srv, db)
-	after := n.retryWait()
-	require.NotNil(t, after, "the retry still waits")
-	assert.True(t, before.RetryAt.Equal(after.RetryAt))
-	assert.Equal(t, before.Attempt, after.Attempt)
+	assert.Nil(t, n.retryWait())
+	var body struct {
+		Messages []struct {
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	require.Equal(t, http.StatusOK, n.do(http.MethodGet, "/messages", nil, &body))
+	require.NotEmpty(t, body.Messages)
+	assert.Equal(t, "first", body.Messages[0].Content)
 }

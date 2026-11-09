@@ -1,7 +1,6 @@
 package server
 
 import (
-	"cmp"
 	"errors"
 	"fmt"
 	"io"
@@ -45,14 +44,7 @@ type serverOptions struct {
 	pidFile  string
 
 	initialPrompt string
-	// stateFile is the deprecated --state-file: its conversation is
-	// imported into the state database, which keeps it from then on.
-	stateFile string
-	// importState: import stateFile when the state database holds no
-	// conversation yet (--load-state isn't turned off).
-	importState bool
-	// stateDB keeps the conversation in SQLite (--state-db, or next to
-	// the --state-file).
+	// stateDB keeps the conversation in SQLite (--state-db).
 	stateDB  string
 	terminal bool
 	// policy is the conversation's: --auto-continue and --retry-delays.
@@ -115,7 +107,7 @@ func loadServerOptions(flags flagSource, args []string) (serverOptions, error) {
 			Events:          flags.GetStringSlice(FlagWebhookEvents),
 			Secret:          flags.GetString(FlagWebhookSecret),
 			Heartbeat:       heartbeatOption(flags.GetDuration(FlagWebhookHeartbeat)),
-			InstanceID:      cmp.Or(flags.GetString(FlagInstanceID), flags.GetString(FlagWebhookInstanceID)),
+			InstanceID:      flags.GetString(FlagInstanceID),
 			// {ip} stays: it may change while the server runs, and every
 			// event and summary fill it in.
 			PublicURL: instanceapi.ExpandPublicURL(flags.GetString(FlagPublicURL), port),
@@ -131,12 +123,6 @@ func loadServerOptions(flags flagSource, args []string) (serverOptions, error) {
 			return serverOptions{}, err
 		}
 	}
-	if opts.stateFile, opts.importState, err = stateFileOptions(flags); err != nil {
-		return serverOptions{}, err
-	}
-	if opts.stateFile != "" && opts.stateDB == "" {
-		opts.stateDB = stateDBForFile(opts.stateFile)
-	}
 	switch {
 	case !flags.GetBool(FlagRegistry):
 		opts.registryDir = ""
@@ -145,8 +131,8 @@ func loadServerOptions(flags flagSource, args []string) (serverOptions, error) {
 			return serverOptions{}, fmt.Errorf("%w; set --registry-dir or --registry=false", err)
 		}
 	}
-	if err := checkTransport(flags); err != nil {
-		return serverOptions{}, err
+	if flags.GetBool(FlagExperimentalACP) {
+		return serverOptions{}, errACPRemoved
 	}
 	// Unset, the conversation's default (the flag's) applies.
 	if flags.IsSet(FlagRetryDelays) {
@@ -158,24 +144,6 @@ func loadServerOptions(flags flagSource, args []string) (serverOptions, error) {
 		return serverOptions{}, fmt.Errorf("invalid --%s: %w", FlagBind, err)
 	}
 	return opts, nil
-}
-
-// stateFileOptions reads the deprecated --state-file, and whether to import
-// it: unless --load-state is turned off. --load-state and --save-state need
-// a state file; --save-state has no effect anymore, since the state
-// database keeps every change.
-func stateFileOptions(flags flagSource) (file string, importState bool, err error) {
-	file = expandHome(flags.GetString(FlagStateFile))
-	if file == "" {
-		if flags.IsSet(FlagLoadState) && flags.GetBool(FlagLoadState) {
-			return "", false, fmt.Errorf("--load-state requires --state-file to be set")
-		}
-		if flags.IsSet(FlagSaveState) && flags.GetBool(FlagSaveState) {
-			return "", false, fmt.Errorf("--save-state requires --state-file to be set")
-		}
-		return "", false, nil
-	}
-	return file, !flags.IsSet(FlagLoadState) || flags.GetBool(FlagLoadState), nil
 }
 
 // expandHome replaces a leading ~ of path, a path setting, with the home
@@ -192,39 +160,8 @@ func expandHome(path string) string {
 	return filepath.Join(home, path[1:])
 }
 
-// stateDBForFile is the state database that takes over from the state
-// file at path when --state-db isn't given: the same name with .db.
-func stateDBForFile(path string) string {
-	db := strings.TrimSuffix(path, filepath.Ext(path)) + ".db"
-	if db == path {
-		db = path + ".sqlite"
-	}
-	return db
-}
-
-// errACPRemoved answers --transport acp and --experimental-acp.
+// errACPRemoved answers --experimental-acp.
 var errACPRemoved = errors.New("the experimental ACP transport was removed: AgentAPI runs Claude Code, Codex and Pi natively")
-
-// errPTYRemoved answers --transport pty.
-var errPTYRemoved = fmt.Errorf("AgentAPI 3 has no PTY transport: it runs Claude Code, Codex and Pi natively; drop --transport pty (or AGENTAPI_TRANSPORT=pty), or use AgentAPI %s, the last release with the PTY transport", lastPTYRelease)
-
-// checkTransport checks the deprecated --transport, which only takes
-// native, the one transport.
-func checkTransport(flags flagSource) error {
-	if flags.GetBool(FlagExperimentalACP) {
-		return errACPRemoved
-	}
-	switch value := flags.GetString(FlagTransport); value {
-	case "", string(instanceapi.TransportNative):
-		return nil
-	case "pty":
-		return errPTYRemoved
-	case "acp":
-		return errACPRemoved
-	default:
-		return fmt.Errorf("unknown --%s %q: AgentAPI 3 drives every agent natively", FlagTransport, value)
-	}
-}
 
 // readPipedPrompt returns what was piped to AgentAPI's stdin, the initial
 // prompt when --initial-prompt isn't given.

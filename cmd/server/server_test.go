@@ -272,7 +272,7 @@ func TestMixed_ConfigurationScenarios(t *testing.T) {
 
 		// Set some env vars
 		t.Setenv("AGENTAPI_TYPE", "goose")
-		t.Setenv("AGENTAPI_TERM_WIDTH", "120")
+		t.Setenv("AGENTAPI_BIND", "127.0.0.1")
 
 		// Set some CLI args
 		serverCmd := CreateServerCmd()
@@ -283,12 +283,11 @@ func TestMixed_ConfigurationScenarios(t *testing.T) {
 		}
 
 		// Verify mixed configuration
-		assert.Equal(t, "goose", viper.GetString(FlagType))            // from env
-		assert.Equal(t, 9999, viper.GetInt(FlagPort))                  // from CLI
-		assert.Equal(t, true, viper.GetBool(FlagPrintOpenAPI))         // from CLI
-		assert.Equal(t, "/chat", viper.GetString(FlagChatBasePath))    // default
-		assert.Equal(t, uint16(120), viper.GetUint16(FlagTermWidth))   // from env
-		assert.Equal(t, uint16(1000), viper.GetUint16(FlagTermHeight)) // default
+		assert.Equal(t, "goose", viper.GetString(FlagType))         // from env
+		assert.Equal(t, 9999, viper.GetInt(FlagPort))               // from CLI
+		assert.Equal(t, true, viper.GetBool(FlagPrintOpenAPI))      // from CLI
+		assert.Equal(t, "/chat", viper.GetString(FlagChatBasePath)) // default
+		assert.Equal(t, "127.0.0.1", viper.GetString(FlagBind))     // from env
 	})
 }
 
@@ -380,124 +379,13 @@ func TestServerCmd_AllowedHosts(t *testing.T) {
 	}
 }
 
-func TestServerCmd_StatePersistenceFlags(t *testing.T) {
-	// NOTE: These tests use --exit flag to test flag parsing and defaults.
-	// Runtime validation that happens in runServer (e.g., "--load-state requires --state-file")
-	// would call os.Exit(1) which terminates the test process, so those validations
-	// are tested through integration/E2E tests instead.
-
-	t.Run("state-file with defaults", func(t *testing.T) {
-		isolateViper(t)
-
-		serverCmd := CreateServerCmd()
-		setupCommandOutput(t, serverCmd)
-		serverCmd.SetArgs([]string{"--state-file", "/tmp/state.json", "--exit", "dummy-command"})
-		err := serverCmd.Execute()
-		require.NoError(t, err)
-
-		assert.Equal(t, "/tmp/state.json", viper.GetString(FlagStateFile))
-		// load-state and save-state default to true when state-file is set (validated in runServer)
-	})
-
-	t.Run("state-file with explicit load-state=false", func(t *testing.T) {
-		isolateViper(t)
-
-		serverCmd := CreateServerCmd()
-		setupCommandOutput(t, serverCmd)
-		serverCmd.SetArgs([]string{"--state-file", "/tmp/state.json", "--load-state=false", "--exit", "dummy-command"})
-		err := serverCmd.Execute()
-		require.NoError(t, err)
-
-		assert.Equal(t, "/tmp/state.json", viper.GetString(FlagStateFile))
-		assert.Equal(t, false, viper.GetBool(FlagLoadState))
-	})
-
-	t.Run("state-file with explicit save-state=false", func(t *testing.T) {
-		isolateViper(t)
-
-		serverCmd := CreateServerCmd()
-		setupCommandOutput(t, serverCmd)
-		serverCmd.SetArgs([]string{"--state-file", "/tmp/state.json", "--save-state=false", "--exit", "dummy-command"})
-		err := serverCmd.Execute()
-		require.NoError(t, err)
-
-		assert.Equal(t, "/tmp/state.json", viper.GetString(FlagStateFile))
-		assert.Equal(t, false, viper.GetBool(FlagSaveState))
-	})
-
-	t.Run("state-file with explicit load-state=true and save-state=true", func(t *testing.T) {
-		isolateViper(t)
-
-		serverCmd := CreateServerCmd()
-		setupCommandOutput(t, serverCmd)
-		serverCmd.SetArgs([]string{
-			"--state-file", "/tmp/state.json",
-			"--load-state=true",
-			"--save-state=true",
-			"--exit", "dummy-command",
-		})
-		err := serverCmd.Execute()
-		require.NoError(t, err)
-
-		assert.Equal(t, "/tmp/state.json", viper.GetString(FlagStateFile))
-		assert.Equal(t, true, viper.GetBool(FlagLoadState))
-		assert.Equal(t, true, viper.GetBool(FlagSaveState))
-	})
-
-	t.Run("load-state flag can be parsed", func(t *testing.T) {
-		isolateViper(t)
-
-		serverCmd := CreateServerCmd()
-		setupCommandOutput(t, serverCmd)
-		serverCmd.SetArgs([]string{"--load-state", "--exit", "dummy-command"})
-		err := serverCmd.Execute()
-		require.NoError(t, err)
-
-		// Flag is parsed correctly (validation happens in runServer)
-		assert.Equal(t, true, viper.GetBool(FlagLoadState))
-	})
-
-	t.Run("save-state flag can be parsed", func(t *testing.T) {
-		isolateViper(t)
-
-		serverCmd := CreateServerCmd()
-		setupCommandOutput(t, serverCmd)
-		serverCmd.SetArgs([]string{"--save-state", "--exit", "dummy-command"})
-		err := serverCmd.Execute()
-		require.NoError(t, err)
-
-		// Flag is parsed correctly (validation happens in runServer)
-		assert.Equal(t, true, viper.GetBool(FlagSaveState))
-	})
-
-	t.Run("pid-file can be set independently", func(t *testing.T) {
-		isolateViper(t)
-
-		serverCmd := CreateServerCmd()
-		setupCommandOutput(t, serverCmd)
-		serverCmd.SetArgs([]string{"--pid-file", "/tmp/server.pid", "--exit", "dummy-command"})
-		err := serverCmd.Execute()
-		require.NoError(t, err)
-
-		assert.Equal(t, "/tmp/server.pid", viper.GetString(FlagPidFile))
-	})
-
-	t.Run("state-file and pid-file can be set together", func(t *testing.T) {
-		isolateViper(t)
-
-		serverCmd := CreateServerCmd()
-		setupCommandOutput(t, serverCmd)
-		serverCmd.SetArgs([]string{
-			"--state-file", "/tmp/state.json",
-			"--pid-file", "/tmp/server.pid",
-			"--exit", "dummy-command",
-		})
-		err := serverCmd.Execute()
-		require.NoError(t, err)
-
-		assert.Equal(t, "/tmp/state.json", viper.GetString(FlagStateFile))
-		assert.Equal(t, "/tmp/server.pid", viper.GetString(FlagPidFile))
-	})
+func TestServerCmd_PIDFileFlag(t *testing.T) {
+	isolateViper(t)
+	serverCmd := CreateServerCmd()
+	setupCommandOutput(t, serverCmd)
+	serverCmd.SetArgs([]string{"--pid-file", "/tmp/server.pid", "--exit", "dummy-command"})
+	require.NoError(t, serverCmd.Execute())
+	assert.Equal(t, "/tmp/server.pid", viper.GetString(FlagPidFile))
 }
 
 func TestPIDFileOperations(t *testing.T) {
