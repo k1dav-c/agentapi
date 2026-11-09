@@ -29,6 +29,19 @@
         "title": "Connection",
         "type": "string"
       },
+      "DispatchAction": {
+        "enum": [
+          "start",
+          "send",
+          "link_pr",
+          "stop"
+        ],
+        "examples": [
+          "start"
+        ],
+        "title": "DispatchAction",
+        "type": "string"
+      },
       "DispatchAssign": {
         "additionalProperties": false,
         "properties": {
@@ -416,15 +429,7 @@
             ]
           },
           "state": {
-            "enum": [
-              "starting",
-              "working",
-              "review",
-              "failed",
-              "done",
-              "stopped"
-            ],
-            "type": "string"
+            "$ref": "#/components/schemas/DispatchJobState"
           },
           "title": {
             "type": "string"
@@ -450,6 +455,21 @@
           "round"
         ],
         "type": "object"
+      },
+      "DispatchJobState": {
+        "enum": [
+          "starting",
+          "working",
+          "review",
+          "failed",
+          "done",
+          "stopped"
+        ],
+        "examples": [
+          "starting"
+        ],
+        "title": "DispatchJobState",
+        "type": "string"
       },
       "DispatchJobsBody": {
         "additionalProperties": false,
@@ -490,12 +510,7 @@
             "type": "string"
           },
           "source": {
-            "enum": [
-              "hub",
-              "review",
-              "comment"
-            ],
-            "type": "string"
+            "$ref": "#/components/schemas/DispatchMessageSource"
           },
           "text": {
             "type": "string"
@@ -508,6 +523,18 @@
           "text"
         ],
         "type": "object"
+      },
+      "DispatchMessageSource": {
+        "enum": [
+          "hub",
+          "review",
+          "comment"
+        ],
+        "examples": [
+          "hub"
+        ],
+        "title": "DispatchMessageSource",
+        "type": "string"
       },
       "DispatchReposBody": {
         "additionalProperties": false,
@@ -531,13 +558,7 @@
         "additionalProperties": false,
         "properties": {
           "action": {
-            "enum": [
-              "start",
-              "send",
-              "link_pr",
-              "stop"
-            ],
-            "type": "string"
+            "$ref": "#/components/schemas/DispatchAction"
           },
           "agent": {
             "type": "string"
@@ -1173,7 +1194,7 @@
             "type": "string"
           },
           "state": {
-            "type": "string"
+            "$ref": "#/components/schemas/LauncherJobState"
           },
           "worktree": {
             "type": "string"
@@ -1192,6 +1213,20 @@
           "started_at"
         ],
         "type": "object"
+      },
+      "LauncherJobState": {
+        "enum": [
+          "starting",
+          "running",
+          "restarting",
+          "failed",
+          "stopping"
+        ],
+        "examples": [
+          "starting"
+        ],
+        "title": "LauncherJobState",
+        "type": "string"
       },
       "PinsBody": {
         "additionalProperties": false,
