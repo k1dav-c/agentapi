@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/devcontainers/go:1-1.24-bookworm
+FROM mcr.microsoft.com/devcontainers/go:2-1.26-bookworm
 
 # The base image ships a yarn apt repo with an expired GPG key that breaks
 # `apt-get update`; drop it before installing anything.
