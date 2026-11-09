@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### Fixes
+
+- An issue card's ring in Issues ends after its 1.6 s again: every event of the hub's stream
+  cancelled the timer that ends it, so a card's ring could stay on for good.
+- The chat no longer reads `GET /queue` every minute while the queue sits idle: it reads it on a
+  timer only from an AgentAPI older than 1.0.0 (or one that doesn't say its version), which sends
+  no queue events, and only until one comes.
+- The notifications closed in the chat are remembered for the 50 AgentAPIs one was closed on last,
+  and forgotten for the others: the browser kept them for every AgentAPI it ever opened, one per
+  issue the hub dispatched.
+- The chat and the hub say token counts, amounts and ages the same way, and round them the same:
+  the chat said 999,600 tokens as "1000k", where the hub said "1M"; an amount just under $1,000 as
+  "$1000.00", and the hub one just under $10 as "$10.00".
+- Adding an AgentAPI by its URL on the hub says why the hub refused it, whatever the shape of its
+  answer; signing in to the hub says a refusal other than a wrong token as the hub said it, not as
+  a hub that didn't answer.
+
+### Performance
+
+- The hub's list renders a row or a machine's card again only when it changed: every event of the
+  issue dispatch rendered every row and card, and every event of an instance every machine's card.
+
 ### Internal
 
 - CI: a release runs on a self-hosted runner of its own, apart from the one that runs the tests,
@@ -10,6 +32,12 @@
   action to a commit and Bun to a version, install the chat's dependencies from the lockfile, and
   check that the chat's generated API types match. A new push to a pull request cancels the jobs of
   its last, and a manual release runs on `main` only. The unused PR preview workflows are gone.
+- One module has the chat's and the hub's formatters (`lib/format.ts`), and one helper keeps a
+  hook's latest value in a ref (`useLatest`).
+- Tests for the chat's event stream (the cache against the 400 ms start, a reconnect after a
+  401), the hub's stream (signed out against unreachable), the drafts and the queue's reads.
+- The chat no longer has the `gh-pages` package and the `deploy-gh-pages` and `serve-static`
+  scripts, which nothing ran.
 
 ## v3.16.1
 
