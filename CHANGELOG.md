@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Internal
+
+- CI: a release runs on a self-hosted runner of its own, apart from the one that runs the tests,
+  and a push that releases nothing (such as `docs:` commits alone) runs no tests. The release
+  builds its five binaries side by side; the jobs no longer restore setup-go's cache, pin each
+  action to a commit and Bun to a version, install the chat's dependencies from the lockfile, and
+  check that the chat's generated API types match. A new push to a pull request cancels the jobs of
+  its last, and a manual release runs on `main` only. The unused PR preview workflows are gone.
+
 ## v3.16.1
 
 ### Fixes

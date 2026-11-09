@@ -4,9 +4,14 @@ name: Go Tests
 # published releases run them through the Release workflow (workflow_call),
 # which releases only once they (test, race, lint) pass.
 #
-# The jobs run on the repository's self-hosted Linux runner. A pull request
-# from a fork runs none: its code would run on that machine. The repository
-# also asks for approval before an outside contributor's workflows run.
+# The jobs run on the repository's self-hosted runner for tests (label ci),
+# never on the one that releases (label release; see MAINTAINERS.md). A pull
+# request from a fork runs none: its code would run on that machine. The
+# repository also asks for approval before an outside contributor's
+# workflows run. A pull request's new push cancels the jobs of its last.
+#
+# setup-go's cache stays off: the runner keeps Go's caches between jobs, and
+# restoring the cache took half of each job.
 on:
     pull_request:
     workflow_call:
@@ -17,28 +22,36 @@ permissions:
 jobs:
     test:
         if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
-        runs-on: [self-hosted, linux, x64]
+        runs-on: [self-hosted, ci]
+        concurrency:
+            group: ${{ github.event_name == 'pull_request' && format('pr-{0}-{1}', github.ref, github.job) || format('run-{0}-{1}', github.run_id, github.job) }}
+            cancel-in-progress: true
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
             - name: Set up Go
-              uses: actions/setup-go@v5
+              uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
               with:
                   go-version-file: go.mod
+                  cache: false
 
             - name: Test
               run: CGO_ENABLED=0 go test -count=1 -v ./...
 
     race:
         if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
-        runs-on: [self-hosted, linux, x64]
+        runs-on: [self-hosted, ci]
+        concurrency:
+            group: ${{ github.event_name == 'pull_request' && format('pr-{0}-{1}', github.ref, github.job) || format('run-{0}-{1}', github.run_id, github.job) }}
+            cancel-in-progress: true
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
             - name: Set up Go
-              uses: actions/setup-go@v5
+              uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
               with:
                   go-version-file: go.mod
+                  cache: false
 
             # The race detector needs cgo; the SQLite driver is pure Go.
             - name: Test with the race detector
@@ -46,20 +59,26 @@ jobs:
 
     lint:
         if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
-        runs-on: [self-hosted, linux, x64]
+        runs-on: [self-hosted, ci]
+        concurrency:
+            group: ${{ github.event_name == 'pull_request' && format('pr-{0}-{1}', github.ref, github.job) || format('run-{0}-{1}', github.run_id, github.job) }}
+            cancel-in-progress: true
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
             - name: Set up Go
-              uses: actions/setup-go@v5
+              uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
               with:
                   go-version-file: go.mod
+                  cache: false
 
             - name: Set up Bun
-              uses: oven-sh/setup-bun@v2
+              uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+              with:
+                  bun-version: 1.4.4
 
             - name: Install Chat Dependencies
-              run: cd chat && bun install
+              run: cd chat && bun install --frozen-lockfile
 
             - name: run linters
               run: make lint
@@ -70,4 +89,5 @@ jobs:
             - name: Check for unstaged changes
               run: |
                   make gen
+                  (cd chat && bun run gen:api)
                   ./check_unstaged.sh

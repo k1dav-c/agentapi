@@ -17,8 +17,16 @@ name: Release
 # mechanism covers every trigger and the commit tested is github.sha;
 # go-test.yml therefore doesn't run on pushes to main itself.
 #
-# The jobs run on the repository's self-hosted Linux runner, one at a time:
-# the tests, then the release.
+# A first, cheap job (plan) asks release-version.sh whether the run releases
+# anything; the tests and the release run only then, so a push of docs alone
+# costs seconds. The release job asks again once it has its turn, since a
+# push before it may have released meanwhile. A manual run releases main
+# only.
+#
+# The tests run on the self-hosted runner for tests (label ci); the release
+# on another (label release), as a user of its own with its own Go and Bun
+# caches, so that nothing a pull request's job leaves behind goes into a
+# release's binaries (see MAINTAINERS.md).
 #
 # The release is created in this workflow, not by a separate release-triggered
 # one, because releases created with GITHUB_TOKEN don't trigger other workflows.
@@ -40,71 +48,77 @@ on:
         default: auto
 
 jobs:
-  test:
-    name: Go Tests
-    uses: ./.github/workflows/go-test.yml
-
-  release:
-    name: Build and Release
-    needs: test
-    runs-on: [self-hosted, linux, x64]
-    permissions:
-      contents: write
-    # One release at a time, after the tests; the tests of later pushes run
-    # meanwhile. GitHub keeps one run waiting per group: one that waits is
-    # cancelled when another starts waiting, and the commits of a cancelled
-    # push go out with the next release.
-    concurrency:
-      group: release
-      cancel-in-progress: false
-
+  plan:
+    name: Plan
+    runs-on: [self-hosted, ci]
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Release main only
+        if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::A manual release runs on main, not ${GITHUB_REF}."
+          exit 1
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
 
       - name: Determine version
         id: version
-        shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           BUMP: ${{ inputs.bump }}
-        run: |
-          version=""
-          if [[ "${EVENT_NAME}" == "push" ]]; then
-            # main as it is now: checkout points origin/main at the commit
-            # it checks out.
-            git fetch --quiet origin main
-          fi
-          if [[ "${EVENT_NAME}" == "release" ]]; then
-            version="${RELEASE_TAG#v}"
-          elif [[ "${EVENT_NAME}" == "push" ]] && released=$(git tag --contains HEAD --list 'v[0-9]*.[0-9]*.[0-9]*') && [[ -n "${released}" ]]; then
-            # The tests of a later push finished first, and its release
-            # holds this commit.
-            echo "Released already in ${released//$'\n'/, }; skipping."
-          elif [[ "${EVENT_NAME}" == "push" ]] && ! git merge-base --is-ancestor HEAD FETCH_HEAD; then
-            echo "$(git rev-parse HEAD) is no longer on main (force-pushed); skipping."
-          else
-            version=$(./next-version.sh "${BUMP:-auto}")
-            if [[ -z "${version}" ]]; then
-              echo "No release-worthy commits since the last release; skipping."
-            fi
-          fi
-          if [[ -n "${version}" ]]; then
-            echo "Version: ${version}"
-          fi
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
+        run: echo "version=$(./release-version.sh)" >> "$GITHUB_OUTPUT"
+
+  test:
+    name: Go Tests
+    needs: plan
+    if: needs.plan.outputs.version != ''
+    uses: ./.github/workflows/go-test.yml
+
+  release:
+    name: Build and Release
+    needs: [plan, test]
+    runs-on: [self-hosted, release]
+    permissions:
+      contents: write
+    # One release at a time, after the tests; the tests of later pushes run
+    # meanwhile. GitHub keeps one run waiting per group: one that waits is
+    # cancelled when another starts waiting, and the commits of a cancelled
+    # push go out with the next release. A release published by hand has a
+    # group of its own, so a push doesn't cancel it and leave it without
+    # binaries.
+    concurrency:
+      group: ${{ github.event_name == 'release' && format('release-{0}', github.event.release.tag_name) || 'release' }}
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      - name: Determine version
+        id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          BUMP: ${{ inputs.bump }}
+        run: echo "version=$(./release-version.sh)" >> "$GITHUB_OUTPUT"
 
       - name: Set up Go
         if: steps.version.outputs.version != ''
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
+          cache: false
 
       - name: Set up Bun
         if: steps.version.outputs.version != ''
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
 
       - name: Install Chat Dependencies
         if: steps.version.outputs.version != ''
@@ -114,6 +128,7 @@ jobs:
         if: steps.version.outputs.version != ''
         run: |
           make gen
+          (cd chat && bun run gen:api)
           ./check_unstaged.sh
 
       - name: Build binaries
@@ -130,11 +145,17 @@ jobs:
             "windows amd64 agentapi-windows-amd64.exe"
           )
 
+          # The chat once, then the five binaries side by side.
+          make embed
+          pids=()
           for variant in "${build_variants[@]}"; do
             read -r goos goarch artifact_name <<< "$variant"
-
             echo "Building for GOOS=$goos GOARCH=$goarch..."
-            GOOS="$goos" GOARCH="$goarch" BINPATH="out/$artifact_name" make build
+            GOOS="$goos" GOARCH="$goarch" BINPATH="out/$artifact_name" make build &
+            pids+=("$!")
+          done
+          for pid in "${pids[@]}"; do
+            wait "$pid"
           done
 
           ./out/agentapi-linux-amd64 --version
