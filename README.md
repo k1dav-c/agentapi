@@ -20,6 +20,8 @@ Use AgentAPI to:
   you, its messages and heartbeats there with [webhooks](#webhooks), and a client that connects
   to many follows each through its [summary](#watching-many-instances). The built-in
   [hub](#running-a-hub) is such a dashboard, on a desktop or a phone.
+- Hand GitHub issues to agents on your machines from the hub's [Issues](docs/hub.md#issues) page:
+  each works on its own branch and opens a pull request.
 
 ## About this fork
 
@@ -128,6 +130,11 @@ has the complete commit history.
   desktop or a phone, with favorite prompts it keeps for every chat it opens.
   [`agentapi hub join`](#joining-a-hub) connects a machine's AgentAPIs to it,
   and they stay connected after a restart.
+- The hub's [issue dispatch](docs/hub.md#issues): its Issues page lists your repositories' open
+  issues through the hub's own GitHub App, and **Assign** hands one to Claude Code, Codex or Pi on
+  a machine whose launcher ([`agentapi host`](#agentapi-host)) starts an AgentAPI for it in a git
+  worktree. The agent pushes a branch and opens a pull request; a review on it goes back to the
+  same agent, and the page shows each job's state and what its runs cost.
 - [Webhooks](#webhooks) push HMAC-signed tasks, requests, messages and
   heartbeats to a dashboard that watches many agents. A client that connects
   to many follows each through one [summary stream](#watching-many-instances).
@@ -192,7 +199,7 @@ has the complete commit history.
 
 ## Agents
 
-AgentAPI 3 runs Claude Code, Codex and Pi through their own protocols, the
+Since 3.0, AgentAPI runs Claude Code, Codex and Pi through their own protocols, the
 [native transport](#native-transport):
 
 | Agent | Type | Protocol |
@@ -216,8 +223,8 @@ Code or another terminal program, use AgentAPI v2.5.1, the last release with the
 download its binary from the [v2.5.1 release](https://github.com/k1dav-c/agentapi/releases/tag/v2.5.1)
 and keep it. `agentapi update` only installs the latest release. An AgentAPI 2 that runs such an
 agent with `--allow-update` checks the new program before it restarts into it, refuses AgentAPI 3
-and keeps serving; but the update already replaced the program on disk, so put v2.5.1 back before
-that AgentAPI restarts some other way.
+or later and keeps serving; but the update already replaced the program on disk, so put v2.5.1
+back before that AgentAPI restarts some other way.
 
 AgentAPI 4 has no `--transport` flag: drop it from command lines and config files. The
 experimental ACP transport (`--experimental-acp`) was removed earlier; that flag stops AgentAPI with
@@ -1351,7 +1358,12 @@ one to open it in the chat. On a phone the list and the chat take turns.
   that changes (a login you won't do), or forgets a stopped or unreachable one. The Offline tile
   and filter forget every stopped one at once.
 - The gear opens the hub's settings. There you keep [favorite prompts](docs/hub.md#favorites),
-  which ☆ in the composer of a chat the hub opens inserts in the message.
+  which ☆ in the composer of a chat the hub opens inserts in the message, and connect the hub's
+  [GitHub App](docs/hub.md#github-settings).
+- ◎ (or `i`) opens [Issues](docs/hub.md#issues), the issue dispatch: the open issues of your
+  repositories by stage, the machines whose launchers report (an offline one can be forgotten
+  there), and each job's agent, pull request and cost. Machines take issues with
+  [`agentapi host`](#agentapi-host).
 - The hub opens an instance through itself (`/i/<id>/...`), sending the instance's API token
   (`--instance-token`, or the one given when it was added) in place of your credentials. The
   browser never holds the instances' tokens or reaches them itself, so no instance needs CORS for
@@ -1365,8 +1377,9 @@ one to open it in the chat. On a phone the list and the chat take turns.
 - It keeps the instances and the favorites in `~/.agentapi/hub/instances.json` (`--state`,
   readable by its owner only), so it knows them after a restart.
 - `--port` (default 3290) and `--bind` (such as the VPN address) set where it listens. Serve it
-  over HTTPS, or only on the private network: signing in sends the token. To reach the instances
-  through a VPN client running in userspace, set `ALL_PROXY` to its SOCKS5 proxy.
+  over HTTPS, or only on the private network: signing in sends the token. A sign-in lasts 30 days.
+  To reach the instances through a VPN client running in userspace, set `ALL_PROXY` to its SOCKS5
+  proxy.
 - The hub serves the chat of its own version: run the same AgentAPI version on the hub and the
   instances. A row marks an instance older than the hub, and the overview counts the versions and
   says how to update the older ones.
@@ -2155,13 +2168,15 @@ make build      # out/agentapi, with the chat UI embedded
 make gen        # regenerate openapi.json and the version
 make lint       # Go, TypeScript, shellcheck and actionlint
 go test ./...   # Go tests, including the e2e smoke test
+cd chat && bun test  # the chat UI's tests
 ```
 
-Tests run with `CGO_ENABLED=0`. Commit `openapi.json` with every API change, and regenerate it only
+AgentAPI builds with Go 1.26 (`go.mod`; the `go` command fetches it) and the chat with Bun. Tests
+run with `CGO_ENABLED=0`. Commit `openapi.json` with every API change, and regenerate it only
 with `make gen` (see [AGENTS.md](AGENTS.md)). The chat UI lives in [chat/](chat/README.md):
 `bun run dev` serves it against a running AgentAPI, and
 `agentapi server -- native-demo` runs a simulated agent for working on it
-without a real one.
+without a real one. [MAINTAINERS.md](MAINTAINERS.md) has how CI tests and releases a commit.
 
 ## Runtime reliability
 

@@ -17,6 +17,8 @@ AgentAPI 可以用來：
 - 從一個中控平台監看多個 agent：每個 AgentAPI 用 [webhook](#webhook) 推送任務、需要你處理的
   請求、訊息和心跳。連到多個 AgentAPI 的用戶端則透過[摘要](#監看多個實例)追蹤每一個。
   內建的 [hub](#執行-hub) 就是這樣的儀表板，桌面和手機都能用
+- 從 hub 的 [Issues](docs/hub.zh-TW.md#issues) 頁把 GitHub issue 交給你各台主機上的 agent：每個
+  agent 在自己的分支上工作，完成後開 pull request
 
 ## 關於這個 fork
 
@@ -104,6 +106,10 @@ AgentAPI 可以用來：
   聊天介面中開啟任何一個，桌面和手機都能用，它開啟的每個聊天介面都能插入保存在 hub 上的我的最愛；
   [`agentapi hub join`](#加入-hub) 把一台主機上的
   AgentAPI 接到 hub，重新啟動後也一樣。
+- hub 的 [issue 派工](docs/hub.zh-TW.md#issues)：Issues 頁透過 hub 自己的 GitHub App 列出各 repo
+  的 open issue，按 **Assign** 就交給某台主機上的 Claude Code、Codex 或 Pi；主機上的 launcher
+  （[`agentapi host`](#agentapi-host)）會在 git worktree 裡為它啟動一個 AgentAPI。agent 推送分支並
+  開 pull request，PR 上的 review 會回到同一個 agent；頁面顯示每個 job 的狀態和各次 run 的花費。
 - [Webhook](#webhook) 把任務、請求、訊息和心跳推送到監看多個 agent 的中控平台，並以 HMAC
   簽章。連到多個 AgentAPI 的用戶端，每個只要開一條[摘要串流](#監看多個實例)。搭配
   [人工回覆 API](#人工回覆-api)，機器人可以在 agent 停下來時通知你，並把你的回覆傳回去。
@@ -161,7 +167,7 @@ AgentAPI 可以用來：
 
 ## Agent
 
-AgentAPI 3 透過 Claude Code、Codex 和 Pi 自己的協定驅動它們，也就是
+從 3.0 起，AgentAPI 透過 Claude Code、Codex 和 Pi 自己的協定驅動它們，也就是
 [native transport](#native-transport)：
 
 | Agent | 類型 | 協定 |
@@ -185,7 +191,7 @@ Aider、Goose、Gemini CLI、Amp、Cursor CLI、Auggie、Amazon Q、Opencode、C
 終端機程式，請使用最後一個有 PTY transport 的版本 AgentAPI v2.5.1：從
 [v2.5.1 release](https://github.com/k1dav-c/agentapi/releases/tag/v2.5.1) 下載執行檔並保留它。
 `agentapi update` 只會安裝最新版。以 `--allow-update` 執行這類 agent 的 AgentAPI 2，在重新啟動
-進新程式前會先檢查它，因此會拒絕 AgentAPI 3 並繼續提供服務；但更新已經換掉磁碟上的程式，所以在
+進新程式前會先檢查它，因此會拒絕 AgentAPI 3 以後的版本並繼續提供服務；但更新已經換掉磁碟上的程式，所以在
 那個 AgentAPI 以其他方式重新啟動之前，請把 v2.5.1 放回去。
 
 AgentAPI 4 沒有 `--transport` 旗標：請從指令和設定檔中拿掉。實驗性的 ACP transport
@@ -1131,7 +1137,11 @@ agentapi hub serve --token "$HUB_TOKEN" --secret "$HUB_SECRET" --instance-token 
   靜音到改變為止（例如不打算處理的登入），或移除已停止、連不到的實例。Offline 狀態格和篩選可以一次
   移除所有已停止的實例。
 - 齒輪按鈕會開啟 hub 的設定，可以在那裡保存[我的最愛](docs/hub.zh-TW.md#我的最愛)提示；在 hub 開啟的
-  聊天介面裡，輸入框的 ☆ 會把它插入訊息。
+  聊天介面裡，輸入框的 ☆ 會把它插入訊息。也可以在那裡連接 hub 的
+  [GitHub App](docs/hub.zh-TW.md#github-設定)。
+- ◎（或 `i`）開啟 [Issues](docs/hub.zh-TW.md#issues)，也就是 issue 派工：依階段列出各 repo 的 open
+  issue、有 launcher 回報的主機（離線的可以在這裡移除），以及每個 job 的 agent、PR 和花費。主機要用
+  [`agentapi host`](#agentapi-host) 才能接 issue。
 - hub 透過自己開啟實例（`/i/<id>/...`），以實例的 API token（`--instance-token`，或加入時給的）
   取代你的憑證。瀏覽器不會拿到實例的 token，也不會直接連到實例，所以實例不必為它設定 CORS。
 - 只接受以 `--secret` 簽章、不超過 10 分鐘而且帶有 delivery ID 的事件，已處理過的傳送會被忽略：
@@ -1142,8 +1152,8 @@ agentapi hub serve --token "$HUB_TOKEN" --secret "$HUB_SECRET" --instance-token 
 - 實例和我的最愛會保存在 `~/.agentapi/hub/instances.json`（`--state`，只有擁有者能讀取），重新啟動後
   仍記得。
 - `--port`（預設 3290）和 `--bind`（例如 VPN 位址）設定監聽位置。請用 HTTPS 提供，或只開在私有
-  網路上：登入時會送出 token。若 VPN 用戶端以 userspace 模式執行，把 `ALL_PROXY` 設成它的 SOCKS5
-  proxy，hub 才連得到實例。
+  網路上：登入時會送出 token。登入的有效期限是 30 天。若 VPN 用戶端以 userspace 模式執行，
+  把 `ALL_PROXY` 設成它的 SOCKS5 proxy，hub 才連得到實例。
 - hub 提供的是它自己版本的聊天介面：hub 和實例請使用相同的 AgentAPI 版本。比 hub 舊的實例會在清單上
   標出來，總覽也會依版本統計，並說明怎麼更新。
 
@@ -1860,13 +1870,15 @@ make build      # 建置 out/agentapi，內含聊天介面
 make gen        # 重新產生 openapi.json 與版本資訊
 make lint       # 執行 Go、TypeScript、shellcheck 與 actionlint 檢查
 go test ./...   # 執行 Go 測試，包含端對端冒煙測試
+cd chat && bun test  # 聊天介面的測試
 ```
 
+AgentAPI 以 Go 1.26 建置（見 `go.mod`，`go` 指令會自動下載），聊天介面用 Bun。
 測試以 `CGO_ENABLED=0` 執行。每次修改 API 都要一併 commit `openapi.json`，而且只能用
 `make gen` 重新產生（見 [AGENTS.md](AGENTS.md)）。聊天介面在 [chat/](chat/README.md)：
 `bun run dev` 會連到執行中的 AgentAPI 提供介面，
 `agentapi server -- native-demo` 則會執行一個模擬的 agent，不需要真正的
-agent 就能開發介面。
+agent 就能開發介面。CI 怎麼測試和發佈一個 commit，見 [MAINTAINERS.md](MAINTAINERS.md)。
 
 ## 執行穩定性
 
