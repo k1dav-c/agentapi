@@ -145,6 +145,24 @@ function Status({
   actions: DetailActions;
 }) {
   const [confirming, setConfirming] = useState<Confirming | null>(null);
+  const section = useRef<HTMLElement>(null);
+  const stopButton = useRef<HTMLButtonElement>(null);
+  const switchButton = useRef<HTMLButtonElement>(null);
+  // The confirmation gone, by an answer or a change from elsewhere, the
+  // focus it had goes back to the button that asked for it (or, gone too,
+  // the status's first), not to the page's body.
+  const asked = useRef<Confirming["kind"] | null>(null);
+  useEffect(() => {
+    if (confirming) {
+      asked.current = confirming.kind;
+      return;
+    }
+    const kind = asked.current;
+    asked.current = null;
+    if (!kind || (document.activeElement && document.activeElement !== document.body)) return;
+    const back = (kind === "stop" ? stopButton : switchButton).current;
+    (back && !back.disabled ? back : section.current?.querySelector<HTMLElement>("button:not(:disabled), a[href]"))?.focus();
+  }, [confirming]);
   const log = logPath(job?.error);
   const others = job ? switchAgents(hosts, job) : [];
   const live = job && instance && (look === "working" || look === "waiting") ? activity(instance) : undefined;
@@ -153,7 +171,17 @@ function Status({
   useEffect(() => setConfirming(null), [state]);
 
   const confirm = confirming && job && (
-    <div role="alertdialog" aria-label="Confirm" className="hub-rise mt-4 rounded-xl border bg-background p-3.5 shadow-sm">
+    <div
+      role="alertdialog"
+      aria-label="Confirm"
+      className="hub-rise mt-4 rounded-xl border bg-background p-3.5 shadow-sm"
+      // Esc is No, here: not Back for the page or the sheet.
+      onKeyDown={(event) => {
+        if (event.key !== "Escape") return;
+        event.stopPropagation();
+        setConfirming(null);
+      }}
+    >
       <p className="text-sm text-pretty">
         {confirming.kind === "stop" ? (
           <>
@@ -188,7 +216,7 @@ function Status({
   const switchMenu = others.length > 0 && job && (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button size="sm" variant="ghost" disabled={busy} className="gap-1 text-muted-foreground hover:text-foreground">
+        <Button ref={switchButton} size="sm" variant="ghost" disabled={busy} className="gap-1 text-muted-foreground hover:text-foreground">
           Switch agent <ChevronDown className="size-3.5" />
         </Button>
       </DropdownMenuTrigger>
@@ -199,7 +227,14 @@ function Status({
     </DropdownMenu>
   );
   const stop = job && active(job) && (
-    <Button size="sm" variant="ghost" disabled={busy} className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive" onClick={() => setConfirming({kind: "stop"})}>
+    <Button
+      ref={stopButton}
+      size="sm"
+      variant="ghost"
+      disabled={busy}
+      className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+      onClick={() => setConfirming({kind: "stop"})}
+    >
       <Square className="size-3.5" /> Stop
     </Button>
   );
@@ -210,7 +245,7 @@ function Status({
   );
 
   return (
-    <section aria-label="Status" className={cn("rounded-2xl border p-4", tint[look])}>
+    <section ref={section} aria-label="Status" className={cn("rounded-2xl border p-4", tint[look])}>
       <p className={cn("flex items-center gap-2 text-xs font-semibold tracking-[0.08em] uppercase", lookTone[look])}>
         <JobGlyph look={look} className="size-4" />
         {lookLabel[look]}
@@ -411,7 +446,7 @@ export function IssueDetail({
   const where = job ? hosts.find((h) => h.hostname === job.host)?.jobs?.find((info) => info.key === job.key) : undefined;
   const talking = job && active(job) && job.state !== "failed" && job.state !== "starting";
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex h-full min-h-0 flex-col" data-issue-detail>
       <div className="flex items-center gap-2 px-5 pt-[max(0.875rem,env(safe-area-inset-top))] pb-2">
         <Button variant="ghost" size="icon" className="-ml-2 size-9 rounded-full text-muted-foreground" onClick={onClose} aria-label={sheet ? "Back to the board" : "Close the issue"}>
           {sheet ? <ArrowLeft className="size-4" /> : <X className="size-4" />}

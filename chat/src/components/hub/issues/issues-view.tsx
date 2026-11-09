@@ -118,8 +118,11 @@ export function IssuesView({
 
   // The board's order, which the cards glide to when it changes.
   useFlip(board, cards.map((card) => `${card.key}:${card.stage}:${card.waiting}`).join(" ") + (selectedKey ? "|open" : ""));
-  // The keys work from the moment it opens.
-  useEffect(() => title.current?.focus({preventScroll: true}), []);
+  // The keys work from the moment it opens: the focus on the title, unless
+  // the issue it opened at has it already (its detail focuses its own).
+  useEffect(() => {
+    if (!document.activeElement?.closest("[data-issue-detail]")) title.current?.focus({preventScroll: true});
+  }, []);
   // An issue opened from a list row's chip comes into sight.
   useEffect(() => {
     if (!selectedKey) return;
@@ -467,6 +470,10 @@ export function IssuesView({
             <DialogPrimitive.Overlay className="fixed inset-0 z-40 hidden bg-black/30 backdrop-blur-[2px] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0 md:block" />
             <DialogPrimitive.Content
               aria-describedby={undefined}
+              // Esc on a confirmation in the sheet answers it, not the sheet.
+              onEscapeKeyDown={(event) => {
+                if ((event.target as Element | null)?.closest?.("[role=alertdialog]")) event.preventDefault();
+              }}
               className="app-frame z-50 bg-background shadow-2xl duration-300 data-[state=closed]:animate-out data-[state=closed]:slide-out-to-right data-[state=open]:animate-in data-[state=open]:slide-in-from-right md:left-auto md:w-[480px] md:border-l"
             >
               <DialogPrimitive.Title className="sr-only">{selected ? `#${selected.number} ${selected.title}` : "Issue"}</DialogPrimitive.Title>

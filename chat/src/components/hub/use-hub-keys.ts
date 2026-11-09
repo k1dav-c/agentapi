@@ -36,7 +36,7 @@ export function useHubKeys({
         {
           typing: !!typing,
           inSearch: !!typing && typing === search.current,
-          inMenuOrDialog: !!target?.closest("[role=menu], [role=dialog]"),
+          inMenuOrDialog: !!target?.closest("[role=menu], [role=dialog], [role=alertdialog]"),
           menuOrDialogOpen: !!document.querySelector("[role=dialog], [role=menu]"),
           inList: !!active?.closest("[data-hub-list]"),
           onBody: !active || active === document.body,

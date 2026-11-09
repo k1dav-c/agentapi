@@ -4,7 +4,7 @@ import type {DispatchBoard} from "@/lib/hub";
 import type {DispatchHost, DispatchJob} from "@/lib/hub-dispatch";
 import {withDOM} from "@/test/dom";
 import {json, mockFetch, restoreFetch} from "@/test/fetch";
-import {button, mount, settle, type Mounted} from "@/test/render";
+import {button, click, key, mount, settle, type Mounted} from "@/test/render";
 import {IssuesView} from "./issues-view";
 
 withDOM();
@@ -57,8 +57,8 @@ afterEach(async () => {
 
 const notConnected = () => mockFetch(json({connected: false, installations: []}), json({connected: false, installations: []}));
 
-const issues = (selectedKey: string | null, live: DispatchBoard = board) => (
-  <IssuesView root="/hub" instances={new Map()} live={live} selectedKey={selectedKey} onSelect={() => {}} onClose={() => {}} onOpenChat={() => {}} />
+const issues = (selectedKey: string | null, live: DispatchBoard = board, onClose = () => {}) => (
+  <IssuesView root="/hub" instances={new Map()} live={live} selectedKey={selectedKey} onSelect={() => {}} onClose={onClose} onOpenChat={() => {}} />
 );
 
 describe("IssuesView's detail", () => {
@@ -89,5 +89,45 @@ describe("IssuesView's detail", () => {
     await view.rerender(issues("acme/widget#13"));
     await settle();
     expect(document.querySelector<HTMLTextAreaElement>("textarea[aria-label^='Message to']")!.value).toBe("");
+  });
+});
+
+describe("IssuesView's focus", () => {
+  test("opened at an issue, the focus is on the issue's title, not the board's", async () => {
+    notConnected();
+    view = await mount(issues("acme/widget#12"));
+    await settle();
+    expect(document.activeElement?.textContent).toBe("Issue 12");
+  });
+
+  test("opened at none, it is on the board's title", async () => {
+    notConnected();
+    view = await mount(issues(null));
+    await settle();
+    expect(document.activeElement?.tagName).toBe("H2");
+    expect(document.activeElement?.closest("aside")).toBeNull();
+  });
+
+  test("Esc on the Stop being confirmed cancels it, not the page; the focus goes back to Stop", async () => {
+    notConnected();
+    let closed = 0;
+    view = await mount(issues("acme/widget#12", board, () => closed++));
+    await settle();
+    await click(button(document.body, /Stop$/));
+    // Cancel has the focus.
+    expect(document.activeElement?.textContent).toBe("Cancel");
+    await key("Escape");
+    expect(document.querySelector("[role=alertdialog]")?.textContent ?? "none").toBe("none");
+    expect(closed).toBe(0);
+    expect(document.activeElement?.textContent?.trim()).toBe("Stop");
+  });
+
+  test("the Stop confirmed or cancelled leaves the focus in the status, not on the page's body", async () => {
+    notConnected();
+    view = await mount(issues("acme/widget#12"));
+    await settle();
+    await click(button(document.body, /Stop$/));
+    await click(button(document.body, "Cancel"));
+    expect(document.activeElement?.textContent?.trim()).toBe("Stop");
   });
 });
