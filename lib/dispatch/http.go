@@ -71,59 +71,18 @@ func (s *Service) MountLauncher(r chi.Router) {
 	r.Post(host.HubTokenPath, s.handleToken)
 }
 
+// handleToken answers a launcher's request for a job's GitHub token: a
+// token for the job's repository alone, to a job that works now on the
+// machine that asks and gets the hub's credentials.
 func (s *Service) handleToken(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(io.LimitReader(r.Body, jsonapi.MaxBody))
+	hostname, key, err := s.authLauncher(r)
 	if err != nil {
-		jsonapi.WriteError(w, jsonapi.Errorf(http.StatusBadRequest, "bad_request", "unreadable request"))
-		return
-	}
-	now := s.config.Now()
-	if err := instanceapi.Verify(s.config.Secret, r.Header, body, now); err != nil {
-		jsonapi.WriteError(w, jsonapi.Errorf(http.StatusUnauthorized, "unauthorized", "invalid signature: %v", err))
-		return
-	}
-	// The signature covers the body and its time, not the delivery
-	// header: a copy is told by its signature.
-	delivery := r.Header.Get(instanceapi.HeaderSignature)
-	s.mu.Lock()
-	for id, at := range s.tokenRequests {
-		if now.Sub(at) > 2*instanceapi.MaxSkew {
-			delete(s.tokenRequests, id)
-		}
-	}
-	_, seen := s.tokenRequests[delivery]
-	s.tokenRequests[delivery] = now
-	s.mu.Unlock()
-	if seen {
-		jsonapi.WriteError(w, jsonapi.Errorf(http.StatusConflict, "replayed", "the request was answered already"))
-		return
-	}
-	var req host.HubTokenRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		jsonapi.WriteError(w, jsonapi.Errorf(http.StatusBadRequest, "bad_request", "%v", err))
-		return
-	}
-	key, err := host.ParseKey(req.Job)
-	if err != nil {
-		jsonapi.WriteError(w, jsonapi.Errorf(http.StatusBadRequest, "bad_request", "%v", err))
-		return
-	}
-	// The machine proves its name with its launcher's token, which the
-	// hub has from its events: the secret alone, which every machine that
-	// joined has, doesn't name it.
-	bearer, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	s.mu.Lock()
-	machine := s.hosts[req.Hostname]
-	known := machine != nil && machine.Token != "" && hmac.Equal([]byte(bearer), []byte(machine.Token))
-	s.mu.Unlock()
-	if !known {
-		jsonapi.WriteError(w, jsonapi.Errorf(http.StatusUnauthorized, "unauthorized", "send the launcher's token of %s", req.Hostname))
+		jsonapi.WriteError(w, err)
 		return
 	}
 	job := s.job(key.String())
-	// Only a job that works now, on the machine that asks, gets a token.
-	if job == nil || job.Host != req.Hostname || !job.working() || !job.Credentials {
-		jsonapi.WriteError(w, jsonapi.Errorf(http.StatusForbidden, "no_job", "%s has no job %s that gets the hub's token", req.Hostname, key))
+	if job == nil || job.Host != hostname || !job.working() || !job.Credentials {
+		jsonapi.WriteError(w, jsonapi.Errorf(http.StatusForbidden, "no_job", "%s has no job %s that gets the hub's token", hostname, key))
 		return
 	}
 	app := s.currentApp()
@@ -137,6 +96,61 @@ func (s *Service) handleToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonapi.Write(w, http.StatusOK, host.Token{Value: token.Value, ExpiresAt: token.ExpiresAt})
+}
+
+// authLauncher reads a launcher's token request: signed with the hub's
+// secret, not answered before, and with the launcher's token of the
+// machine it names. It returns the machine and the job asked about, or a
+// *jsonapi.Error.
+func (s *Service) authLauncher(r *http.Request) (string, host.Key, error) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, jsonapi.MaxBody))
+	if err != nil {
+		return "", host.Key{}, jsonapi.Errorf(http.StatusBadRequest, "bad_request", "unreadable request")
+	}
+	now := s.config.Now()
+	if err := instanceapi.Verify(s.config.Secret, r.Header, body, now); err != nil {
+		return "", host.Key{}, jsonapi.Errorf(http.StatusUnauthorized, "unauthorized", "invalid signature: %v", err)
+	}
+	if s.replayedToken(r.Header.Get(instanceapi.HeaderSignature), now) {
+		return "", host.Key{}, jsonapi.Errorf(http.StatusConflict, "replayed", "the request was answered already")
+	}
+	var req host.HubTokenRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		return "", host.Key{}, jsonapi.Errorf(http.StatusBadRequest, "bad_request", "%v", err)
+	}
+	key, err := host.ParseKey(req.Job)
+	if err != nil {
+		return "", host.Key{}, jsonapi.Errorf(http.StatusBadRequest, "bad_request", "%v", err)
+	}
+	// The machine proves its name with its launcher's token, which the
+	// hub has from its events: the secret alone, which every machine that
+	// joined has, doesn't name it.
+	bearer, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	s.mu.Lock()
+	machine := s.hosts[req.Hostname]
+	known := machine != nil && machine.Token != "" && hmac.Equal([]byte(bearer), []byte(machine.Token))
+	s.mu.Unlock()
+	if !known {
+		return "", host.Key{}, jsonapi.Errorf(http.StatusUnauthorized, "unauthorized", "send the launcher's token of %s", req.Hostname)
+	}
+	return req.Hostname, key, nil
+}
+
+// replayedToken reports whether a token request with signature was taken
+// before, and takes it. The signature covers the body and its time, not
+// the delivery header: a copy is told by its signature, which holds for
+// 2*instanceapi.MaxSkew at most.
+func (s *Service) replayedToken(signature string, now time.Time) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, at := range s.tokenRequests {
+		if now.Sub(at) > 2*instanceapi.MaxSkew {
+			delete(s.tokenRequests, id)
+		}
+	}
+	_, seen := s.tokenRequests[signature]
+	s.tokenRequests[signature] = now
+	return seen
 }
 
 // GitHubStatus is GET /api/github.

@@ -1247,3 +1247,44 @@ func TestPruneWithoutStateFile(t *testing.T) {
 	defer s.mu.Unlock()
 	assert.Equal(t, map[string]time.Time{"new": now}, s.deliveries)
 }
+
+// authLauncher takes a token request signed with the hub's secret, once,
+// from the machine whose launcher's token it carries.
+func TestAuthLauncher(t *testing.T) {
+	s, _ := newService(t, nil)
+	l := newFakeLauncher(t, "pve-1")
+	join(t, s, l, "claude")
+	request := func(hostname, job, secret, bearer string, ago int, body string) *http.Request {
+		if body == "" {
+			data, _ := json.Marshal(host.HubTokenRequest{Hostname: hostname, Job: job})
+			body = string(data)
+		}
+		req := httptest.NewRequest(http.MethodPost, host.HubTokenPath, strings.NewReader(body))
+		ts := strconv.FormatInt(s.config.Now().Unix()-int64(ago), 10)
+		req.Header.Set(instanceapi.HeaderTimestamp, ts)
+		req.Header.Set(instanceapi.HeaderSignature, instanceapi.Sign(secret, ts, []byte(body)))
+		req.Header.Set("Authorization", "Bearer "+bearer)
+		return req
+	}
+
+	hostname, key, err := s.authLauncher(request("pve-1", "acme~widget~12", "hub-secret", l.token, 1, ""))
+	require.NoError(t, err)
+	assert.Equal(t, "pve-1", hostname)
+	assert.Equal(t, host.Key{Owner: "acme", Name: "widget", Issue: 12}, key)
+
+	for name, test := range map[string]struct {
+		req  *http.Request
+		code string
+	}{
+		"sent again":         {request("pve-1", "acme~widget~12", "hub-secret", l.token, 1, ""), "replayed"},
+		"another secret":     {request("pve-1", "acme~widget~12", "wrong", l.token, 2, ""), "unauthorized"},
+		"too old":            {request("pve-1", "acme~widget~12", "hub-secret", l.token, 3600, ""), "unauthorized"},
+		"not JSON":           {request("", "", "hub-secret", l.token, 3, "{"), "bad_request"},
+		"a bad job":          {request("pve-1", "acme/widget#0", "hub-secret", l.token, 4, ""), "bad_request"},
+		"another token":      {request("pve-1", "acme~widget~12", "hub-secret", "wrong", 5, ""), "unauthorized"},
+		"an unknown machine": {request("pve-2", "acme~widget~12", "hub-secret", l.token, 6, ""), "unauthorized"},
+	} {
+		_, _, err := s.authLauncher(test.req)
+		assert.True(t, jsonapi.IsCode(err, test.code), "%s: %v", name, err)
+	}
+}
