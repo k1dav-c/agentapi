@@ -1058,18 +1058,19 @@ chat and `parseFromFrame` in the hub.
 - `e2e/` runs the server binary against `e2e/fakeclaude`, a scripted
   Claude Code, through a restart in place.
 - `golangci-lint` (including the exhaustive check over enums),
-  `paralleltestctx` and `make gen` (the OpenAPI schema must match the code)
-  run in CI; the chat has eslint, `bun test` and `tsc`. CI also runs the
-  tests of `lib/` and `cmd/` with the race detector, on the repository's
-  self-hosted Linux runner; nothing tests macOS or Windows. The Release
-  workflow runs these tests (`go-test.yml`, called as a reusable workflow)
-  on the commit it releases and releases only once they pass, for a push to
-  `main`, a manual run and a published release alike. Pull requests run
-  every job on their own, except those from forks, whose code would run on
-  the runner's machine. The
-  Release workflow checks that each binary is built for its platform, and a
-  push that a later push's release already holds, or that is no longer on
-  `main`, releases nothing.
+  `paralleltestctx` and `make gen` (the OpenAPI schema and the chat's types
+  generated from it must match the code) run in CI; the chat has eslint,
+  `bun test` and `tsc`. CI also runs the tests of `lib/` and `cmd/` with the
+  race detector, on the repository's self-hosted Linux runner for tests;
+  nothing tests macOS or Windows. The Release workflow first asks
+  `release-version.sh` whether the commit releases anything; only then does
+  it run these tests (`go-test.yml`, called as a reusable workflow) on it,
+  and it releases only once they pass, for a push to `main`, a manual run
+  and a published release alike, on a runner of its own (MAINTAINERS.md).
+  Pull requests run every job on their own, except those from forks, whose
+  code would run on the runners' machine. The Release workflow checks that
+  each binary is built for its platform, and a push that a later push's
+  release already holds, or that is no longer on `main`, releases nothing.
 
 ## Design principles
 
