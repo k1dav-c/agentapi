@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Fixes
+
+- The hub's version no longer runs under the buttons at the top of the hub's list, where the name
+  leaves the status line too little room: the status line (live, how many agents, the version, the
+  spend) has a row of its own under the name.
+
 ### Internal
 
 - CI runs on the repository's self-hosted Linux runner, and no longer tests macOS or Windows. A

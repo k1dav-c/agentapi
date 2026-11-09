@@ -49,73 +49,75 @@ export function HubListHeader({status, unreachable, hubVersion, spend, notify, o
   const {counts, query, setQuery} = filters;
   return (
     <header className="space-y-3 border-b px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-3">
-      <div className="flex items-center gap-2.5">
-        <HubMark className="size-8" />
-        <div className="min-w-0 flex-1">
-          <h1 className="text-[15px] leading-tight font-semibold tracking-tight">AgentAPI Hub</h1>
-          <p className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-            <span aria-hidden="true" className={cn("size-1.5 shrink-0 rounded-full", connected ? "bg-state-ready" : "animate-pulse bg-state-needs")} />
-            <span aria-live="polite" className="shrink-0">
-              {connected
-                ? `Live · ${counts.all} ${counts.all === 1 ? "agent" : "agents"}`
-                : status === "offline"
-                  ? "Offline"
-                  : unreachable
-                    ? "Can't reach the hub · retrying"
-                    : "Reconnecting…"}
-            </span>
-            {/* The hub's version keeps its room; the spend gives way first. */}
-            {hubVersion && (
-              <span className="shrink-0 font-mono text-[11px]" title={`The hub runs AgentAPI ${hubLabel(hubVersion)}`}>
-                · {hubLabel(hubVersion)}
+      {/* The status line has a row of its own: beside the buttons, the
+          name keeps too little room for it in the list's width. */}
+      <div className="space-y-0.5">
+        <div className="flex items-center gap-2.5">
+          <HubMark className="size-8" />
+          <h1 className="min-w-0 flex-1 text-[15px] leading-tight font-semibold tracking-tight">AgentAPI Hub</h1>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-9 rounded-full text-muted-foreground"
+            onClick={onToggleNotify}
+            aria-pressed={notify}
+            aria-label={notify ? "Stop notifying me" : "Notify me when an agent needs me"}
+            title={notify ? "Notifications on" : "Notify me when an agent needs me"}
+          >
+            {notify ? <Bell className="size-4 text-foreground" /> : <BellOff className="size-4" />}
+          </Button>
+          <ModeToggle />
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn("relative size-9 rounded-full text-muted-foreground", issuesOpen && "bg-accent text-foreground")}
+            aria-label={issuesNeedYou > 0 ? `Issues, ${issuesNeedYou} ${issuesNeedYou === 1 ? "needs" : "need"} you` : "Issues"}
+            aria-pressed={issuesOpen}
+            title="Issues: hand GitHub issues to agents (i)"
+            onClick={onIssues}
+          >
+            <CircleDot className="size-4" />
+            {/* As a group's header counts what needs you. */}
+            {issuesNeedYou > 0 && (
+              <span
+                aria-hidden="true"
+                className="absolute -top-0.5 -right-0.5 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-state-needs px-1 text-[10px] font-semibold text-background tabular-nums ring-2 ring-background"
+              >
+                {issuesNeedYou}
               </span>
             )}
-            {/* Out of the live region: it changes every minute. */}
-            {connected && spend.week > 0 && (
-              <span className="min-w-0 truncate tabular-nums" title={spendTitle(spend.day, spend.week)}>
-                · {formatUSD(spend.day)}/24h
-              </span>
-            )}
-          </p>
+          </Button>
+          <Button variant="ghost" size="icon" className="size-9 rounded-full text-muted-foreground" aria-label="Hub settings" title="Hub settings" onClick={onSettings}>
+            <Settings className="size-4" />
+          </Button>
+          <Button variant="outline" size="icon" className="size-9 rounded-full" aria-label="Add agents" title="Add agents" onClick={onAdd}>
+            <Plus className="size-4" />
+          </Button>
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-9 rounded-full text-muted-foreground"
-          onClick={onToggleNotify}
-          aria-pressed={notify}
-          aria-label={notify ? "Stop notifying me" : "Notify me when an agent needs me"}
-          title={notify ? "Notifications on" : "Notify me when an agent needs me"}
-        >
-          {notify ? <Bell className="size-4 text-foreground" /> : <BellOff className="size-4" />}
-        </Button>
-        <ModeToggle />
-        <Button
-          variant="ghost"
-          size="icon"
-          className={cn("relative size-9 rounded-full text-muted-foreground", issuesOpen && "bg-accent text-foreground")}
-          aria-label={issuesNeedYou > 0 ? `Issues, ${issuesNeedYou} ${issuesNeedYou === 1 ? "needs" : "need"} you` : "Issues"}
-          aria-pressed={issuesOpen}
-          title="Issues: hand GitHub issues to agents (i)"
-          onClick={onIssues}
-        >
-          <CircleDot className="size-4" />
-          {/* As a group's header counts what needs you. */}
-          {issuesNeedYou > 0 && (
-            <span
-              aria-hidden="true"
-              className="absolute -top-0.5 -right-0.5 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-state-needs px-1 text-[10px] font-semibold text-background tabular-nums ring-2 ring-background"
-            >
-              {issuesNeedYou}
+        <p className="flex min-w-0 items-center gap-1.5 pl-[42px] text-xs text-muted-foreground">
+          <span aria-hidden="true" className={cn("size-1.5 shrink-0 rounded-full", connected ? "bg-state-ready" : "animate-pulse bg-state-needs")} />
+          <span aria-live="polite" className="shrink-0">
+            {connected
+              ? `Live · ${counts.all} ${counts.all === 1 ? "agent" : "agents"}`
+              : status === "offline"
+                ? "Offline"
+                : unreachable
+                  ? "Can't reach the hub · retrying"
+                  : "Reconnecting…"}
+          </span>
+          {/* The hub's version keeps its room; the spend gives way first. */}
+          {hubVersion && (
+            <span className="shrink-0 font-mono text-[11px]" title={`The hub runs AgentAPI ${hubLabel(hubVersion)}`}>
+              · {hubLabel(hubVersion)}
             </span>
           )}
-        </Button>
-        <Button variant="ghost" size="icon" className="size-9 rounded-full text-muted-foreground" aria-label="Hub settings" title="Hub settings" onClick={onSettings}>
-          <Settings className="size-4" />
-        </Button>
-        <Button variant="outline" size="icon" className="size-9 rounded-full" aria-label="Add agents" title="Add agents" onClick={onAdd}>
-          <Plus className="size-4" />
-        </Button>
+          {/* Out of the live region: it changes every minute. */}
+          {connected && spend.week > 0 && (
+            <span className="min-w-0 truncate tabular-nums" title={spendTitle(spend.day, spend.week)}>
+              · {formatUSD(spend.day)}/24h
+            </span>
+          )}
+        </p>
       </div>
       <div className="flex gap-2">
         <div className="relative min-w-0 flex-1">
