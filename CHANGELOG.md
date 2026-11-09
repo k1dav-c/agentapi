@@ -25,6 +25,8 @@
   the input perhaps typed, or when the client leaves. Two inputs no longer interleave.
 - The hub ends a browser's stream (`/api/events`) whose browser takes no event for 30 seconds,
   where one that stopped reading kept its handler and subscriptions for good.
+- The pipe of an agent's output is closed when the output ends, where each start of the agent
+  again left one open until AgentAPI exited.
 - An interrupt Claude Code or Codex accepts after `POST /interrupt` stopped waiting for the answer
   still ends the turn within 10 seconds when the agent doesn't, where the turn could stay running.
 
