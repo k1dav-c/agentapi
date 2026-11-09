@@ -172,6 +172,28 @@ export function listSections(instances: Iterable<HubInstance>, {filter, agents, 
   return sections;
 }
 
+// keepMachines puts the machines of before (the sections the list showed)
+// in place of those of sections that have the same agents, the same
+// objects in the same order, in the same section: a machine's card renders
+// again only when one of its agents changed, not for every event of the
+// hub's stream. It returns sections.
+export function keepMachines(sections: ListSection[], before: readonly ListSection[]): ListSection[] {
+  const shown = new Map<string, HubMachine>();
+  for (const section of before) {
+    for (const machine of section.machines ?? []) shown.set(`${section.key}\n${machine.key}`, machine);
+  }
+  if (shown.size === 0) return sections;
+  for (const section of sections) {
+    if (!section.machines) continue;
+    section.machines = section.machines.map((machine) => {
+      const was = shown.get(`${section.key}\n${machine.key}`);
+      const same = was && was.hostname === machine.hostname && was.instances.length === machine.instances.length && was.instances.every((instance, i) => instance === machine.instances[i]);
+      return same ? was : machine;
+    });
+  }
+  return sections;
+}
+
 // recentAgent is the agent a machine's card shows in the recent order: the
 // one open beside the list when the card has it, else the one picked on it
 // if that was at its latest change or after (picked, at when; a pick that

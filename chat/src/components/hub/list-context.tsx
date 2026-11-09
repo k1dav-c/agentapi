@@ -1,7 +1,7 @@
 "use client";
 
 import {createContext, useContext} from "react";
-import type {DispatchJob} from "@/lib/hub-dispatch";
+import type {RowJob} from "@/lib/hub-dispatch";
 
 // RowActions are what a row does to its instance; the hub keeps the same
 // object from render to render.
@@ -33,9 +33,9 @@ export interface HubList {
   root: string;
   groups: readonly string[];
   prefix: string;
-  // jobs are the issue dispatch's jobs by their AgentAPI's ID: the rows of
-  // those agents name their issue.
-  jobs: ReadonlyMap<string, DispatchJob>;
+  // jobs are the issue dispatch's jobs by their AgentAPI's ID, what the
+  // rows of those agents show of them (rowJobs): they name their issue.
+  jobs: ReadonlyMap<string, RowJob>;
   actions: RowActions;
 }
 

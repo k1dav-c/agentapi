@@ -1,6 +1,6 @@
 import {describe, expect, test} from "bun:test";
 import {HubAPIError} from "./hub-api";
-import {active, createDispatchAPI, forgetBlocker, hostAgents, hostsFor, jobCost, parseIssueRef, pendingAnswers, prNumber, withAnswers, type DispatchHost, type DispatchJob} from "./hub-dispatch";
+import {active, createDispatchAPI, forgetBlocker, hostAgents, hostsFor, jobCost, parseIssueRef, pendingAnswers, prNumber, rowJobs, withAnswers, type DispatchHost, type DispatchJob, type DispatchRun, type RowJob} from "./hub-dispatch";
 
 const host = (over: Partial<DispatchHost>): DispatchHost => ({
   hostname: "pve",
@@ -177,5 +177,24 @@ describe("the answers to the page's actions on the board", () => {
   test("an answer without a time it changed gives way to the stream's job", () => {
     const odd = job({updated_at: ""});
     expect(pendingAnswers(new Map([[odd.key, odd]]), [job({})]).size).toBe(0);
+  });
+});
+
+describe("rowJobs", () => {
+  test("each job by the AgentAPIs that worked on it, as the rows' chips show it", () => {
+    const jobs = rowJobs([job({runs: [{instance_id: "pve~acme~widget~12~1"} as DispatchRun], pr_url: "https://github.com/acme/widget/pull/14"})]);
+    const shown: RowJob = {key: "acme/widget#12", state: "working", pr_url: "https://github.com/acme/widget/pull/14"};
+    expect(Object.fromEntries(jobs)).toEqual({"pve~acme~widget~12~1": shown, "pve~acme~widget~12": shown});
+  });
+
+  test("the same map while the chips show the same", () => {
+    const before = rowJobs([job({})]);
+    // Another event of the dispatch: new objects, a new cost, the same chip.
+    expect(rowJobs([job({updated_at: "2026-11-08T10:09:00Z", round: 2})], before)).toBe(before);
+    expect(rowJobs([job({state: "review"})], before)).not.toBe(before);
+    expect(rowJobs([job({pr_url: "https://github.com/acme/widget/pull/14"})], before)).not.toBe(before);
+    expect(rowJobs([job({}), job({key: "acme/widget#13", issue: 13, instance_id: "pve~acme~widget~13"})], before)).not.toBe(before);
+    expect(rowJobs([], before).size).toBe(0);
+    expect(rowJobs([], new Map())).toEqual(new Map());
   });
 });

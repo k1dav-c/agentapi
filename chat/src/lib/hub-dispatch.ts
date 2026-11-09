@@ -137,6 +137,26 @@ export function withAnswers(streamed: DispatchJob[], answers: ReadonlyMap<string
   return [...[...pending.values()].filter((job) => !keys.has(job.key)), ...streamed.map((job) => pending.get(job.key) ?? job)];
 }
 
+// RowJob is what a list row's chip shows of its agent's job.
+export type RowJob = Pick<DispatchJob, "key" | "state" | "pr_url">;
+
+const sameRowJob = (a: RowJob | undefined, b: RowJob) => !!a && a.key === b.key && a.state === b.state && a.pr_url === b.pr_url;
+
+// rowJobs are the jobs by the ID of each AgentAPI that worked on one, as
+// the list rows' chips show them; before when they show the same, so the
+// rows don't render again for every event of the dispatch (a run's cost,
+// a message).
+export function rowJobs(jobs: readonly DispatchJob[], before?: ReadonlyMap<string, RowJob>): ReadonlyMap<string, RowJob> {
+  const byID = new Map<string, RowJob>();
+  for (const job of jobs) {
+    const row: RowJob = {key: job.key, state: job.state, pr_url: job.pr_url};
+    for (const run of job.runs ?? []) byID.set(run.instance_id, row);
+    if (job.instance_id) byID.set(job.instance_id, row);
+  }
+  if (before && before.size === byID.size && [...byID].every(([id, row]) => sameRowJob(before.get(id), row))) return before;
+  return byID;
+}
+
 // Fields of an answer, unchecked until read.
 type Fields<T> = Partial<Record<keyof T, unknown>>;
 
