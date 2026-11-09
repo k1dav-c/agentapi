@@ -86,8 +86,9 @@ type Launcher struct {
 
 // reservation is a job being started.
 type reservation struct {
-	mode string
-	port int
+	mode  string
+	port  int
+	agent string
 }
 
 // New reads the launcher's jobs and tokens, making the tokens it lacks.
@@ -333,15 +334,24 @@ type StartRequest struct {
 	Credentials string `json:"credentials,omitempty"`
 }
 
-// gitTimeout bounds a clone or fetch, which go on when the request that
-// started them ends: a clone cut short would leave half a repository.
+// gitTimeout bounds the clone or fetch and the worktree of a start.
 const gitTimeout = 10 * time.Minute
+
+// StartTimeout bounds a start: its git (gitTimeout), then its AgentAPI
+// (readyTimeout). A hub waits that long for POST /jobs.
+const StartTimeout = gitTimeout + readyTimeout
 
 // Start starts the job of req.Issue: the worktree on its branch, then its
 // AgentAPI. A job that runs already with the same agent is returned as it
 // is (created false). A failed one is started again, with req's agent:
 // another agent is a new run in the same worktree.
+//
+// The start goes on when ctx ends (the hub's request timed out, or the
+// hub went away), bounded by its own timeouts (StartTimeout): a clone cut
+// short would leave half a repository, and an AgentAPI killed as it starts
+// a job the hub may yet adopt from the launcher's next report.
 func (l *Launcher) Start(ctx context.Context, req StartRequest) (JobInfo, bool, error) {
+	ctx = context.WithoutCancel(ctx)
 	owner, name, err := ParseRepo(req.Repo)
 	if err != nil {
 		return JobInfo{}, false, errorf(http.StatusBadRequest, "bad_request", "%v", err)
@@ -364,12 +374,12 @@ func (l *Launcher) Start(ctx context.Context, req StartRequest) (JobInfo, bool, 
 	}
 
 	mode := l.credentialsMode(req.Credentials)
-	port, release, err := l.reserve(key, mode)
+	port, release, err := l.reserve(key, mode, agent)
 	if err != nil {
 		return JobInfo{}, false, err
 	}
 	defer release()
-	gitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), gitTimeout)
+	gitCtx, cancel := context.WithTimeout(ctx, gitTimeout)
 	defer cancel()
 	repoDir, worktree, base, err := l.prepare(gitCtx, key, req, mode)
 	if err != nil {
@@ -485,13 +495,13 @@ func (l *Launcher) activeLocked() int {
 
 // reserve holds a place and a port for key while it is prepared, and lets
 // its git get a token; release lets them go.
-func (l *Launcher) reserve(key Key, mode string) (port int, release func(), err error) {
+func (l *Launcher) reserve(key Key, mode, agent string) (port int, release func(), err error) {
 	l.mu.Lock()
 	if n := l.activeLocked(); n >= l.config.MaxJobs {
 		l.mu.Unlock()
 		return 0, nil, errorf(http.StatusConflict, "capacity", "this machine runs %d jobs, its most", n)
 	}
-	l.reserved[key.String()] = reservation{mode: mode}
+	l.reserved[key.String()] = reservation{mode: mode, agent: agent}
 	l.mu.Unlock()
 	release = func() {
 		l.mu.Lock()
@@ -503,7 +513,7 @@ func (l *Launcher) reserve(key Key, mode string) (port int, release func(), err 
 		return 0, nil, err
 	}
 	l.mu.Lock()
-	l.reserved[key.String()] = reservation{mode: mode, port: port}
+	l.reserved[key.String()] = reservation{mode: mode, port: port, agent: agent}
 	l.mu.Unlock()
 	return port, release, nil
 }
@@ -919,13 +929,20 @@ func (l *Launcher) Stop(ctx context.Context, key Key, opts StopOptions) error {
 	return nil
 }
 
-// Jobs are the launcher's jobs.
+// Jobs are the launcher's jobs, with those being prepared (a clone, a
+// fetch) as starting, without an AgentAPI yet: the hub waits for a start
+// it lost the answer of while the launcher reports it.
 func (l *Launcher) Jobs() []JobInfo {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	out := make([]JobInfo, 0, len(l.store.jobs))
+	out := make([]JobInfo, 0, len(l.store.jobs)+len(l.reserved))
 	for _, job := range l.store.jobs {
 		out = append(out, job.info())
+	}
+	for _, key := range slices.Sorted(maps.Keys(l.reserved)) {
+		if l.store.get(key) == nil {
+			out = append(out, JobInfo{Key: key, Agent: l.reserved[key].agent, State: JobStarting})
+		}
 	}
 	return out
 }

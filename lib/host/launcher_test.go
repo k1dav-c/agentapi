@@ -478,7 +478,7 @@ func TestLauncherCredentials(t *testing.T) {
 
 	// While a job is being started, the launcher's own git (its clone and
 	// fetch) gets its token.
-	_, release, err := l.reserve(key, credentialsFile)
+	_, release, err := l.reserve(key, credentialsFile, "native-demo")
 	require.NoError(t, err)
 	out, err := gitCredentialFill(e.root, l.gitEnv(key, nil, credentialsFile), "https://github.com/acme/widget.git")
 	require.NoError(t, err, out)
@@ -654,4 +654,29 @@ func TestLauncherHTTP(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, status)
 	status, _ = do("DELETE", "/jobs/acme~widget~4", token, "")
 	assert.Equal(t, http.StatusNotFound, status)
+}
+
+// A start goes on when the request that asked for it ends (the hub's call
+// timed out, or the hub went away): the hub adopts the job from the
+// launcher's next report.
+func TestLauncherStartOutlivesTheRequest(t *testing.T) {
+	e := newTestEnv(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	job, created, err := e.launcher.Start(ctx, StartRequest{Repo: "acme/widget", Issue: 24})
+	require.NoError(t, err)
+	assert.True(t, created)
+	assert.Equal(t, JobRunning, job.State)
+	assert.True(t, alive(job.PID, job.InstanceID))
+}
+
+// A job being prepared is reported as starting, without an AgentAPI.
+func TestLauncherReportsJobsBeingPrepared(t *testing.T) {
+	e := newTestEnv(t)
+	l := e.launcher
+	_, release, err := l.reserve(mustKey(t, "acme/widget#25"), "", "claude")
+	require.NoError(t, err)
+	assert.Equal(t, []JobInfo{{Key: "acme/widget#25", Agent: "claude", State: JobStarting}}, l.Jobs())
+	release()
+	assert.Empty(t, l.Jobs())
 }
