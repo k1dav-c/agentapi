@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -129,6 +132,31 @@ func TestWebhookSend(t *testing.T) {
 	assert.Equal(t, event.Type, receivedHeader.Get("X-AgentAPI-Event"))
 	assert.Equal(t, "1700000000", receivedHeader.Get("X-AgentAPI-Timestamp"))
 	assert.Empty(t, receivedHeader.Get("X-AgentAPI-Signature-256"))
+}
+
+// The receiver's answer is read, so its connection takes the next delivery.
+func TestWebhookSendReusesTheConnection(t *testing.T) {
+	t.Parallel()
+	var connections atomic.Int32
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"ok": true, "note": "`+strings.Repeat("x", 1000)+`"}`)
+	}))
+	server.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			connections.Add(1)
+		}
+	}
+	server.Start()
+	defer server.Close()
+	dispatcher, err := New(Config{URL: server.URL}, slog.New(slog.DiscardHandler), instanceapi.AgentTypeClaude, quartz.NewReal())
+	require.NoError(t, err)
+	client := &http.Client{}
+	for i := range 3 {
+		event := instanceapi.WebhookEvent{ID: fmt.Sprint("delivery-", i), CreatedAt: time.Now()}
+		_, err = dispatcher.send(t.Context(), dispatcher.config, client, event, []byte(`{}`))
+		require.NoError(t, err)
+	}
+	assert.Equal(t, int32(1), connections.Load())
 }
 
 func TestWebhookSendRejectsNonSuccessfulResponse(t *testing.T) {

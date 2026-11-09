@@ -732,7 +732,12 @@ func (d *Dispatcher) send(ctx context.Context, config Config, client *http.Clien
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = response.Body.Close() }()
+	defer func() {
+		// The rest of a short answer is read, so the connection is used
+		// again.
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4<<10))
+		_ = response.Body.Close()
+	}()
 	if response.StatusCode >= 200 && response.StatusCode < 300 {
 		return response.Status, nil
 	}
