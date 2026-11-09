@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- The hub's page says which AgentAPI version the hub runs, beside how many agents it follows
+  (`dev` for a build of no release).
+
 ## v3.12.1
 
 ### Fixes

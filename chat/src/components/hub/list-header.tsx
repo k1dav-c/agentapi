@@ -5,6 +5,7 @@ import {ModeToggle} from "@/components/mode-toggle";
 import {Button} from "@/components/ui/button";
 import type {ConnectionStatus} from "@/lib/event-source";
 import {formatUSD, spendTitle, type SpendTotals} from "@/lib/hub-spend";
+import {parseVersion} from "@/lib/hub-version";
 import {cn} from "@/lib/utils";
 import {HubMark} from "./brand";
 import {AgentChips, StatusChips} from "./filter-chips";
@@ -16,6 +17,8 @@ export interface HubListHeaderProps {
   // the last session check after it failed.
   status: ConnectionStatus;
   unreachable: boolean;
+  // hubVersion is the AgentAPI version the hub runs; "" until it says.
+  hubVersion: string;
   spend: SpendTotals;
   notify: boolean;
   onToggleNotify: () => void;
@@ -31,11 +34,17 @@ export interface HubListHeaderProps {
   view: HubListView;
 }
 
+// hubLabel names the hub's version: v3.12.1, or dev for a build of no
+// release.
+export function hubLabel(version: string): string {
+  return parseVersion(version) ? `v${version}` : "dev";
+}
+
 // HubListHeader heads the hub's list: the hub's name and whether it is
 // live, what the agents spent today, notifications, the theme, the
 // settings and Add; the search, the list's order and By machine; and the
 // state and agent chips.
-export function HubListHeader({status, unreachable, spend, notify, onToggleNotify, onSettings, onAdd, issuesOpen, issuesNeedYou, onIssues, search, filters, view}: HubListHeaderProps) {
+export function HubListHeader({status, unreachable, hubVersion, spend, notify, onToggleNotify, onSettings, onAdd, issuesOpen, issuesNeedYou, onIssues, search, filters, view}: HubListHeaderProps) {
   const connected = status === "connected";
   const {counts, query, setQuery} = filters;
   return (
@@ -55,6 +64,12 @@ export function HubListHeader({status, unreachable, spend, notify, onToggleNotif
                     ? "Can't reach the hub · retrying"
                     : "Reconnecting…"}
             </span>
+            {/* The hub's version keeps its room; the spend gives way first. */}
+            {hubVersion && (
+              <span className="shrink-0 font-mono text-[11px]" title={`The hub runs AgentAPI ${hubLabel(hubVersion)}`}>
+                · {hubLabel(hubVersion)}
+              </span>
+            )}
             {/* Out of the live region: it changes every minute. */}
             {connected && spend.week > 0 && (
               <span className="min-w-0 truncate tabular-nums" title={spendTitle(spend.day, spend.week)}>
