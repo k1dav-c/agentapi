@@ -525,7 +525,7 @@ func (a *Adapter) interruptAccepted(ended chan struct{}) {
 func (a *Adapter) Respond(ctx context.Context, requestID string, response agentstate.Response) error {
 	a.mu.Lock()
 	p, ok := a.requests[requestID]
-	if !ok || p.answering {
+	if !ok || p.answer.Answering {
 		a.mu.Unlock()
 		return native.ErrRequestNotFound
 	}
@@ -534,7 +534,7 @@ func (a *Adapter) Respond(ctx context.Context, requestID string, response agents
 		a.mu.Unlock()
 		return err
 	}
-	p.answering = true
+	p.answer.Begin()
 	a.mu.Unlock()
 	err = a.write(ctx, map[string]any{
 		"type": "control_response",
@@ -544,17 +544,13 @@ func (a *Adapter) Respond(ctx context.Context, requestID string, response agents
 	})
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	switch {
-	case err == nil:
-		if a.requests[requestID] == p {
-			delete(a.requests, requestID)
-		}
-	case !errors.Is(err, native.ErrUnconfirmed):
-		// The CLI didn't get the answer: the request is still open.
-		p.answering = false
+	// An answer the CLI didn't get leaves the request open; an unconfirmed
+	// one may yet reach the CLI: the request takes no other until the CLI
+	// cancels it or the turn ends.
+	p.answer.Written(err)
+	if err == nil && a.requests[requestID] == p {
+		delete(a.requests, requestID)
 	}
-	// An unconfirmed answer may yet reach the CLI: the request takes no
-	// other until the CLI cancels it or the turn ends.
 	return err
 }
 

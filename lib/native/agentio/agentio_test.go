@@ -285,3 +285,23 @@ func TestCallsClose(t *testing.T) {
 	_, err = calls.Add(3, nil)
 	assert.ErrorIs(t, err, exited, "the first error stays")
 }
+
+// An answer takes the request until its write fails before it went out.
+func TestAnswer(t *testing.T) {
+	t.Parallel()
+	var a agentio.Answer
+	require.True(t, a.Begin())
+	assert.False(t, a.Begin(), "one answer at a time")
+	a.Written(errors.New("broken pipe"))
+	assert.Equal(t, agentio.Answer{}, a, "it never went out: answer again")
+
+	require.True(t, a.Begin())
+	a.Written(native.Unconfirmed(context.DeadlineExceeded))
+	assert.Equal(t, agentio.Answer{Answering: true, Unconfirmed: true}, a, "the agent may yet get it")
+	assert.False(t, a.Begin())
+
+	a = agentio.Answer{}
+	require.True(t, a.Begin())
+	a.Written(nil)
+	assert.Equal(t, agentio.Answer{Answering: true}, a)
+}

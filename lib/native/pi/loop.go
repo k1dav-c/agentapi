@@ -543,11 +543,11 @@ func (a *Adapter) cancelTurnDialogs(withdraw bool) {
 		d := a.dialogs[id]
 		switch {
 		case d == nil:
-		case d.unconfirmed:
+		case d.answer.Unconfirmed:
 			// It may have its answer: no cancel contradicts it.
 			d.stopTimer()
 			delete(a.dialogs, id)
-		case !d.answering:
+		case !d.answer.Answering:
 			d.stopTimer()
 			delete(a.dialogs, id)
 			cancel = append(cancel, id)

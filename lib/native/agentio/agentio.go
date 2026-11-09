@@ -159,6 +159,40 @@ func (w *Writer) WriteAsync(v any, logger *slog.Logger) {
 	}()
 }
 
+// Answer is where the answer to an agent's request (an approval, a
+// question, a dialog) stands. The adapter holds its lock around Begin and
+// Written, and writes the answer between them without it.
+type Answer struct {
+	// Answering: an answer is being written, or went out; the request
+	// takes no other.
+	Answering bool
+	// Unconfirmed: the answer's write didn't finish, so the agent may yet
+	// get it. The request stays Answering, and takes no other.
+	Unconfirmed bool
+}
+
+// Begin starts an answer; false if the request has one already.
+func (a *Answer) Begin() bool {
+	if a.Answering {
+		return false
+	}
+	a.Answering = true
+	return true
+}
+
+// Written records how the answer's write ended. One that failed before it
+// went out leaves the request open for another answer; one that went out
+// unconfirmed is Unconfirmed.
+func (a *Answer) Written(err error) {
+	switch {
+	case err == nil:
+	case errors.Is(err, native.ErrUnconfirmed):
+		a.Unconfirmed = true
+	default:
+		a.Answering = false
+	}
+}
+
 // Calls matches an agent's responses to the requests waiting for them,
 // by the requests' IDs. Once Close was called, because the agent's output
 // ended, every request still waiting gets Close's error, and new ones are
