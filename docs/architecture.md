@@ -950,13 +950,17 @@ props in `HubListContext`; its logic in `lib/hub.ts`, the instance, its state an
 events, and beside it `lib/hub-groups.ts`, `hub-machines.ts`, `hub-filter.ts`, `hub-format.ts`,
 `hub-spend.ts`, `hub-work.ts`, `hub-version.ts` and `hub-order.ts`; the changes it makes through
 `lib/hub-api.ts`; what the browser keeps through `lib/hub-settings.ts`), which `agentapi hub serve`
-serves with the same build. Its Issues page (`components/hub/issues/`: the view, its cards, the
-detail with the runs' timeline, the assign menu; `use-dispatch.ts` reads GitHub and acts) works on
-the board model of `lib/hub-issues.ts` (the cards by section, the suggested agent and machine, the
-timeline), with the dispatch's calls in `lib/hub-dispatch.ts`. The machines and jobs come with the
-stream's `dispatch` event, which also feeds the badge on the Issues button and the rows' chips of
-the agents of issues (`HubListContext.jobs`); from a hub without it, the page reads them every 10
-seconds. The hub's API isn't huma's: its wire types are generated, `make gen`
+serves with the same build. Where the page is, the agent open and whether Issues is open below it,
+is a page of the browser's history each (`lib/hub-route.ts`, `useHubRoute`). Its Issues page
+(`components/hub/issues/`: the view, its cards, the detail with its status and the runs' timeline,
+the assign menu; `use-dispatch.ts` reads the issues and acts) works on the board model of
+`lib/hub-issues.ts` (the cards by section, the suggested agent and machine, the timeline), with the
+dispatch's calls in `lib/hub-dispatch.ts`, which checks each answer as it comes. The hub's GitHub
+App is read once for Issues and the settings' GitHub tab (`lib/hub-github-store.ts`,
+`useHubGitHub`), again whenever the page shows again. The machines and jobs come with the stream's
+`dispatch` event, which also feeds the badge on the Issues button and the rows' chips of the agents
+of issues (`HubListContext.jobs`); an action's answer shows on the board until the stream has the
+job as new. The hub's API isn't huma's: its wire types are generated, `make gen`
 writing `lib/hub/hub-schema.json` from the Go types (`hub.Schema`) and `bun run gen:api` writing
 `lib/hub-schema.ts` from it, with `hubLimits`, the limits the page checks; `parseHubEvent` reads
 each event of `/api/events`. The frame's messages are read field by field, `parseToFrame` in the
@@ -1030,7 +1034,10 @@ chat and `parseFromFrame` in the hub.
   and gets only the calls made since. A hook of the chat's state, or of one
   component, sits in `components/` beside what uses it; a hook that knows
   nothing of the chat (`use-loaded.ts`, `use-copy.ts`, `use-persisted.ts`)
-  in `lib/`. Fixtures and fakes the tests share are in `src/test/`.
+  in `lib/`. Fixtures and fakes the tests share are in `src/test/`; a test
+  file that renders with effects (react-dom/client, a hook) calls `withDOM`
+  (`src/test/dom.ts`) for happy-dom's document, the others render on the
+  server.
 
 ## Testing
 

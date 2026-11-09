@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- An issue's detail on the hub's Issues page starts fresh for each issue opened: a **Stop** being
+  confirmed showed for the next issue's job, and a message half written to one agent was sent to
+  the next one's.
+- The Issues page's jobs come from the hub's stream only; what you do shows at once, as the hub
+  answers, until the stream has the job as new. A job's answer no longer stays on the board in
+  place of newer news, and the page no longer reads the machines and jobs every 10 seconds.
+- Issues and the settings' **GitHub** tab read the hub's GitHub App once, together, and again when
+  you come back to the page: the **Install** card on Issues goes once the app is installed, and a
+  disconnect shows at once. A read from before a later one no longer lands after it, for the app
+  and for the issues.
+- **Forward** into an agent opened from Issues, or a reload of it, keeps Issues open below it, as
+  Back does.
+- **Esc** on a **Stop** or **Switch agent** being confirmed cancels it, instead of closing Issues
+  (or the issue's sheet on a phone), and the focus goes back to the button.
+
+### Internal
+
+- The hub's page routes from one router over the browser's history (`lib/hub-route.ts`), with
+  its transitions tested on a fake history.
+- The chat's tests that render with effects run on happy-dom's document (`withDOM`).
+- The Issues page's and GitHub settings' parts are split into smaller files and share their
+  looks, the read error and the reduced-motion check; the dispatch API checks the hub's answers;
+  the Issues cards' memo holds again.
+
 ## v3.15.0
 
 ### Features
