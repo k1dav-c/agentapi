@@ -497,8 +497,8 @@ AgentAPI 正在更新時，上方那一列也會顯示進度，還在等任務�
 
 ![Hub settings：我的最愛，每一項都有自己的按鈕](screenshots/hub-settings-favorites.png)
 
-我的最愛是你常送出的提示，保存在 hub 上。標題列的齒輪按鈕會開啟 **Hub settings**，其中的
-**Favorites** 區列出所有項目，可以新增、編輯、刪除和上下移動。每一項有一段最多 20,000 字的提示，
+我的最愛是你常送出的提示，保存在 hub 上。標題列的齒輪按鈕會開啟 **Hub settings** 的
+**Favorites** 分頁（另一個分頁是 [GitHub](#github-設定)），列出所有項目，可以新增、編輯、刪除和上下移動。每一項有一段最多 20,000 字的提示，
 以及最多 100 字、可省略的標題；沒有標題時，以提示的第一行當名稱。hub 最多保存 100 項。每次修改都
 會立即儲存，登入這個 hub 的每個頁面也會跟著更新，所以手機和桌機看到的我的最愛都一樣。**Undo** 可以
 救回最後刪除的那一項。在編輯區裡，⌘/Ctrl+Enter 儲存，**Esc** 取消。
@@ -510,6 +510,31 @@ AgentAPI 正在更新時，上方那一列也會顯示進度，還在等任務�
 游標停在它後面。按 Ctrl/⌘+Z 可以把它拿掉。超過七項時會出現搜尋框，在清單上直接打字也會輸入到搜尋框。
 **Manage favorites…** 會開啟 hub 設定的我的最愛區。還沒有任何一項時選單照樣出現，裡面只有這個連結。
 單獨開啟的聊天介面（新分頁，或 AgentAPI 自己的網址）沒有 ☆。
+
+### GitHub 設定
+
+![Hub settings：hub 的 GitHub App、安裝在哪些帳號、可存取哪些 repo](screenshots/hub-settings-github.png)
+
+**Hub settings** 的 **GitHub** 分頁顯示 hub 的 GitHub App：[Issues](#issues) 靠它列出 issue，job 也以它
+的身分推分支、開 PR。在 Issues 頁上，**Issues** 旁的 App 名稱，以及 repo 選單最下面的
+**GitHub settings…**，也會開到這裡。分頁上有 App 的名稱（連到它在 GitHub 的頁面）和擁有它的帳號或組織；
+下面列出安裝了 App 的每個帳號，附上大頭貼、**All repositories** 或選了幾個 repo，以及前幾個 repo 的名稱。
+hub 的頁面重新顯示時會再讀一次，所以從 GitHub 切回來就看得到改動。
+
+- **Choose repositories** 在新分頁開啟 GitHub，可以把 App 裝到其他帳號，或改選已安裝帳號的 repo。帳號旁的
+  **Change** 直接開到那個帳號的安裝設定。
+- **App settings on GitHub** 開啟 App 的設定：名稱、權限，以及 **Delete GitHub App**。3.14 以前建立
+  App 的 hub，要等 GitHub 從安裝頁導回一次（按 **Choose repositories** 再按 **Save**）才知道設定在誰底下；
+  在那之前，這個連結開的是 App 的公開頁面。
+- **Reconnect…** 從 hub 的 `/github/connect` 建立新的 App，可以建在你的帳號或組織底下（目前的 App
+  屬於組織時，預設就是那個組織）。GitHub 把新 App 交回來之前，hub 照常使用目前的 App，所以在 GitHub
+  上取消不會有任何改變。接著要安裝新 App；裝好之前，job 拿不到 repo 的 token，Issues 也列不出 issue。
+  舊的 App 會留在 GitHub 上，請到它的設定頁刪除。
+- **Disconnect…** 會先確認，然後 hub 忘掉它的 App（`DELETE /api/github`）：金鑰和安裝在哪裡都不留。
+  正在跑的 job 拿不到新的 repo token，手上的 token 到期後（一小時內）推送和開 PR 都會失敗；Issues 要
+  重新連接 GitHub 才能用。App 本身留在 GitHub 上，仍裝在原來的地方，要到 GitHub 刪除。
+
+還沒有 App 時，這個分頁顯示和 Issues 一樣的 **Connect GitHub**，可以建在你的帳號或組織底下。
 
 ### Issues
 
@@ -583,6 +608,7 @@ agent 還在工作時，可以從最下面的輸入框傳訊息給它（⌘/Ctrl
 ![還沒接上 GitHub 時的 Issues](screenshots/dispatch-no-github.png)
 
 hub 還沒有 GitHub App 時，Issues 會顯示 **Connect GitHub**，從 manifest 為你的帳號或組織建立一個 App。
+[GitHub 設定](#github-設定)可以改 App 的 repo、換一個新的 App，或中斷連接。
 沒有 App 也能用 issue 的代號（`owner/repo#12` 或 issue 網址）開工，這時主機用自己的 GitHub 登入。
 沒有任何主機裝了 launcher 時，頁面會顯示安裝指令。
 
@@ -832,7 +858,7 @@ hub 透過環境變數中的 proxy（`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`�
 | `GET /api/events` | Server-sent events：先送 `instances`（全部實例和 `hub_version`，格式同 `GET /api/instances`）和 `favorites`（格式同 `GET /api/favorites`），再送 `instance`（某個實例有頁面看得到的變動，或工作時間變動滿一分鐘；最後聯絡時間只在它離線時才算）、`removed`（`{"id"}`）、`favorites`（有變動時送出全部）、`dispatch`（[issue 派工](#issues)的主機和 job，格式同 `GET /api/hosts` 和 `GET /api/jobs`，一開始和每次變動時送出），以及每 15 秒一次的 `heartbeat` |
 | `GET /api/hosts` | 有 launcher 回報的主機：能跑的 agent、有的 repo、job 與上限，以及是否在線（`online`） |
 | `GET /api/jobs` | 各 job（一個 issue 的工作）：狀態、agent 與主機、PR、各次 run 與花費，以及最近 50 則送給 agent 的訊息（`messages`：`at`；`source` 為 `hub`、`review` 或 `comment`；`author`、`agent`；`text`，最多 2,000 字） |
-| `GET /api/github` | hub 的 GitHub App（若有）及安裝在哪些帳號 |
+| `GET /api/github` | hub 的 GitHub App（若有：`slug`、`owner`、hub 知道時的 `owner_type`（`User` 或 `Organization`）、`html_url`、`settings_url`、`install_url`）及安裝在哪些帳號（`installations`：`account`、`account_type`、`repository_selection`（`all` 或 `selected`）、`avatar_url`、`settings_url`）；`DELETE` 讓 hub 忘掉 App，GitHub 上的 App 不受影響 |
 | `GET /api/github/repos` | App 看得到的 repo，最近有 push 或變動的在前（`pushed_at`、`updated_at`） |
 | `GET /api/github/issues?repo=` | repo 的 open issue；`POST` 開新 issue，帶 `assign` 時直接開工 |
 | `POST /api/dispatch` | 開工、傳訊息、連結 PR、停止（`action`：`start`、`send`、`link_pr`、`stop`）；也接受 `--dispatch-token` |

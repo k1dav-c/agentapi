@@ -576,7 +576,7 @@ for the task ([Updating from the hub](#updating-from-the-hub)).
 ![Hub settings: the favorites, each with its buttons](screenshots/hub-settings-favorites.png)
 
 Favorites are prompts you send often, kept on the hub. The gear in the header opens **Hub
-settings**; its **Favorites** section lists them, and adds, edits, deletes and moves them up and
+settings** at its **Favorites** tab (the other is [GitHub](#github-settings)), which lists them, and adds, edits, deletes and moves them up and
 down. Each has a prompt of up to 20,000 characters and an optional title of up to 100; without a
 title, its first line names it. The hub keeps up to 100. A change is saved at once, and every page
 signed in to the hub shows it, so your phone and desktop have the same favorites. **Undo** brings
@@ -591,6 +591,38 @@ cursor after it. Ctrl/⌘+Z takes it back out. Past seven favorites, a search bo
 and typing in the list types in it. **Manage favorites…** opens the hub's settings at the
 favorites. The menu shows even before the first favorite, with that link. A chat opened on its own,
 in a new tab or at its AgentAPI's URL, has no ☆.
+
+### GitHub settings
+
+![Hub settings: the hub's GitHub App, where it is installed and on which repositories](screenshots/hub-settings-github.png)
+
+The **GitHub** tab of **Hub settings** shows the hub's GitHub App, which lists the
+[Issues](#issues) and which the jobs push branches and open pull requests as. On the Issues page,
+the app's name beside **Issues**, and **GitHub settings…** at the foot of the repository menu, open
+it too. It has the app's name, linked to its page on GitHub, and the account or organization that
+owns it. Below, each account the app is installed on has its picture, **All repositories** or how
+many were selected, and their first names. The section reads the app again when the hub's page
+shows again, so coming back from GitHub is enough to see a change.
+
+- **Choose repositories** opens GitHub in a new tab, where you install the app on another account
+  or pick the repositories of one it is on. **Change** beside an account goes straight to its
+  installation.
+- **App settings on GitHub** opens the app's settings: its name, permissions, and **Delete GitHub
+  App**. A hub that registered its app before 3.14 knows whose settings they are under only once
+  GitHub sends you back from an installation (after **Choose repositories** and **Save**); until
+  then the link opens the app's public page.
+- **Reconnect…** registers a new app, for your account or an organization (the current one when
+  the app is an organization's), from the hub's `/github/connect`. The hub keeps its current app
+  until GitHub hands the new one back, so leaving the flow on GitHub changes nothing. Then install
+  the new app; until you do, jobs can't get repository tokens and Issues lists nothing. The old
+  app stays on GitHub: delete it in its settings.
+- **Disconnect…** asks first, then the hub forgets its app (`DELETE /api/github`): its key and
+  where it is installed. The jobs at work can't get new repository tokens, so their pushes and pull
+  requests fail once the token they have expires, within the hour. Issues needs GitHub connected
+  again. The app stays on GitHub, installed where it was, until you delete it there.
+
+Without an app, the tab has the same **Connect GitHub** as Issues, for your account or an
+organization.
 
 ### Issues
 
@@ -677,7 +709,8 @@ Issues.
 ![Issues before GitHub is connected](screenshots/dispatch-no-github.png)
 
 Before the hub has a GitHub App, Issues shows **Connect GitHub**, which registers one from a
-manifest, for your account or an organization. An issue can still be started by its reference
+manifest, for your account or an organization. [GitHub settings](#github-settings) changes the
+app's repositories, connects another app, or disconnects it. An issue can still be started by its reference
 (`owner/repo#12`, or its URL); the machine then works with its own GitHub login. Without a launcher
 on any machine, the page shows the command that installs one.
 
@@ -954,7 +987,7 @@ running AgentAPIs, which then no longer follow their conversation for the webhoo
 | `GET /api/events` | Server-sent events: `instances` (all of them and `hub_version`, as `GET /api/instances` has them) and `favorites` (as `GET /api/favorites` has them), then `instance` (one changed what the page shows, or its work time moved by a minute; when it was last heard of counts only while it is offline), `removed` (`{"id"}`), `favorites` (all of them, after a change), `dispatch` (the [issue dispatch's](#issues) machines and jobs, as `GET /api/hosts` and `GET /api/jobs` have them, at first and after each change) and a `heartbeat` every 15 s |
 | `GET /api/hosts` | The machines whose launchers report: their agents, repositories, jobs and room, and whether each is `online` |
 | `GET /api/jobs` | The jobs, each an issue's work: its state, agent and machine, pull request, runs with their cost, and the last 50 messages its agents were sent (`messages`: `at`, `source` `hub`, `review` or `comment`, `author`, `agent`, `text`, up to 2,000 characters) |
-| `GET /api/github` | The hub's GitHub App, if any, and where it is installed |
+| `GET /api/github` | The hub's GitHub App, if any (`slug`, `owner`, `owner_type` `User` or `Organization` when the hub knows it, `html_url`, `settings_url`, `install_url`), and where it is installed (`installations`: `account`, `account_type`, `repository_selection` `all` or `selected`, `avatar_url`, `settings_url`); `DELETE` forgets the app, which stays on GitHub |
 | `GET /api/github/repos` | The repositories the app can see, the latest pushed to or changed first (`pushed_at`, `updated_at`) |
 | `GET /api/github/issues?repo=` | A repository's open issues; `POST` opens one, and with `assign`, starts work on it |
 | `POST /api/dispatch` | Starts, messages, links and stops the work on an issue (`action`: `start`, `send`, `link_pr`, `stop`); also takes `--dispatch-token` |

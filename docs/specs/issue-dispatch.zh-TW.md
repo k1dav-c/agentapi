@@ -270,7 +270,7 @@ GitHub App 另外存在 `~/.agentapi/hub/github-app.json`（0600，不併入 `in
 | GET | `/api/hosts` | session | 主機、repo、agents |
 | GET | `/api/jobs` | session | job 列表 |
 | POST | `/api/dispatch` | session **或** dispatch token | §7.1 |
-| GET | `/api/github` | session | App 設定狀態：未設定、已建立未安裝、已安裝（帳號與 repo 數） |
+| GET | `/api/github` | session | App 設定狀態：未設定、已建立未安裝、已安裝；App 與各安裝的 GitHub 連結（設定頁、安裝頁、大頭貼）與帳號類型（§6.5） |
 | GET | `/github/connect?org=` | session | 開始建立 App：一頁自動填好 manifest 的表單（§6.1） |
 | GET | `/github/callback` | session + state | manifest 跳轉回來（§6.1） |
 | GET | `/github/setup` | session + state | 安裝完成跳轉回來（§6.2） |
@@ -440,6 +440,15 @@ job 已結束（`done`）時：視為新的一輪開發。遠端與本機分支�
 ### 6.4 手動設定（備援）
 
 `agentapi hub serve --github-app-file <path>` 讀入相同格式的 JSON，給無法用瀏覽器完成 manifest flow 的情況（例如 GitHub 帳號設定不允許）。
+
+### 6.5 之後的調整：Hub settings 的 GitHub 分頁
+
+接上 App 之後，Hub settings 的 **GitHub** 分頁（Issues 頁上 App 的名稱、repo 選單底部的 **GitHub settings…** 也會開到這裡）列出 App、擁有者，以及每個安裝的帳號、`all` 或選了哪些 repo。所有改動都在 GitHub 上做，分頁只提供連結，頁面重新顯示時再讀一次 `/api/github`：
+
+- **Choose repositories**：`https://github.com/apps/<slug>/installations/new`，加裝到其他帳號或改選 repo。各帳號的 **Change** 直接到該安裝：個人 `https://github.com/settings/installations/<id>`，組織 `https://github.com/organizations/<org>/settings/installations/<id>`。改完 GitHub 依 `setup_on_update` 導回 `/github/setup`，hub 更新那個 installation（§6.2）。
+- **App settings on GitHub**：個人 `https://github.com/settings/apps/<slug>`，組織 `https://github.com/organizations/<org>/settings/apps/<slug>`。hub 從 manifest 轉換（`owner.type`）與 installation（`account.type`）記下帳號類型；3.14 以前建立的 App 沒有記錄，要等擁有者自己的 installation 再經過一次 `/github/setup` 才知道，在那之前連到 App 的公開頁 `https://github.com/apps/<slug>`。
+- **Reconnect**：選個人帳號或組織後到 `/github/connect`（§6.1），**不先刪除**目前的 App。`/github/callback` 拿到新 App 才以 `saveApp` 原子地取代 `github-app.json` 與記憶體中的 App，並清掉舊 App 快取的 token；在 GitHub 上取消，舊 App 照常運作。新 App 沒有 installation，裝好之前 job 拿不到 token。舊 App 留在 GitHub，由使用者自己刪除。
+- **Disconnect**：確認後 `DELETE /api/github`，hub 刪掉 `github-app.json` 與快取的 token。執行中的 job 拿不到新 token，手上的 token 到期（≤ 1 小時）後推送與開 PR 會失敗；GitHub 上的 App 與安裝不受影響。
 
 ## 7. 資料格式
 
