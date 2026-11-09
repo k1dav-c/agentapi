@@ -465,7 +465,9 @@ type Factory func(resume Resume) (Adapter, error)
   its output, line by line, to one loop goroutine, which also runs the
   functions posted to it and one timer: for the snapshots the throttle held
   back (`agentio.Throttle`, 100 ms) and the 10-second wait for an
-  interrupted turn to end (`agentio.InterruptDeadline`). That goroutine
+  interrupted turn to end (`agentio.InterruptDeadline`), which starts when
+  the agent accepts the interrupt, also after `Interrupt` stopped waiting for
+  that answer. That goroutine
   calls the Sink. The agent has exited, for `Wait`, once the process is gone
   and the loop has handled its output, or 2 seconds after the process is
   gone: a process the agent started can keep the output open. Stopping it

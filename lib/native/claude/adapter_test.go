@@ -518,6 +518,31 @@ func TestRespondWriteFails(t *testing.T) {
 	require.NoError(t, a.Close())
 }
 
+// An interrupt the CLI accepts after Interrupt stopped waiting still ends
+// the turn when the CLI doesn't.
+func TestLateInterruptAnswerStartsTheDeadline(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	clock := quartz.NewMock(t)
+	proc := newFakeProcess("")
+	a, sink := started(t, Config{Clock: clock}, proc)
+	require.NoError(t, a.StartTurn(ctx, native.Input{Text: "hi"}))
+	proc.send(t, []byte(`{"type":"system","subtype":"session_state_changed","state":"running"}`))
+	interruptCtx, cancel := context.WithCancel(ctx)
+	errCh := make(chan error, 1)
+	go func() { errCh <- a.Interrupt(interruptCtx) }()
+	request, _ := proc.waitRequest(t, 1, "interrupt")
+	cancel()
+	require.ErrorIs(t, <-errCh, native.ErrUnconfirmed)
+	proc.answer(t, request, `{}`)
+	proc.barrier(t)
+	assert.Equal(t, []string{"turn_started"}, sink.TurnLog())
+	clock.Advance(10 * time.Second).MustWait(ctx)
+	require.Eventually(t, func() bool { return len(sink.TurnLog()) == 2 }, 5*time.Second, time.Millisecond)
+	assert.Equal(t, []string{"turn_started", "turn_completed:interrupted"}, sink.TurnLog())
+	require.NoError(t, a.Close())
+}
+
 func TestInterruptTimeout(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

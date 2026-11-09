@@ -239,6 +239,8 @@ type turnState struct {
 	ended chan struct{}
 	// interrupted: the user interrupted it.
 	interrupted bool
+	// interruptAccepted: the CLI answered the interrupt.
+	interruptAccepted bool
 	// authFailed: the CLI reported a login failure in it.
 	authFailed bool
 	// result is its latest result.
@@ -481,6 +483,7 @@ func (a *Adapter) Steer(ctx context.Context, input native.Input) error {
 func (a *Adapter) Interrupt(ctx context.Context) error {
 	a.mu.Lock()
 	busy := a.turn.phase != turnIdle
+	ended := a.turn.ended
 	if busy {
 		a.turn.interrupted = true
 	}
@@ -488,24 +491,32 @@ func (a *Adapter) Interrupt(ctx context.Context) error {
 	if !busy {
 		return native.ErrNoActiveTurn
 	}
-	_, err := a.request(ctx, "interrupt", nil, a.interruptAccepted)
+	_, err := a.request(ctx, "interrupt", nil, func(json.RawMessage) { a.interruptAccepted(ended) })
 	if err != nil {
-		// Not interrupted: the turn ends as it ends, its error included.
+		// Not interrupted, unless the CLI accepts it later: the turn ends
+		// as it ends, its error included.
 		a.mu.Lock()
-		a.turn.interrupted = false
+		if a.turn.ended == ended && !a.turn.interruptAccepted {
+			a.turn.interrupted = false
+		}
 		a.mu.Unlock()
 	}
 	return err
 }
 
 // interruptAccepted starts the wait for the end of the interrupted turn
-// (see wake). It runs in the read loop.
-func (a *Adapter) interruptAccepted(json.RawMessage) {
+// (see wake), the one that ends closes. It runs in the read loop, also for
+// an answer that came after Interrupt stopped waiting.
+func (a *Adapter) interruptAccepted(ended chan struct{}) {
 	a.mu.Lock()
 	// The turn may have ended before the answer came.
-	interrupted := a.turn.interrupted
+	same := ended != nil && a.turn.ended == ended
+	if same {
+		a.turn.interrupted = true
+		a.turn.interruptAccepted = true
+	}
 	a.mu.Unlock()
-	if interrupted {
+	if same {
 		a.interrupt.Start()
 	}
 }
@@ -577,7 +588,7 @@ func (a *Adapter) interruptForClose(ctx context.Context) <-chan struct{} {
 	// whose closing stdin makes it fail. Sent although the adapter is
 	// closing, which refuses other requests.
 	go func() {
-		if _, _, err := a.issueControl(ctx, "interrupt", nil, a.interruptAccepted); err != nil {
+		if _, _, err := a.issueControl(ctx, "interrupt", nil, func(json.RawMessage) { a.interruptAccepted(ended) }); err != nil {
 			a.log.Debug("Failed to interrupt the turn before closing", "error", err)
 		}
 	}()

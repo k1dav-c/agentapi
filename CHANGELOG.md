@@ -20,6 +20,8 @@
 - `POST /terminal/input` no longer waits forever when the terminal's program doesn't read its
   input (a paste into a busy full-screen program): it gives up after 10 seconds with 503, part of
   the input perhaps typed, or when the client leaves. Two inputs no longer interleave.
+- An interrupt Claude Code or Codex accepts after `POST /interrupt` stopped waiting for the answer
+  still ends the turn within 10 seconds when the agent doesn't, where the turn could stay running.
 
 ### Internal
 

@@ -207,6 +207,18 @@ func TestCallsAwait(t *testing.T) {
 	assert.ErrorIs(t, err, native.ErrUnconfirmed)
 	assert.False(t, calls.Resolve("b", 1, nil), "the request is dropped")
 
+	// A request with an onResult stays registered: a response that comes
+	// after its caller gave up still runs it.
+	var late []int
+	detached, err := calls.Add("d", func(v int, _ error) { late = append(late, v) })
+	require.NoError(t, err)
+	_, err = calls.Await(ctx, "d", detached)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.ErrorIs(t, err, native.ErrUnconfirmed)
+	assert.True(t, calls.Resolve("d", 9, nil), "the request still waits for its response")
+	assert.Equal(t, []int{9}, late)
+	assert.False(t, calls.Resolve("d", 10, nil))
+
 	exited := errors.New("the agent exited")
 	waiting, err := calls.Add("c", nil)
 	require.NoError(t, err)

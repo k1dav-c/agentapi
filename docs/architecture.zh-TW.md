@@ -364,7 +364,8 @@ type Factory func(resume Resume) (Adapter, error)
   `lib/procenv` 建立的環境變數，其中不含上層 agent 工作階段的變數。`agentio.Host` 替 adapter
   執行這個行程：adapter 已關閉就不再啟動，並把輸出逐行交給同一個迴圈 goroutine。這個 goroutine
   也執行投遞給它的函式，以及唯一的計時器：送出節流暫緩的快照（`agentio.Throttle`，100 毫秒），
-  以及等待被中斷的回合結束的 10 秒（`agentio.InterruptDeadline`）。Sink 由它呼叫。行程結束、
+  以及等待被中斷的回合結束的 10 秒（`agentio.InterruptDeadline`）；agent 接受中斷時開始計時，
+  `Interrupt` 已不再等這個回應時也一樣。Sink 由它呼叫。行程結束、
   迴圈也處理完它的輸出後，`Wait` 才視為 agent 已結束；行程結束 2 秒後則一律視為結束，因為 agent
   啟動的行程可能讓輸出一直開著。停止時會先關閉它的輸入，3 秒後對整個 group 送出 SIGTERM，
   再過 2 秒送出 SIGKILL。在那之前，adapter 會先中斷進行中的回合，最多等 3 秒讓它結束，agent
