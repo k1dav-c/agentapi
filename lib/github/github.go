@@ -38,8 +38,11 @@ type App struct {
 	WebhookSecret string `json:"webhook_secret"`
 	// BotUserID is the user ID of <slug>[bot], for its commits' email.
 	BotUserID int64 `json:"bot_user_id"`
-	// Owner is the account the app belongs to.
-	Owner string `json:"owner"`
+	// Owner is the account the app belongs to; OwnerType is its kind,
+	// "User" or "Organization", where its settings live on GitHub (empty
+	// for an app registered before the hub kept it).
+	Owner     string `json:"owner"`
+	OwnerType string `json:"owner_type,omitempty"`
 	// HubURL is the hub's address the app was registered from, for links.
 	HubURL        string         `json:"hub_url"`
 	Installations []Installation `json:"installations"`
@@ -47,9 +50,40 @@ type App struct {
 
 // Installation is the app installed on an account.
 type Installation struct {
-	ID                  int64  `json:"id"`
-	Account             string `json:"account"`
+	ID      int64  `json:"id"`
+	Account string `json:"account"`
+	// AccountType is the account's kind, "User" or "Organization" (empty
+	// for one installed before the hub kept it).
+	AccountType         string `json:"account_type,omitempty"`
 	RepositorySelection string `json:"repository_selection"`
+}
+
+// SettingsURL is the app's settings page on GitHub, under its owner's
+// settings; "" while the owner's kind isn't known.
+func (a *App) SettingsURL(web string) string {
+	base := strings.TrimSuffix(web, "/")
+	switch a.OwnerType {
+	case "User":
+		return base + "/settings/apps/" + url.PathEscape(a.Slug)
+	case "Organization":
+		return base + "/organizations/" + url.PathEscape(a.Owner) + "/settings/apps/" + url.PathEscape(a.Slug)
+	}
+	return ""
+}
+
+// SettingsURL is the installation's page on GitHub, where its account
+// picks the repositories it is on; "" while the account's kind isn't
+// known.
+func (i Installation) SettingsURL(web string) string {
+	base := strings.TrimSuffix(web, "/")
+	id := strconv.FormatInt(i.ID, 10)
+	switch i.AccountType {
+	case "User":
+		return base + "/settings/installations/" + id
+	case "Organization":
+		return base + "/organizations/" + url.PathEscape(i.Account) + "/settings/installations/" + id
+	}
+	return ""
 }
 
 // BotName and BotEmail are who the app's commits are by.
@@ -179,12 +213,13 @@ func (c *Client) ConvertManifest(ctx context.Context, code string) (App, error) 
 		WebhookSecret string `json:"webhook_secret"`
 		Owner         struct {
 			Login string `json:"login"`
+			Type  string `json:"type"`
 		} `json:"owner"`
 	}
 	if err := c.do(ctx, http.MethodPost, "/app-manifests/"+url.PathEscape(code)+"/conversions", "", nil, &out); err != nil {
 		return App{}, err
 	}
-	app := App{ID: out.ID, Slug: out.Slug, ClientID: out.ClientID, ClientSecret: out.ClientSecret, PEM: out.PEM, WebhookSecret: out.WebhookSecret, Owner: out.Owner.Login}
+	app := App{ID: out.ID, Slug: out.Slug, ClientID: out.ClientID, ClientSecret: out.ClientSecret, PEM: out.PEM, WebhookSecret: out.WebhookSecret, Owner: out.Owner.Login, OwnerType: out.Owner.Type}
 	if _, err := parseKey(app.PEM); err != nil {
 		return App{}, err
 	}
@@ -257,13 +292,14 @@ func (c *Client) AppInstallation(ctx context.Context, app *App, id int64) (Insta
 		ID      int64 `json:"id"`
 		Account struct {
 			Login string `json:"login"`
+			Type  string `json:"type"`
 		} `json:"account"`
 		RepositorySelection string `json:"repository_selection"`
 	}
 	if err := c.do(ctx, http.MethodGet, "/app/installations/"+strconv.FormatInt(id, 10), "Bearer "+jwt, nil, &out); err != nil {
 		return Installation{}, err
 	}
-	return Installation{ID: out.ID, Account: out.Account.Login, RepositorySelection: out.RepositorySelection}, nil
+	return Installation{ID: out.ID, Account: out.Account.Login, AccountType: out.Account.Type, RepositorySelection: out.RepositorySelection}, nil
 }
 
 // RepoToken is an installation token for repo (owner/name) alone, with

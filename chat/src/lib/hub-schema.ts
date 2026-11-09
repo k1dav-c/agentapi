@@ -55,8 +55,10 @@ export interface components {
             connected: boolean;
             html_url?: string;
             install_url?: string;
-            installations: components["schemas"]["GitHubInstallation"][] | null;
+            installations: components["schemas"]["DispatchInstallationStatus"][] | null;
             owner?: string;
+            owner_type?: string;
+            settings_url?: string;
             slug?: string;
         };
         DispatchHost: {
@@ -83,6 +85,15 @@ export interface components {
         };
         DispatchHostsBody: {
             hosts: components["schemas"]["DispatchHost"][] | null;
+        };
+        DispatchInstallationStatus: {
+            account: string;
+            account_type?: string;
+            avatar_url: string;
+            /** Format: int64 */
+            id: number;
+            repository_selection: string;
+            settings_url?: string;
         };
         DispatchIssuesBody: {
             issues: components["schemas"]["GitHubIssue"][] | null;
@@ -197,12 +208,6 @@ export interface components {
         };
         ForgetBody: {
             ids: string[];
-        };
-        GitHubInstallation: {
-            account: string;
-            /** Format: int64 */
-            id: number;
-            repository_selection: string;
         };
         GitHubIssue: {
             body: string;
