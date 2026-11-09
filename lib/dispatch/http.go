@@ -141,12 +141,65 @@ func (s *Service) handleToken(w http.ResponseWriter, r *http.Request) {
 
 // GitHubStatus is GET /api/github.
 type GitHubStatus struct {
-	Connected     bool                  `json:"connected"`
-	Slug          string                `json:"slug,omitempty"`
-	Owner         string                `json:"owner,omitempty"`
-	HTMLURL       string                `json:"html_url,omitempty"`
-	InstallURL    string                `json:"install_url,omitempty"`
-	Installations []github.Installation `json:"installations"`
+	Connected bool   `json:"connected"`
+	Slug      string `json:"slug,omitempty"`
+	Owner     string `json:"owner,omitempty"`
+	// OwnerType is the owner's kind, "User" or "Organization"; empty
+	// while the hub doesn't know it.
+	OwnerType string `json:"owner_type,omitempty"`
+	// HTMLURL is the app's public page; SettingsURL its settings, under
+	// its owner's (empty while the owner's kind isn't known); InstallURL
+	// installs it on an account, or picks the repositories of one it is
+	// installed on.
+	HTMLURL       string               `json:"html_url,omitempty"`
+	SettingsURL   string               `json:"settings_url,omitempty"`
+	InstallURL    string               `json:"install_url,omitempty"`
+	Installations []InstallationStatus `json:"installations"`
+}
+
+// InstallationStatus is an installation of the hub's app, with its links.
+type InstallationStatus struct {
+	ID      int64  `json:"id"`
+	Account string `json:"account"`
+	// AccountType is "User" or "Organization"; empty while the hub doesn't
+	// know it.
+	AccountType string `json:"account_type,omitempty"`
+	// RepositorySelection is "all" or "selected".
+	RepositorySelection string `json:"repository_selection"`
+	// AvatarURL is the account's picture on GitHub; SettingsURL the
+	// installation's page, where the account picks its repositories (empty
+	// while the account's kind isn't known).
+	AvatarURL   string `json:"avatar_url"`
+	SettingsURL string `json:"settings_url,omitempty"`
+}
+
+// githubStatus is what GET /api/github says of app (nil: not connected).
+func githubStatus(web string, app *github.App) GitHubStatus {
+	status := GitHubStatus{Installations: []InstallationStatus{}}
+	if app == nil {
+		return status
+	}
+	web = strings.TrimSuffix(web, "/")
+	status.Connected, status.Slug, status.Owner = true, app.Slug, app.Owner
+	// An app registered before the hub kept its owner's kind: its owner's
+	// own installation says it.
+	known := *app
+	for _, inst := range app.Installations {
+		if known.OwnerType == "" && inst.AccountType != "" && strings.EqualFold(inst.Account, app.Owner) {
+			known.OwnerType = inst.AccountType
+		}
+	}
+	status.OwnerType = known.OwnerType
+	status.HTMLURL = web + "/apps/" + url.PathEscape(app.Slug)
+	status.SettingsURL = known.SettingsURL(web)
+	status.InstallURL = app.InstallURL(web, "")
+	for _, inst := range app.Installations {
+		status.Installations = append(status.Installations, InstallationStatus{
+			ID: inst.ID, Account: inst.Account, AccountType: inst.AccountType, RepositorySelection: inst.RepositorySelection,
+			AvatarURL: web + "/" + url.PathEscape(inst.Account) + ".png?size=96", SettingsURL: inst.SettingsURL(web),
+		})
+	}
+	return status
 }
 
 // MountSession adds the routes for a signed-in browser: the machines, the
@@ -159,14 +212,7 @@ func (s *Service) MountSession(r chi.Router) {
 		jsonapi.Write(w, http.StatusOK, JobsBody{Jobs: s.Jobs()})
 	})
 	r.Get("/api/github", func(w http.ResponseWriter, _ *http.Request) {
-		status := GitHubStatus{Installations: []github.Installation{}}
-		if app := s.currentApp(); app != nil {
-			status.Connected, status.Slug, status.Owner = true, app.Slug, app.Owner
-			status.HTMLURL = strings.TrimSuffix(s.gh.Web, "/") + "/apps/" + app.Slug
-			status.InstallURL = app.InstallURL(s.gh.Web, "")
-			status.Installations = append(status.Installations, app.Installations...)
-		}
-		jsonapi.Write(w, http.StatusOK, status)
+		jsonapi.Write(w, http.StatusOK, githubStatus(s.gh.Web, s.currentApp()))
 	})
 	r.Delete("/api/github", func(w http.ResponseWriter, _ *http.Request) {
 		s.mu.Lock()
@@ -389,6 +435,7 @@ var connectPage = template.Must(template.New("").Parse(`<!doctype html>
 <body style="font-family:system-ui;max-width:40rem;margin:3rem auto">
 <h1>建立 agentapi hub 的 GitHub App</h1>
 <p>按下按鈕後到 GitHub 確認建立。名稱可以在 GitHub 上修改（GitHub 上不能重名）。建立後會接著請你選擇要安裝的 repository。</p>
+{{if .Current}}<p>這個 hub 現在用的是 {{.Current}}。新的 App 建立後才會取代它；在 GitHub 上取消的話，{{.Current}} 照常運作。舊的 App 會留在 GitHub 上，不用時到它的設定頁刪除。</p>{{end}}
 <form id="f" method="post" action="{{.Action}}">
 <input type="hidden" name="manifest" value="{{.Manifest}}">
 <button type="submit">在 GitHub 建立 App{{if .Org}}（組織 {{.Org}}）{{end}}</button>
@@ -421,7 +468,11 @@ func (s *Service) connect(w http.ResponseWriter, r *http.Request) {
 	manifest, _ := json.Marshal(Manifest(origin(r), "agentapi-hub-"+hex.EncodeToString(suffix)))
 	action += "?state=" + url.QueryEscape(s.newState())
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = connectPage.Execute(w, map[string]string{"Action": action, "Manifest": string(manifest), "Org": org})
+	current := ""
+	if app := s.currentApp(); app != nil {
+		current = app.Slug
+	}
+	_ = connectPage.Execute(w, map[string]string{"Action": action, "Manifest": string(manifest), "Org": org, "Current": current})
 }
 
 func (s *Service) callback(w http.ResponseWriter, r *http.Request) {
@@ -436,10 +487,14 @@ func (s *Service) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	app.HubURL = origin(r)
+	// The new app replaces the one the hub had, if any, only now: a
+	// connect left on GitHub keeps the hub's app working.
 	if err := s.saveApp(&app); err != nil {
 		s.page(w, http.StatusInternalServerError, donePageData{Title: "連接失敗", Message: err.Error()})
 		return
 	}
+	// The tokens kept are the old app's.
+	s.gh.Forget()
 	s.logger.Info("Registered the hub's GitHub App", "slug", app.Slug, "owner", app.Owner)
 	http.Redirect(w, r, app.InstallURL(s.gh.Web, s.newState()), http.StatusFound)
 }

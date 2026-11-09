@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- Hub settings has a **GitHub** tab beside Favorites, which the Issues page opens too (the app's
+  name beside Issues, or **GitHub settings…** in the repository menu). It shows the hub's GitHub
+  App, its owner, and each account it is installed on with its picture and repositories, and
+  links to GitHub in a new tab: **Choose repositories**, each account's installation, and the
+  app's settings. **Reconnect…** registers a new app, for your account or an organization; the
+  hub keeps its app until GitHub hands the new one back. **Disconnect…** asks first and says what
+  stops. The tab reads the app again when you come back from GitHub. See
+  [GitHub settings](docs/hub.md#github-settings).
+- `GET /api/github` says whether the app's owner is a user or an organization, and has the app's
+  settings page and each installation's page and avatar.
+
+### Fixes
+
+- A new GitHub App connected in place of the hub's drops the old app's cached repository tokens,
+  which the hub went on handing to jobs until they expired. The connect page names the app it
+  would replace.
+
 ## v3.13.0
 
 ### Features

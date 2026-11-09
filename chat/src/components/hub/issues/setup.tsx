@@ -5,6 +5,7 @@ import {ArrowRight, Github, Play, Server} from "lucide-react";
 import {CopyCommand} from "@/components/copy-command";
 import {Button} from "@/components/ui/button";
 import {agentLabel, parseIssueRef, type DispatchHost, type GitHubStatus} from "@/lib/hub-dispatch";
+import {connectURL} from "@/lib/hub-github";
 import {suggest} from "@/lib/hub-issues";
 import {cn} from "@/lib/utils";
 
@@ -20,28 +21,32 @@ const steps = [
 
 // ConnectGitHub is the first thing a hub without GitHub shows: what
 // connecting does, in three steps, and the button that starts it. An
-// organization's app is a field away.
-export function ConnectGitHub({root}: {root: string}) {
+// organization's app is a field away. compact is the hub settings' own,
+// in a dialog's width.
+export function ConnectGitHub({root, compact = false}: {root: string; compact?: boolean}) {
   const [org, setOrg] = useState("");
   const [forOrg, setForOrg] = useState(false);
-  const connect = `${root}/github/connect${org.trim() ? `?org=${encodeURIComponent(org.trim())}` : ""}`;
+  const connect = connectURL(root, org);
+  const pad = compact ? "px-5" : "px-6 sm:px-8";
+  // Under the settings' own heading, a level down.
+  const Heading = compact ? "h4" : "h3";
   return (
-    <section aria-labelledby="connect-github" className="hub-rise overflow-hidden rounded-3xl border bg-card shadow-xs">
-      <div className="hub-grid relative border-b px-6 pt-7 pb-6 sm:px-8">
-        <span className="flex size-11 items-center justify-center rounded-2xl bg-foreground text-background shadow-md">
-          <Github className="size-5" aria-hidden="true" />
+    <section aria-labelledby="connect-github" className={cn("hub-rise overflow-hidden border bg-card shadow-xs", compact ? "rounded-2xl" : "rounded-3xl")}>
+      <div className={cn("hub-grid relative border-b", pad, compact ? "pt-5 pb-4" : "pt-7 pb-6")}>
+        <span className={cn("flex items-center justify-center bg-foreground text-background shadow-md", compact ? "size-9 rounded-xl" : "size-11 rounded-2xl")}>
+          <Github className={compact ? "size-4" : "size-5"} aria-hidden="true" />
         </span>
-        <h3 id="connect-github" className="mt-5 text-2xl font-semibold tracking-tight">
+        <Heading id="connect-github" className={cn("font-semibold tracking-tight", compact ? "mt-4 text-lg" : "mt-5 text-2xl")}>
           Connect GitHub
-        </h3>
-        <p className="mt-2 max-w-prose text-[15px] text-pretty text-muted-foreground">
+        </Heading>
+        <p className={cn("mt-2 max-w-prose text-pretty text-muted-foreground", compact ? "text-sm" : "text-[15px]")}>
           List your repositories&apos; open issues here, and have agents push branches and open pull requests as the hub&apos;s app, with their spend in a comment. Reviews on the pull
           request go back to the same agent.
         </p>
       </div>
       <ol className="grid gap-px bg-border sm:grid-cols-3">
         {steps.map((step, i) => (
-          <li key={step.title} className="bg-card px-6 py-4 sm:px-8">
+          <li key={step.title} className={cn("bg-card", pad, compact ? "py-3.5" : "py-4")}>
             <span className="flex items-center gap-2 text-sm font-semibold">
               <span className="flex size-5 items-center justify-center rounded-full bg-foreground/8 text-[11px] tabular-nums">{i + 1}</span>
               {step.title}
@@ -50,14 +55,14 @@ export function ConnectGitHub({root}: {root: string}) {
           </li>
         ))}
       </ol>
-      <div className="flex flex-wrap items-center gap-3 border-t px-6 py-4 sm:px-8">
+      <div className={cn("flex flex-wrap items-center gap-3 border-t py-4", pad)}>
         <Button asChild className="h-10 rounded-xl px-4">
           <a href={connect}>
             <Github className="size-4" /> Connect GitHub{org.trim() ? ` for ${org.trim()}` : ""} <ArrowRight className="size-4" />
           </a>
         </Button>
         {forOrg ? (
-          <input autoFocus className={cn(field, "w-56 flex-none")} placeholder="Organization" aria-label="Organization" value={org} onChange={(e) => setOrg(e.target.value)} />
+          <input autoFocus className={cn(field, "w-56 max-w-full flex-none")} placeholder="Organization" aria-label="Organization" value={org} onChange={(e) => setOrg(e.target.value)} />
         ) : (
           <button type="button" onClick={() => setForOrg(true)} className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
             For an organization?

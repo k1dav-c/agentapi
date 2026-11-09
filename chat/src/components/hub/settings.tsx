@@ -1,32 +1,61 @@
 "use client";
 
-import {useRef} from "react";
+import {useRef, useState} from "react";
+import * as TabsPrimitive from "@radix-ui/react-tabs";
+import {Github, Star} from "lucide-react";
 import {Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle} from "@/components/ui/dialog";
 import type {Favorite} from "@/lib/hub-favorites";
 import {FavoritesSettings} from "./favorites-settings";
+import {GitHubSettings} from "./github-settings";
 
-// The sections of the hub's settings, each a block of the dialog; opening it
+// The sections of the hub's settings, each a tab of the dialog; opening it
 // at one shows that one.
-export type SettingsSection = "favorites";
+export type SettingsSection = "favorites" | "github";
+
+const sections: {id: SettingsSection; label: string; icon: React.ReactNode}[] = [
+  {id: "favorites", label: "Favorites", icon: <Star />},
+  {id: "github", label: "GitHub", icon: <Github />},
+];
 
 // HubSettings is the dialog of the settings kept on the hub, which every
-// browser signed in to it shares: for now the favorites. section is the one
-// it opens at; null is closed.
+// browser signed in to it shares: the favorites, and the hub's GitHub App.
+// section is the one it opens at; null is closed. activeJobs is how many
+// jobs at work push with the app's tokens; onGitHubChanged is told when
+// the app or where it is installed changed.
 export function HubSettings({
   root,
   section,
   onClose,
   favorites,
   onFavoritesSaved,
+  activeJobs,
+  onGitHubChanged,
 }: {
   root: string;
   section: SettingsSection | null;
   onClose: () => void;
   favorites: Favorite[] | undefined;
   onFavoritesSaved: (favorites: Favorite[]) => void;
+  activeJobs?: number;
+  onGitHubChanged?: () => void;
 }) {
   const editor = useRef<{open: boolean; cancel: () => void} | null>(null);
   const headings = useRef<Partial<Record<SettingsSection, HTMLHeadingElement | null>>>({});
+  const [shown, setShown] = useState<SettingsSection>(section ?? "favorites");
+  // The GitHub section reads GitHub through the hub: only once it shows,
+  // again each time the dialog opens.
+  const [seen, setSeen] = useState<ReadonlySet<SettingsSection>>(new Set(section ? [section] : []));
+  const show = (next: SettingsSection) => {
+    setShown(next);
+    setSeen((all) => (all.has(next) ? all : new Set([...all, next])));
+  };
+  // Opened, or at another section: that one, before the dialog draws.
+  const [asked, setAsked] = useState(section);
+  if (section !== asked) {
+    setAsked(section);
+    if (section) show(section);
+    else setSeen(new Set());
+  }
   return (
     <Dialog open={section !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent
@@ -35,7 +64,6 @@ export function HubSettings({
           const heading = section ? headings.current[section] : null;
           if (!heading) return;
           event.preventDefault();
-          heading.scrollIntoView({block: "start"});
           heading.focus({preventScroll: true});
         }}
         // Escape closes the editor first, then the dialog; a click outside
@@ -53,15 +81,44 @@ export function HubSettings({
           <DialogTitle>Hub settings</DialogTitle>
           <DialogDescription>Kept on the hub: every browser signed in to it has the same.</DialogDescription>
         </DialogHeader>
-        <FavoritesSettings
-          root={root}
-          favorites={favorites}
-          onSaved={onFavoritesSaved}
-          editor={editor}
-          headingRef={(heading) => {
-            headings.current.favorites = heading;
-          }}
-        />
+        <TabsPrimitive.Root value={shown} onValueChange={(value) => show(value as SettingsSection)} className="min-w-0 space-y-5">
+          <TabsPrimitive.List aria-label="Settings" className="relative flex gap-1 rounded-xl bg-muted p-1">
+            {sections.map(({id, label, icon}) => (
+              <TabsPrimitive.Trigger
+                key={id}
+                value={id}
+                className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg text-sm font-medium text-muted-foreground outline-none transition-[color,background-color,box-shadow] duration-200 hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/40 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm dark:data-[state=active]:bg-input/40 [&_svg]:size-3.5"
+              >
+                {icon}
+                {label}
+              </TabsPrimitive.Trigger>
+            ))}
+          </TabsPrimitive.List>
+          {/* Both stay mounted: a half-written favorite outlives a look at GitHub. */}
+          <TabsPrimitive.Content value="favorites" forceMount className="outline-none data-[state=inactive]:hidden">
+            <FavoritesSettings
+              root={root}
+              favorites={favorites}
+              onSaved={onFavoritesSaved}
+              editor={editor}
+              headingRef={(heading) => {
+                headings.current.favorites = heading;
+              }}
+            />
+          </TabsPrimitive.Content>
+          <TabsPrimitive.Content value="github" forceMount className="outline-none data-[state=inactive]:hidden">
+            {seen.has("github") && (
+              <GitHubSettings
+                root={root}
+                activeJobs={activeJobs}
+                onChanged={onGitHubChanged}
+                headingRef={(heading) => {
+                  headings.current.github = heading;
+                }}
+              />
+            )}
+          </TabsPrimitive.Content>
+        </TabsPrimitive.Root>
       </DialogContent>
     </Dialog>
   );

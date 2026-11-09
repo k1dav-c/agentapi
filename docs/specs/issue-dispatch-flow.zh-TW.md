@@ -200,6 +200,10 @@ flowchart TB
 
 ![/github/connect](../screenshots/dispatch-github-connect.png)
 
+接上之後，改安裝的 repo、換一個 App 或中斷連接，都在 Hub settings 的 **GitHub** 分頁（Issues 頁上點 App 的名稱也會開到這裡）。Reconnect 不會先中斷：新 App 從 GitHub 回來才取代舊的，中途取消一切照舊（規格 §6.5）。
+
+![Hub settings 的 GitHub 分頁](../screenshots/hub-settings-github.png)
+
 ## 7. Job 狀態
 
 ```mermaid

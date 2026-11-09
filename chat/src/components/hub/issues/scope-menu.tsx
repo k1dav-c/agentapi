@@ -1,9 +1,10 @@
 "use client";
 
-import {useState} from "react";
-import {Check, ChevronDown, FolderGit2, Layers, Search} from "lucide-react";
+import {useRef, useState} from "react";
+import {Check, ChevronDown, FolderGit2, Layers, Search, Settings2} from "lucide-react";
 import {DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger} from "@/components/ui/dropdown-menu";
 import {active, type DispatchJob} from "@/lib/hub-dispatch";
+import {useDialogFromMenu} from "@/lib/menu-dialog";
 import {cn} from "@/lib/utils";
 
 // How many repositories the menu lists before it asks for a search.
@@ -11,9 +12,28 @@ const listed = 8;
 
 // ScopeMenu picks the repositories the board shows: the recent ones (the
 // first of repos, which the hub lists the latest pushed or changed first),
-// or any one, found by its name; each with the work going on in it.
-export function ScopeMenu({repos, recent, jobs, scope, onScope}: {repos: string[]; recent: number; jobs: DispatchJob[]; scope: string; onScope: (repo: string) => void}) {
+// or any one, found by its name; each with the work going on in it. Its
+// foot opens the hub settings at GitHub, where the app picks them.
+export function ScopeMenu({
+  repos,
+  recent,
+  jobs,
+  scope,
+  onScope,
+  onGitHubSettings,
+}: {
+  repos: string[];
+  recent: number;
+  jobs: DispatchJob[];
+  scope: string;
+  onScope: (repo: string) => void;
+  onGitHubSettings?: () => void;
+}) {
   const [query, setQuery] = useState("");
+  // The settings open once the menu let go of the page.
+  const openSettings = useRef(onGitHubSettings);
+  openSettings.current = onGitHubSettings;
+  const settings = useDialogFromMenu(() => openSettings.current?.());
   const busy = (repo: string) => jobs.filter((job) => active(job) && (repo === "" || job.repo === repo)).length;
   const q = query.trim().toLowerCase();
   const found = q ? repos.filter((repo) => repo.toLowerCase().includes(q)) : repos.slice(0, listed);
@@ -36,7 +56,7 @@ export function ScopeMenu({repos, recent, jobs, scope, onScope}: {repos: string[
         <span className={cn("min-w-0 truncate", scope && "font-mono text-[13px]")}>{scope || (repos.length > recent ? "Recent repositories" : "All repositories")}</span>
         <ChevronDown className="size-3.5 shrink-0 text-muted-foreground transition-transform duration-200 group-data-[state=open]:rotate-180" aria-hidden="true" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" sideOffset={6} className="w-80 rounded-xl p-1 shadow-lg">
+      <DropdownMenuContent align="start" sideOffset={6} className="w-80 rounded-xl p-1 shadow-lg" onCloseAutoFocus={settings.onCloseAutoFocus}>
         {item("", allLabel, <Layers className="size-4" aria-hidden="true" />)}
         {repos.length > recent && <p className="px-2 pb-1.5 text-[11px] text-muted-foreground">The issues of those pushed or changed latest; jobs show from all.</p>}
         <DropdownMenuSeparator />
@@ -57,6 +77,15 @@ export function ScopeMenu({repos, recent, jobs, scope, onScope}: {repos: string[
         {repos.length > listed && !q && <DropdownMenuLabel className="pt-1 text-[11px] font-normal text-muted-foreground">Latest</DropdownMenuLabel>}
         {found.map((repo) => item(repo, repo, <FolderGit2 className="size-4" aria-hidden="true" />))}
         {q && found.length === 0 && <p className="px-2.5 py-2 text-sm text-muted-foreground">No repository matches.</p>}
+        {onGitHubSettings && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={settings.onSelect} className="gap-2.5 rounded-lg py-2 text-muted-foreground">
+              <Settings2 className="size-4" aria-hidden="true" />
+              <span className="flex-1">GitHub settings…</span>
+            </DropdownMenuItem>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

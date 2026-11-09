@@ -163,11 +163,14 @@ func (g *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	switch {
 	case r.Method == "POST" && path == "/app-manifests/the-code/conversions":
-		jsonapi.Write(w, 201, map[string]any{"id": 42, "slug": "agentapi-hub-x", "client_id": "Iv1", "client_secret": "cs", "pem": g.pem(), "webhook_secret": "ws", "owner": map[string]string{"login": "acme"}})
+		jsonapi.Write(w, 201, map[string]any{"id": 42, "slug": "agentapi-hub-x", "client_id": "Iv1", "client_secret": "cs", "pem": g.pem(), "webhook_secret": "ws", "owner": map[string]string{"login": "acme", "type": "Organization"}})
+	case r.Method == "POST" && path == "/app-manifests/another-code/conversions":
+		// The same key and ID, for the fake's JWT check: another app all the same.
+		jsonapi.Write(w, 201, map[string]any{"id": 42, "slug": "agentapi-hub-y", "client_id": "Iv2", "client_secret": "cs", "pem": g.pem(), "webhook_secret": "ws", "owner": map[string]string{"login": "dave", "type": "User"}})
 	case r.Method == "GET" && path == "/users/agentapi-hub-x[bot]":
 		jsonapi.Write(w, 200, map[string]any{"id": 99})
 	case r.Method == "GET" && path == "/app/installations/7" && g.checkJWT(r):
-		jsonapi.Write(w, 200, map[string]any{"id": 7, "account": map[string]string{"login": "acme"}, "repository_selection": "selected"})
+		jsonapi.Write(w, 200, map[string]any{"id": 7, "account": map[string]string{"login": "acme", "type": "Organization"}, "repository_selection": "selected"})
 	case r.Method == "GET" && path == "/repos/acme/widget/installation" && g.checkJWT(r):
 		jsonapi.Write(w, 200, map[string]any{"id": 7})
 	case r.Method == "GET" && strings.HasSuffix(path, "/installation"):
@@ -386,7 +389,8 @@ func TestDispatchWithGitHubApp(t *testing.T) {
 	assert.Equal(t, int64(42), app.ID)
 	assert.Equal(t, int64(99), app.BotUserID)
 	assert.Equal(t, srv.URL, app.HubURL)
-	assert.Equal(t, []github.Installation{{ID: 7, Account: "acme", RepositorySelection: "selected"}}, app.Installations)
+	assert.Equal(t, "Organization", app.OwnerType)
+	assert.Equal(t, []github.Installation{{ID: 7, Account: "acme", AccountType: "Organization", RepositorySelection: "selected"}}, app.Installations)
 
 	// A repository the app isn't on is refused.
 	_, err = s.Dispatch(ctx, Request{Action: ActionStart, Repo: "acme/other", Issue: 1})
@@ -743,4 +747,83 @@ func TestMessageSourceOverHTTP(t *testing.T) {
 	assert.Empty(t, messages[0].Author)
 	assert.Equal(t, SourceComment, messages[1].Source)
 	assert.Equal(t, "hub", messages[1].Author)
+}
+
+func TestGitHubStatus(t *testing.T) {
+	web := "https://github.example/"
+	assert.Equal(t, GitHubStatus{Installations: []InstallationStatus{}}, githubStatus(web, nil))
+
+	org := &github.App{Slug: "agentapi-hub-x", Owner: "acme", OwnerType: "Organization", Installations: []github.Installation{
+		{ID: 7, Account: "acme", AccountType: "Organization", RepositorySelection: "selected"},
+		{ID: 8, Account: "dave", AccountType: "User", RepositorySelection: "all"},
+	}}
+	assert.Equal(t, GitHubStatus{
+		Connected: true, Slug: "agentapi-hub-x", Owner: "acme", OwnerType: "Organization",
+		HTMLURL:     "https://github.example/apps/agentapi-hub-x",
+		SettingsURL: "https://github.example/organizations/acme/settings/apps/agentapi-hub-x",
+		InstallURL:  "https://github.example/apps/agentapi-hub-x/installations/new",
+		Installations: []InstallationStatus{
+			{ID: 7, Account: "acme", AccountType: "Organization", RepositorySelection: "selected", AvatarURL: "https://github.example/acme.png?size=96", SettingsURL: "https://github.example/organizations/acme/settings/installations/7"},
+			{ID: 8, Account: "dave", AccountType: "User", RepositorySelection: "all", AvatarURL: "https://github.example/dave.png?size=96", SettingsURL: "https://github.example/settings/installations/8"},
+		},
+	}, githubStatus(web, org))
+
+	// An app from before the hub kept the owner's kind: its owner's own
+	// installation says it, once one says its kind.
+	old := &github.App{Slug: "agentapi-hub-x", Owner: "dave", Installations: []github.Installation{{ID: 8, Account: "dave", RepositorySelection: "all"}}}
+	status := githubStatus(web, old)
+	assert.Empty(t, status.OwnerType)
+	assert.Empty(t, status.SettingsURL)
+	assert.Empty(t, status.Installations[0].SettingsURL)
+	old.Installations[0].AccountType = "User"
+	status = githubStatus(web, old)
+	assert.Equal(t, "User", status.OwnerType)
+	assert.Equal(t, "https://github.example/settings/apps/agentapi-hub-x", status.SettingsURL)
+	assert.Empty(t, old.OwnerType, "the app itself is left as it is")
+}
+
+// A connect while the hub has an app keeps that one until GitHub hands the
+// new one back: a connect left on GitHub changes nothing.
+func TestReconnectReplacesTheAppOnlyOnceSaved(t *testing.T) {
+	ctx := context.Background()
+	g := newFakeGitHub(t)
+	s, _ := newService(t, g)
+	r := chi.NewRouter()
+	s.MountSession(r)
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+	noRedirect := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	get := func(path string) *http.Response {
+		resp, err := noRedirect.Get(srv.URL + path)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = resp.Body.Close() })
+		return resp
+	}
+	assert.Equal(t, http.StatusFound, get("/github/callback?code=the-code&state="+s.newState()).StatusCode)
+	assert.Equal(t, http.StatusOK, get("/github/setup?installation_id=7&setup_action=install").StatusCode)
+	_, err := s.gh.RepoToken(ctx, s.currentApp(), "acme/widget")
+	require.NoError(t, err)
+	require.Equal(t, 1, g.tokens)
+
+	// The connect page names the app it would replace.
+	resp := get("/github/connect")
+	body, _ := io.ReadAll(resp.Body)
+	assert.Contains(t, string(body), "這個 hub 現在用的是 agentapi-hub-x")
+	assert.Equal(t, "agentapi-hub-x", s.currentApp().Slug, "a connect alone changes nothing")
+	saved, err := LoadApp(s.config.AppPath)
+	require.NoError(t, err)
+	assert.Equal(t, "agentapi-hub-x", saved.Slug)
+
+	// GitHub hands the new app back: it replaces the old one, which had
+	// its installations, and the old one's tokens go.
+	assert.Equal(t, http.StatusFound, get("/github/callback?code=another-code&state="+s.newState()).StatusCode)
+	saved, err = LoadApp(s.config.AppPath)
+	require.NoError(t, err)
+	assert.Equal(t, "agentapi-hub-y", saved.Slug)
+	assert.Equal(t, "User", saved.OwnerType)
+	assert.Empty(t, saved.Installations)
+	assert.Equal(t, "agentapi-hub-y", s.currentApp().Slug)
+	_, err = s.gh.RepoToken(ctx, s.currentApp(), "acme/widget")
+	require.NoError(t, err)
+	assert.Equal(t, 2, g.tokens, "a token of the new app, not the old one's kept")
 }

@@ -2,7 +2,7 @@
 
 import {useCallback, useEffect, useMemo, useRef, useState} from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import {ArrowLeft, Plus, RefreshCw, TriangleAlert} from "lucide-react";
+import {ArrowLeft, Plus, RefreshCw, Settings2, TriangleAlert} from "lucide-react";
 import {Button} from "@/components/ui/button";
 import type {DispatchBoard, HubInstance} from "@/lib/hub";
 import {jobCost, type DispatchHost} from "@/lib/hub-dispatch";
@@ -79,6 +79,8 @@ export function IssuesView({
   onSelect,
   onClose,
   onOpenChat,
+  githubChanges = 0,
+  onGitHubSettings,
 }: {
   root: string;
   instances: ReadonlyMap<string, HubInstance>;
@@ -91,8 +93,13 @@ export function IssuesView({
   onSelect: (key: string | null) => void;
   onClose: () => void;
   onOpenChat: (instanceID: string) => void;
+  // Counts the changes to the hub's GitHub App in the settings: each reads
+  // it again.
+  githubChanges?: number;
+  // Opens the hub settings at GitHub.
+  onGitHubSettings?: () => void;
 }) {
-  const d = useDispatch(root, live);
+  const d = useDispatch(root, live, githubChanges);
   const hosts: DispatchHost[] = useMemo(() => (d.hosts.state === "ready" ? d.hosts.value : []), [d.hosts]);
   const status = d.github.state === "ready" ? d.github.value : undefined;
   const connected = !!status?.connected;
@@ -272,7 +279,7 @@ export function IssuesView({
             <Button variant="ghost" size="icon" className="-ml-2 size-9 shrink-0 rounded-full md:hidden" onClick={onClose} aria-label="Back to the list">
               <ArrowLeft className="size-4" />
             </Button>
-            {connected && <ScopeMenu repos={repoNames} recent={recentRepos} jobs={d.jobs} scope={d.scope} onScope={d.setScope} />}
+            {connected && <ScopeMenu repos={repoNames} recent={recentRepos} jobs={d.jobs} scope={d.scope} onScope={d.setScope} onGitHubSettings={onGitHubSettings} />}
             <span className="flex-1" />
             <Button variant="ghost" size="icon" className="size-9 shrink-0 rounded-full text-muted-foreground" onClick={dispatch.refresh} aria-label="Read the issues again" title="Read again (r)">
               <RefreshCw className={cn("size-4", d.reading && "animate-spin")} />
@@ -286,13 +293,26 @@ export function IssuesView({
         </header>
 
         <div className="mx-auto max-w-6xl px-5 pt-5 pb-20 md:px-10 md:pt-12">
-          <p className="text-sm text-muted-foreground">
+          <p className="flex flex-wrap items-center gap-x-1 text-sm text-muted-foreground">
             Issues
             {status?.connected && status.slug && (
               <>
-                {" "}
-                · <span className="font-mono text-[13px]">{status.slug}</span>
-                {(status.installations ?? []).length > 0 && ` on ${(status.installations ?? []).map((i) => i.account).join(", ")}`}
+                <span aria-hidden="true">·</span>
+                {onGitHubSettings ? (
+                  <button
+                    type="button"
+                    onClick={onGitHubSettings}
+                    title="GitHub settings"
+                    className="group -mx-1 inline-flex items-center gap-1 rounded-md px-1 outline-none transition-colors hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/40"
+                  >
+                    <span className="font-mono text-[13px] underline-offset-4 group-hover:underline">{status.slug}</span>
+                    <Settings2 className="size-3.5 opacity-60 transition-opacity group-hover:opacity-100" aria-hidden="true" />
+                    <span className="sr-only">: GitHub settings</span>
+                  </button>
+                ) : (
+                  <span className="font-mono text-[13px]">{status.slug}</span>
+                )}
+                {(status.installations ?? []).length > 0 && <span>on {(status.installations ?? []).map((i) => i.account).join(", ")}</span>}
               </>
             )}
           </p>

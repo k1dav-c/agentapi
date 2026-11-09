@@ -40,6 +40,12 @@ and the issues and jobs of `acme/web`, `acme/api` and `acme/infra`, at a fixed t
 Codex, a local bare repository in place of github.com, and a fake GitHub API. None of them are
 part of `capture-docs.mjs`.
 
+`hub-settings-github.png` came from the same kind of build and fixtures: an app of the `acme`
+organization installed on `acme` (24 selected repositories) and on a user, `dave` (all three of
+his), with the accounts' pictures drawn locally in place of GitHub's. Since the settings dialog
+has tabs, `hub-settings-favorites.png` was taken the same way, with the favorites
+`capture-docs.mjs` puts on its hub; the script takes it again as before.
+
 ## Gallery
 
 Desktop views are 1440 × 1000 (or a part of one), phone views 390 × 844, all in the light theme at a
@@ -91,7 +97,8 @@ device scale factor of 1.
 | [hub-sign-in.png](hub-sign-in.png) | Signing in to the hub, beside its picture of agents in their states |
 | [hub-list.png](hub-list.png) | The hub's list: two pinned agents, then two groups and Ungrouped, with every state's glyph: approval, question, login, usage limit, working, finished, idle, unreachable, stopped; and each agent's AgentAPI version, one older than the hub |
 | [hub-add.png](hub-add.png) | The Add dialog: joining a machine (the hub's address, updates from the hub, the command and a prompt for an agent, the secret masked), or adding an instance by its URL and token |
-| [hub-settings-favorites.png](hub-settings-favorites.png) | Hub settings: the favorites, each with its buttons to move, edit and delete it |
+| [hub-settings-favorites.png](hub-settings-favorites.png) | Hub settings at its Favorites tab: the favorites, each with its buttons to move, edit and delete it |
+| [hub-settings-github.png](hub-settings-github.png) | Hub settings at its GitHub tab: the hub's GitHub App, the accounts it is installed on with their repositories, and Choose repositories, App settings on GitHub, Reconnect and Disconnect |
 | [hub-recent.png](hub-recent.png) | The hub's list by the agents' latest changes: the pinned agents, then one list without group headers, the most recent first, and each row's group where it has room |
 | [hub-machines.png](hub-machines.png) | The hub's list By machine in the groups: the pinned agents, then each group with a card per machine: the machine with its version and spend once, a tab per agent with its state's dot, and the picked agent below, one older than the hub |
 | [hub-machines-recent.png](hub-machines-recent.png) | The hub's list By machine in the recent order: the pinned agents, then a card per machine without group headers, the machine of the latest change first, each with the age of that change and the agent that changed last |

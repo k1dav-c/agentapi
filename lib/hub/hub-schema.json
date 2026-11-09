@@ -178,7 +178,7 @@
           },
           "installations": {
             "items": {
-              "$ref": "#/components/schemas/GitHubInstallation"
+              "$ref": "#/components/schemas/DispatchInstallationStatus"
             },
             "type": [
               "array",
@@ -186,6 +186,12 @@
             ]
           },
           "owner": {
+            "type": "string"
+          },
+          "owner_type": {
+            "type": "string"
+          },
+          "settings_url": {
             "type": "string"
           },
           "slug": {
@@ -306,6 +312,37 @@
         },
         "required": [
           "hosts"
+        ],
+        "type": "object"
+      },
+      "DispatchInstallationStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "account": {
+            "type": "string"
+          },
+          "account_type": {
+            "type": "string"
+          },
+          "avatar_url": {
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "repository_selection": {
+            "type": "string"
+          },
+          "settings_url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "account",
+          "repository_selection",
+          "avatar_url"
         ],
         "type": "object"
       },
@@ -738,27 +775,6 @@
         },
         "required": [
           "ids"
-        ],
-        "type": "object"
-      },
-      "GitHubInstallation": {
-        "additionalProperties": false,
-        "properties": {
-          "account": {
-            "type": "string"
-          },
-          "id": {
-            "format": "int64",
-            "type": "integer"
-          },
-          "repository_selection": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "account",
-          "repository_selection"
         ],
         "type": "object"
       },

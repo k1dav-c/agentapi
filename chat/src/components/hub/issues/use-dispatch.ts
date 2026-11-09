@@ -68,7 +68,9 @@ function refusal(error: unknown): {title?: string; description: string} {
 // GitHub App, its repositories and their open issues, and the machines and
 // the jobs, from live (the hub's stream) or, from an older hub, read every
 // few seconds; and does what the view asks of them.
-export function useDispatch(root: string, live?: DispatchBoard) {
+// githubChanges counts the changes to the app made elsewhere (the hub's
+// settings): each reads it again.
+export function useDispatch(root: string, live?: DispatchBoard, githubChanges = 0) {
   const api = useMemo(() => createDispatchAPI(root), [root]);
   const [scope, setScope] = useHubSetting("issuesRepo");
   const [preferred, setPreferred] = useHubSetting("issuesAgent");
@@ -132,8 +134,10 @@ export function useDispatch(root: string, live?: DispatchBoard) {
 
   useEffect(() => {
     void refreshJobs();
+  }, [refreshJobs]);
+  useEffect(() => {
     void readGitHub();
-  }, [refreshJobs, readGitHub]);
+  }, [readGitHub, githubChanges]);
   useEffect(() => {
     void readIssues();
   }, [readIssues]);
