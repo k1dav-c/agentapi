@@ -256,8 +256,11 @@ export function IssuesView({
     />
   );
 
+  // Keyed by the issue: a confirmation or a message half written is for
+  // the issue it was started on, not the next one opened.
   const detail = selected && (
     <IssueDetail
+      key={selected.key}
       card={selected}
       hosts={hosts}
       instance={selected.job ? instances.get(selected.job.instance_id) : undefined}
