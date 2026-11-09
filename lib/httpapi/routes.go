@@ -12,7 +12,7 @@ import (
 )
 
 func (s *Server) NormalizeSchema(schema any) any {
-	switch val := (schema).(type) {
+	switch val := schema.(type) {
 	case *any:
 		s.NormalizeSchema(*val)
 	case []any:

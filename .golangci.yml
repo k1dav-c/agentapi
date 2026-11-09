@@ -6,7 +6,7 @@ linters:
     exhaustive:
       check:
         - "switch"
-        - "map"
+        - "mapliteral"
     staticcheck:
       checks:
         - "-QF1001" # disable "could apply De Morgan's law"

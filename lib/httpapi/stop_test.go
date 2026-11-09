@@ -37,8 +37,8 @@ func TestStopWaitsForTheQueueLoop(t *testing.T) {
 	go func() { stopped <- srv.Stop(context.Background()) }()
 	call := trap.MustWait(t.Context())
 	select {
-	case <-stopped:
-		t.Fatal("Stop returned before the queue loop ended")
+	case err := <-stopped:
+		t.Fatalf("Stop returned before the queue loop ended: %v", err)
 	default:
 	}
 	call.Release()

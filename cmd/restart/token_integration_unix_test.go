@@ -50,8 +50,11 @@ func TestGeneratedAPITokenAcrossRestart(t *testing.T) {
 	var logs syncBuffer
 	server.Stdout, server.Stderr = &logs, &logs
 	require.NoError(t, server.Start())
-	exited := make(chan error, 1)
-	go func() { exited <- server.Wait() }()
+	exited := make(chan struct{})
+	go func() {
+		_ = server.Wait()
+		close(exited)
+	}()
 	t.Cleanup(func() {
 		_ = server.Process.Signal(syscall.SIGTERM)
 		select {

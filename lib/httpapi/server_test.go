@@ -1134,6 +1134,7 @@ func TestServer_Stop_Idempotency(t *testing.T) {
 	err = srv.Stop(stopCtx3)
 	require.NoError(t, err)
 }
+
 func TestServer_ListenAddr(t *testing.T) {
 	t.Parallel()
 	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -1190,7 +1191,7 @@ func TestServer_StartBindsLoopback(t *testing.T) {
 	go func() { errCh <- srv.Start() }()
 	t.Cleanup(func() {
 		_ = srv.Stop(context.Background())
-		<-errCh
+		assert.ErrorIs(t, <-errCh, http.ErrServerClosed)
 	})
 
 	url := fmt.Sprintf("http://127.0.0.1:%d/status", port)

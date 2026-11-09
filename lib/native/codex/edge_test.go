@@ -887,8 +887,8 @@ func TestCloseInterruptsTheTurn(t *testing.T) {
 	select {
 	case <-h.proc.done:
 		t.Fatal("stdin closed before the turn ended")
-	case <-closed:
-		t.Fatal("Close returned before the turn ended")
+	case err := <-closed:
+		t.Fatalf("Close returned before the turn ended: %v", err)
 	case <-time.After(50 * time.Millisecond):
 	}
 	h.feedJSON(`{"id":` + string(sent.ID) + `,"result":{}}`)
