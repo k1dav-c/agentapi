@@ -249,7 +249,7 @@ The handlers are grouped by file:
 | `restart.go`, `statedb.go` | Restarts (`beginRestart`); restoring and persisting the state |
 | `update.go` | Updating AgentAPI through its API (`POST /update`, `DELETE /update`, the `updater`) and the summary's `update`; see [Restarts and updates](#restarts-and-updates) |
 | `models.go` | The API's types |
-| `uploads.go` | Uploaded files (`uploadAPI`, which serves `POST /upload` from the operation's middleware: huma v2.32 changes the shared operation on every multipart request) |
+| `uploads.go` | Uploaded files (`uploadAPI`: `POST /upload`, and the images `GET /uploads` serves) |
 
 Chi routes outside huma serve the chat (`/chat/*`, with `/` redirecting there), uploaded images
 (`/uploads/{checksum}/{name}`) and workspace images (`/files/image`).
@@ -840,8 +840,8 @@ of the content's SHA-256, so a path never changes; unused ones are removed after
   rebinding), and `--allowed-origins` which origins may call the API from a
   browser. A request that changes something (not GET, HEAD or OPTIONS) from
   a page of another origin is refused unless that origin is listed; `*`
-  trusts none (`lib/httpmw/crossorigin.go`, the rules of Go 1.25's
-  `http.CrossOriginProtection`).
+  trusts none (`lib/httpmw/crossorigin.go`: net/http's
+  `CrossOriginProtection`, and the listed origins that hold a `*`).
 - Uploads go to a private directory, and only images are served back. Files
   outside the working directory can't be opened.
 - The webhook sends its configured events, the conversation included, to

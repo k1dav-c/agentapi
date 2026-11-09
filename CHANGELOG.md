@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Changes
+
+- `POST /upload` answers 413 (`request body is too large`) for a body over 101 MiB, where it
+  answered 400; a file over 100 MB in a smaller body still gets 400 and
+  `file size exceeds 100MB limit`. An empty file part sent without a `Content-Type` gets 422.
+- An escaped dot segment or slash in a session id (`/sessions/%2E%2E/resume`) gets 400, an
+  invalid id, where it got 404.
+- An IPv6 address without brackets in `--allowed-hosts` is refused as not a valid host, where the
+  error said it must not include a port.
+
+### Internal
+
+- AgentAPI builds with Go 1.26.10, huma v2.40.0 and the latest golang.org/x modules and
+  modernc.org/sqlite; lint runs golangci-lint v2.15.0.
+- `POST /upload` is a huma handler again (huma v2.37 fixed the race on its operation), uploads are
+  renamed into place with `os.Root.Rename`, and the cross-origin check asks net/http's
+  `CrossOriginProtection` instead of a copy of it.
+
 ## v3.16.2
 
 ### Fixes

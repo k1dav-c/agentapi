@@ -45,8 +45,11 @@ func stopServer(cmd *exec.Cmd) {
 		return
 	}
 	_ = cmd.Process.Signal(os.Interrupt)
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
+	done := make(chan struct{})
+	go func() {
+		_ = cmd.Wait()
+		close(done)
+	}()
 	select {
 	case <-done:
 	case <-time.After(10 * time.Second):

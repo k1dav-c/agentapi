@@ -3827,7 +3827,14 @@
                           },
                           "id": {
                             "description": "The event ID.",
-                            "type": "integer"
+                            "oneOf": [
+                              {
+                                "type": "integer"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ]
                           },
                           "retry": {
                             "description": "The retry time in milliseconds.",
@@ -3853,7 +3860,14 @@
                           },
                           "id": {
                             "description": "The event ID.",
-                            "type": "integer"
+                            "oneOf": [
+                              {
+                                "type": "integer"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ]
                           },
                           "retry": {
                             "description": "The retry time in milliseconds.",
@@ -3879,7 +3893,14 @@
                           },
                           "id": {
                             "description": "The event ID.",
-                            "type": "integer"
+                            "oneOf": [
+                              {
+                                "type": "integer"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ]
                           },
                           "retry": {
                             "description": "The retry time in milliseconds.",
@@ -3905,7 +3926,14 @@
                           },
                           "id": {
                             "description": "The event ID.",
-                            "type": "integer"
+                            "oneOf": [
+                              {
+                                "type": "integer"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ]
                           },
                           "retry": {
                             "description": "The retry time in milliseconds.",
@@ -3931,7 +3959,14 @@
                           },
                           "id": {
                             "description": "The event ID.",
-                            "type": "integer"
+                            "oneOf": [
+                              {
+                                "type": "integer"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ]
                           },
                           "retry": {
                             "description": "The retry time in milliseconds.",
@@ -3957,7 +3992,14 @@
                           },
                           "id": {
                             "description": "The event ID.",
-                            "type": "integer"
+                            "oneOf": [
+                              {
+                                "type": "integer"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ]
                           },
                           "retry": {
                             "description": "The retry time in milliseconds.",
@@ -3983,7 +4025,14 @@
                           },
                           "id": {
                             "description": "The event ID.",
-                            "type": "integer"
+                            "oneOf": [
+                              {
+                                "type": "integer"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ]
                           },
                           "retry": {
                             "description": "The retry time in milliseconds.",
@@ -4009,7 +4058,14 @@
                           },
                           "id": {
                             "description": "The event ID.",
-                            "type": "integer"
+                            "oneOf": [
+                              {
+                                "type": "integer"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ]
                           },
                           "retry": {
                             "description": "The retry time in milliseconds.",
@@ -4035,7 +4091,14 @@
                           },
                           "id": {
                             "description": "The event ID.",
-                            "type": "integer"
+                            "oneOf": [
+                              {
+                                "type": "integer"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ]
                           },
                           "retry": {
                             "description": "The retry time in milliseconds.",
@@ -4061,7 +4124,14 @@
                           },
                           "id": {
                             "description": "The event ID.",
-                            "type": "integer"
+                            "oneOf": [
+                              {
+                                "type": "integer"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ]
                           },
                           "retry": {
                             "description": "The retry time in milliseconds.",
@@ -5933,7 +6003,14 @@
                           },
                           "id": {
                             "description": "The event ID.",
-                            "type": "integer"
+                            "oneOf": [
+                              {
+                                "type": "integer"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ]
                           },
                           "retry": {
                             "description": "The retry time in milliseconds.",
@@ -5959,7 +6036,14 @@
                           },
                           "id": {
                             "description": "The event ID.",
-                            "type": "integer"
+                            "oneOf": [
+                              {
+                                "type": "integer"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ]
                           },
                           "retry": {
                             "description": "The retry time in milliseconds.",
@@ -6352,11 +6436,11 @@
               "schema": {
                 "properties": {
                   "file": {
-                    "contentEncoding": "binary",
-                    "contentMediaType": "application/octet-stream",
                     "description": "file that needs to be uploaded",
                     "format": "binary",
-                    "type": "string"
+                    "type": "string",
+                    "x-contentEncoding": "binary",
+                    "x-contentMediaType": "application/octet-stream"
                   }
                 },
                 "required": [

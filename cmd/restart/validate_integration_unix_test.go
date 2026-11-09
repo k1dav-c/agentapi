@@ -56,8 +56,13 @@ func TestRestartRefusedByValidate(t *testing.T) {
 	var logs syncBuffer
 	server.Stdout, server.Stderr = &logs, &logs
 	require.NoError(t, server.Start())
-	exited := make(chan error, 1)
-	go func() { exited <- server.Wait() }()
+	// exited is closed once the server exited, with waitErr.
+	exited := make(chan struct{})
+	var waitErr error
+	go func() {
+		waitErr = server.Wait()
+		close(exited)
+	}()
 	t.Cleanup(func() {
 		_ = server.Process.Signal(syscall.SIGTERM)
 		select {
@@ -131,8 +136,8 @@ func TestRestartRefusedByValidate(t *testing.T) {
 	assert.Equal(t, after.ServerID, serverID(), "the generated token still signs in")
 	assert.Contains(t, logs.String(), "validated=true", "the new binary checked the settings")
 	select {
-	case err := <-exited:
-		t.Fatalf("the process exited: %v", err)
+	case <-exited:
+		t.Fatalf("the process exited: %v", waitErr)
 	default:
 	}
 }

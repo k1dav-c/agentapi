@@ -64,8 +64,13 @@ func TestUpdateThroughTheAPI(t *testing.T) {
 	var logs bytes.Buffer
 	server.Stdout, server.Stderr = &logs, &logs
 	require.NoError(t, server.Start())
-	exited := make(chan error, 1)
-	go func() { exited <- server.Wait() }()
+	// exited is closed once the server exited, with waitErr.
+	exited := make(chan struct{})
+	var waitErr error
+	go func() {
+		waitErr = server.Wait()
+		close(exited)
+	}()
 	t.Cleanup(func() {
 		_ = server.Process.Signal(syscall.SIGTERM)
 		select {
@@ -124,8 +129,8 @@ func TestUpdateThroughTheAPI(t *testing.T) {
 	assert.Equal(t, 1, release.Downloads())
 	assert.FileExists(t, filepath.Join(scratch, "bin", ".agentapi.lock"))
 	select {
-	case err := <-exited:
-		t.Fatalf("the process exited: %v", err)
+	case <-exited:
+		t.Fatalf("the process exited: %v", waitErr)
 	default:
 	}
 }
@@ -163,8 +168,11 @@ func TestUpdateRestartsWhenUpToDate(t *testing.T) {
 	var logs bytes.Buffer
 	server.Stdout, server.Stderr = &logs, &logs
 	require.NoError(t, server.Start())
-	exited := make(chan error, 1)
-	go func() { exited <- server.Wait() }()
+	exited := make(chan struct{})
+	go func() {
+		_ = server.Wait()
+		close(exited)
+	}()
 	t.Cleanup(func() {
 		_ = server.Process.Signal(syscall.SIGTERM)
 		select {

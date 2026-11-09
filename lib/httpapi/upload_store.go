@@ -127,7 +127,7 @@ func (u *uploadStore) save(name string, data []byte) (string, string, error) {
 // place. A file of the same size already there is this content (a tool
 // result's image comes again with every snapshot of its message).
 func (u *uploadStore) saveFrom(name string, r io.Reader, limit int64) (string, string, error) {
-	// The rename below goes by path: a name is one file in the directory.
+	// A name is one file in the directory.
 	if name == "" || name == "." || name == ".." || strings.Contains(name, "/") || name != filepath.Base(name) {
 		return "", "", fmt.Errorf("invalid file name %q", name)
 	}
@@ -155,16 +155,11 @@ func (u *uploadStore) saveFrom(name string, r io.Reader, limit int64) (string, s
 	if err := root.Mkdir(checksum, 0o755); err != nil && !errors.Is(err, fs.ErrExist) {
 		return "", "", err
 	}
-	// os.Root has no Rename before Go 1.25: the rename goes by path, so
-	// the directory must be one, not a link out of the store.
-	if info, err := root.Lstat(checksum); err != nil || !info.IsDir() {
-		return "", "", fmt.Errorf("%s in %s is not a directory", checksum, u.dir)
-	}
 	file := path.Join(checksum, name)
 	if info, err := root.Lstat(file); err == nil && info.Mode().IsRegular() && info.Size() == size {
 		return filepath.Join(u.dir, checksum, name), checksum, nil
 	}
-	if err := os.Rename(filepath.Join(u.dir, temp), filepath.Join(u.dir, checksum, name)); err != nil {
+	if err := root.Rename(temp, file); err != nil {
 		return "", "", err
 	}
 	return filepath.Join(u.dir, checksum, name), checksum, nil

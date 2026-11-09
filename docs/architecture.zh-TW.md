@@ -205,7 +205,7 @@ flowchart TB
 | `restart.go`、`statedb.go` | 重新啟動（`beginRestart`）；還原與保存狀態 |
 | `update.go` | 透過 API 更新 AgentAPI（`POST /update`、`DELETE /update`、`updater`）與摘要的 `update`；見[重新啟動與更新](#重新啟動與更新) |
 | `models.go` | API 的型別 |
-| `uploads.go` | 上傳的檔案（`uploadAPI`，它從操作的 middleware 處理 `POST /upload`：huma v2.32 每次處理 multipart 請求都會改動共用的操作） |
+| `uploads.go` | 上傳的檔案（`uploadAPI`：`POST /upload`，以及 `GET /uploads` 送出的圖片） |
 
 huma 以外的 chi 路由提供聊天介面（`/chat/*`，`/` 會重新導向到這裡）、上傳圖片
 （`/uploads/{checksum}/{name}`）與工作目錄圖片（`/files/image`）。
@@ -627,8 +627,8 @@ Content-Security-Policy。
 - `--bind` 限制誰能連線，`--allowed-hosts` 決定接受哪些 `Host` 標頭（預設為 `localhost`、
   `127.0.0.1` 和 `[::1]`，用來防範 DNS rebinding），`--allowed-origins` 決定哪些來源可以從
   瀏覽器呼叫 API。其他來源的網頁送出會造成改動的請求（GET、HEAD、OPTIONS 以外）時，除非那個來源
-  列在清單上，否則一律拒絕；`*` 不信任任何來源（`lib/httpmw/crossorigin.go`，規則同 Go 1.25 的
-  `http.CrossOriginProtection`）。
+  列在清單上，否則一律拒絕；`*` 不信任任何來源（`lib/httpmw/crossorigin.go`：net/http 的
+  `CrossOriginProtection`，加上清單裡含 `*` 的來源）。
 - 上傳的檔案存放在私有目錄，只回傳圖片。工作目錄以外的檔案無法開啟。
 - webhook 會把設定要送的內容（包括對話）送到它的網址，而 `PUT /webhook` 可以修改網址；它的
   HMAC secret 只能寫入、無法讀回。

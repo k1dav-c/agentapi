@@ -8,10 +8,8 @@ import (
 	"log/slog"
 	"net/http"
 	"slices"
-	"strconv"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 
 	"github.com/coder/agentapi/lib/transcript"
@@ -70,84 +68,19 @@ func (u *uploadStore) storeRichImages(msg *transcript.RichMessage, logger *slog.
 // file: the form's boundaries and part headers.
 const uploadFormOverhead = 1 << 20
 
-// serveUploadRequest answers POST /upload, as the operation's middleware,
-// which never passes the request on to huma's handler. huma (v2.32)
-// decodes a multipart body into its struct by adding the struct's fields to
-// the operation's parameters on every request: a data race between
-// requests, and each upload added a parameter to the OpenAPI schema. (huma
-// fixed it in v2.37, which needs Go 1.25.) The operation stays registered
-// with huma for the schema, and the responses are written as huma writes
-// them.
-func (u *uploadAPI) serveUploadRequest(ctx huma.Context, _ func(huma.Context)) {
-	r, w := humachi.Unwrap(ctx)
-	// A larger body would only be parsed into temporary files to be
-	// refused.
-	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize+uploadFormOverhead)
-	if err := r.ParseMultipartForm(humachi.MultipartMaxMemory); err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			_ = huma.WriteErr(u.api, ctx, http.StatusBadRequest, uploadTooLarge)
-			return
-		}
-		u.uploadInvalid(ctx, "body", "cannot read multipart form: "+err.Error())
-		return
-	}
+// uploadInput is the input of POST /upload.
+type uploadInput struct {
+	RawBody huma.MultipartFormFiles[UploadRequest]
+}
+
+// upload handles POST /upload.
+func (u *uploadAPI) upload(_ context.Context, input *uploadInput) (*UploadResponse, error) {
 	// The parts too large for memory went to temporary files, which
-	// net/http would remove only for its own copy of the request.
-	defer func() { _ = r.MultipartForm.RemoveAll() }()
-	files := r.MultipartForm.File["file"]
-	switch len(files) {
-	case 0:
-		u.uploadInvalid(ctx, "file", "File required")
-		return
-	case 1:
-	default:
-		u.uploadInvalid(ctx, "file", "Multiple files received but only one was expected")
-		return
-	}
-	file, err := files[0].Open()
-	if err != nil {
-		u.uploadInvalid(ctx, "file", "Failed to open file")
-		return
-	}
+	// net/http removes only for its own copy of the request.
+	defer func() { _ = input.RawBody.Form.RemoveAll() }()
+	file := input.RawBody.Data().File
 	defer func() { _ = file.Close() }()
-	resp, err := u.saveUpload(files[0].Filename, file)
-	var statusErr huma.StatusError
-	switch {
-	case errors.As(err, &statusErr):
-		_ = huma.WriteErr(u.api, ctx, statusErr.GetStatus(), statusErr.Error())
-	case err != nil:
-		_ = huma.WriteErr(u.api, ctx, http.StatusInternalServerError, "unexpected error occurred", err)
-	default:
-		u.writeHumaResponse(ctx, http.StatusOK, resp.Body)
-	}
-}
-
-// uploadInvalid answers an upload whose form doesn't fit, as huma's
-// validation does.
-func (u *uploadAPI) uploadInvalid(ctx huma.Context, location, message string) {
-	_ = huma.WriteErr(u.api, ctx, http.StatusUnprocessableEntity, "validation failed", &huma.ErrorDetail{Location: location, Message: message})
-}
-
-// writeHumaResponse writes body with status as huma writes a handler's
-// response: in the content type the client accepts, through the API's
-// transformers (which link the body's schema).
-func (u *uploadAPI) writeHumaResponse(ctx huma.Context, status int, body any) {
-	contentType, err := u.api.Negotiate(ctx.Header("Accept"))
-	if err != nil {
-		_ = huma.WriteErr(u.api, ctx, http.StatusNotAcceptable, "unable to marshal response", err)
-		return
-	}
-	transformed, err := u.api.Transform(ctx, strconv.Itoa(status), body)
-	if err != nil {
-		_ = huma.WriteErr(u.api, ctx, http.StatusInternalServerError, "unexpected error occurred", err)
-		return
-	}
-	ctx.SetHeader("Content-Type", contentType)
-	ctx.SetStatus(status)
-	if err := u.api.Marshal(ctx.BodyWriter(), contentType, transformed); err != nil {
-		u.logger.Error("Failed to write the response", "path", ctx.Operation().Path, "error", err)
-	}
+	return u.saveUpload(file.Filename, file)
 }
 
 // saveUpload stores an uploaded file under the base name of the one the
@@ -170,15 +103,6 @@ func (u *uploadAPI) saveUpload(sent string, file io.Reader) (*UploadResponse, er
 	return resp, nil
 }
 
-// describeUpload describes POST /upload for the OpenAPI schema; the
-// operation's middleware, serveUploadRequest, answers the requests.
-func (u *uploadAPI) describeUpload(context.Context, *struct {
-	RawBody huma.MultipartFormFiles[UploadRequest]
-},
-) (*UploadResponse, error) {
-	return nil, errors.New("POST /upload is served by serveUploadRequest")
-}
-
 // cleanupUploadDir removes the upload directory and all its contents, unless
 // the conversation that refers to them is kept.
 func (s *Server) cleanupUploadDir() {
@@ -193,17 +117,15 @@ func (s *Server) cleanupUploadDir() {
 // uploadAPI stores what the user uploads and serves uploaded images.
 type uploadAPI struct {
 	uploads *uploadStore
-	logger  *slog.Logger
-	// api writes the responses of POST /upload, which bypasses huma's
-	// request handling.
-	api huma.API
 }
 
 func (s *Server) registerUploadRoutes() {
-	u := &uploadAPI{uploads: s.uploads, logger: s.logger, api: s.api}
-	huma.Post(s.api, "/upload", u.describeUpload, func(o *huma.Operation) {
+	u := &uploadAPI{uploads: s.uploads}
+	huma.Post(s.api, "/upload", u.upload, func(o *huma.Operation) {
 		o.Description = "Upload files to the specified upload path."
-		o.Middlewares = append(o.Middlewares, u.serveUploadRequest)
+		// A larger body would only be parsed into temporary files to be
+		// refused.
+		o.MaxBodyBytes = maxUploadSize + uploadFormOverhead
 	})
 
 	// Uploaded images, for the chat to show (not part of the OpenAPI

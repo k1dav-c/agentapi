@@ -2888,7 +2888,7 @@ export interface operations {
                          */
                         event: "agent_error";
                         /** @description The event ID. */
-                        id?: number;
+                        id?: number | string;
                         /** @description The retry time in milliseconds. */
                         retry?: number;
                     } | {
@@ -2899,7 +2899,7 @@ export interface operations {
                          */
                         event: "heartbeat";
                         /** @description The event ID. */
-                        id?: number;
+                        id?: number | string;
                         /** @description The retry time in milliseconds. */
                         retry?: number;
                     } | {
@@ -2910,7 +2910,7 @@ export interface operations {
                          */
                         event: "message_update";
                         /** @description The event ID. */
-                        id?: number;
+                        id?: number | string;
                         /** @description The retry time in milliseconds. */
                         retry?: number;
                     } | {
@@ -2921,7 +2921,7 @@ export interface operations {
                          */
                         event: "queue_update";
                         /** @description The event ID. */
-                        id?: number;
+                        id?: number | string;
                         /** @description The retry time in milliseconds. */
                         retry?: number;
                     } | {
@@ -2932,7 +2932,7 @@ export interface operations {
                          */
                         event: "request_update";
                         /** @description The event ID. */
-                        id?: number;
+                        id?: number | string;
                         /** @description The retry time in milliseconds. */
                         retry?: number;
                     } | {
@@ -2943,7 +2943,7 @@ export interface operations {
                          */
                         event: "rich_message_update";
                         /** @description The event ID. */
-                        id?: number;
+                        id?: number | string;
                         /** @description The retry time in milliseconds. */
                         retry?: number;
                     } | {
@@ -2954,7 +2954,7 @@ export interface operations {
                          */
                         event: "session_sync";
                         /** @description The event ID. */
-                        id?: number;
+                        id?: number | string;
                         /** @description The retry time in milliseconds. */
                         retry?: number;
                     } | {
@@ -2965,7 +2965,7 @@ export interface operations {
                          */
                         event: "status_change";
                         /** @description The event ID. */
-                        id?: number;
+                        id?: number | string;
                         /** @description The retry time in milliseconds. */
                         retry?: number;
                     } | {
@@ -2976,7 +2976,7 @@ export interface operations {
                          */
                         event: "summary_update";
                         /** @description The event ID. */
-                        id?: number;
+                        id?: number | string;
                         /** @description The retry time in milliseconds. */
                         retry?: number;
                     } | {
@@ -2987,7 +2987,7 @@ export interface operations {
                          */
                         event: "task_update";
                         /** @description The event ID. */
-                        id?: number;
+                        id?: number | string;
                         /** @description The retry time in milliseconds. */
                         retry?: number;
                     })[];
@@ -4620,7 +4620,7 @@ export interface operations {
                          */
                         event: "exit";
                         /** @description The event ID. */
-                        id?: number;
+                        id?: number | string;
                         /** @description The retry time in milliseconds. */
                         retry?: number;
                     } | {
@@ -4631,7 +4631,7 @@ export interface operations {
                          */
                         event: "output";
                         /** @description The event ID. */
-                        id?: number;
+                        id?: number | string;
                         /** @description The retry time in milliseconds. */
                         retry?: number;
                     })[];

@@ -33,12 +33,18 @@ func (s *serialSink) do(f func(Sink)) {
 	f(s.sink)
 }
 
-func (s *serialSink) TurnStarted()                       { s.do(func(k Sink) { k.TurnStarted() }) }
-func (s *serialSink) TurnCompleted(r TurnResult)         { s.do(func(k Sink) { k.TurnCompleted(r) }) }
+func (s *serialSink) TurnStarted() { s.do(func(k Sink) { k.TurnStarted() }) }
+
+func (s *serialSink) TurnCompleted(r TurnResult) { s.do(func(k Sink) { k.TurnCompleted(r) }) }
+
 func (s *serialSink) RequestOpened(r agentstate.Request) { s.do(func(k Sink) { k.RequestOpened(r) }) }
-func (s *serialSink) RequestClosed(id string)            { s.do(func(k Sink) { k.RequestClosed(id) }) }
-func (s *serialSink) SessionName(name string)            { s.do(func(k Sink) { k.SessionName(name) }) }
-func (s *serialSink) SessionRef(ref string)              { s.do(func(k Sink) { k.SessionRef(ref) }) }
+
+func (s *serialSink) RequestClosed(id string) { s.do(func(k Sink) { k.RequestClosed(id) }) }
+
+func (s *serialSink) SessionName(name string) { s.do(func(k Sink) { k.SessionName(name) }) }
+
+func (s *serialSink) SessionRef(ref string) { s.do(func(k Sink) { k.SessionRef(ref) }) }
+
 func (s *serialSink) LoginRequired(l agentstate.LoginRequired) {
 	s.do(func(k Sink) { k.LoginRequired(l) })
 }

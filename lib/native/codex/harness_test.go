@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/agentapi/lib/agentstate"
@@ -311,7 +312,8 @@ func (h *harness) finish() {
 	done := make(chan error, 1)
 	go func() { done <- h.a.Wait() }()
 	select {
-	case <-done:
+	case err := <-done:
+		assert.NoError(h.t, err, "Wait after Close")
 	case <-time.After(waitTimeout):
 		h.t.Fatal("Wait did not return after Close")
 	}

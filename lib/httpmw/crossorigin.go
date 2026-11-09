@@ -2,8 +2,6 @@ package httpmw
 
 import (
 	"net/http"
-	"net/url"
-	"slices"
 	"strings"
 )
 
@@ -15,30 +13,33 @@ import (
 // user opened could otherwise send the agent a message or type into the
 // shell terminal.
 //
-// The rules are those of Go 1.25's http.CrossOriginProtection. A request
-// whose Sec-Fetch-Site is same-origin or none (the user typed the URL) is
-// let through; so is one without Sec-Fetch-Site whose Origin is the
-// request's own host, or that has neither header (not a browser: curl, an
-// SDK, a hub). Otherwise its Origin must match one of trusted, which may
-// hold one "*" each as --allowed-origins does (https://*.example.com). "*"
+// net/http's CrossOriginProtection decides: a request whose Sec-Fetch-Site
+// is same-origin or none (the user typed the URL) is let through; so is
+// one without Sec-Fetch-Site whose Origin is the request's own host, or
+// that has neither header (not a browser: curl, an SDK, a hub). Otherwise
+// its Origin must be one of trusted, or match one of trusted that holds a
+// "*" as --allowed-origins does (https://*.example.com), in any case. "*"
 // alone trusts none: it lets pages read the answers, which a server
 // without a token gives anyone already.
 func CrossOriginProtection(trusted []string, refused http.Handler) func(http.Handler) http.Handler {
-	var origins trustedOrigins
+	protection := http.NewCrossOriginProtection()
+	var patterns originPatterns
 	for _, origin := range trusted {
 		origin = strings.ToLower(origin)
 		if origin == "*" {
 			continue
 		}
 		if prefix, suffix, ok := strings.Cut(origin, "*"); ok {
-			origins.patterns = append(origins.patterns, [2]string{prefix, suffix})
+			patterns = append(patterns, [2]string{prefix, suffix})
 			continue
 		}
-		origins.exact = append(origins.exact, origin)
+		// An origin it refuses (no scheme or host, or a path) is never
+		// the Origin of a request.
+		_ = protection.AddTrustedOrigin(origin)
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if crossOriginAllowed(r, origins) {
+			if protection.Check(r) == nil || patterns.match(r.Header.Get("Origin")) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -47,44 +48,19 @@ func CrossOriginProtection(trusted []string, refused http.Handler) func(http.Han
 	}
 }
 
-type trustedOrigins struct {
-	exact    []string
-	patterns [][2]string
-}
+// originPatterns are the trusted origins with a "*", as prefix and suffix
+// in lower case.
+type originPatterns [][2]string
 
-func (t trustedOrigins) match(origin string) bool {
-	origin = strings.ToLower(origin)
+func (p originPatterns) match(origin string) bool {
 	if origin == "" {
 		return false
 	}
-	if slices.Contains(t.exact, origin) {
-		return true
-	}
-	for _, p := range t.patterns {
-		if len(origin) >= len(p[0])+len(p[1]) && strings.HasPrefix(origin, p[0]) && strings.HasSuffix(origin, p[1]) {
+	origin = strings.ToLower(origin)
+	for _, pattern := range p {
+		if len(origin) >= len(pattern[0])+len(pattern[1]) && strings.HasPrefix(origin, pattern[0]) && strings.HasSuffix(origin, pattern[1]) {
 			return true
 		}
 	}
 	return false
-}
-
-func crossOriginAllowed(r *http.Request, trusted trustedOrigins) bool {
-	switch r.Method {
-	case http.MethodGet, http.MethodHead, http.MethodOptions:
-		return true
-	}
-	origin := r.Header.Get("Origin")
-	switch r.Header.Get("Sec-Fetch-Site") {
-	case "same-origin", "none":
-		return true
-	case "":
-		// An older browser, or no browser at all.
-		if origin == "" {
-			return true
-		}
-		if u, err := url.Parse(origin); err == nil && u.Host == r.Host {
-			return true
-		}
-	}
-	return trusted.match(origin)
 }
