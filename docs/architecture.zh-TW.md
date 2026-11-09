@@ -607,7 +607,8 @@ webhook 事件的 delivery ID 也以同樣方式寫入 `instances.deliveries.jso
 預覽同樣以 agent 的工作目錄為根目錄讀取檔案。`GET /files/preview`（`lib/htmlpreview`）回傳的 HTML 檔中，
 以相對路徑引用的樣式表、腳本、圖片、字型和影音都會轉成 data: URL：只收副檔名符合用途的檔案
 （樣式表必須是 `.css`，腳本必須是 `.js`），不接受隱藏目錄內或工作目錄外的檔案，每個最多
-4 MiB，合計 16 MiB。聊天介面把頁面放在設了 `allow-scripts`、但沒有 `allow-same-origin` 的
+4 MiB，合計 16 MiB。不論樣式表 import 同一個檔案多少次，每個檔案只讀一次；16 MiB 用完後就不再讀取，
+請求結束時也會停止。聊天介面把頁面放在設了 `allow-scripts`、但沒有 `allow-same-origin` 的
 sandbox iframe 中：頁面沒有 origin，所以它的腳本讀不到聊天介面，也無法帶著 session cookie
 呼叫 API，而且頁面引用的東西都不會從 AgentAPI 載入（前面若有代理，代理的 cookie 也帶不過
 去）。`GET /files/image` 和 `GET /uploads` 一樣依內容判斷點陣圖，另外也依副檔名提供 SVG

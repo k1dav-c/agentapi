@@ -817,7 +817,8 @@ Previews use the same working-directory root. `GET /files/preview` (`lib/htmlpre
 HTML file with the stylesheets, scripts, images, fonts and media it references by relative path
 embedded as data URLs: only files whose extension matches their resource type (a stylesheet must be
 `.css`, a script `.js`), none in a hidden directory or above the working directory, up to 4 MiB
-each and 16 MiB in all. The chat shows the page in an iframe sandboxed with `allow-scripts` but
+each and 16 MiB in all. Each file is read once, however often stylesheets import it; once the
+16 MiB are spent nothing more is read, and a request that ends stops the work. The chat shows the page in an iframe sandboxed with `allow-scripts` but
 without `allow-same-origin`: the page has no origin, so its scripts can't read the chat, send its
 session cookie or call the API with it, and nothing it refers to is loaded from AgentAPI (which a
 proxy's cookie wouldn't reach either). `GET /files/image` serves raster images judged by content, as

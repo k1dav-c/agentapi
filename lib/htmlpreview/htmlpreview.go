@@ -8,6 +8,7 @@ package htmlpreview
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -131,9 +132,11 @@ const storageShim = `<script>(()=>{const m=()=>{const s=new Map();return{get len
 // page's directory, and a path starting with "/" from the root of fsys.
 // Files outside fsys, hidden ones (a segment starting with "."), files of a
 // type that doesn't fit their use, and files over MaxAsset are left as they
-// are and listed in Missing.
-func Inline(fsys fs.FS, name string, page []byte) (Page, error) {
-	in := &inliner{fsys: fsys, budget: MaxTotal, dataURLs: map[string]string{}}
+// are and listed in Missing. Each file is read once, however often the page
+// and its stylesheets refer to it, and nothing more is read once MaxTotal
+// is used up or ctx ends, which Inline then returns.
+func Inline(ctx context.Context, fsys fs.FS, name string, page []byte) (Page, error) {
+	in := &inliner{ctx: ctx, fsys: fsys, budget: MaxTotal, dataURLs: map[string]string{}}
 	var out bytes.Buffer
 	z := html.NewTokenizer(bytes.NewReader(page))
 	dir := path.Dir(name)
@@ -145,6 +148,9 @@ func Inline(fsys fs.FS, name string, page []byte) (Page, error) {
 				return Page{}, fmt.Errorf("parse %s: %w", name, err)
 			}
 			break
+		}
+		if err := ctx.Err(); err != nil {
+			return Page{}, err
 		}
 		raw := bytes.Clone(z.Raw())
 		if tt != html.StartTagToken && tt != html.SelfClosingTagToken {
@@ -170,14 +176,19 @@ func Inline(fsys fs.FS, name string, page []byte) (Page, error) {
 			}
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return Page{}, err
+	}
 	return Page{HTML: out.String(), Missing: in.missing}, nil
 }
 
 type inliner struct {
+	ctx  context.Context
 	fsys fs.FS
 	// budget is what is left of MaxTotal.
 	budget int
-	// dataURLs are the files read so far, by path.
+	// dataURLs are the files read so far, by path; a stylesheet's with
+	// what it refers to inlined.
 	dataURLs map[string]string
 	missing  []Missing
 }
@@ -326,6 +337,12 @@ func (in *inliner) rewriteCSS(css, dir string, depth int, importing map[string]b
 			in.miss(ref, "imported too deep, or imported by itself")
 			return match
 		}
+		if value, ok := in.dataURLs[file]; ok {
+			if value, ok = in.charge(ref, value); ok {
+				return `@import url("` + value + `")`
+			}
+			return match
+		}
 		data, ok := in.read(ref, file)
 		if !ok {
 			return match
@@ -339,6 +356,7 @@ func (in *inliner) rewriteCSS(css, dir string, depth int, importing map[string]b
 		if !ok {
 			return match
 		}
+		in.dataURLs[file] = value
 		return `@import url("` + value + `")`
 	})
 	return cssURLRe.ReplaceAllStringFunc(css, func(match string) string {
@@ -424,8 +442,12 @@ func (in *inliner) lookup(ref, dir string, use kind) (string, bool) {
 }
 
 // read returns the content of file, a regular file of at most MaxAsset
-// bytes, which ref refers to.
+// bytes, which ref refers to. Nothing is read once the budget is used up
+// or the context ended.
 func (in *inliner) read(ref, file string) ([]byte, bool) {
+	if in.ctx.Err() != nil {
+		return nil, false
+	}
 	info, err := fs.Stat(in.fsys, file)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
@@ -442,6 +464,11 @@ func (in *inliner) read(ref, file string) ([]byte, bool) {
 		return nil, false
 	case info.Size() > MaxAsset:
 		in.miss(ref, fmt.Sprintf("larger than %d MiB", MaxAsset>>20))
+		return nil, false
+	case base64.StdEncoding.EncodedLen(int(info.Size())) > in.budget:
+		// Its data: URL is larger still; inlining what it refers to only
+		// adds to it.
+		in.miss(ref, usedUp)
 		return nil, false
 	}
 	f, err := in.fsys.Open(file)
@@ -471,12 +498,15 @@ func (in *inliner) encode(ref, mediaType string, data []byte) (string, bool) {
 // fit is left out.
 func (in *inliner) charge(ref, value string) (string, bool) {
 	if len(value) > in.budget {
-		in.miss(ref, fmt.Sprintf("the page's %d MiB of inlined files are used up", MaxTotal>>20))
+		in.miss(ref, usedUp)
 		return "", false
 	}
 	in.budget -= len(value)
 	return value, true
 }
+
+// usedUp is the reason a file is left out once the page's budget is spent.
+var usedUp = fmt.Sprintf("the page's %d MiB of inlined files are used up", MaxTotal>>20)
 
 // miss lists ref as missing, once per reason.
 func (in *inliner) miss(ref, reason string) {
