@@ -312,7 +312,9 @@ func (l *Launcher) relaunchLocked(job *Job) {
 		l.logger.Warn("A job's AgentAPI exited; starting it again after a while", "job", job.Key, "pid", job.PID, "delay", delay)
 		return
 	}
-	if now.Before(job.RestartAt) {
+	// The check that set RestartAt comes again a delay later, a moment
+	// early: a tick's slack keeps it from waiting one more check.
+	if now.Add(100 * time.Millisecond).Before(job.RestartAt) {
 		return
 	}
 	job.RestartAt = time.Time{}
