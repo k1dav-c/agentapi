@@ -85,7 +85,7 @@ func TestWriteAsync(t *testing.T) {
 	t.Parallel()
 	w := agentio.NewWriter("test")
 	pr, pw := io.Pipe()
-	defer pr.Close()
+	defer func() { _ = pr.Close() }()
 	w.Attach(pw)
 	w.WriteAsync(map[string]string{"answer": "no"}, slog.New(slog.DiscardHandler))
 	line, err := bufio.NewReader(pr).ReadString('\n')

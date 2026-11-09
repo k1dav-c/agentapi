@@ -27,7 +27,7 @@ func TestStreamEndsWhenTheBrowserStopsReading(t *testing.T) {
 
 	conn, err := net.Dial("tcp", srv.Listener.Addr().String())
 	require.NoError(t, err)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	require.NoError(t, conn.(*net.TCPConn).SetReadBuffer(4<<10))
 	_, err = fmt.Fprintf(conn, "GET /api/events HTTP/1.1\r\nHost: %s\r\n\r\n", srv.Listener.Addr())
 	require.NoError(t, err)

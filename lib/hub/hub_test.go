@@ -816,7 +816,7 @@ func TestHubSessionExpires(t *testing.T) {
 		req.AddCookie(&http.Cookie{Name: "agentapi_hub_session", Value: value})
 		resp, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		var session map[string]bool
 		require.NoError(t, json.NewDecoder(resp.Body).Decode(&session))
 		return session["authenticated"]
