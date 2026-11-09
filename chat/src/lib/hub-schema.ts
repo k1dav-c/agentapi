@@ -21,6 +21,10 @@ export interface components {
             agent?: string;
             host?: string;
         };
+        DispatchBoard: {
+            hosts: components["schemas"]["DispatchHost"][] | null;
+            jobs: components["schemas"]["DispatchJob"][] | null;
+        };
         DispatchCost: {
             /** Format: int64 */
             calls: number;
@@ -98,6 +102,7 @@ export interface components {
             issue: number;
             issue_url: string;
             key: string;
+            messages?: components["schemas"]["DispatchMessage"][] | null;
             pr_url?: string;
             repo: string;
             /** Format: int64 */
@@ -111,6 +116,18 @@ export interface components {
         };
         DispatchJobsBody: {
             jobs: components["schemas"]["DispatchJob"][] | null;
+        };
+        DispatchMessage: {
+            agent: string;
+            /** Format: date-time */
+            at: string;
+            author?: string;
+            /** Format: int64 */
+            comments?: number;
+            review_state?: string;
+            /** @enum {string} */
+            source: "hub" | "review" | "comment";
+            text: string;
         };
         DispatchReposBody: {
             repos: components["schemas"]["GitHubRepo"][] | null;
@@ -209,6 +226,10 @@ export interface components {
             full_name: string;
             html_url: string;
             private: boolean;
+            /** Format: date-time */
+            pushed_at?: string;
+            /** Format: date-time */
+            updated_at?: string;
         };
         GitHubUser: {
             login: string;
@@ -218,6 +239,7 @@ export interface components {
             time: string;
         };
         HubEvents: {
+            dispatch: components["schemas"]["DispatchBoard"];
             favorites: components["schemas"]["FavoritesBody"];
             heartbeat: components["schemas"]["HeartbeatEvent"];
             instance: components["schemas"]["Instance"];

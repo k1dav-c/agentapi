@@ -41,6 +41,34 @@
         },
         "type": "object"
       },
+      "DispatchBoard": {
+        "additionalProperties": false,
+        "properties": {
+          "hosts": {
+            "items": {
+              "$ref": "#/components/schemas/DispatchHost"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/DispatchJob"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "jobs",
+          "hosts"
+        ],
+        "type": "object"
+      },
       "DispatchCost": {
         "additionalProperties": false,
         "properties": {
@@ -338,6 +366,15 @@
           "key": {
             "type": "string"
           },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/DispatchMessage"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "pr_url": {
             "type": "string"
           },
@@ -408,6 +445,46 @@
         },
         "required": [
           "jobs"
+        ],
+        "type": "object"
+      },
+      "DispatchMessage": {
+        "additionalProperties": false,
+        "properties": {
+          "agent": {
+            "type": "string"
+          },
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "author": {
+            "type": "string"
+          },
+          "comments": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "review_state": {
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "hub",
+              "review",
+              "comment"
+            ],
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "source",
+          "agent",
+          "text"
         ],
         "type": "object"
       },
@@ -766,6 +843,14 @@
           },
           "private": {
             "type": "boolean"
+          },
+          "pushed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
           }
         },
         "required": [
@@ -804,6 +889,9 @@
       "HubEvents": {
         "additionalProperties": false,
         "properties": {
+          "dispatch": {
+            "$ref": "#/components/schemas/DispatchBoard"
+          },
           "favorites": {
             "$ref": "#/components/schemas/FavoritesBody"
           },
@@ -825,7 +913,8 @@
           "instance",
           "removed",
           "favorites",
-          "heartbeat"
+          "heartbeat",
+          "dispatch"
         ],
         "type": "object"
       },
