@@ -110,13 +110,10 @@ func TestNative_ResumeSession(t *testing.T) {
 	assert.Equal(t, http.StatusConflict, n.do(http.MethodPost, "/sessions/earlier/resume", map[string]any{}, nil), "a turn runs")
 	first.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonEndTurn})
 	assert.Equal(t, http.StatusNotFound, n.do(http.MethodPost, "/sessions/missing/resume", map[string]any{}, nil))
-	// An id that would name another file than a session's log; the
-	// router doesn't route a path with a dot segment or a slash at all.
-	for _, id := range []string{"..%5Cearlier", "a%00b", "a%0Ab"} {
+	// An id that would name another file than a session's log, escaped
+	// dot segments and slashes included: huma unescapes the parameter.
+	for _, id := range []string{"..%5Cearlier", "a%00b", "a%0Ab", "%2E%2E", "..%2Fearlier"} {
 		assert.Equal(t, http.StatusBadRequest, n.do(http.MethodPost, "/sessions/"+id+"/resume", map[string]any{}, nil), id)
-	}
-	for _, id := range []string{"%2E%2E", "..%2Fearlier"} {
-		assert.Equal(t, http.StatusNotFound, n.do(http.MethodPost, "/sessions/"+id+"/resume", map[string]any{}, nil), id)
 	}
 
 	require.Equal(t, http.StatusOK, n.do(http.MethodPost, "/sessions/earlier/resume", map[string]any{}, nil))

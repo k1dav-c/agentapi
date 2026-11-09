@@ -230,7 +230,7 @@ func TestServer_AllowedHosts(t *testing.T) {
 		{
 			name:               "ipv6 literal without square brackets is invalid",
 			allowedHosts:       []string{"2001:db8::1"},
-			validationErrorMsg: "must not include a port",
+			validationErrorMsg: "is not a valid host",
 		},
 		{
 			name:               "host with port in config is invalid",
