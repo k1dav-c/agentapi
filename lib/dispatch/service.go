@@ -416,7 +416,8 @@ func (s *Service) markOnlineLocked() {
 // (trust on first use), and an event with another token is refused, the
 // machine online or not, whatever the event (host.stopped too). Otherwise
 // a machine with the secret could take over another's name, and with it
-// its jobs' GitHub tokens and the dispatches to it.
+// its jobs' GitHub tokens and the dispatches to it. A launcher that lost
+// its token is admitted again once the machine is forgotten (ForgetHost).
 func (s *Service) HostEvent(eventType string, data json.RawMessage) error {
 	var d host.HostEventData
 	if err := json.Unmarshal(data, &d); err != nil || d.Hostname == "" || d.URL == "" {
@@ -439,7 +440,7 @@ func (s *Service) HostEvent(eventType string, data json.RawMessage) error {
 		h.Token = d.Token
 	case !hmac.Equal([]byte(d.Token), []byte(h.Token)):
 		s.logger.Warn("Refused a host event with another launcher's token than the machine's", "host", d.Hostname, "url", d.URL, "event", eventType)
-		return fmt.Errorf("the machine %s has another launcher's token", d.Hostname)
+		return fmt.Errorf("the machine %s has another launcher's token: forget the machine on the hub to admit this launcher", d.Hostname)
 	}
 	h.HostInfo = d.HostInfo
 	h.HeartbeatSeconds = d.HeartbeatSeconds
@@ -448,6 +449,32 @@ func (s *Service) HostEvent(eventType string, data json.RawMessage) error {
 	if !h.Stopped {
 		s.reconcileLocked(h)
 	}
+	s.saveLocked()
+	return nil
+}
+
+// ForgetHost removes a machine and the launcher's token its name is
+// pinned to, so a launcher with another token can join under the name. A
+// machine online, or with jobs that work, isn't forgotten: stop its jobs
+// first.
+func (s *Service) ForgetHost(name string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	h := s.hosts[name]
+	if h == nil {
+		return errorf(http.StatusNotFound, "host_not_found", "no machine %s", name)
+	}
+	if s.online(h) {
+		return errorf(http.StatusConflict, "host_online", "%s is online: stop its launcher first", name)
+	}
+	for _, j := range s.jobs {
+		if j.Host == name && j.working() {
+			return errorf(http.StatusConflict, "host_busy", "%s works on %s: stop it first", name, j.Key)
+		}
+	}
+	delete(s.hosts, name)
+	delete(s.onlineSeen, name)
+	s.logger.Info("Forgot a machine", "host", name)
 	s.saveLocked()
 	return nil
 }

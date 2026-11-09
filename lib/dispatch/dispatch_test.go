@@ -583,6 +583,63 @@ func TestHostTakeOverRefused(t *testing.T) {
 	assert.True(t, s.Hosts()[0].Online)
 }
 
+// Forgetting a machine frees its name for a launcher with another token:
+// not while it is online or has jobs that work.
+func TestForgetHost(t *testing.T) {
+	s, now := newService(t, nil)
+	l := newFakeLauncher(t, "pve-1")
+	join(t, s, l, "claude")
+	_, err := s.Dispatch(context.Background(), Request{Action: ActionStart, Repo: "acme/widget", Issue: 4})
+	require.NoError(t, err)
+
+	r := chi.NewRouter()
+	s.MountSession(r)
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+	forget := func(name string) (int, string) {
+		req, _ := http.NewRequest(http.MethodDelete, srv.URL+"/api/hosts/"+name, nil)
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer func() { _ = resp.Body.Close() }()
+		data, _ := io.ReadAll(resp.Body)
+		code, _ := jsonapi.ReadError(data)
+		return resp.StatusCode, code
+	}
+	status, code := forget("nowhere")
+	assert.Equal(t, http.StatusNotFound, status)
+	assert.Equal(t, "host_not_found", code)
+	status, code = forget("pve-1")
+	assert.Equal(t, http.StatusConflict, status)
+	assert.Equal(t, "host_online", code)
+
+	// The machine went away with its launcher's token; a new launcher
+	// under its name is refused.
+	*now = now.Add(10 * time.Minute)
+	rekeyed := newFakeLauncher(t, "pve-1")
+	rekeyed.token = "a-new-token"
+	data, _ := json.Marshal(rekeyed.event("claude"))
+	assert.Error(t, s.HostEvent(host.EventHostStarted, data))
+	status, code = forget("pve-1")
+	assert.Equal(t, http.StatusConflict, status)
+	assert.Equal(t, "host_busy", code, "its job works")
+
+	_, err = s.Dispatch(context.Background(), Request{Action: ActionStop, Repo: "acme/widget", Issue: 4})
+	require.NoError(t, err)
+	assert.Equal(t, JobStopped, s.job("acme/widget#4").State, "stopped while the machine was offline")
+	status, _ = forget("pve-1")
+	assert.Equal(t, http.StatusNoContent, status)
+	assert.Empty(t, s.Hosts())
+
+	// The new launcher joins; the job stopped while it was away is done.
+	require.NoError(t, s.HostEvent(host.EventHostStarted, data))
+	require.Len(t, s.Hosts(), 1)
+	assert.True(t, s.Hosts()[0].Online)
+	s.mu.Lock()
+	assert.Equal(t, "a-new-token", s.hosts["pve-1"].Token)
+	s.mu.Unlock()
+	assert.Equal(t, JobDone, s.job("acme/widget#4").State)
+}
+
 // A switch that fails after the old agent stopped leaves the job failed,
 // not working with no agent.
 func TestSwitchAgentFailure(t *testing.T) {
