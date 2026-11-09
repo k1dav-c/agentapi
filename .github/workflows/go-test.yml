@@ -19,13 +19,16 @@ on:
 permissions:
     contents: read
 
+# A pull request's runs share a group; a run the Release workflow calls has
+# one of its own.
+concurrency:
+    group: ${{ github.event_name == 'pull_request' && format('go-tests-{0}', github.ref) || format('go-tests-run-{0}', github.run_id) }}
+    cancel-in-progress: true
+
 jobs:
     test:
         if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
         runs-on: [self-hosted, ci]
-        concurrency:
-            group: ${{ github.event_name == 'pull_request' && format('pr-{0}-{1}', github.ref, github.job) || format('run-{0}-{1}', github.run_id, github.job) }}
-            cancel-in-progress: true
         steps:
             - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -41,9 +44,6 @@ jobs:
     race:
         if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
         runs-on: [self-hosted, ci]
-        concurrency:
-            group: ${{ github.event_name == 'pull_request' && format('pr-{0}-{1}', github.ref, github.job) || format('run-{0}-{1}', github.run_id, github.job) }}
-            cancel-in-progress: true
         steps:
             - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -60,9 +60,6 @@ jobs:
     lint:
         if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
         runs-on: [self-hosted, ci]
-        concurrency:
-            group: ${{ github.event_name == 'pull_request' && format('pr-{0}-{1}', github.ref, github.job) || format('run-{0}-{1}', github.run_id, github.job) }}
-            cancel-in-progress: true
         steps:
             - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
