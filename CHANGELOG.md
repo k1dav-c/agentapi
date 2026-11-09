@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Internal
+
+- CI runs on the repository's self-hosted Linux runner, and no longer tests macOS or Windows. A
+  pull request from a fork runs no job.
+
 ## v3.16.0
 
 ### Features

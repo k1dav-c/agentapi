@@ -35,8 +35,8 @@ Use these commands and conventions when changing AgentAPI.
 - `cd chat && bun test` - Run the chat UI tests
 - Tests are located alongside source files (e.g., `lib/httpapi/server_test.go`)
 - CI releases on every push to `main` from Conventional Commit messages, but only after these tests
-  pass on that commit: the Release workflow runs `.github/workflows/go-test.yml` first. It doesn't
-  wait for the macOS and Windows jobs, which run alongside
+  pass on that commit: the Release workflow runs `.github/workflows/go-test.yml` first. Every job
+  runs on the repository's self-hosted Linux runner; nothing tests macOS or Windows
 
 ## Development commands
 

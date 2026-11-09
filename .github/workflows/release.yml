@@ -17,11 +17,8 @@ name: Release
 # mechanism covers every trigger and the commit tested is github.sha;
 # go-test.yml therefore doesn't run on pushes to main itself.
 #
-# The macOS and Windows tests run here too, as a separate call that the
-# release doesn't need: their hosted runners are sometimes unavailable for
-# long enough to cancel the job, and a release shouldn't wait on that. A
-# failure there fails the run but not the release; re-running the failed jobs
-# re-runs only them.
+# The jobs run on the repository's self-hosted Linux runner, one at a time:
+# the tests, then the release.
 #
 # The release is created in this workflow, not by a separate release-triggered
 # one, because releases created with GITHUB_TOKEN don't trigger other workflows.
@@ -46,20 +43,11 @@ jobs:
   test:
     name: Go Tests
     uses: ./.github/workflows/go-test.yml
-    with:
-      skip-platforms: true
-
-  platforms:
-    name: Go Tests (macOS, Windows)
-    uses: ./.github/workflows/go-test.yml
-    with:
-      skip-linux: true
 
   release:
     name: Build and Release
-    # Only the Linux tests; see above.
     needs: test
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     permissions:
       contents: write
     # One release at a time, after the tests; the tests of later pushes run
