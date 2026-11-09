@@ -43,6 +43,9 @@ type fakeProc struct {
 	err        error
 	terminated atomic.Int32
 	killed     atomic.Int32
+	// writing counts the writes to stdin under way, which wait for a
+	// reader.
+	writing atomic.Int32
 	// ignoreStdinClose keeps the process running after stdin closes.
 	ignoreStdinClose bool
 	ignoreTerm       bool
@@ -55,10 +58,22 @@ func newFakeProc() *fakeProc {
 	return p
 }
 
-func (p *fakeProc) Stdin() io.WriteCloser { return p.stdinW }
+func (p *fakeProc) Stdin() io.WriteCloser { return countingWriter{p.stdinW, &p.writing} }
 func (p *fakeProc) Stdout() io.Reader     { return p.stdoutR }
 func (p *fakeProc) Wait() error           { <-p.done; return p.err }
 func (p *fakeProc) StderrTail() string    { return "" }
+
+// countingWriter counts the writes under way.
+type countingWriter struct {
+	*io.PipeWriter
+	n *atomic.Int32
+}
+
+func (w countingWriter) Write(b []byte) (int, error) {
+	w.n.Add(1)
+	defer w.n.Add(-1)
+	return w.PipeWriter.Write(b)
+}
 
 func (p *fakeProc) Terminate() error {
 	p.terminated.Add(1)

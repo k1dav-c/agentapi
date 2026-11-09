@@ -155,7 +155,7 @@ func TestClose(t *testing.T) {
 		a, _ := started(t, Config{StopTimeout: 10 * time.Millisecond}, proc)
 		turnErr := make(chan error, 1)
 		go func() { turnErr <- a.StartTurn(context.Background(), native.Input{Text: "hi"}) }()
-		require.Eventually(t, a.writer.Writing, 5*time.Second, time.Millisecond, "the prompt is not being written")
+		require.Eventually(t, proc.blockedWrite, 5*time.Second, time.Millisecond, "the prompt is not being written")
 		closed := make(chan error, 1)
 		go func() { closed <- a.Close() }()
 		select {

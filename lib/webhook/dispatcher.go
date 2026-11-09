@@ -196,11 +196,11 @@ type Dispatcher struct {
 	// configChanged wakes the heartbeat loop when the interval changes.
 	configChanged chan struct{}
 	// ip finds the address {ip} in the public URL stands for. Only
-	// RefreshIP asks it, outside any lock: a lookup may wait on DNS, and
-	// the events are built under the emitter's lock.
+	// RefreshIP asks it, outside the emitter's lock: a lookup may wait on
+	// DNS, and the events are built under that lock.
 	ip *netaddr.Resolver
 	// refreshMu makes the lookups take turns, so an older answer can't
-	// replace a newer one.
+	// replace a newer one, and guards ip.
 	refreshMu sync.Mutex
 	// ipMu guards publicAddr, the address {ip} stands for in the events
 	// and summaries; empty until one is found.
@@ -228,8 +228,12 @@ func (d *Dispatcher) SetSnapshot(f func() any) { d.snapshot = f }
 func (d *Dispatcher) OnURLChange(f func()) { d.urlChanged = f }
 
 // SetResolver replaces the lookup of the address {ip} stands for, for
-// tests. It isn't synchronized with RefreshIP: set it while no lookup runs.
-func (d *Dispatcher) SetResolver(r *netaddr.Resolver) { d.ip = r }
+// tests. It waits for a lookup that runs.
+func (d *Dispatcher) SetResolver(r *netaddr.Resolver) {
+	d.refreshMu.Lock()
+	defer d.refreshMu.Unlock()
+	d.ip = r
+}
 
 // SendHeartbeat queues an instance.heartbeat now, if the webhook sends it.
 func (d *Dispatcher) SendHeartbeat() {

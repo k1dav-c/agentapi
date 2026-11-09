@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -43,6 +44,8 @@ type fakeProcess struct {
 	// frames (get_settings included), like a hung CLI; zero reads
 	// everything.
 	stallAfter int
+	// writing counts the writes to stdin under way.
+	writing atomic.Int32
 	// settings answers get_settings, which the process answers by itself
 	// and leaves out of written: the applied settings, or none if empty.
 	settings string
@@ -146,8 +149,13 @@ func (s fakeStdin) Write(data []byte) (int, error) {
 	if fail {
 		return 0, errors.New("broken pipe")
 	}
+	s.p.writing.Add(1)
+	defer s.p.writing.Add(-1)
 	return s.p.stdinW.Write(data)
 }
+
+// blockedWrite reports whether a write waits for the process to read.
+func (p *fakeProcess) blockedWrite() bool { return p.writing.Load() > 0 }
 
 func (s fakeStdin) Close() error { return s.p.stdinW.Close() }
 

@@ -816,7 +816,7 @@ func TestCloseWithBlockedWrite(t *testing.T) {
 	go func() { started <- a.Start(context.Background(), newRecorder(t)) }()
 	// Start blocks writing initialize.
 	require.Eventually(t, func() bool {
-		return a.writer.Writing()
+		return proc.writing.Load() > 0
 	}, waitTimeout, time.Millisecond)
 
 	closed := make(chan struct{})
