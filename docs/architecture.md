@@ -878,7 +878,8 @@ of the content's SHA-256, so a path never changes; unused ones are removed after
   can still point a new instance ID, or one whose address stopped answering,
   at an address of its own and get `--instance-token`; a key per machine
   would close that. Browsers sign in with the hub token for an HttpOnly, SameSite=Lax cookie
-  derived from it. The proxy drops their cookies and `Authorization`, `Origin`,
+  that holds its issue time, signed with the token, which the hub refuses
+  after 30 days. The proxy drops their cookies and `Authorization`, `Origin`,
   `Referer` and `Sec-Fetch-*` headers and the instances' `Set-Cookie`, so
   neither side's credentials reach the other. The hub refuses requests that
   change something from pages of other origins, as AgentAPI does, and with

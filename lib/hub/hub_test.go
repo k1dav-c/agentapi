@@ -4,6 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -798,6 +801,46 @@ func TestHubSession(t *testing.T) {
 	require.NoError(t, err)
 	_ = resp.Body.Close()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+// The hub checks a cookie's age itself, and an older hub's cookie, without
+// an issue time, no longer signs in.
+func TestHubSessionExpires(t *testing.T) {
+	clock := quartz.NewMock(t)
+	clock.Set(time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC))
+	hubSrv := startHubWith(t, hub.Config{Clock: clock}, false)
+	signedIn := func(value string) bool {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodGet, hubSrv.URL+"/api/session", nil)
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "agentapi_hub_session", Value: value})
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		var session map[string]bool
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&session))
+		return session["authenticated"]
+	}
+	body, _ := json.Marshal(map[string]string{"token": hubToken})
+	resp, err := http.Post(hubSrv.URL+"/api/session", "application/json", bytes.NewReader(body))
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	require.Len(t, resp.Cookies(), 1)
+	cookie := resp.Cookies()[0].Value
+	unix, _, ok := strings.Cut(cookie, ".")
+	require.True(t, ok)
+	assert.Equal(t, strconv.FormatInt(clock.Now().Unix(), 10), unix)
+
+	assert.True(t, signedIn(cookie))
+	assert.False(t, signedIn(strconv.FormatInt(clock.Now().Unix()+1, 10)+cookie[len(unix):]), "the issue time is signed")
+	mac := hmac.New(sha256.New, []byte(hubToken))
+	mac.Write([]byte("agentapi-hub-session-v1"))
+	assert.False(t, signedIn(hex.EncodeToString(mac.Sum(nil))), "an older hub's cookie")
+
+	clock.Advance(30*24*time.Hour - time.Second)
+	assert.True(t, signedIn(cookie))
+	clock.Advance(time.Second)
+	assert.False(t, signedIn(cookie), "30 days after it was issued")
 }
 
 func TestNewRefusesWithoutSecrets(t *testing.T) {

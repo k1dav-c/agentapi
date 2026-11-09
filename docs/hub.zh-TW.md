@@ -181,8 +181,8 @@ http://hub.vpn:3290 的 hub」。
 
 ![hub 的登入畫面](screenshots/hub-sign-in.png)
 
-token 只送給 hub 一次，換回一個由 token 推導出的 HttpOnly cookie；頁面不會保存 token。更換
-`--token` 會讓所有瀏覽器登出。token 錯誤時會當場拒絕，眼睛按鈕可以顯示你貼上的內容。
+token 只送給 hub 一次，換回一個以 token 簽章的 HttpOnly cookie；頁面不會保存 token。cookie
+從登入起有效 30 天，由 hub 自己檢查。更換 `--token` 會讓所有瀏覽器登出。token 錯誤時會當場拒絕，眼睛按鈕可以顯示你貼上的內容。
 
 如果 hub 本身就在另一層登入後面，例如 Coder workspace app 或私人 VPN，可以不設 token：用
 `--no-token` 取代 `--token`，就不會出現這個頁面，連得到 hub 的人都能直接進入。兩個都沒給時，hub
@@ -729,7 +729,9 @@ AgentAPI 1.1 以上。在這裡輸入的 token 會為這個實例保存，取代
 - 只有在已連上時，也就是 hub 正從那個網址讀到這個實例的摘要時，hub 才會轉送這個實例的請求
   （對話、核准、更新）。hub 重新啟動、串流斷線或事件把實例搬走後，連線中的期間 proxy 一律回 503，
   什麼都不送出。
-- session cookie 是 HttpOnly、SameSite=Lax，由 hub token 推導而來，裡面沒有 token 本身。proxy 會
+- session cookie 是 HttpOnly、SameSite=Lax，裡面是簽發時間和以 hub token 算出的簽章（HMAC），
+  沒有 token 本身。超過 30 天的 cookie，不論瀏覽器還留著與否，hub 都會拒絕。登出只會清掉瀏覽器
+  裡的那一份：複製到別處的 cookie 在過期或 `--token` 更換前仍然有效。proxy 會
   移除瀏覽器的 cookie 以及 `Authorization`、`Origin`、`Referer`、`Sec-Fetch-*` 標頭，也會移除實例的
   `Set-Cookie`，雙方的憑證都不會傳到另一邊。
 - 不論有沒有 token，其他網站的網頁都無法讓 hub 做任何改動，也無法替實例送任務：除非瀏覽器表明請求

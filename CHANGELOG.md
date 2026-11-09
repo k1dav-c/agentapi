@@ -4,6 +4,9 @@
 
 ### Changes
 
+- The hub's session cookie holds the time it was issued, signed with the hub token, and the hub
+  refuses one older than 30 days itself, where only the browser dropped it. A browser signed in to
+  an older hub is signed out once and signs in again.
 - `POST /upload` answers 413 (`request body is too large`) for a body over 101 MiB, where it
   answered 400; a file over 100 MB in a smaller body still gets 400 and
   `file size exceeds 100MB limit`. An empty file part sent without a `Content-Type` gets 422.

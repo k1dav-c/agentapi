@@ -202,8 +202,9 @@ Open `http://hub.vpn:3290/` on a desktop or a phone that is on the VPN, and sign
 
 ![The hub's sign-in](screenshots/hub-sign-in.png)
 
-The token goes to the hub once and comes back as an HttpOnly cookie derived from it; the page never
-stores the token. Changing `--token` signs every browser out. A wrong token is refused on the spot,
+The token goes to the hub once and comes back as an HttpOnly cookie signed with it; the page never
+stores the token. The cookie lasts 30 days from the sign-in, which the hub checks itself. Changing
+`--token` signs every browser out. A wrong token is refused on the spot,
 and the eye button shows what you pasted.
 
 A hub behind a sign-in of its own, such as a Coder workspace app or a private VPN, can run
@@ -850,8 +851,10 @@ right is forgotten, it closes.
   connected: it reads that instance's summary at its URL. While it connects, after the hub
   restarts, a stream drops or an event moved the instance, the proxy answers 503 and sends
   nothing.
-- The session cookie is HttpOnly and SameSite=Lax, derived from the hub token rather than holding
-  it. The proxy drops the browser's cookies and its `Authorization`, `Origin`, `Referer` and
+- The session cookie is HttpOnly and SameSite=Lax, and holds the time it was issued, signed with
+  the hub token (HMAC), rather than the token. The hub refuses one older than 30 days, whatever the
+  browser keeps. Signing out only clears the browser's copy: a cookie copied elsewhere still works
+  until it expires or `--token` changes. The proxy drops the browser's cookies and its `Authorization`, `Origin`, `Referer` and
   `Sec-Fetch-*` headers, and drops the instance's `Set-Cookie`, so neither side's credentials
   reach the other.
 - A page of another site can't make the hub change anything or send an instance a task, with or
