@@ -1,5 +1,39 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- `DELETE /api/hosts/{name}` forgets a machine of the issue dispatch, and the launcher token the hub
+  pinned its name to, so a launcher with a new token (its `host.token` deleted, or the machine set
+  up again) can join under the name. It refuses a machine that is online (409 `host_online`) or has
+  a job that works (409 `host_busy`). See [Troubleshooting](docs/hub.md#troubleshooting).
+
+### Fixes
+
+- The hub pins each machine's name to the launcher token it first came with, and refuses a
+  `host.*` event with another token, or none, whether the machine is online or not, `host.stopped`
+  included. A machine that had the hub's secret could send `host.stopped` with its own token, then
+  heartbeats as another machine, get that machine's jobs' GitHub tokens and have the hub send it
+  that machine's dispatches; a machine offline long enough could be claimed outright.
+- A dispatch's start answers once its job is `starting` on a machine, and the hub calls the
+  launcher in the background, so the first dispatch of a big repository no longer fails on the
+  workflow's 60-second `curl`. A start that fails there leaves the job failed with the launcher's
+  error, comments it on the issue (with the GitHub App) and forgets its delivery ID, so the
+  workflow run again starts it again. Sending to a starting job is refused (409 `job_starting`).
+- A launcher finishes a start when the hub's request ends, within its own limits (10 minutes of
+  git, then a minute for the AgentAPI), rather than killing the job it had just started. The hub
+  keeps each start until it hears how it ended: one whose answer it lost (the call failed, the hub
+  restarted) is adopted from the machine's next report, or failed if the machine doesn't have it,
+  and a job a machine runs that no start asked for is stopped there, its worktree kept.
+- Concurrent starts no longer fill a machine past its `max-jobs`: the hub holds the place when it
+  picks the machine, and a launcher that says it is full has another machine take a job the hub
+  picked it for.
+- A job's AgentAPI that exits starts again after 5 s, 15 s, 45 s, 2 min, then 5 min, rather than
+  at the next 5-second check, and the job fails when it exits again after 5 restarts in 30 minutes
+  (it failed after 5 exits in about 30 seconds). The restarts are kept in `jobs.json`, so a
+  restarted launcher counts on.
+
 ## v3.14.0
 
 ### Features

@@ -68,16 +68,17 @@ sequenceDiagram
   R->>GH: 查加 label 的人的權限（write / admin 才繼續）
   R->>H: POST /api/dispatch {start, repo, issue, agent}
   H->>GH: 讀 issue、default branch（App token）
-  H->>H: 挑主機：在線、有該 agent、有空位、優先有 repo
-  H->>L: POST /jobs（prompt、bot 的 git 身分、credentials=hub）
+  H->>H: 挑主機：在線、有該 agent、有空位、優先有 repo<br/>同一個鎖內記下 job：starting
+  H-->>R: 201 created（job：starting）
+  H->>L: POST /jobs（背景；prompt、bot 的 git 身分、credentials=hub）
   L->>L: 預留位置與 port
   L->>GH: clone / fetch（token 經 hub 取得）
   L->>L: worktree：repo.worktrees/12，分支 agent/issue-12
   L->>J: 啟動 agentapi server（--initial-prompt）
   J-->>L: /status ready
   L-->>H: JobInfo（instance ID）
+  Note over H: job 狀態 → working（沒收到回應時，由下一次 heartbeat 接回）
   H->>GH: issue 留言「Claude Code 在 pve 上開始處理」
-  H-->>R: 201 created
   J->>J: 讀 issue → 實作 → 測試
   J->>GH: push agent/issue-12、gh pr create（bot 身分）
   GH-->>R: pull_request.opened
@@ -166,6 +167,7 @@ sequenceDiagram
   participant J2 as Codex
 
   H->>H: 先讀 issue（失敗就什麼都不動）
+  Note over H: job 狀態 → starting，先回應，以下在背景進行
   H->>L: DELETE /jobs/{key}?keep_worktree&keep_state
   L->>J1: 停止（保留 worktree、分支、對話紀錄）
   H->>L: POST /jobs {agent: codex, 接手 prompt}
@@ -208,14 +210,15 @@ flowchart TB
 
 ```mermaid
 stateDiagram-v2
-  [*] --> working: start
+  [*] --> starting: start（hub 先回應，launcher 在背景啟動）
+  starting --> working: agent 起來
+  starting --> failed: launcher 拒絕／沒啟動／換 agent 失敗
+  starting --> done: stop
   working --> review: PR 開了（link_pr）／任務結束且有 PR
   review --> working: send（review 意見）
   working --> starting: 換 agent
-  starting --> working: 新 agent 起來
-  starting --> failed: 換 agent 失敗
   working --> failed: launcher 回報失敗／主機上已沒有這個 job
-  failed --> working: Retry（同一或另一個 agent）
+  failed --> starting: Retry（同一或另一個 agent）
   working --> done: stop
   review --> done: stop（PR 關閉）
   failed --> done: stop
@@ -224,7 +227,7 @@ stateDiagram-v2
   done --> working: 再開工（新的一輪）
 ```
 
-AgentAPI 在 10 分鐘內退出 5 次，launcher 就不再重啟，job 標為 failed，並附上 log 的位置（可複製）。Retry 用原本的 agent 重來，也可以按 Switch agent 換一個：
+AgentAPI 退出後，launcher 依序等 5 秒、15 秒、45 秒、2 分鐘、5 分鐘再重啟；30 分鐘內重啟 5 次後又退出，就不再重啟，job 標為 failed，並附上 log 的位置（可複製）。Retry 用原本的 agent 重來，也可以按 Switch agent 換一個：
 
 ![失敗的 job](../screenshots/dispatch-failed.png)
 

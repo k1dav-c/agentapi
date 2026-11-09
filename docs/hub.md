@@ -671,6 +671,11 @@ doesn't run that agent, or doesn't have the repository and doesn't clone. A mach
 gets the issue. `a` assigns the issue whose card has the focus. Without a machine that can take it,
 the button says why.
 
+The issue is **Starting** on that machine at once: the hub holds its place there, and the machine
+clones or fetches the repository and starts the agent after, which for a big repository can take
+minutes. The card then shows the agent working, or the job failed with why. A machine that turns out
+to be full hands the issue to another the hub would pick, unless you picked it by hand.
+
 #### An issue's detail
 
 | An issue in review | A failed job |
@@ -909,6 +914,8 @@ right is forgotten, it closes.
 | A connected agent's **⋯** menu has nothing about updating it | Its AgentAPI is too old to update from the hub | Update it by hand ([Updating by hand](#updating-by-hand)) |
 | The hub logs "The hub's file of instances doesn't parse" | The file was damaged, such as by an edit by hand, or a hub of 2.2 or earlier started on a newer hub's file | The hub moved it aside (`instances.json.corrupt-<time>`) and started empty. Joined instances come back with their next heartbeat. To get the rest back, stop the hub and copy `instances.json.bak` (the file as the hub's previous start found it) over `instances.json`; for a hub of 2.2 or earlier, see [Files](#files) |
 | The hub doesn't start: `instances.json is of a newer hub` | A newer hub wrote the file | Run the newer hub, or start from `instances.json.bak` |
+| A machine stays offline in Issues; the hub logs "Refused a host event with another launcher's token than the machine's" | The hub pins a machine's name to the launcher token it first came with. The launcher has a new token (its `~/.agentapi/host.token` was deleted, or the machine was set up again), or another machine with the hub's secret uses the name | If it is your machine: stop its jobs, and once it shows offline, forget it with `curl -X DELETE -H "Authorization: Bearer <hub token>" http://<hub>:3290/api/hosts/<name>`; it joins with its next heartbeat. If it isn't, change the hub's `--secret` and join your machines again |
+| An issue stays **Starting** for minutes | The machine clones or fetches a big repository (up to 10 minutes), then waits up to a minute for the agent | Wait; `~/.agentapi/jobs/<owner>~<repo>~<issue>/agentapi.log` on the machine has the agent's side. A start the hub lost the answer of works or fails with the machine's next heartbeat |
 
 `agentapi hub status` on an instance's machine shows which hub its config file names and where
 each running AgentAPI reports. The hub logs each instance it starts following, stops or can't
@@ -986,11 +993,12 @@ running AgentAPIs, which then no longer follow their conversation for the webhoo
 | `PUT /api/favorites` | `{"favorites": […]}` replaces them, in that order. At most 100; a title has at most 100 characters, on one line; a text isn't blank and has at most 20,000; an ID has 1 to 64 letters, digits, `-` or `_`, once. A favorite sent without an ID gets one; the answer is the list as the hub keeps it. 400, changing nothing, for a list it refuses |
 | `GET /api/events` | Server-sent events: `instances` (all of them and `hub_version`, as `GET /api/instances` has them) and `favorites` (as `GET /api/favorites` has them), then `instance` (one changed what the page shows, or its work time moved by a minute; when it was last heard of counts only while it is offline), `removed` (`{"id"}`), `favorites` (all of them, after a change), `dispatch` (the [issue dispatch's](#issues) machines and jobs, as `GET /api/hosts` and `GET /api/jobs` have them, at first and after each change) and a `heartbeat` every 15 s |
 | `GET /api/hosts` | The machines whose launchers report: their agents, repositories, jobs and room, and whether each is `online` |
+| `DELETE /api/hosts/{name}` | Forgets a machine and the launcher token the hub pinned its name to, so a launcher with a new token can join under the name. 409 while the machine is online (`host_online`) or has a job that works (`host_busy`): stop its jobs first; 404 for a machine the hub doesn't have |
 | `GET /api/jobs` | The jobs, each an issue's work: its state, agent and machine, pull request, runs with their cost, and the last 50 messages its agents were sent (`messages`: `at`, `source` `hub`, `review` or `comment`, `author`, `agent`, `text`, up to 2,000 characters) |
 | `GET /api/github` | The hub's GitHub App, if any (`slug`, `owner`, `owner_type` `User` or `Organization` when the hub knows it, `html_url`, `settings_url`, `install_url`), and where it is installed (`installations`: `account`, `account_type`, `repository_selection` `all` or `selected`, `avatar_url`, `settings_url`); `DELETE` forgets the app, which stays on GitHub |
 | `GET /api/github/repos` | The repositories the app can see, the latest pushed to or changed first (`pushed_at`, `updated_at`) |
 | `GET /api/github/issues?repo=` | A repository's open issues; `POST` opens one, and with `assign`, starts work on it |
-| `POST /api/dispatch` | Starts, messages, links and stops the work on an issue (`action`: `start`, `send`, `link_pr`, `stop`); also takes `--dispatch-token` |
+| `POST /api/dispatch` | Starts, messages, links and stops the work on an issue (`action`: `start`, `send`, `link_pr`, `stop`); also takes `--dispatch-token`. A start answers once its job is `starting` on a machine; the job's state then follows on the stream and in `GET /api/jobs` |
 | `GET /api/join` | Where machines join the hub: `urls`, each a webhook URL (`url`) with the interface of its address (`interface`; none for `--bind`'s), in the order the startup log has them; and the secret (`secret`, with `secret_shown: true`) only on a hub with a token |
 | `/i/{id}/…` | The instance's own API and chat, through the hub; the page updates an instance with `POST /i/{id}/update` and cancels with `DELETE` |
 

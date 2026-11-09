@@ -110,3 +110,9 @@ review 才會派工或轉送；查不到時一律忽略。組織的 MEMBER 不�
 判斷。issue 範本自動帶上的 `agent` label 也會檢查開 issue 的人。fork 來的 PR 一律不處理。
 留言要以 `/agent` 加空白開頭（`/agents …` 不算）；在不是 agent 開的 PR 上留言 `/agent` 會被忽略。
 也可以在 hub 的畫面直接打開 job 的 instance 對話。
+
+開工時，hub 一挑好主機、把 job 記為 `starting` 就回應 workflow，主機接著在背景 clone 或 fetch
+repo、啟動 agent，所以 workflow 不必等到 clone 完成。之後的結果由 hub 在 issue 上留言（需要 GitHub
+App）：開始處理，或沒能開始與原因。背景失敗的開工不會記下 delivery ID，在 Actions 重跑即可再開工。
+workflow 本身失敗並留言「hub 沒有接受這次派工」的，只有 hub 當下就拒絕的情況：沒有在線的主機、主機
+沒有這個 agent、App 沒裝在這個 repo 等。
