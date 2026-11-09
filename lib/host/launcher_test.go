@@ -385,23 +385,54 @@ func TestLauncherSwitchAgentKeepsWorktree(t *testing.T) {
 	assert.Contains(t, e.started(next.PID).Args, filepath.Join(e.config.jobFiles(key).dir, "state-2.db"))
 }
 
-func TestLauncherRestartsAndTakesOver(t *testing.T) {
-	e := newTestEnv(t)
-	ctx := context.Background()
-	l := e.launcher
-	job, _, err := l.Start(ctx, StartRequest{Repo: "acme/widget", Issue: 9})
-	require.NoError(t, err)
+// fakeClock is a launcher's l.now that a test moves.
+type fakeClock struct{ now time.Time }
 
-	// Its AgentAPI exits: the check starts it again.
-	kill(job.PID)
-	waitFor(t, func() bool { return !alive(job.PID, job.InstanceID) })
+func (c *fakeClock) Now() time.Time          { return c.now }
+func (c *fakeClock) Advance(d time.Duration) { c.now = c.now.Add(d) }
+
+func useClock(l *Launcher) *fakeClock {
+	c := &fakeClock{now: time.Now()}
+	l.now = c.Now
+	return c
+}
+
+// exitAndRestart has the job's AgentAPI exit, and the checks start it
+// again once its delay passed.
+func exitAndRestart(t *testing.T, l *Launcher, clock *fakeClock, delay time.Duration) {
+	t.Helper()
+	ctx := context.Background()
+	before := l.Jobs()[0]
+	kill(before.PID)
+	waitFor(t, func() bool { return !alive(before.PID, before.InstanceID) })
 	l.check(ctx)
-	restarted := l.Jobs()[0]
-	assert.NotEqual(t, job.PID, restarted.PID)
+	waiting := l.Jobs()[0]
+	assert.Equal(t, JobRestarting, waiting.State)
+	assert.Equal(t, before.PID, waiting.PID, "not started again before its delay")
+	clock.Advance(delay - time.Second)
+	l.check(ctx)
+	assert.Equal(t, before.PID, l.Jobs()[0].PID, "not started again before its delay")
+	clock.Advance(time.Second)
+	l.check(ctx)
+	require.NotEqual(t, before.PID, l.Jobs()[0].PID, "started again after %s", delay)
 	waitFor(t, func() bool {
 		l.check(ctx)
 		return l.Jobs()[0].State == JobRunning
 	})
+}
+
+func TestLauncherRestartsAndTakesOver(t *testing.T) {
+	e := newTestEnv(t)
+	ctx := context.Background()
+	l := e.launcher
+	clock := useClock(l)
+	job, _, err := l.Start(ctx, StartRequest{Repo: "acme/widget", Issue: 9})
+	require.NoError(t, err)
+
+	// Its AgentAPI exits: a check starts it again.
+	exitAndRestart(t, l, clock, restartDelays[0])
+	restarted := l.Jobs()[0]
+	assert.NotEqual(t, job.PID, restarted.PID)
 
 	// Another launcher (after a restart or an update) takes it over
 	// without starting it again.
@@ -415,15 +446,19 @@ func TestLauncherRestartsAndTakesOver(t *testing.T) {
 	})
 	assert.Equal(t, restarted.PID, l2.Jobs()[0].PID)
 
-	// An AgentAPI that keeps exiting leaves the job failed.
-	for range maxRestarts + 1 {
-		pid := l2.Jobs()[0].PID
-		kill(pid)
-		waitFor(t, func() bool { return !alive(pid, job.InstanceID) })
-		l2.check(ctx)
+	// An AgentAPI that keeps exiting leaves the job failed: the restart
+	// before the launcher's counts on.
+	clock2 := useClock(l2)
+	clock2.now = clock.now
+	for _, delay := range restartDelays[1:] {
+		exitAndRestart(t, l2, clock2, delay)
 	}
+	pid := l2.Jobs()[0].PID
+	kill(pid)
+	waitFor(t, func() bool { return !alive(pid, job.InstanceID) })
+	l2.check(ctx)
 	assert.Equal(t, JobFailed, l2.Jobs()[0].State)
-	assert.Contains(t, l2.Jobs()[0].Error, "exited")
+	assert.Contains(t, l2.Jobs()[0].Error, "exited 6 times")
 
 	// Starting it again tries anew.
 	again, created, err := l2.Start(ctx, StartRequest{Repo: "acme/widget", Issue: 9})
@@ -679,4 +714,43 @@ func TestLauncherReportsJobsBeingPrepared(t *testing.T) {
 	assert.Equal(t, []JobInfo{{Key: "acme/widget#25", Agent: "claude", State: JobStarting}}, l.Jobs())
 	release()
 	assert.Empty(t, l.Jobs())
+}
+
+// A job's AgentAPI that exits starts again after a longer wait each time,
+// kept across a restart of the launcher; the exits of long ago don't
+// count.
+func TestLauncherRestartBackoff(t *testing.T) {
+	e := newTestEnv(t)
+	ctx := context.Background()
+	l := e.launcher
+	clock := useClock(l)
+	_, _, err := l.Start(ctx, StartRequest{Repo: "acme/widget", Issue: 26})
+	require.NoError(t, err)
+	for _, delay := range restartDelays[:3] {
+		exitAndRestart(t, l, clock, delay)
+	}
+
+	// Long after, it exits again: the first delay again.
+	clock.Advance(restartWindow + time.Minute)
+	exitAndRestart(t, l, clock, restartDelays[0])
+
+	// It exits while the launcher is down: the new one waits the delay of
+	// the restarts kept.
+	pid := l.Jobs()[0].PID
+	kill(pid)
+	waitFor(t, func() bool { return !alive(pid, "server") })
+	l.check(ctx)
+	l2 := e.newLauncher()
+	clock2 := useClock(l2)
+	clock2.now = clock.now
+	l2.takeOver()
+	job := l2.Jobs()[0]
+	assert.Equal(t, JobRestarting, job.State)
+	assert.Equal(t, pid, job.PID, "not started again before its delay")
+	clock2.Advance(restartDelays[1])
+	l2.check(ctx)
+	assert.NotEqual(t, pid, l2.Jobs()[0].PID)
+	l2.mu.Lock()
+	assert.Len(t, l2.store.get("acme/widget#26").Restarts, 2)
+	l2.mu.Unlock()
 }

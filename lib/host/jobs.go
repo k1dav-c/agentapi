@@ -64,13 +64,16 @@ type Job struct {
 	// Credentials is where its git and gh get a token: hub, file, or
 	// empty for the machine's own.
 	Credentials string `json:"credentials,omitempty"`
+	// Restarts are when the launcher started the AgentAPI again after it
+	// exited, within restartWindow; RestartAt, when set, is when it starts
+	// it again next (restartDelays).
+	Restarts  []time.Time `json:"restarts,omitempty"`
+	RestartAt time.Time   `json:"restart_at,omitzero"`
 
-	// restarts are when the launcher started the AgentAPI again lately;
 	// since is when its state last changed, for the time it has to serve;
 	// done closes when an AgentAPI this launcher started exits.
-	restarts []time.Time
-	since    time.Time
-	done     chan struct{}
+	since time.Time
+	done  chan struct{}
 }
 
 // JobInfo is what the launcher tells of a job: its API's answers and its
