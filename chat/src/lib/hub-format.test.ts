@@ -2,7 +2,7 @@ import {describe, expect, test} from "bun:test";
 import {idleInstance as instance, summary} from "./hub-fixtures";
 import {sortInstances, stateLabel} from "./hub";
 import {countFilters} from "./hub-filter";
-import {activity, formatAgo, formatElapsed, formatTimeAndDay, shortError} from "./hub-format";
+import {activity, formatElapsed, formatTimeAndDay, shortError} from "./hub-format";
 
 describe("what a row says", () => {
   test("a row says what the instance waits for or does, and since when", () => {
@@ -17,14 +17,8 @@ describe("what a row says", () => {
     expect(activity(instance("e")).text).toBe("No task yet");
   });
 
-  test("ages and running times are short", () => {
+  test("running times are short", () => {
     const now = Date.parse("2026-10-26T10:00:00Z");
-    expect(formatAgo("2026-10-26T09:59:55Z", now)).toBe("now");
-    expect(formatAgo("2026-10-26T09:59:15Z", now)).toBe("45s");
-    expect(formatAgo("2026-10-26T09:48:00Z", now)).toBe("12m");
-    expect(formatAgo("2026-10-26T07:00:00Z", now)).toBe("3h");
-    expect(formatAgo("2026-10-24T10:00:00Z", now)).toBe("2d");
-    expect(formatAgo(undefined, now)).toBe("");
     expect(formatElapsed("2026-10-26T09:57:46Z", now)).toBe("2m 14s");
     expect(formatElapsed("2026-10-26T08:55:00Z", now)).toBe("1h 05m");
   });

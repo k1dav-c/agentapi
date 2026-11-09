@@ -5,7 +5,8 @@ import {ArrowRight, ExternalLink, GitPullRequest, MessageSquare, RotateCcw} from
 import {AgentMark} from "@/components/agent-mark";
 import type {HubInstance} from "@/lib/hub";
 import {agentLabel, jobCost, prNumber, type DispatchHost} from "@/lib/hub-dispatch";
-import {activity, formatAgo, formatElapsed} from "@/lib/hub-format";
+import {formatAge} from "@/lib/format";
+import {activity, formatElapsed} from "@/lib/hub-format";
 import {failureText, repoName, type Card, type Option} from "@/lib/hub-issues";
 import {cn} from "@/lib/utils";
 import {useHubTime} from "../clock";
@@ -28,7 +29,7 @@ function Age({card}: {card: Card}) {
   const job = card.job;
   const running = job && (job.state === "working" || job.state === "starting");
   const since = running ? (job.runs ?? []).at(-1)?.started_at || job.created_at : job?.updated_at;
-  const text = useHubTime((now) => (running ? formatElapsed(since, now) : formatAgo(since, now)));
+  const text = useHubTime((now) => (running ? formatElapsed(since, now) : formatAge(since, now)));
   if (!job || !text) return null;
   return <span className={cn("shrink-0 tabular-nums", running && "font-mono text-state-working")}>{running ? text : text === "now" ? "just now" : `${text} ago`}</span>;
 }

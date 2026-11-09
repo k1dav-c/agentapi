@@ -1,15 +1,14 @@
 import {describe, expect, test} from "bun:test";
 import {idleInstance as instance, summary} from "./hub-fixtures";
-import {countedSpends, countedTokens, currentSpend, formatTokens, formatUSD, spendTitle, spendTotals, tokensTitle, tokenTotals, type Spend} from "./hub-spend";
+import {countedSpends, countedTokens, currentSpend, spendTitle, spendTotals, tokensTitle, tokenTotals, type Spend} from "./hub-spend";
 
 describe("spend", () => {
   const spending = (day_usd: number, week_usd: number, scope: string, updated_at = "2026-10-26T00:00:00Z") =>
     summary({spend: {day_usd, week_usd, scope, updated_at}});
 
-  test("spend: totals of the instances that report one, and short amounts", () => {
+  test("spend: totals of the instances that report one", () => {
     const totals = spendTotals([instance("a", {summary: spending(1.5, 10, "s1")}), instance("b", {summary: spending(100, 300, "s2")}), instance("c")]);
     expect(totals).toEqual({day: 101.5, week: 310, counted: 2});
-    expect([0, 0.004, 4.2, 109.77, 452.31, 1234, 98_765, 1_500_000].map(formatUSD)).toEqual(["$0", "$0", "$4.20", "$110", "$452", "$1.2k", "$99k", "$1.5M"]);
   });
 
   test("spend: AgentAPIs that add up the same sessions count once, with the most recent figure", () => {
@@ -63,10 +62,7 @@ describe("spend", () => {
     expect(tokenTotals([])).toEqual({day: tokens(0), week: tokens(0), counted: 0});
   });
 
-  test("tokens: short counts and titles", () => {
-    expect([0, 7.4, 950, 999, 1000, 1234, 9_949, 9_960, 12_345, 999_499, 999_999, 3_412_000, 45_600_000, 1_234_000_000, 2e15].map(formatTokens)).toEqual([
-      "0", "7", "950", "999", "1k", "1.2k", "9.9k", "10k", "12k", "999k", "1M", "3.4M", "46M", "1.2B", "2000T",
-    ]);
+  test("tokens: titles", () => {
     expect(tokensTitle(3_400_000, 21_000_000)).toBe("3.4M tokens in the last 24 hours, 21M in the last 7 days");
     expect(spendTitle(4.2, 30, false, 3_400_000)).toBe("$4.20 in the last 24 hours, $30 in the last 7 days (API-equivalent, at list prices; a subscription doesn't charge it); 3.4M tokens in the last 24 hours");
     expect(spendTitle(4.2, 30, true, 950)).toStartWith("Last known, not counted: $4.20");

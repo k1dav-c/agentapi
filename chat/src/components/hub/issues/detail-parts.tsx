@@ -7,7 +7,7 @@ import {AgentMark} from "@/components/agent-mark";
 import {Button} from "@/components/ui/button";
 import {agentLabel, type DispatchJob} from "@/lib/hub-dispatch";
 import {formatRunDuration, jobTotals} from "@/lib/hub-issues";
-import {formatTokens} from "@/lib/hub-spend";
+import {formatTokens} from "@/lib/format";
 import {useCopy} from "@/lib/use-copy";
 import {cn} from "@/lib/utils";
 import {useHubTime} from "../clock";

@@ -2,6 +2,7 @@
 // report them.
 
 import type {HubInstance, Summary} from "./hub";
+import {formatTokens, formatUSDShort} from "./format";
 
 export type Spend = NonNullable<Summary["spend"]>;
 
@@ -54,20 +55,11 @@ export function spendTotals(instances: Iterable<HubInstance>): SpendTotals {
   return totals;
 }
 
-// formatUSD is a short amount: "$0", "$4.20", "$110", "$1.2k".
-export function formatUSD(usd: number): string {
-  if (usd < 0.005) return "$0";
-  if (usd < 10) return `$${usd.toFixed(2)}`;
-  if (usd < 1000) return `$${Math.round(usd)}`;
-  if (usd < 999_500) return `$${(usd / 1000).toFixed(usd < 9_950 ? 1 : 0)}k`;
-  return `$${(usd / 1_000_000).toFixed(1)}M`;
-}
-
 // spendTitle says what a spend is, for a tooltip; lastKnown, that it is an
 // instance's last, which doesn't count while the hub doesn't follow it;
 // dayTokens, the tokens of its last 24 hours, where it says them.
 export function spendTitle(day: number, week: number, lastKnown = false, dayTokens?: number): string {
-  let amounts = `${formatUSD(day)} in the last 24 hours, ${formatUSD(week)} in the last 7 days (API-equivalent, at list prices; a subscription doesn't charge it)`;
+  let amounts = `${formatUSDShort(day)} in the last 24 hours, ${formatUSDShort(week)} in the last 7 days (API-equivalent, at list prices; a subscription doesn't charge it)`;
   if (dayTokens !== undefined) amounts += `; ${formatTokens(dayTokens)} tokens in the last 24 hours`;
   return lastKnown ? `Last known, not counted: ${amounts}` : amounts;
 }
@@ -120,23 +112,6 @@ export function tokenTotals(instances: Iterable<HubInstance>): TokenTotals {
     addTokens(totals.week, week);
   }
   return totals;
-}
-
-// formatTokens is a short count: "950", "1.2k", "12k", "3.4M", "1.2B".
-export function formatTokens(tokens: number): string {
-  const n = Math.max(0, Math.round(tokens));
-  if (n < 1000) return String(n);
-  const units: [number, string][] = [
-    [1e3, "k"],
-    [1e6, "M"],
-    [1e9, "B"],
-    [1e12, "T"],
-  ];
-  for (const [i, [unit, suffix]] of units.entries()) {
-    const scaled = n / unit;
-    if (scaled < 999.5 || i === units.length - 1) return `${scaled.toFixed(scaled < 9.95 ? 1 : 0).replace(/\.0$/, "")}${suffix}`;
-  }
-  return String(n);
 }
 
 // tokensTitle says what a count of tokens is, for a tooltip.

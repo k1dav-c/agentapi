@@ -1,28 +1,10 @@
 import {describe, expect, test} from "bun:test";
 import type {ModelCall} from "./chat-api";
-import {costDetails, formatTokens, formatUSD, periodTotals, taskCosts, taskSpan} from "./cost";
+import {costDetails, periodTotals, taskCosts, taskSpan} from "./cost";
 
 function call(time: string, usd: number, priced = true): ModelCall {
   return {time, usd, priced, model: "claude-opus-5-5", tokens: {input: 10, cache_read: 1000, cache_write: 100, output: 50}};
 }
-
-describe("formatUSD", () => {
-  test("cents, fractions of a cent and thousands", () => {
-    expect(formatUSD(0)).toBe("$0.00");
-    expect(formatUSD(0.0042)).toBe("$0.004");
-    expect(formatUSD(12.345)).toBe("$12.35");
-    expect(formatUSD(1234.5)).toBe("$1,235");
-  });
-});
-
-describe("formatTokens", () => {
-  test("rounds to thousands and millions", () => {
-    expect(formatTokens(512)).toBe("512");
-    expect(formatTokens(1500)).toBe("1.5k");
-    expect(formatTokens(34_000)).toBe("34k");
-    expect(formatTokens(1_200_000)).toBe("1.2M");
-  });
-});
 
 describe("taskCosts", () => {
   test("a task's calls run until the next task's prompt", () => {
@@ -104,7 +86,7 @@ describe("costDetails", () => {
     const details = costDetails({usd: 1.5, calls: 2, tokens: {input: 20, cache_read: 2000, cache_write: 200, output: 100}}, true);
     expect(details).toContain("$1.50 API-equivalent cost");
     expect(details).toContain("2 model calls");
-    expect(details).toContain("Input 2.2k: 20 uncached, 2.0k cached, 200 written to the cache");
+    expect(details).toContain("Input 2.2k: 20 uncached, 2k cached, 200 written to the cache");
     expect(details).toContain("without a known price");
   });
 });

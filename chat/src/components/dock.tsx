@@ -2,7 +2,7 @@
 
 import {useChatSelector} from "./chat-provider";
 import { sameValue } from "@/lib/agent-status";
-import { formatTokenCount } from "@/lib/session-status";
+import { formatTokens } from "@/lib/format";
 import { useWorkingElapsed } from "@/lib/use-elapsed";
 import { loginTitle } from "@/lib/login";
 
@@ -52,7 +52,7 @@ export function StateStrip() {
         {!needs && elapsed && <span className="shrink-0">{elapsed}</span>}
         {!needs && !retrying && tokens.total > 0 && (
           <span className="hidden shrink-0 sm:inline" title="Tokens used by this task">
-            ↑{formatTokenCount(tokens.input + tokens.cacheRead)} ↓{formatTokenCount(tokens.output)}
+            ↑{formatTokens(tokens.input + tokens.cacheRead)} ↓{formatTokens(tokens.output)}
           </span>
         )}
       </div>

@@ -1035,8 +1035,9 @@ chat and `parseFromFrame` in the hub.
   (`shell-view.tsx`, from `/terminal`).
 - `lib/` holds the logic in plain modules with bun tests: task grouping, tool
   formatting, file references, diffs, slash commands, settings, usage, costs
-  (`cost.ts`: a task's share of the session's calls, totals by period),
-  terminal keys, auth. `use-session-cost.ts` reads `GET /cost` when a turn
+  (`cost.ts`: a task's share of the session's calls, totals by period), the
+  counts, amounts and ages the chat and the hub show (`format.ts`), terminal
+  keys, auth. `use-session-cost.ts` reads `GET /cost` when a turn
   ends and while one runs; after the first read it sends `from` and `digest`,
   and gets only the calls made since. A hook of the chat's state, or of one
   component, sits in `components/` beside what uses it; a hook that knows

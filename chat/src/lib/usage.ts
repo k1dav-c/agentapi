@@ -63,12 +63,3 @@ export function coldCache(usage: AgentUsage | null | undefined, now: number): Co
   return {expiredAt, tokens: context.used};
 }
 
-// How long ago a time was: "just now", "12 min ago", "3 h ago".
-export function formatAgo(at: number, now: number): string {
-  const minutes = Math.floor((now - at) / 60_000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes} min ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} h ago`;
-  return `${Math.floor(hours / 24)} d ago`;
-}
