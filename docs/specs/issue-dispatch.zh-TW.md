@@ -287,7 +287,7 @@ GitHub App 另外存在 `~/.agentapi/hub/github-app.json`（0600，不併入 `in
 - hub 的瀏覽器串流（`GET /api/events`）多了 `dispatch` 事件：主機與 job 的完整內容（同 `/api/hosts`、`/api/jobs`），一開始送一次，之後每次變動再送（短時間內的多次變動合併成一次）；主機因漏掉 heartbeat 而離線時，hub 自己的 heartbeat 也會送一次。3.12 以前的頁面不聽這個事件。
 - 新增 `--dispatch-token`（`AGENTAPI_HUB_DISPATCH_TOKEN`）：只能呼叫 `/api/dispatch`。
 - `/api/github/token`：簽章以 secret 驗證，並以簽章本身去重（delivery ID 不在簽章內）；另須帶該主機的 host token。只發給在該主機上進行中（不含 failed）、用 hub 憑證的 job。
-- `host.*` 事件：主機名稱綁定第一次帶來的 host token（§11）；token 不同或沒帶 token 的事件一律拒絕，不論主機是否在線、事件是不是 `host.stopped`。重灌而換了 token 的主機，要先以 `DELETE /api/hosts/{name}` 移除。
+- `host.*` 事件：主機名稱綁定第一次帶來的 host token（§11）；token 不同或沒帶 token 的事件一律拒絕，不論主機是否在線、事件是不是 `host.stopped`。重灌而換了 token 的主機，要先以 `DELETE /api/hosts/{name}`（Issues 頁離線主機的 **×**）移除。
 - dispatch.json 在背景寫入（不在鎖內做磁碟 I/O），hub 結束時寫完。
 - `/github/callback`、`/github/setup` 是瀏覽器跳轉，需要已登入 hub；沒登入時先登入再跳回。
 
@@ -628,7 +628,7 @@ jobs:
 5. `github-app.json` 0600；hub 的 log 不輸出 token 與 key。
 6. launcher 與 job instance 都必須有 token；launcher 建議 `bind` 內網位址。
 
-7. **主機身分（trust on first use）**：webhook secret 是所有加入的主機共用的，所以它不代表某一台主機。hub 第一次收到某個主機名稱的 `host.*` 事件時，記下事件裡的 host token，之後這個名稱只接受同一個 token：token 不同或沒帶 token 的事件一律拒絕（不論主機是否在線，`host.stopped` 也一樣），`/api/github/token` 也只認這個 token。否則持有 secret 的機器可以先送 `host.stopped` 再冒名送 heartbeat，取得那台主機上 job 的 GitHub token，並讓 hub 把派工送到自己那裡。主機重灌或 `host.token` 遺失時，先停掉它的 job，等它離線後以 `DELETE /api/hosts/{name}` 移除，新的 launcher 下一次 heartbeat 就會重新加入。
+7. **主機身分（trust on first use）**：webhook secret 是所有加入的主機共用的，所以它不代表某一台主機。hub 第一次收到某個主機名稱的 `host.*` 事件時，記下事件裡的 host token，之後這個名稱只接受同一個 token：token 不同或沒帶 token 的事件一律拒絕（不論主機是否在線，`host.stopped` 也一樣），`/api/github/token` 也只認這個 token。否則持有 secret 的機器可以先送 `host.stopped` 再冒名送 heartbeat，取得那台主機上 job 的 GitHub token，並讓 hub 把派工送到自己那裡。主機重灌或 `host.token` 遺失時，先停掉它的 job，等它離線後以 `DELETE /api/hosts/{name}`（Issues 頁離線主機的 **×**）移除，新的 launcher 下一次 heartbeat 就會重新加入。
 8. **同一使用者的信任邊界**：主機上的 job 都以同一個使用者執行，agent 讀得到 `~/.agentapi/` 裡的 secret 與 host token。token 只發給 job 自己的 process（Linux），但同一台主機上的 agent 仍可讀其他檔案；需要更強的隔離時，以不同使用者或不同主機跑 job。
 
 ## 12. 失敗處理

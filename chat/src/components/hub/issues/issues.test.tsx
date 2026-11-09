@@ -65,6 +65,7 @@ const detailActions: DetailActions = {
   send: async () => true,
   createIssue: async () => undefined,
   refresh: noop,
+  forgetHost: async () => {},
   openChat: noop,
   assignCard: noop,
 };

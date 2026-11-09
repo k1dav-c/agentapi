@@ -548,7 +548,9 @@ PR，以及在等你回應的 agent。再按一次 ◎、按 `Esc`，或在手�
 這一頁把目前範圍內各 repo 的 issue 放在同一個看板上。大標題說明有多少需要你處理，下一行是各階段的
 數量。再下面的長條依比例顯示 To do、In progress、In review、Done 各有幾個 issue；In progress 另外標出
 其中有幾個在等你、幾個失敗。接著是有 launcher 回報的主機：是否在線、job 數與上限（●●●○）、能跑的
-agent。最後依區塊列出 issue：
+agent。離線的主機有 **×**，確認後 hub 會移除這台主機，以及為它的名稱記下的 launcher token，讓重新安裝、
+換了 token 的 launcher 能以同一個名稱加入。它還有進行中的 job（done、stopped、failed 以外）時按鈕無法
+使用，請先停掉 job。主機本身不受影響，launcher 再次回報時它就會重新出現。最後依區塊列出 issue：
 
 - **Needs you**：失敗的 job，接著是在等你回應（核准、問題）的 agent，再來是等你 review 的 PR。
 - **Working**：正在工作的 agent，做最久的排前面，各自附上正在做的事。
@@ -614,7 +616,7 @@ agent 還在工作時，可以從最下面的輸入框傳訊息給它（⌘/Ctrl
 hub 還沒有 GitHub App 時，Issues 會顯示 **Connect GitHub**，從 manifest 為你的帳號或組織建立一個 App。
 [GitHub 設定](#github-設定)可以改 App 的 repo、換一個新的 App，或中斷連接。
 沒有 App 也能用 issue 的代號（`owner/repo#12` 或 issue 網址）開工，這時主機用自己的 GitHub 登入。
-沒有任何主機裝了 launcher 時，頁面會顯示安裝指令。
+上方會列出主機，離線的同樣有 **×**。沒有任何主機裝了 launcher 時，頁面會顯示安裝指令。
 
 | 手機上的看板 | 手機上的 issue |
 | --- | --- |
@@ -789,7 +791,7 @@ AgentAPI 1.1 以上。在這裡輸入的 token 會為這個實例保存，取代
 | 已連線的 agent，**⋯** 選單裡沒有任何更新項目 | 它的 AgentAPI 太舊，還不支援從 hub 更新 | 手動更新（見[手動更新](#手動更新)） |
 | hub 的 log 有「The hub's file of instances doesn't parse」 | 檔案損壞，例如手動改壞了；或是 2.2 以前的 hub 讀到較新 hub 寫的檔案 | hub 已把它改名放到一旁（`instances.json.corrupt-<時間>`），從空的清單開始。用 webhook 加入的實例會在下一次 heartbeat 回來。其餘的要找回來，先停掉 hub，再用 `instances.json.bak`（hub 上次啟動時看到的檔案）覆蓋 `instances.json`；2.2 以前的 hub 請見[檔案](#檔案) |
 | hub 無法啟動：`instances.json is of a newer hub` | 檔案是較新的 hub 寫的 | 改用較新的 hub，或從 `instances.json.bak` 開始 |
-| Issues 裡某台主機一直離線，hub 的 log 有 "Refused a host event with another launcher's token than the machine's" | hub 會把主機名稱綁定到它第一次帶來的 launcher token。這台 launcher 換了 token（`~/.agentapi/host.token` 被刪除，或主機重新安裝），或是另一台持有 hub secret 的機器冒用這個名稱 | 是你自己的主機時：先停掉它的 job，等它顯示離線後以 `curl -X DELETE -H "Authorization: Bearer <hub token>" http://<hub>:3290/api/hosts/<名稱>` 移除，下一次 heartbeat 就會重新加入。不是你的主機時，更換 hub 的 `--secret`，再讓你的主機重新 join |
+| Issues 裡某台主機一直離線，hub 的 log 有 "Refused a host event with another launcher's token than the machine's" | hub 會把主機名稱綁定到它第一次帶來的 launcher token。這台 launcher 換了 token（`~/.agentapi/host.token` 被刪除，或主機重新安裝），或是另一台持有 hub secret 的機器冒用這個名稱 | 是你自己的主機時：先停掉它的 job，等它顯示離線後在 [Issues](#issues) 按它的 **×** 移除，下一次 heartbeat 就會重新加入。不是你的主機時，更換 hub 的 `--secret`，再讓你的主機重新 join |
 | issue 停在 **Starting** 好幾分鐘 | 主機正在 clone 或 fetch 大的 repo（最多 10 分鐘），之後再等 agent 最多 1 分鐘 | 稍候；主機上的 `~/.agentapi/jobs/<owner>~<repo>~<issue>/agentapi.log` 有 agent 這端的紀錄。hub 沒收到回應的啟動，會在主機下一次 heartbeat 時改為工作中或失敗 |
 
 在實例所在的主機上執行 `agentapi hub status`，可以看到設定檔指向哪個 hub，以及每個執行中的
@@ -832,8 +834,9 @@ agentapi host status
 launcher 的設定（`~/.agentapi/config.yaml` 的 `host` 區段）、它的檔案和 `agentapi host uninstall`
 見 [CLI 參考](../README.zh-TW.md#agentapi-host)；[examples/issue-dispatch](../examples/issue-dispatch/README.md)
 另外說明 hub 的 dispatch token、GitHub App 和 workflow 的架設。hub 會把主機名稱綁定到它第一次帶來的
-launcher token（`~/.agentapi/host.token`）：重灌過、或 token 檔被刪掉的主機，要先在 hub 上執行
-`DELETE /api/hosts/{name}` 才能以原名稱加入（見[疑難排解](#疑難排解)）。
+launcher token（`~/.agentapi/host.token`）：重灌過、或 token 檔被刪掉的主機，要先
+在 hub 上移除它，才能以原名稱加入：在 [Issues](#issues) 按主機的 **×**，或呼叫 `DELETE /api/hosts/{name}`
+（見[疑難排解](#疑難排解)）。
 
 ### `agentapi hub join`、`leave`、`status`
 

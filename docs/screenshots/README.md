@@ -40,6 +40,10 @@ and the issues and jobs of `acme/web`, `acme/api` and `acme/infra`, at a fixed t
 Codex, a local bare repository in place of github.com, and a fake GitHub API. None of them are
 part of `capture-docs.mjs`.
 
+The Issues side of `dispatch-no-github.png` was taken again from a 3.16 build, for the machines
+it shows since: a hub of its own with three machines' launchers (one offline) reported by hand,
+and the list beside it kept from the first.
+
 `hub-settings-github.png` came from the same kind of build and fixtures: an app of the `acme`
 organization installed on `acme` (24 selected repositories) and on a user, `dave` (all three of
 his), with the accounts' pictures drawn locally in place of GitHub's. Since the settings dialog

@@ -2049,7 +2049,7 @@ host:
 
 | File | Holds |
 | --- | --- |
-| `~/.agentapi/host.token` | The token the hub calls the launcher with, made on first start. The hub pins the machine's name to it: a launcher with a new one (the file deleted, the machine set up again) joins only after `DELETE /api/hosts/{name}` on the hub ([Troubleshooting](docs/hub.md#troubleshooting)) |
+| `~/.agentapi/host.token` | The token the hub calls the launcher with, made on first start. The hub pins the machine's name to it: a launcher with a new one (the file deleted, the machine set up again) joins only after the hub forgets the machine: **×** on it in the hub's Issues, or `DELETE /api/hosts/{name}` ([Troubleshooting](docs/hub.md#troubleshooting)) |
 | `~/.agentapi/instance.token` | The API token of every job's AgentAPI; it must be the hub's `--instance-token` |
 | `~/.agentapi/host.sock` | Where the jobs' `git` and `gh` get their GitHub token from the launcher |
 | `~/.agentapi/jobs.json`, `~/.agentapi/jobs/` | The jobs, and each one's state database, log and `gh` shim |

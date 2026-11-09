@@ -1,6 +1,6 @@
 import {describe, expect, test} from "bun:test";
 import {HubAPIError} from "./hub-api";
-import {active, createDispatchAPI, hostAgents, hostsFor, jobCost, parseIssueRef, pendingAnswers, prNumber, withAnswers, type DispatchHost, type DispatchJob} from "./hub-dispatch";
+import {active, createDispatchAPI, forgetBlocker, hostAgents, hostsFor, jobCost, parseIssueRef, pendingAnswers, prNumber, withAnswers, type DispatchHost, type DispatchJob} from "./hub-dispatch";
 
 const host = (over: Partial<DispatchHost>): DispatchHost => ({
   hostname: "pve",
@@ -83,6 +83,17 @@ describe("jobs", () => {
   });
 });
 
+describe("forgetBlocker", () => {
+  test("the hub forgets a machine offline whose jobs ended", () => {
+    const offline = host({online: false});
+    expect(forgetBlocker(host({}), [])).toBe("It is online: stop its launcher first");
+    expect(forgetBlocker(offline, [])).toBeUndefined();
+    expect(forgetBlocker(offline, [job({state: "done"}), job({state: "stopped"}), job({state: "failed"}), job({host: "other", state: "working"})])).toBeUndefined();
+    expect(forgetBlocker(offline, [job({state: "working"})])).toBe("Stop its job first");
+    expect(forgetBlocker(offline, [job({state: "review"}), job({state: "starting"})])).toBe("Stop its 2 jobs first");
+  });
+});
+
 describe("createDispatchAPI", () => {
   test("calls the hub's routes, and throws the hub's message", async () => {
     const calls: string[] = [];
@@ -94,12 +105,14 @@ describe("createDispatchAPI", () => {
     });
     expect((await api.repos()).map((r) => r.full_name)).toEqual(["acme/widget"]);
     expect(await api.issues("acme/my repo")).toEqual([]);
+    await api.forgetHost("old box");
     const refused = api.dispatch({action: "start", repo: "acme/widget", issue: 12, agent: "codex"});
     await expect(refused).rejects.toThrow("no machine online runs codex");
     await expect(refused).rejects.toBeInstanceOf(HubAPIError);
     expect(calls).toEqual([
       "GET http://hub/api/github/repos ",
       "GET http://hub/api/github/issues?repo=acme%2Fmy%20repo ",
+      "DELETE http://hub/api/hosts/old%20box ",
       'POST http://hub/api/dispatch {"action":"start","repo":"acme/widget","issue":12,"agent":"codex"}',
     ]);
   });

@@ -16,7 +16,7 @@ import {fieldClass} from "./styles";
 // disconnecting the one the hub has.
 
 // Note is one line of what a dialog's action does.
-function Note({icon, children}: {icon: React.ReactNode; children: React.ReactNode}) {
+export function Note({icon, children}: {icon: React.ReactNode; children: React.ReactNode}) {
   return (
     <li className="flex gap-3 px-3.5 py-3 text-sm">
       <span className="mt-0.5 shrink-0 text-muted-foreground [&_svg]:size-4" aria-hidden="true">
