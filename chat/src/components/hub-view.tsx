@@ -17,7 +17,6 @@ import {AddInstance, ForgetStopped, GroupName, type Naming} from "./hub/dialogs"
 import {HubClock} from "./hub/clock";
 import {HubList} from "./hub/hub-list";
 import {IssuesView} from "./hub/issues/issues-view";
-import {useIssuesRoute} from "./hub/issues/use-issues-route";
 import {basePath, FrameFavorites, FrameInfo, InstanceBar} from "./hub/instance-bar";
 import {HubListContext, type HubList as HubListShared, type RowActions} from "./hub/list-context";
 import {ListEdge, useListWidth} from "./hub/list-edge";
@@ -32,8 +31,8 @@ import {cancelFromHub} from "./hub/update";
 import {useCollapsedGroups} from "./hub/use-collapsed-groups";
 import {useHubActions} from "./hub/use-hub-actions";
 import {useHubFrame} from "./hub/use-hub-frame";
-import {agentDepth, useHubHistory} from "./hub/use-hub-history";
 import {useHubKeys} from "./hub/use-hub-keys";
+import {useHubRoute} from "./hub/use-hub-route";
 import {useHubStream} from "./hub/use-hub-stream";
 import {useListFilters} from "./hub/use-list-filters";
 import {useNeedsYou} from "./hub/use-needs-you";
@@ -45,10 +44,11 @@ import {useNotify} from "./hub/use-notify";
 export function HubView() {
   const root = useMemo(() => (typeof window === "undefined" ? "" : hubRoot(basePath, window.location.origin)), []);
   const {session, signedIn, retrySession, instances, hubVersion, favorites, setFavorites, dispatch, unreachable, status} = useHubStream(root);
-  const {selected, select} = useHubHistory();
+  // The agent open beside the list, and whether the Issues view is open
+  // there instead of the overview (or below the agent, opened from it).
+  const route = useHubRoute();
+  const {agent: selected, select} = route;
   const [adding, setAdding] = useState(false);
-  // The Issues view, beside the list where the overview is.
-  const issues = useIssuesRoute();
   // The issue open in its detail, which a list row's chip opens too.
   const [issueKey, setIssueKey] = useState<string | null>(null);
   // The jobs by the ID of each AgentAPI that worked on one, for the rows'
@@ -114,34 +114,18 @@ export function HubView() {
     onClearSearch: () => filters.setQuery(""),
     // Esc steps back: from an agent opened from Issues to Issues, from
     // Issues to the overview.
-    onOverview: () => (selected ? select(undefined) : issues.show(false)),
-    onIssues: () => {
-      if (!issues.open || selected) openIssues();
-    },
+    onOverview: () => (selected ? select(undefined) : route.closeIssues()),
+    onIssues: route.openIssues,
     onPin: (id) => {
       const instance = actions.instance(id);
       if (instance) void actions.setPinned(id, pinOf(instance) === undefined);
     },
   });
 
-  // The list header's Issues: opens the view, or closes it; from an agent,
-  // shows the view (the one it was opened from, or a new one).
-  const openIssues = () => {
-    if (!selected) return issues.show(!issues.open);
-    if (issues.open || agentDepth(history.state) === 0) {
-      select(undefined);
-      if (!issues.open) issues.show(true);
-      return;
-    }
-    // Back past the agents first, then the view's page on top.
-    window.addEventListener("popstate", () => issues.show(true), {once: true});
-    select(undefined);
-  };
-
   // A row's chip opens its issue in Issues.
   const openIssue = useStableCallback((key: string) => {
     setIssueKey(key);
-    if (!issues.open || selected) openIssues();
+    route.openIssues();
   });
 
   // Forget closes the agent once the hub forgot it.
@@ -217,7 +201,7 @@ export function HubView() {
         <aside
           id="hub-list"
           style={{"--hub-list-width": `${listWidth.width}px`} as React.CSSProperties}
-          className={cn("relative flex w-full flex-col border-r bg-background md:w-(--hub-list-width) md:shrink-0", current || issues.open ? "hidden md:flex" : "flex")}
+          className={cn("relative flex w-full flex-col border-r bg-background md:w-(--hub-list-width) md:shrink-0", current || route.issues ? "hidden md:flex" : "flex")}
         >
           <HubListHeader
             status={status}
@@ -228,9 +212,9 @@ export function HubView() {
             onToggleNotify={() => void toggleNotify()}
             onSettings={() => setSettings("favorites")}
             onAdd={() => setAdding(true)}
-            issuesOpen={issues.open}
+            issuesOpen={route.issues}
             issuesNeedYou={issuesNeedYou}
-            onIssues={openIssues}
+            onIssues={route.toggleIssues}
             search={search}
             filters={filters}
             view={view}
@@ -260,7 +244,7 @@ export function HubView() {
           <ListEdge controls="hub-list" {...listWidth} />
         </aside>
 
-        <section className={cn("min-w-0 flex-1 flex-col bg-[color-mix(in_oklch,var(--muted)_45%,var(--background))]", current || issues.open ? "flex" : "hidden md:flex")}>
+        <section className={cn("min-w-0 flex-1 flex-col bg-[color-mix(in_oklch,var(--muted)_45%,var(--background))]", current || route.issues ? "flex" : "hidden md:flex")}>
           {current ? (
             <>
               {framed?.instance === current.id ? (
@@ -280,7 +264,7 @@ export function HubView() {
                 className={cn("min-h-0 w-full flex-1 border-0 bg-background", framed?.instance === current.id && "pt-[env(safe-area-inset-top)]")}
               />
             </>
-          ) : issues.open ? null : (
+          ) : route.issues ? null : (
             <Overview
               root={root}
               instances={all}
@@ -294,7 +278,7 @@ export function HubView() {
             />
           )}
           {/* Kept under an agent opened from it, so Back finds it as it was. */}
-          {issues.open && (
+          {route.issues && (
             <div className={cn("min-h-0 flex-1", current && "hidden")}>
               <IssuesView
                 root={root}
@@ -302,7 +286,7 @@ export function HubView() {
                 live={dispatch}
                 selectedKey={issueKey}
                 onSelect={setIssueKey}
-                onClose={() => issues.show(false)}
+                onClose={route.closeIssues}
                 onOpenChat={select}
                 onGitHubSettings={() => setSettings("github")}
               />
