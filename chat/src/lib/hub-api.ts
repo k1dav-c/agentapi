@@ -1,8 +1,8 @@
-// The hub's API for the changes its page makes: an instance's pin, group
-// and mute, forgetting one or the stopped ones, the order of the pinned ones, and the
-// favorites. Each change comes back on the event stream (/api/events),
-// like any other; a call throws HubAPIError when the hub refuses it or
-// doesn't answer.
+// The hub's API for the changes its page makes: signing in, an instance
+// added by its URL, its pin, group and mute, forgetting one or the stopped
+// ones, the order of the pinned ones, and the favorites. Each change comes
+// back on the event stream (/api/events), like any other; a call throws
+// HubAPIError when the hub refuses it or doesn't answer.
 
 import type {HubWire} from "./hub";
 import {parseFavorites, type Favorite, type FavoriteDraft} from "./hub-favorites";
@@ -49,6 +49,16 @@ export function createHubAPI(root: string, fetcher: Fetcher = (url, init) => fet
     await answer;
   };
   return {
+    // Trades the hub's token for its session cookie (POST /api/session),
+    // which the other calls need; this one doesn't.
+    signIn: (token: string) => done(call("/api/session", json("POST", {token} satisfies HubWire["SignInBody"]))),
+    // Adds an AgentAPI by its URL (POST /api/instances), and returns its ID.
+    addInstance: async (body: HubWire["AddInstanceBody"]): Promise<string> => {
+      const response = await call("/api/instances", json("POST", body));
+      const added = (await response.json().catch(() => null)) as Partial<Record<keyof HubWire["Instance"], unknown>> | null;
+      if (typeof added?.id !== "string" || !added.id) throw new HubAPIError("The hub's answer doesn't say which instance it added.", response.status);
+      return added.id;
+    },
     // Pins, groups or mutes an instance (PATCH /api/instances/{id}).
     changeInstance: (id: string, change: InstanceChange) => done(call(instance(id), json("PATCH", change))),
     // Forgets an instance the hub doesn't follow now.

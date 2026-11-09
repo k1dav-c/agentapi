@@ -1,9 +1,9 @@
 "use client";
 
-import {useState} from "react";
+import {useMemo, useState} from "react";
 import {ArrowRight, Eye, EyeOff, TriangleAlert} from "lucide-react";
 import {Button} from "@/components/ui/button";
-import type {HubWire} from "@/lib/hub";
+import {createHubAPI, HubAPIError, hubErrorText} from "@/lib/hub-api";
 import {cn} from "@/lib/utils";
 import {ConstellationScene, HubMark} from "./brand";
 
@@ -14,6 +14,7 @@ export function SignIn({root, onSignedIn}: {root: string; onSignedIn: () => void
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
   const [busy, setBusy] = useState(false);
+  const api = useMemo(() => createHubAPI(root), [root]);
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!token.trim()) {
@@ -23,16 +24,16 @@ export function SignIn({root, onSignedIn}: {root: string; onSignedIn: () => void
     }
     setBusy(true);
     setError("");
-    const response = await fetch(`${root}/api/session`, {
-      method: "POST",
-      credentials: "same-origin",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({token: token.trim()} satisfies HubWire["SignInBody"]),
-    }).catch(() => undefined);
-    setBusy(false);
-    if (response?.ok) return onSignedIn();
-    setError(response?.status === 401 ? "That token doesn't open this hub." : "The hub didn't answer. Is it still running?");
-    setAttempt((n) => n + 1);
+    try {
+      await api.signIn(token.trim());
+      setBusy(false);
+      return onSignedIn();
+    } catch (error) {
+      setBusy(false);
+      const status = error instanceof HubAPIError ? error.status : 0;
+      setError(status === 401 ? "That token doesn't open this hub." : status === 0 ? "The hub didn't answer. Is it still running?" : hubErrorText(error));
+      setAttempt((n) => n + 1);
+    }
   };
   return (
     <main className="app-frame grid overflow-y-auto overscroll-contain bg-background lg:grid-cols-[1.15fr_1fr]">
