@@ -220,6 +220,7 @@ export function HubView() {
           <HubListHeader
             status={status}
             unreachable={unreachable}
+            hubVersion={hubVersion}
             spend={spend}
             notify={notify}
             onToggleNotify={() => void toggleNotify()}
