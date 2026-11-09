@@ -114,6 +114,10 @@ func TestHostLaunchAndClose(t *testing.T) {
 	t.Parallel()
 	proc := newFakeProc()
 	h := newHost(func(procutil.Command) (procutil.Process, error) { return proc, nil })
+	// It exits when its stdin closes, which takes the fake's goroutine
+	// longer than newHost's 10 ms on a busy machine: Close mustn't
+	// terminate it first.
+	h.StdinGrace = time.Minute
 	got, err := h.Launch(procutil.Command{Program: "agent"}, noLoop)
 	require.NoError(t, err)
 	assert.Equal(t, procutil.Process(proc), got)

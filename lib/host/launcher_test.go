@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -147,7 +148,32 @@ func fakeServer() {
 		_ = f.Close()
 		_, _ = io.WriteString(w, `{"ok":true,"queued":false}`)
 	}))
-	_ = http.ListenAndServe("127.0.0.1:"+strconv.Itoa(*port), mux)
+	if err := http.ListenAndServe("127.0.0.1:"+strconv.Itoa(*port), mux); err != nil {
+		fmt.Fprintln(os.Stderr, "fake:", err)
+		os.Exit(1)
+	}
+}
+
+// testPorts is a range of n ports for a test's jobs, which this machine
+// can listen on. It is picked at random below the ephemeral ports (Linux
+// from 32768, macOS from 49152): test processes that run at once, such as
+// CI's runners on one machine, or an outgoing connection, would otherwise
+// take a port between the launcher's check and its fake listening, and the
+// fake exits.
+func testPorts(t *testing.T, n int) (first, last int) {
+	t.Helper()
+	for range 100 {
+		first = 20000 + rand.IntN(12000/n)*n
+		free := true
+		for port := first; port < first+n && free; port++ {
+			free = portFree(port)
+		}
+		if free {
+			return first, first + n - 1
+		}
+	}
+	t.Fatal("no free ports for the test's jobs")
+	return 0, 0
 }
 
 // testEnv is a machine with a GitHub stand-in: a bare repository for each
@@ -221,10 +247,11 @@ func newTestEnv(t *testing.T) *testEnv {
 	// inherit it.
 	t.Setenv("AGENTAPI_PID_FILE", filepath.Join(root, "someone-elses.pid"))
 
+	firstPort, lastPort := testPorts(t, 20)
 	config, err := Config{
 		Dir:      filepath.Join(root, "agentapi"),
 		Workdir:  workdir,
-		Ports:    "47300-47399",
+		Ports:    fmt.Sprintf("%d-%d", firstPort, lastPort),
 		Agents:   []string{"native-demo", "claude"},
 		AgentAPI: os.Args[0],
 	}.withDefaults(root)
@@ -304,7 +331,7 @@ func TestLauncherStartMessageStop(t *testing.T) {
 	wantWorktree := filepath.Join(e.config.Workdir, "acme", "widget.worktrees", "7")
 	assert.Equal(t, wantWorktree, job.Worktree)
 	assert.Equal(t, "agent/issue-7", runGit(t, wantWorktree, "rev-parse", "--abbrev-ref", "HEAD"))
-	assert.True(t, job.Port >= 47300 && job.Port <= 47399, "port %d in the range", job.Port)
+	assert.True(t, job.Port >= e.config.firstPort && job.Port <= e.config.lastPort, "port %d in the range", job.Port)
 
 	r := e.started(job.PID)
 	assert.Equal(t, wantWorktree, r.Dir)
