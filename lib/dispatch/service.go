@@ -48,14 +48,6 @@ type Config struct {
 	Location *time.Location
 }
 
-// Error is a dispatch the hub refuses or that failed, with the HTTP status
-// and a code clients tell apart.
-type Error = jsonapi.Error
-
-var errorf = jsonapi.Errorf
-
-func isCode(err error, code string) bool { return jsonapi.IsCode(err, code) }
-
 // Service is the dispatch.
 type Service struct {
 	config Config
@@ -516,14 +508,14 @@ func (s *Service) ForgetHost(name string) error {
 	defer s.mu.Unlock()
 	h := s.hosts[name]
 	if h == nil {
-		return errorf(http.StatusNotFound, "host_not_found", "no machine %s", name)
+		return jsonapi.Errorf(http.StatusNotFound, "host_not_found", "no machine %s", name)
 	}
 	if s.online(h) {
-		return errorf(http.StatusConflict, "host_online", "%s is online: stop its launcher first", name)
+		return jsonapi.Errorf(http.StatusConflict, "host_online", "%s is online: stop its launcher first", name)
 	}
 	for _, j := range s.jobs {
 		if j.Host == name && j.working() {
-			return errorf(http.StatusConflict, "host_busy", "%s works on %s: stop it first", name, j.Key)
+			return jsonapi.Errorf(http.StatusConflict, "host_busy", "%s works on %s: stop it first", name, j.Key)
 		}
 	}
 	delete(s.hosts, name)
@@ -632,7 +624,7 @@ func (s *Service) stopOnLauncher(h Host, key string, keep bool) {
 	if keep {
 		path += "?keep_worktree=true&keep_state=true"
 	}
-	if err := s.callLauncher(ctx, h, http.MethodDelete, path, nil, nil); err != nil && !isCode(err, "job_not_found") {
+	if err := s.callLauncher(ctx, h, http.MethodDelete, path, nil, nil); err != nil && !jsonapi.IsCode(err, "job_not_found") {
 		s.logger.Warn("Couldn't stop a job on its machine", "job", key, "host", h.Hostname, "error", err)
 	}
 }
@@ -711,10 +703,10 @@ func (s *Service) lockJob(key string) func() {
 func (s *Service) Dispatch(ctx context.Context, req Request) (Response, error) {
 	owner, name, err := host.ParseRepo(req.Repo)
 	if err != nil {
-		return Response{}, errorf(http.StatusBadRequest, "bad_request", "%v", err)
+		return Response{}, jsonapi.Errorf(http.StatusBadRequest, "bad_request", "%v", err)
 	}
 	if req.Issue <= 0 {
-		return Response{}, errorf(http.StatusBadRequest, "bad_request", "issue is a positive number")
+		return Response{}, jsonapi.Errorf(http.StatusBadRequest, "bad_request", "issue is a positive number")
 	}
 	key := host.Key{Owner: owner, Name: name, Issue: req.Issue}
 	defer s.lockJob(key.String())()
@@ -743,10 +735,10 @@ func (s *Service) Dispatch(ctx context.Context, req Request) (Response, error) {
 	case ActionStop:
 		resp, err = s.stop(ctx, key)
 	default:
-		return Response{}, errorf(http.StatusBadRequest, "bad_request", "action %q: want start, send, link_pr or stop", req.Action)
+		return Response{}, jsonapi.Errorf(http.StatusBadRequest, "bad_request", "action %q: want start, send, link_pr or stop", req.Action)
 	}
 	if err != nil {
-		var e *Error
+		var e *jsonapi.Error
 		if errors.As(err, &e) {
 			s.logger.Warn("Refused a dispatch", "action", req.Action, "job", key.String(), "code", e.Code, "error", e.Message)
 		}
@@ -781,10 +773,10 @@ func (s *Service) repoClient(ctx context.Context, repo string) (as github.As, ok
 	token, err := s.gh.RepoToken(ctx, app, repo)
 	if err != nil {
 		if github.IsStatus(err, http.StatusNotFound) {
-			return github.As{}, false, errorf(http.StatusPreconditionFailed, "github_not_installed",
+			return github.As{}, false, jsonapi.Errorf(http.StatusPreconditionFailed, "github_not_installed",
 				"the hub's GitHub App isn't installed on %s: install it at %s", repo, app.InstallURL(s.gh.Web, ""))
 		}
-		return github.As{}, false, errorf(http.StatusBadGateway, "github_failed", "%v", err)
+		return github.As{}, false, jsonapi.Errorf(http.StatusBadGateway, "github_failed", "%v", err)
 	}
 	return s.gh.With(token), true, nil
 }
@@ -860,16 +852,16 @@ func (s *Service) pickHostLocked(key host.Key, agent, want string, skip []string
 	if want != "" {
 		i := slices.IndexFunc(hosts, func(h Host) bool { return h.Hostname == want })
 		if i < 0 {
-			return Host{}, errorf(http.StatusServiceUnavailable, "host_offline", "the machine %s isn't online", want)
+			return Host{}, jsonapi.Errorf(http.StatusServiceUnavailable, "host_offline", "the machine %s isn't online", want)
 		}
 		h := hosts[i]
 		switch {
 		case !supports(h, agent):
-			return Host{}, errorf(http.StatusUnprocessableEntity, "agent_unavailable", "%s doesn't run %q (it runs %v)", want, agent, h.Agents)
+			return Host{}, jsonapi.Errorf(http.StatusUnprocessableEntity, "agent_unavailable", "%s doesn't run %q (it runs %v)", want, agent, h.Agents)
 		case !has(h) && !h.Clone:
-			return Host{}, errorf(http.StatusUnprocessableEntity, "repo_missing", "%s has no clone of %s", want, key.Repo())
+			return Host{}, jsonapi.Errorf(http.StatusUnprocessableEntity, "repo_missing", "%s has no clone of %s", want, key.Repo())
 		case !room(h):
-			return Host{}, errorf(http.StatusConflict, "capacity", "%s runs %d jobs, its most", want, h.Active)
+			return Host{}, jsonapi.Errorf(http.StatusConflict, "capacity", "%s runs %d jobs, its most", want, h.Active)
 		}
 		return h, nil
 	}
@@ -888,7 +880,7 @@ func (s *Service) pickHostLocked(key host.Key, agent, want string, skip []string
 	if len(cloners) > 0 {
 		return cloners[0], nil
 	}
-	return Host{}, errorf(http.StatusServiceUnavailable, "no_host", "no machine online runs %s for %s with room", cmp.Or(agent, "an agent"), key.Repo())
+	return Host{}, jsonapi.Errorf(http.StatusServiceUnavailable, "no_host", "no machine online runs %s for %s with room", cmp.Or(agent, "an agent"), key.Repo())
 }
 
 // issueMeta is what the dispatch reads of an issue.
@@ -904,14 +896,14 @@ func (s *Service) readIssue(ctx context.Context, as github.As, ok bool, key host
 	}
 	issue, err := as.Issue(ctx, key.Repo(), key.Issue)
 	if err != nil {
-		return meta, errorf(http.StatusBadGateway, "github_failed", "%v", err)
+		return meta, jsonapi.Errorf(http.StatusBadGateway, "github_failed", "%v", err)
 	}
 	if issue.PullRequest != nil {
-		return meta, errorf(http.StatusUnprocessableEntity, "not_an_issue", "%s is a pull request", key)
+		return meta, jsonapi.Errorf(http.StatusUnprocessableEntity, "not_an_issue", "%s is a pull request", key)
 	}
 	repo, err := as.Repo(ctx, key.Repo())
 	if err != nil {
-		return meta, errorf(http.StatusBadGateway, "github_failed", "%v", err)
+		return meta, jsonapi.Errorf(http.StatusBadGateway, "github_failed", "%v", err)
 	}
 	meta.title, meta.url, meta.defaultBranch = issue.Title, cmp.Or(issue.HTMLURL, meta.url), repo.DefaultBranch
 	for _, l := range issue.Labels {
@@ -934,10 +926,10 @@ func (s *Service) start(ctx context.Context, key host.Key, req Request) (Respons
 		return Response{Job: *job}, nil
 	}
 	if job != nil && job.State == JobStarting {
-		return Response{}, errorf(http.StatusConflict, "job_starting", "%s starts %s; stop it, or wait until it works, to switch agents", key, job.Agent)
+		return Response{}, jsonapi.Errorf(http.StatusConflict, "job_starting", "%s starts %s; stop it, or wait until it works, to switch agents", key, job.Agent)
 	}
 	if job != nil && !job.State.ended() && req.Agent != "" && req.Agent != job.Agent && req.Replace != nil && !*req.Replace {
-		return Response{}, errorf(http.StatusConflict, "job_active", "%s works on %s; replace to switch agents", job.Agent, key)
+		return Response{}, jsonapi.Errorf(http.StatusConflict, "job_active", "%s works on %s; replace to switch agents", job.Agent, key)
 	}
 	// Read before anything stops: an issue GitHub can't give leaves the
 	// work as it is.
@@ -986,10 +978,10 @@ func (s *Service) reserveStart(key host.Key, req Request, meta issueMeta, gh boo
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.ctx.Err() != nil {
-		return nil, Job{}, errorf(http.StatusServiceUnavailable, "hub_stopping", "the hub is stopping")
+		return nil, Job{}, jsonapi.Errorf(http.StatusServiceUnavailable, "hub_stopping", "the hub is stopping")
 	}
 	if s.running[key.String()] != nil {
-		return nil, Job{}, errorf(http.StatusConflict, "job_busy", "a start of %s before is still on its way; try again in a while", key)
+		return nil, Job{}, jsonapi.Errorf(http.StatusConflict, "job_busy", "a start of %s before is still on its way; try again in a while", key)
 	}
 	job := s.jobs[key.String()]
 	ongoing := job != nil && !job.State.ended()
@@ -998,12 +990,12 @@ func (s *Service) reserveStart(key host.Key, req Request, meta issueMeta, gh boo
 	if ongoing {
 		known := s.hosts[job.Host]
 		if known == nil || !s.online(known) {
-			return nil, Job{}, errorf(http.StatusServiceUnavailable, "host_offline", "%s works on %s, which isn't online", key, job.Host)
+			return nil, Job{}, jsonapi.Errorf(http.StatusServiceUnavailable, "host_offline", "%s works on %s, which isn't online", key, job.Host)
 		}
 		h = *known
 		agent = cmp.Or(agent, job.Agent)
 		if !supports(h, agent) {
-			return nil, Job{}, errorf(http.StatusUnprocessableEntity, "agent_unavailable", "%s, where %s's worktree is, doesn't run %q", h.Hostname, key, agent)
+			return nil, Job{}, jsonapi.Errorf(http.StatusUnprocessableEntity, "agent_unavailable", "%s, where %s's worktree is, doesn't run %q", h.Hostname, key, agent)
 		}
 	} else {
 		var err error
@@ -1066,7 +1058,7 @@ func (s *Service) runStart(key host.Key, a *startAttempt, asked string, start ho
 	}
 	if a.Switch {
 		err := s.callLauncher(ctx, target(), http.MethodDelete, "/jobs/"+key.Slug()+"?keep_worktree=true&keep_state=true", nil, nil)
-		if isCode(err, "job_not_found") {
+		if jsonapi.IsCode(err, "job_not_found") {
 			err = nil
 		}
 		if !s.afterCall(key, a, err, failed, func(job *Job) { s.endRunLocked(job, "replaced") }) {
@@ -1078,7 +1070,7 @@ func (s *Service) runStart(key host.Key, a *startAttempt, asked string, start ho
 		start.Agent = a.Agent
 		var answer host.StartResponse
 		err := s.callLauncher(ctx, h, http.MethodPost, "/jobs", start, &answer)
-		if isCode(err, "capacity") && a.Pick && s.movePick(key, a, asked, append(tried, h.Hostname)) {
+		if jsonapi.IsCode(err, "capacity") && a.Pick && s.movePick(key, a, asked, append(tried, h.Hostname)) {
 			tried = append(tried, h.Hostname)
 			continue
 		}
@@ -1107,7 +1099,7 @@ func (s *Service) afterCall(key host.Key, a *startAttempt, err error, failed fun
 	if job == nil || s.attempts[key.String()] != a {
 		h := s.hosts[a.Host]
 		s.mu.Unlock()
-		if h != nil && (err == nil || isCode(err, "host_no_answer")) {
+		if h != nil && (err == nil || jsonapi.IsCode(err, "host_no_answer")) {
 			s.logger.Info("Stopping a job stopped while it started", "job", key.String(), "host", a.Host)
 			s.stopOnLauncher(*h, key.String(), false)
 		}
@@ -1119,7 +1111,7 @@ func (s *Service) afterCall(key host.Key, a *startAttempt, err error, failed fun
 		s.saveLocked()
 		s.mu.Unlock()
 		return true
-	case isCode(err, "host_no_answer") || s.ctx.Err() != nil:
+	case jsonapi.IsCode(err, "host_no_answer") || s.ctx.Err() != nil:
 		s.mu.Unlock()
 		s.logger.Warn("A machine didn't answer a start; its next report says how it went", "job", key.String(), "host", a.Host, "error", err)
 		return false
@@ -1185,20 +1177,20 @@ func (s *Service) failStartLocked(job *Job, a *startAttempt, err error) {
 func (s *Service) send(ctx context.Context, key host.Key, req Request) (Response, error) {
 	job := s.job(key.String())
 	if job == nil {
-		return Response{}, errorf(http.StatusNotFound, "job_not_found", "no job works on %s", key)
+		return Response{}, jsonapi.Errorf(http.StatusNotFound, "job_not_found", "no job works on %s", key)
 	}
 	if job.State.ended() {
-		return Response{}, errorf(http.StatusConflict, "job_ended", "the work on %s ended", key)
+		return Response{}, jsonapi.Errorf(http.StatusConflict, "job_ended", "the work on %s ended", key)
 	}
 	if job.State == JobStarting {
-		return Response{}, errorf(http.StatusConflict, "job_starting", "%s is starting on %s; send again once it works", key, job.Host)
+		return Response{}, jsonapi.Errorf(http.StatusConflict, "job_starting", "%s is starting on %s; send again once it works", key, job.Host)
 	}
 	if strings.TrimSpace(req.Message) == "" && len(req.Comments) == 0 {
-		return Response{}, errorf(http.StatusBadRequest, "bad_request", "a send has a message or comments")
+		return Response{}, jsonapi.Errorf(http.StatusBadRequest, "bad_request", "a send has a message or comments")
 	}
 	h, ok := s.hostByName(job.Host)
 	if !ok {
-		return Response{}, errorf(http.StatusServiceUnavailable, "host_offline", "%s works on %s, which isn't online", key, job.Host)
+		return Response{}, jsonapi.Errorf(http.StatusServiceUnavailable, "host_offline", "%s works on %s, which isn't online", key, job.Host)
 	}
 	content := render("review", promptData{
 		Repo: key.Repo(), Issue: key.Issue, PRURL: job.PRURL,
@@ -1246,10 +1238,10 @@ func sourceOf(ctx context.Context, req Request) MessageSource {
 
 func (s *Service) linkPR(key host.Key, req Request) (Response, error) {
 	if s.job(key.String()) == nil {
-		return Response{}, errorf(http.StatusNotFound, "job_not_found", "no job works on %s", key)
+		return Response{}, jsonapi.Errorf(http.StatusNotFound, "job_not_found", "no job works on %s", key)
 	}
 	if !strings.Contains(req.PRURL, "/pull/") {
-		return Response{}, errorf(http.StatusBadRequest, "bad_request", "pr_url %q isn't a pull request's", req.PRURL)
+		return Response{}, jsonapi.Errorf(http.StatusBadRequest, "bad_request", "pr_url %q isn't a pull request's", req.PRURL)
 	}
 	updated := s.update(key.String(), func(j *Job) {
 		j.PRURL = req.PRURL
@@ -1263,7 +1255,7 @@ func (s *Service) linkPR(key host.Key, req Request) (Response, error) {
 func (s *Service) stop(ctx context.Context, key host.Key) (Response, error) {
 	job := s.job(key.String())
 	if job == nil {
-		return Response{}, errorf(http.StatusNotFound, "job_not_found", "no job works on %s", key)
+		return Response{}, jsonapi.Errorf(http.StatusNotFound, "job_not_found", "no job works on %s", key)
 	}
 	if job.State.ended() {
 		return Response{Job: *job}, nil
@@ -1276,7 +1268,7 @@ func (s *Service) stop(ctx context.Context, key host.Key) (Response, error) {
 		// The launcher holds the job while it starts it: the start, once
 		// it answers, stops it (afterCall).
 	} else if h, ok := s.hostByName(job.Host); ok {
-		if err := s.callLauncher(ctx, h, http.MethodDelete, "/jobs/"+key.Slug(), nil, nil); err != nil && !isCode(err, "job_not_found") {
+		if err := s.callLauncher(ctx, h, http.MethodDelete, "/jobs/"+key.Slug(), nil, nil); err != nil && !jsonapi.IsCode(err, "job_not_found") {
 			return Response{}, err
 		}
 	} else {
@@ -1396,17 +1388,17 @@ func (s *Service) callLauncher(ctx context.Context, h Host, method, path string,
 		// A call that never reached the launcher did nothing there; one
 		// that got no answer may have.
 		if op := (*net.OpError)(nil); errors.As(err, &op) && op.Op == "dial" {
-			return errorf(http.StatusBadGateway, "host_unreachable", "the machine %s: %v", h.Hostname, err)
+			return jsonapi.Errorf(http.StatusBadGateway, "host_unreachable", "the machine %s: %v", h.Hostname, err)
 		}
-		return errorf(http.StatusGatewayTimeout, "host_no_answer", "the machine %s didn't answer: %v", h.Hostname, err)
+		return jsonapi.Errorf(http.StatusGatewayTimeout, "host_no_answer", "the machine %s didn't answer: %v", h.Hostname, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode >= 300 {
 		if code, message := jsonapi.ReadError(data); message != "" {
-			return &Error{Status: resp.StatusCode, Code: code, Message: h.Hostname + ": " + message}
+			return &jsonapi.Error{Status: resp.StatusCode, Code: code, Message: h.Hostname + ": " + message}
 		}
-		return errorf(http.StatusBadGateway, "host_failed", "the machine %s answered %s", h.Hostname, resp.Status)
+		return jsonapi.Errorf(http.StatusBadGateway, "host_failed", "the machine %s answered %s", h.Hostname, resp.Status)
 	}
 	if out != nil && len(data) > 0 {
 		return json.Unmarshal(data, out)

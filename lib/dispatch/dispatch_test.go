@@ -339,7 +339,7 @@ func TestDispatchWithoutGitHub(t *testing.T) {
 	assert.Equal(t, "stopped", resp.Job.Runs[0].EndReason)
 
 	_, err = s.Dispatch(ctx, Request{Action: ActionSend, Repo: "acme/widget", Issue: 12, Message: "x"})
-	assert.True(t, isCode(err, "job_ended"))
+	assert.True(t, jsonapi.IsCode(err, "job_ended"))
 
 	// The dispatch keeps it all.
 	s.Flush()
@@ -366,9 +366,9 @@ func TestPickHost(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "b", h.Hostname, "the one that runs the agent, cloning")
 	_, err = s.pickHost(key, "pi", "")
-	assert.True(t, isCode(err, "no_host"))
+	assert.True(t, jsonapi.IsCode(err, "no_host"))
 	_, err = s.pickHost(key, "codex", "a")
-	assert.True(t, isCode(err, "agent_unavailable"))
+	assert.True(t, jsonapi.IsCode(err, "agent_unavailable"))
 
 	// A job the hub started counts before the machine's next heartbeat
 	// says so.
@@ -376,12 +376,12 @@ func TestPickHost(t *testing.T) {
 	require.NoError(t, err)
 	s.waitStarts()
 	_, err = s.pickHost(key, "codex", "")
-	assert.True(t, isCode(err, "no_host"), "b is full")
+	assert.True(t, jsonapi.IsCode(err, "no_host"), "b is full")
 	assert.Equal(t, 1, s.Hosts()[1].Active)
 
 	*now = now.Add(4 * time.Minute)
 	_, err = s.pickHost(key, "", "a")
-	assert.True(t, isCode(err, "host_offline"), "missed three heartbeats")
+	assert.True(t, jsonapi.IsCode(err, "host_offline"), "missed three heartbeats")
 }
 
 func TestDispatchWithGitHubApp(t *testing.T) {
@@ -417,7 +417,7 @@ func TestDispatchWithGitHubApp(t *testing.T) {
 
 	// A repository the app isn't on is refused.
 	_, err = s.Dispatch(ctx, Request{Action: ActionStart, Repo: "acme/other", Issue: 1})
-	assert.True(t, isCode(err, "github_not_installed"))
+	assert.True(t, jsonapi.IsCode(err, "github_not_installed"))
 
 	started := startJob(t, s, Request{Repo: "acme/widget", Issue: 12, Agent: "claude"})
 	start := l.starts[0]
@@ -478,7 +478,7 @@ func TestDispatchWithGitHubApp(t *testing.T) {
 	_, err = s.Dispatch(ctx, Request{Action: ActionLinkPR, Repo: "acme/widget", Issue: 12, PRURL: "https://github.com/acme/widget/pull/34"})
 	require.NoError(t, err)
 	replaced, err := s.Dispatch(ctx, Request{Action: ActionStart, Repo: "acme/widget", Issue: 12, Agent: "codex", Replace: ptr(false)})
-	assert.True(t, isCode(err, "job_active"))
+	assert.True(t, jsonapi.IsCode(err, "job_active"))
 	assert.Empty(t, replaced.Job.Key)
 	replaced = startJob(t, s, Request{Repo: "acme/widget", Issue: 12, Agent: "codex"})
 	assert.Equal(t, []string{"acme~widget~12?keep_worktree=true&keep_state=true"}, l.stops)
@@ -1011,9 +1011,9 @@ func TestStartAnswersAtOnce(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, again.Created)
 	_, err = s.Dispatch(context.Background(), Request{Action: ActionSend, Repo: "acme/widget", Issue: 12, Message: "hi"})
-	assert.True(t, isCode(err, "job_starting"))
+	assert.True(t, jsonapi.IsCode(err, "job_starting"))
 	_, err = s.Dispatch(context.Background(), Request{Action: ActionStart, Repo: "acme/widget", Issue: 12, Agent: "codex"})
-	assert.True(t, isCode(err, "job_starting"))
+	assert.True(t, jsonapi.IsCode(err, "job_starting"))
 
 	close(l.gate)
 	s.waitStarts()
@@ -1122,7 +1122,7 @@ func TestStopWhileStarting(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, JobDone, stopped.Job.State)
 	_, err = s.Dispatch(context.Background(), Request{Action: ActionStart, Repo: "acme/widget", Issue: 12})
-	assert.True(t, isCode(err, "job_busy"))
+	assert.True(t, jsonapi.IsCode(err, "job_busy"))
 
 	close(l.gate)
 	s.waitStarts()
@@ -1179,7 +1179,7 @@ func TestConcurrentStartsSpread(t *testing.T) {
 	refused := 0
 	for _, err := range errs {
 		if err != nil {
-			assert.True(t, isCode(err, "no_host"), err)
+			assert.True(t, jsonapi.IsCode(err, "no_host"), err)
 			refused++
 		}
 	}

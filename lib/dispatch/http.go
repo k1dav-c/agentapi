@@ -36,7 +36,7 @@ func (s *Service) MountDispatch(r chi.Router, signedIn func(*http.Request) bool)
 		token := s.dispatchToken(r)
 		browser := !token && signedIn(r)
 		if !browser && !token {
-			jsonapi.WriteError(w, errorf(http.StatusUnauthorized, "unauthorized", "sign in to the hub, or send the dispatch token"))
+			jsonapi.WriteError(w, jsonapi.Errorf(http.StatusUnauthorized, "unauthorized", "sign in to the hub, or send the dispatch token"))
 			return
 		}
 		var req Request
@@ -74,12 +74,12 @@ func (s *Service) MountLauncher(r chi.Router) {
 func (s *Service) handleToken(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, jsonapi.MaxBody))
 	if err != nil {
-		jsonapi.WriteError(w, errorf(http.StatusBadRequest, "bad_request", "unreadable request"))
+		jsonapi.WriteError(w, jsonapi.Errorf(http.StatusBadRequest, "bad_request", "unreadable request"))
 		return
 	}
 	now := s.config.Now()
 	if err := instanceapi.Verify(s.config.Secret, r.Header, body, now); err != nil {
-		jsonapi.WriteError(w, errorf(http.StatusUnauthorized, "unauthorized", "invalid signature: %v", err))
+		jsonapi.WriteError(w, jsonapi.Errorf(http.StatusUnauthorized, "unauthorized", "invalid signature: %v", err))
 		return
 	}
 	// The signature covers the body and its time, not the delivery
@@ -95,17 +95,17 @@ func (s *Service) handleToken(w http.ResponseWriter, r *http.Request) {
 	s.tokenRequests[delivery] = now
 	s.mu.Unlock()
 	if seen {
-		jsonapi.WriteError(w, errorf(http.StatusConflict, "replayed", "the request was answered already"))
+		jsonapi.WriteError(w, jsonapi.Errorf(http.StatusConflict, "replayed", "the request was answered already"))
 		return
 	}
 	var req host.HubTokenRequest
 	if err := json.Unmarshal(body, &req); err != nil {
-		jsonapi.WriteError(w, errorf(http.StatusBadRequest, "bad_request", "%v", err))
+		jsonapi.WriteError(w, jsonapi.Errorf(http.StatusBadRequest, "bad_request", "%v", err))
 		return
 	}
 	key, err := host.ParseKey(req.Job)
 	if err != nil {
-		jsonapi.WriteError(w, errorf(http.StatusBadRequest, "bad_request", "%v", err))
+		jsonapi.WriteError(w, jsonapi.Errorf(http.StatusBadRequest, "bad_request", "%v", err))
 		return
 	}
 	// The machine proves its name with its launcher's token, which the
@@ -117,23 +117,23 @@ func (s *Service) handleToken(w http.ResponseWriter, r *http.Request) {
 	known := machine != nil && machine.Token != "" && hmac.Equal([]byte(bearer), []byte(machine.Token))
 	s.mu.Unlock()
 	if !known {
-		jsonapi.WriteError(w, errorf(http.StatusUnauthorized, "unauthorized", "send the launcher's token of %s", req.Hostname))
+		jsonapi.WriteError(w, jsonapi.Errorf(http.StatusUnauthorized, "unauthorized", "send the launcher's token of %s", req.Hostname))
 		return
 	}
 	job := s.job(key.String())
 	// Only a job that works now, on the machine that asks, gets a token.
 	if job == nil || job.Host != req.Hostname || !job.working() || !job.Credentials {
-		jsonapi.WriteError(w, errorf(http.StatusForbidden, "no_job", "%s has no job %s that gets the hub's token", req.Hostname, key))
+		jsonapi.WriteError(w, jsonapi.Errorf(http.StatusForbidden, "no_job", "%s has no job %s that gets the hub's token", req.Hostname, key))
 		return
 	}
 	app := s.currentApp()
 	if app == nil {
-		jsonapi.WriteError(w, errorf(http.StatusServiceUnavailable, "github_not_connected", "the hub has no GitHub App"))
+		jsonapi.WriteError(w, jsonapi.Errorf(http.StatusServiceUnavailable, "github_not_connected", "the hub has no GitHub App"))
 		return
 	}
 	token, err := s.gh.RepoToken(r.Context(), app, key.Repo())
 	if err != nil {
-		jsonapi.WriteError(w, errorf(http.StatusBadGateway, "github_failed", "%v", err))
+		jsonapi.WriteError(w, jsonapi.Errorf(http.StatusBadGateway, "github_failed", "%v", err))
 		return
 	}
 	jsonapi.Write(w, http.StatusOK, host.Token{Value: token.Value, ExpiresAt: token.ExpiresAt})
@@ -245,19 +245,19 @@ func (s *Service) MountSession(r chi.Router) {
 func (s *Service) listRepos(w http.ResponseWriter, r *http.Request) {
 	app := s.currentApp()
 	if app == nil {
-		jsonapi.WriteError(w, errorf(http.StatusPreconditionFailed, "github_not_connected", "connect the hub to GitHub first"))
+		jsonapi.WriteError(w, jsonapi.Errorf(http.StatusPreconditionFailed, "github_not_connected", "connect the hub to GitHub first"))
 		return
 	}
 	repos := []github.Repo{}
 	for _, inst := range app.Installations {
 		token, err := s.gh.InstallationToken(r.Context(), app, inst.ID)
 		if err != nil {
-			jsonapi.WriteError(w, errorf(http.StatusBadGateway, "github_failed", "%v", err))
+			jsonapi.WriteError(w, jsonapi.Errorf(http.StatusBadGateway, "github_failed", "%v", err))
 			return
 		}
 		list, err := s.gh.With(token).Repos(r.Context())
 		if err != nil {
-			jsonapi.WriteError(w, errorf(http.StatusBadGateway, "github_failed", "%v", err))
+			jsonapi.WriteError(w, jsonapi.Errorf(http.StatusBadGateway, "github_failed", "%v", err))
 			return
 		}
 		repos = append(repos, list...)
@@ -269,12 +269,12 @@ func (s *Service) listRepos(w http.ResponseWriter, r *http.Request) {
 func (s *Service) listIssues(w http.ResponseWriter, r *http.Request) {
 	repo := r.URL.Query().Get("repo")
 	if _, _, err := host.ParseRepo(repo); err != nil {
-		jsonapi.WriteError(w, errorf(http.StatusBadRequest, "bad_request", "%v", err))
+		jsonapi.WriteError(w, jsonapi.Errorf(http.StatusBadRequest, "bad_request", "%v", err))
 		return
 	}
 	as, ok, err := s.repoClient(r.Context(), repo)
 	if err == nil && !ok {
-		err = errorf(http.StatusPreconditionFailed, "github_not_connected", "connect the hub to GitHub first")
+		err = jsonapi.Errorf(http.StatusPreconditionFailed, "github_not_connected", "connect the hub to GitHub first")
 	}
 	if err != nil {
 		jsonapi.WriteError(w, err)
@@ -282,7 +282,7 @@ func (s *Service) listIssues(w http.ResponseWriter, r *http.Request) {
 	}
 	issues, err := as.Issues(r.Context(), repo)
 	if err != nil {
-		jsonapi.WriteError(w, errorf(http.StatusBadGateway, "github_failed", "%v", err))
+		jsonapi.WriteError(w, jsonapi.Errorf(http.StatusBadGateway, "github_failed", "%v", err))
 		return
 	}
 	jsonapi.Write(w, http.StatusOK, IssuesBody{Issues: issues})
@@ -340,12 +340,12 @@ func (s *Service) createIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, _, err := host.ParseRepo(req.Repo); err != nil || strings.TrimSpace(req.Title) == "" {
-		jsonapi.WriteError(w, errorf(http.StatusBadRequest, "bad_request", "an issue has a repo (owner/name) and a title"))
+		jsonapi.WriteError(w, jsonapi.Errorf(http.StatusBadRequest, "bad_request", "an issue has a repo (owner/name) and a title"))
 		return
 	}
 	as, ok, err := s.repoClient(r.Context(), req.Repo)
 	if err == nil && !ok {
-		err = errorf(http.StatusPreconditionFailed, "github_not_connected", "connect the hub to GitHub first")
+		err = jsonapi.Errorf(http.StatusPreconditionFailed, "github_not_connected", "connect the hub to GitHub first")
 	}
 	if err != nil {
 		jsonapi.WriteError(w, err)
@@ -358,7 +358,7 @@ func (s *Service) createIssue(w http.ResponseWriter, r *http.Request) {
 	body := strings.TrimRight(req.Body, "\n") + "\n\n_由 agentapi hub 建立。_"
 	issue, err := as.CreateIssue(r.Context(), req.Repo, req.Title, body, labels)
 	if err != nil {
-		jsonapi.WriteError(w, errorf(http.StatusBadGateway, "github_failed", "%v", err))
+		jsonapi.WriteError(w, jsonapi.Errorf(http.StatusBadGateway, "github_failed", "%v", err))
 		return
 	}
 	resp := CreateIssueResponse{Issue: issue}
@@ -465,7 +465,7 @@ func (s *Service) connect(w http.ResponseWriter, r *http.Request) {
 	action := strings.TrimSuffix(s.gh.Web, "/") + "/settings/apps/new"
 	if org != "" {
 		if _, _, err := host.ParseRepo(org + "/x"); err != nil {
-			jsonapi.WriteError(w, errorf(http.StatusBadRequest, "bad_request", "org %q isn't an organization's name", org))
+			jsonapi.WriteError(w, jsonapi.Errorf(http.StatusBadRequest, "bad_request", "org %q isn't an organization's name", org))
 			return
 		}
 		action = strings.TrimSuffix(s.gh.Web, "/") + "/organizations/" + url.PathEscape(org) + "/settings/apps/new"

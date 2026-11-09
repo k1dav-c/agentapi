@@ -94,7 +94,7 @@ func (l *Launcher) requireToken(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		bearer, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 		if !ok || !hmac.Equal([]byte(bearer), []byte(l.hostToken)) {
-			jsonapi.WriteError(w, errorf(http.StatusUnauthorized, "unauthorized", "send the launcher's token: Authorization: Bearer <token>"))
+			jsonapi.WriteError(w, jsonapi.Errorf(http.StatusUnauthorized, "unauthorized", "send the launcher's token: Authorization: Bearer <token>"))
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -125,7 +125,7 @@ func (l *Launcher) ServeSocket(ctx context.Context) error {
 	mux.HandleFunc("GET "+tokenPath, func(w http.ResponseWriter, r *http.Request) {
 		key, err := ParseKey(r.URL.Query().Get("job"))
 		if err != nil {
-			jsonapi.WriteError(w, errorf(http.StatusBadRequest, "bad_request", "%v", err))
+			jsonapi.WriteError(w, jsonapi.Errorf(http.StatusBadRequest, "bad_request", "%v", err))
 			return
 		}
 		caller, _ := r.Context().Value(peerKey{}).(int)
@@ -157,7 +157,7 @@ func (l *Launcher) ServeSocket(ctx context.Context) error {
 func pathKey(w http.ResponseWriter, r *http.Request) (Key, bool) {
 	key, err := ParseKey(chi.URLParam(r, "key"))
 	if err != nil {
-		jsonapi.WriteError(w, errorf(http.StatusBadRequest, "bad_request", "%v", err))
+		jsonapi.WriteError(w, jsonapi.Errorf(http.StatusBadRequest, "bad_request", "%v", err))
 		return Key{}, false
 	}
 	return key, true

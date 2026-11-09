@@ -53,7 +53,7 @@ var wireTypes = []reflect.Type{
 	// GitHub* by the package they come from (schemaNamer).
 	reflect.TypeFor[dispatch.Request](),
 	reflect.TypeFor[dispatch.Response](),
-	reflect.TypeFor[dispatch.Error](),
+	reflect.TypeFor[jsonapi.Error](),
 	reflect.TypeFor[dispatch.HostsBody](),
 	reflect.TypeFor[dispatch.JobsBody](),
 	reflect.TypeFor[dispatch.GitHubStatus](),

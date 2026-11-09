@@ -20,6 +20,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/coder/agentapi/lib/jsonapi"
 	"github.com/stretchr/testify/require"
 )
 
@@ -330,7 +332,7 @@ func TestLauncherStartMessageStop(t *testing.T) {
 
 	// Another agent waits for the job to stop.
 	_, _, err = l.Start(ctx, StartRequest{Repo: "acme/widget", Issue: 7, Agent: "claude"})
-	var e409 *Error
+	var e409 *jsonapi.Error
 	require.ErrorAs(t, err, &e409)
 	assert.Equal(t, "job_active", e409.Code)
 
@@ -479,7 +481,7 @@ func TestLauncherClonesAndRefuses(t *testing.T) {
 	assert.Empty(t, matches, "no clone directory left behind")
 	assert.Contains(t, l.Info(ctx).Repos, "acme/other")
 
-	var refused *Error
+	var refused *jsonapi.Error
 	_, _, err = l.Start(ctx, StartRequest{Repo: "acme/missing", Issue: 1})
 	require.ErrorAs(t, err, &refused)
 	assert.Equal(t, "clone_failed", refused.Code)
@@ -596,7 +598,7 @@ func TestLauncherRestartsAFailedJob(t *testing.T) {
 	_, _, err = l.Start(ctx, StartRequest{Repo: "acme/widget", Issue: 22})
 	require.NoError(t, err)
 	_, _, err = l.Start(ctx, StartRequest{Repo: "acme/widget", Issue: 21, Agent: "claude"})
-	var refused *Error
+	var refused *jsonapi.Error
 	require.ErrorAs(t, err, &refused)
 	assert.Equal(t, "capacity", refused.Code)
 }
