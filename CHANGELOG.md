@@ -30,6 +30,9 @@
   stylesheets importing each other many times over could keep it reading for a long time.
 - Pi's adapter remembers the last 256 message IDs it gave out, which tell apart messages of the
   same millisecond, where it kept every one for the life of the agent.
+- The registry entry of an AgentAPI that crashed is removed when another process got its PID: the
+  entry has when its process started (`process_start`, on Linux and macOS), where it stayed listed
+  as long as the PID ran.
 - A webhook delivery reads the receiver's answer (up to 4 KiB) before it closes it, so the next
   delivery uses the same connection, where each delivery with an answer opened a new one.
 - The pipe of an agent's output is closed when the output ends, where each start of the agent

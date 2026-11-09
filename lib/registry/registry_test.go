@@ -88,3 +88,31 @@ func TestFileName(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, "ab_c____d.json", fileName("ab/c:../d"))
 }
+
+// An entry whose PID another process got since is removed: the process
+// started at another time.
+func TestListRemovesAnEntryWhosePIDWasReused(t *testing.T) {
+	t.Parallel()
+	start := ProcessStart(os.Getpid())
+	if start == "" {
+		t.Skip("the system doesn't tell when a process started")
+	}
+	assert.Equal(t, start, ProcessStart(os.Getpid()), "the same each time")
+	dir := t.TempDir()
+	hostname, _ := os.Hostname()
+	entry := func(serverID, processStart string) Entry {
+		return Entry{WebhookInstance: instanceapi.WebhookInstance{ServerID: serverID, Hostname: hostname, PID: os.Getpid()}, ProcessStart: processStart}
+	}
+	for _, e := range []Entry{entry("same", start), entry("reused", start+"1"), entry("unknown", "")} {
+		_, err := Write(dir, e)
+		require.NoError(t, err)
+	}
+	entries, err := List(dir)
+	require.NoError(t, err)
+	var ids []string
+	for _, e := range entries {
+		ids = append(ids, e.ServerID)
+	}
+	assert.ElementsMatch(t, []string{"same", "unknown"}, ids)
+	assert.NoFileExists(t, filepath.Join(dir, "reused.json"))
+}
