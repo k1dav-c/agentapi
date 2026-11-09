@@ -5,6 +5,7 @@
 package shellterm
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -29,6 +30,9 @@ const (
 	// closeGrace is how long Close waits for the shell to exit after its
 	// terminal hangs up, before it kills the shell's process group.
 	closeGrace = 2 * time.Second
+	// writeTimeout is how long Write waits for the shell's program to take
+	// its input.
+	writeTimeout = 10 * time.Second
 	// Default size until a client says otherwise.
 	defaultCols, defaultRows = 100, 30
 )
@@ -63,6 +67,11 @@ type Terminal struct {
 	watchers   map[int]chan []byte
 	nextID     int
 	closed     bool
+
+	// writing holds the turn to write, so writes don't interleave; a
+	// write waiting for it gives up when its context ends.
+	writing      chan struct{}
+	writeTimeout time.Duration
 }
 
 // New returns a terminal; nothing runs until Watch.
@@ -77,6 +86,7 @@ func New(cfg Config) *Terminal {
 		cfg: cfg, cols: defaultCols, rows: defaultRows,
 		history:  newScrollback(cfg.Scrollback),
 		watchers: make(map[int]chan []byte),
+		writing:  make(chan struct{}, 1), writeTimeout: writeTimeout,
 	}
 }
 
@@ -214,17 +224,65 @@ func (t *Terminal) appendLocked(data []byte) {
 	t.history.add(data)
 }
 
-// Write types data into the shell.
-func (t *Terminal) Write(data []byte) error {
+// Write types data into the shell. One write goes in at a time, so two
+// pastes don't interleave. A program that doesn't read its input fills the
+// terminal's buffer; Write then gives up after writeTimeout, or when ctx
+// ends, with part of data perhaps typed, and returns ErrInputStalled or
+// ctx's error.
+func (t *Terminal) Write(ctx context.Context, data []byte) error {
+	select {
+	case t.writing <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 	t.mu.Lock()
 	ptmx := t.ptmx
 	t.mu.Unlock()
 	if ptmx == nil {
+		<-t.writing
 		return ErrNotRunning
 	}
+	if err := ptmx.SetWriteDeadline(time.Now().Add(t.writeTimeout)); err != nil {
+		// A terminal without deadlines: the write goes on in the
+		// background, holding the turn, and Write only stops waiting.
+		written := make(chan error, 1)
+		go func() {
+			defer func() { <-t.writing }()
+			_, err := ptmx.Write(data)
+			written <- err
+		}()
+		select {
+		case err := <-written:
+			return err
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(t.writeTimeout):
+			return ErrInputStalled
+		}
+	}
+	defer func() { <-t.writing }()
+	// A deadline in the past stops the write when ctx ends.
+	fired := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		_ = ptmx.SetWriteDeadline(time.Unix(1, 0))
+		close(fired)
+	})
 	_, err := ptmx.Write(data)
+	if !stop() {
+		<-fired
+		if err != nil {
+			return ctx.Err()
+		}
+	}
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		return ErrInputStalled
+	}
 	return err
 }
+
+// ErrInputStalled is returned by Write when the shell's program didn't take
+// the input in time.
+var ErrInputStalled = errors.New("the terminal's program isn't reading its input")
 
 // ErrNotRunning is returned by Write while no shell runs.
 var ErrNotRunning = errors.New("the terminal's shell is not running")

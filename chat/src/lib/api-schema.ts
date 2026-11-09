@@ -720,7 +720,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Type into the terminal */
+        /**
+         * Type into the terminal
+         * @description Types the data into the shell, one request at a time. A program that doesn't read its input, with more than the terminal holds, gets 503 after 10 seconds, with part of the data perhaps typed.
+         */
         post: operations["post-terminal-input"];
         delete?: never;
         options?: never;
@@ -4699,6 +4702,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

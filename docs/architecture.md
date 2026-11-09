@@ -793,7 +793,9 @@ client subscribes and keeps running after all clients disconnect. Its output goe
 scrollback, trimmed at a line start, and to each watcher's buffer. The scrollback is a ring, so adding
 output takes time in proportion to the output, not to the scrollback. A watcher that falls 512 chunks
 behind is dropped and reconnects for the scrollback. `GET /terminal` streams base64-encoded `output`
-and `exit` events. `POST /terminal/input` sends input, and `/terminal/resize` changes the
+and `exit` events. `POST /terminal/input` sends input, one request at a time; a program that
+doesn't read it, once the terminal's buffers are full, gets it for 10 seconds, after which the
+request gives up with 503 (also when the client leaves). `/terminal/resize` changes the
 dimensions; the most recent resize applies. Closing hangs up the terminal and kills the shell's
 process group after 2 seconds.
 

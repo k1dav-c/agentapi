@@ -86,13 +86,16 @@ func (t *terminalAPI) subscribeTerminal(ctx context.Context, _ *struct{}, send s
 	}
 }
 
-func (t *terminalAPI) terminalInput(_ context.Context, input *TerminalInputRequest) (*InterruptResponse, error) {
+func (t *terminalAPI) terminalInput(ctx context.Context, input *TerminalInputRequest) (*InterruptResponse, error) {
 	if t.terminal == nil {
 		return nil, huma.Error404NotFound(noTerminal)
 	}
-	if err := t.terminal.Write([]byte(input.Body.Data)); err != nil {
+	if err := t.terminal.Write(ctx, []byte(input.Body.Data)); err != nil {
 		if errors.Is(err, shellterm.ErrNotRunning) {
 			return nil, huma.Error409Conflict("the terminal's shell is not running; GET /terminal starts it")
+		}
+		if errors.Is(err, shellterm.ErrInputStalled) {
+			return nil, huma.Error503ServiceUnavailable("the terminal's program didn't read the input in 10 seconds; part of it may have been typed")
 		}
 		return nil, err
 	}
@@ -133,7 +136,8 @@ func (s *Server) registerTerminalRoutes() {
 	huma.Post(s.api, "/terminal/input", t.terminalInput, func(o *huma.Operation) {
 		o.Tags = []string{"Terminal"}
 		o.Summary = "Type into the terminal"
-		o.Errors = []int{404, 409}
+		o.Description = "Types the data into the shell, one request at a time. A program that doesn't read its input, with more than the terminal holds, gets 503 after 10 seconds, with part of the data perhaps typed."
+		o.Errors = []int{404, 409, 503}
 	})
 	huma.Post(s.api, "/terminal/resize", t.terminalResize, func(o *huma.Operation) {
 		o.Tags = []string{"Terminal"}

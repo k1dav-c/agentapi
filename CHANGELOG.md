@@ -17,6 +17,9 @@
 - The server gives a client 10 seconds to send a request's headers, and closes a keep-alive
   connection after 2 idle minutes, where a client that sent nothing held its connection open
   forever; the hub and the launcher close idle connections after 2 minutes too.
+- `POST /terminal/input` no longer waits forever when the terminal's program doesn't read its
+  input (a paste into a busy full-screen program): it gives up after 10 seconds with 503, part of
+  the input perhaps typed, or when the client leaves. Two inputs no longer interleave.
 
 ### Internal
 

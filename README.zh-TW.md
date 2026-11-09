@@ -644,8 +644,9 @@ Ctrl 和 Alt 按鈕會按住修飾鍵，套用到下一個輸入的按鍵。
 
 - `GET /terminal` 以 server-sent events 串流輸出（`output` 事件帶 base64 資料，第一個
   事件是最近的輸出，供重播；shell 結束時送出 `exit`），shell 沒有在執行時會啟動它。
-- `POST /terminal/input`（`{"data": "..."}`）輸入按鍵，`POST /terminal/resize`
-  （`{"cols": 120, "rows": 40}`）調整大小。
+- `POST /terminal/input`（`{"data": "..."}`）輸入按鍵，一次一個請求；`POST /terminal/resize`
+  （`{"cols": 120, "rows": 40}`）調整大小。忙碌的程式 10 秒內沒讀走的輸入會得到 503，可能已經
+  輸入了一部分。
 - 預設開啟，`--terminal=false` 可以關閉。它和 API 的其他部分受到相同
   的保護，所以別人連得到伺服器時，請使用 `--api-token`。
 

@@ -589,7 +589,8 @@ webhook 事件的 delivery ID 也以同樣方式寫入 `instances.deliveries.jso
 觀看時也會繼續執行。它的輸出會寫進 256 KiB 的捲動緩衝區（從行首截斷）和每個觀看者的緩衝區。
 捲動緩衝區是環狀的，加入一段輸出所花的時間只和那段輸出的長度成正比，與緩衝區大小無關。落後
 512 個區塊的觀看者會被斷開，重新連線後再取得捲動緩衝區。`GET /terminal` 串流 `output`
-（base64）和 `exit` 事件，`POST /terminal/input` 與 `/terminal/resize` 則輸入按鍵和調整大小，
+（base64）和 `exit` 事件，`POST /terminal/input` 輸入按鍵，一次一個請求；程式不讀輸入、終端機的緩衝區滿了時，
+請求最多等 10 秒，之後以 503 放棄（用戶端離開時也會放棄）。`/terminal/resize` 調整大小，
 以最後一次調整為準。關閉時會掛斷終端機，2 秒後終止 shell 的 process group。
 
 ## 檔案
