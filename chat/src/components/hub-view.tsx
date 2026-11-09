@@ -3,7 +3,7 @@
 import {useMemo, useRef, useState} from "react";
 import {Button} from "@/components/ui/button";
 import {chatURL, displayName, hubRoot, type HubInstance} from "@/lib/hub";
-import {active, type DispatchJob} from "@/lib/hub-dispatch";
+import {active, rowJobs, type RowJob} from "@/lib/hub-dispatch";
 import {stoppedOf} from "@/lib/hub-filter";
 import {needsYou} from "@/lib/hub-issues";
 import {groupNames, groupOf} from "@/lib/hub-groups";
@@ -52,15 +52,10 @@ export function HubView() {
   // The issue open in its detail, which a list row's chip opens too.
   const [issueKey, setIssueKey] = useState<string | null>(null);
   // The jobs by the ID of each AgentAPI that worked on one, for the rows'
-  // chips; and how many issues need you, for the Issues button.
-  const jobsByInstance = useMemo(() => {
-    const byID = new Map<string, DispatchJob>();
-    for (const job of dispatch?.jobs ?? []) {
-      for (const run of job.runs ?? []) byID.set(run.instance_id, job);
-      if (job.instance_id) byID.set(job.instance_id, job);
-    }
-    return byID;
-  }, [dispatch]);
+  // chips: the same map while the chips show the same (rowJobs); and how
+  // many issues need you, for the Issues button.
+  const shownJobs = useRef<ReadonlyMap<string, RowJob>>(undefined);
+  const jobsByInstance = useMemo(() => (shownJobs.current = rowJobs(dispatch?.jobs ?? [], shownJobs.current)), [dispatch]);
   const issuesNeedYou = useMemo(() => (dispatch ? needsYou(dispatch.jobs, instances) : 0), [dispatch, instances]);
   const [naming, setNaming] = useState<Naming | null>(null);
   const [settings, setSettings] = useState<SettingsSection | null>(null);

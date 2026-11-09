@@ -1,7 +1,8 @@
 "use client";
 
-import {useEffect, useRef, type RefObject} from "react";
+import {useEffect, type RefObject} from "react";
 import {hubKey} from "@/lib/hub-keys";
+import {useLatest} from "@/lib/use-stable-callback";
 
 // useHubKeys handles the hub page's keys (lib/hub-keys.ts). The listener
 // stays the same from render to render: it reads the latest query and
@@ -22,10 +23,7 @@ export function useHubKeys({
   // Pins or unpins the row's instance.
   onPin: (id: string) => void;
 }) {
-  const latest = useRef({query, onClearSearch, onOverview, onIssues, onPin});
-  useEffect(() => {
-    latest.current = {query, onClearSearch, onOverview, onIssues, onPin};
-  });
+  const latest = useLatest({query, onClearSearch, onOverview, onIssues, onPin});
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -80,5 +78,5 @@ export function useHubKeys({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [search]);
+  }, [latest, search]);
 }

@@ -3,21 +3,7 @@
 // API-equivalent cost, which a subscription doesn't charge.
 
 import type {HourCost, ModelCall, Tokens} from "./chat-api";
-
-// "$12.34", "$0.004" below a cent, "$1,234" from a thousand on.
-export function formatUSD(usd: number): string {
-  if (usd === 0) return "$0.00";
-  if (usd < 0.01) return `$${usd.toFixed(3)}`;
-  if (usd >= 1000) return `$${Math.round(usd).toLocaleString("en-US")}`;
-  return `$${usd.toFixed(2)}`;
-}
-
-// "1.2M", "34k", "512": a token count at a glance.
-export function formatTokens(count: number): string {
-  if (count >= 1e6) return `${(count / 1e6).toFixed(count >= 1e7 ? 0 : 1)}M`;
-  if (count >= 1e3) return `${(count / 1e3).toFixed(count >= 1e4 ? 0 : 1)}k`;
-  return String(count);
-}
+import {formatTokens, formatUSD} from "./format";
 
 // All the input of some calls: uncached, cached and written to the cache.
 export function inputTokens(tokens: Tokens): number {

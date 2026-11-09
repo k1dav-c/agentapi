@@ -8,7 +8,8 @@ import {AgentMark} from "@/components/agent-mark";
 import {displayName, type HubInstance} from "@/lib/hub";
 import {groupSubtotals, type GroupSubtotal} from "@/lib/hub-groups";
 import {machineOf, machineSubtotals, type MachineSubtotal} from "@/lib/hub-machines";
-import {countedSpends, countedTokens, formatTokens, formatUSD, spendTitle, spendTotals, tokenKinds, tokensTitle, tokenTotals} from "@/lib/hub-spend";
+import {formatTokens, formatUSDShort} from "@/lib/format";
+import {countedSpends, countedTokens, spendTitle, spendTotals, tokenKinds, tokensTitle, tokenTotals} from "@/lib/hub-spend";
 import {parseVersion, versionTotals, type VersionRelation} from "@/lib/hub-version";
 import {formatWork, workSeconds, workTitle, workTotals} from "@/lib/hub-work";
 import {olderUpdates} from "@/lib/hub-update";
@@ -207,8 +208,8 @@ export function SpendCard({instances, onOpen}: {instances: HubInstance[]; onOpen
       id="hub-spend"
       title="Spend"
       note="API-equivalent, at list prices; a subscription doesn't charge it"
-      day={<Figure label="Last 24 hours" value={formatUSD(totals.day)} />}
-      week={<Figure label="Last 7 days" value={formatUSD(totals.week)} />}
+      day={<Figure label="Last 24 hours" value={formatUSDShort(totals.day)} />}
+      week={<Figure label="Last 7 days" value={formatUSDShort(totals.week)} />}
       counted={
         <>
           {totals.counted} of {instances.length} agents report it
@@ -221,13 +222,13 @@ export function SpendCard({instances, onOpen}: {instances: HubInstance[]; onOpen
             <PeriodRow
               key={instance.id}
               cell={<InstanceCell instance={instance} onOpen={onOpen} />}
-              day={formatUSD(spend.day_usd)}
-              week={formatUSD(spend.week_usd)}
+              day={formatUSDShort(spend.day_usd)}
+              week={formatUSDShort(spend.week_usd)}
               title={spendTitle(spend.day_usd, spend.week_usd)}
             />
           ))}
         </PeriodTable>
-        <MachineTable machines={machineRows(machines, formatUSD, (day, week) => spendTitle(day, week))} />
+        <MachineTable machines={machineRows(machines, formatUSDShort, (day, week) => spendTitle(day, week))} />
       </div>
     </PeriodCard>
   );

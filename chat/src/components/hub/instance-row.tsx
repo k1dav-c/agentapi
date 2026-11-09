@@ -16,9 +16,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import {agentDisplayName, parseAgentType} from "@/lib/agents";
 import {displayName, finishedAt, instanceState, stateLabel, usagePercent, type HubInstance} from "@/lib/hub";
-import {activity, formatAgo} from "@/lib/hub-format";
+import {formatAge, formatUSDShort} from "@/lib/format";
+import {activity} from "@/lib/hub-format";
 import {groupOf, type HubGroup} from "@/lib/hub-groups";
-import {formatUSD, spendTitle, spendTotals, tokenTotals} from "@/lib/hub-spend";
+import {spendTitle, spendTotals, tokenTotals} from "@/lib/hub-spend";
 import {instanceVersion, olderThanHub} from "@/lib/hub-version";
 import {formatWork, workSeconds, workTitle} from "@/lib/hub-work";
 import {changedAt, type ListOrder} from "@/lib/hub-order";
@@ -86,7 +87,7 @@ export const InstanceRow = memo(function InstanceRow({instance, order, selected,
   const doing = activity(instance);
   const recent = order === "recent";
   const since = recent ? changedAt(instance) : doing.since;
-  const ago = useHubTime((now) => formatAgo(since, now));
+  const ago = useHubTime((now) => formatAge(since, now));
   const group = recent || pinned ? groupOf(instance) : "";
   const spend = summary?.spend;
   // The last spend and version of an instance the hub doesn't follow now:
@@ -149,7 +150,7 @@ export const InstanceRow = memo(function InstanceRow({instance, order, selected,
                 >
                   <span className="sr-only">{spendTitle(spend.day_usd, spend.week_usd, lastKnown, spend.day_tokens?.total)}</span>
                   <span aria-hidden="true">
-                    {formatUSD(spend.day_usd)}
+                    {formatUSDShort(spend.day_usd)}
                     <span className="text-muted-foreground/60">/24h</span>
                   </span>
                 </span>
@@ -347,7 +348,7 @@ function GroupSpend({group}: {group: HubGroup}) {
   return (
     <span className="shrink-0 text-[11px] text-muted-foreground/70 tabular-nums" title={title}>
       <span className="sr-only">{title}</span>
-      <span aria-hidden="true">· {formatUSD(totals.day)}/24h</span>
+      <span aria-hidden="true">· {formatUSDShort(totals.day)}/24h</span>
     </span>
   );
 }

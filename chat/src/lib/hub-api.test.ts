@@ -63,4 +63,23 @@ describe("the hub's API", () => {
     await expect(createHubAPI("", fetcher(json(200, {}))).forgetStopped(["x"])).rejects.toMatchObject({message: "The hub's answer doesn't say which it forgot."});
     await expect(createHubAPI("", fetcher(json(400, {error: "send ids"}))).forgetStopped([])).rejects.toMatchObject({message: "send ids", status: 400});
   });
+
+  test("signing in posts the token, with no session yet; a wrong one is a 401", async () => {
+    const answers = fetcher(new Response(null, {status: 204}), json(401, {code: "unauthorized", message: "invalid token", error: "invalid token"}));
+    const api = createHubAPI("/hub", answers);
+    await api.signIn("secret");
+    expect(answers.calls.map(({url, init}) => [init.method, url, init.body, init.credentials])).toEqual([["POST", "/hub/api/session", '{"token":"secret"}', "same-origin"]]);
+    await expect(api.signIn("wrong")).rejects.toMatchObject({status: 401});
+  });
+
+  test("adding one by its URL returns its ID, or what the hub said", async () => {
+    const answers = fetcher(json(201, {id: "dev-1:3284", url: "http://dev-1:3284"}));
+    expect(await createHubAPI("/hub", answers).addInstance({url: "http://dev-1:3284", token: "t"})).toBe("dev-1:3284");
+    expect(answers.calls.map(({url, init}) => [init.method, url, init.body])).toEqual([["POST", "/hub/api/instances", '{"url":"http://dev-1:3284","token":"t"}']]);
+    await expect(createHubAPI("", fetcher(json(400, {code: "bad_request", message: "the URL isn't http or https", error: "the URL isn't http or https"}))).addInstance({url: "x"})).rejects.toMatchObject({
+      message: "the URL isn't http or https",
+      status: 400,
+    });
+    await expect(createHubAPI("", fetcher(json(201, {}))).addInstance({url: "http://x"})).rejects.toMatchObject({message: "The hub's answer doesn't say which instance it added."});
+  });
 });

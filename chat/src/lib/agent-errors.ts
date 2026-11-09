@@ -9,10 +9,15 @@ export function agentErrorKey(error: {message: string; level: string; time: stri
 
 // How many dismissed notifications are remembered per server.
 const MAX_DISMISSED = 200;
+// How many servers they are remembered for: the hub's dispatch starts a
+// server for every issue, each with its own URL. Past it, those of the
+// server the user closed one of the longest ago are forgotten.
+export const MAX_DISMISSED_SERVERS = 50;
 
 // The storage the dismissed notifications are kept in: localStorage, which
-// tests replace.
-type KeyValueStorage = Pick<Storage, "getItem" | "setItem">;
+// tests replace. key and length find the servers of a browser that kept
+// them before their index.
+type KeyValueStorage = Pick<Storage, "getItem" | "setItem" | "removeItem"> & Partial<Pick<Storage, "key" | "length">>;
 
 function browserStorage(): KeyValueStorage | null {
   try {
@@ -23,7 +28,35 @@ function browserStorage(): KeyValueStorage | null {
   }
 }
 
-const dismissedKey = (agentAPIUrl: string) => `agentapi.chat.dismissed-errors:${agentAPIUrl}`;
+const dismissedPrefix = "agentapi.chat.dismissed-errors:";
+const dismissedKey = (agentAPIUrl: string) => `${dismissedPrefix}${agentAPIUrl}`;
+// The servers with dismissed notifications, the latest closed last.
+const serversKey = "agentapi.chat.dismissed-errors";
+
+function readServers(storage: KeyValueStorage): string[] {
+  try {
+    const stored: unknown = JSON.parse(storage.getItem(serversKey) ?? "null");
+    if (Array.isArray(stored)) return stored.filter((url): url is string => typeof url === "string");
+  } catch {
+    // Unreadable: found again below.
+  }
+  // None yet: the servers this browser kept notifications of before.
+  const found: string[] = [];
+  for (let i = 0; i < (storage.length ?? 0); i++) {
+    const key = storage.key?.(i);
+    if (key?.startsWith(dismissedPrefix)) found.push(key.slice(dismissedPrefix.length));
+  }
+  return found;
+}
+
+// keepServer puts agentAPIUrl last among the servers, and forgets the
+// notifications of the oldest past MAX_DISMISSED_SERVERS.
+function keepServer(agentAPIUrl: string, storage: KeyValueStorage) {
+  const servers = readServers(storage).filter((url) => url !== agentAPIUrl);
+  servers.push(agentAPIUrl);
+  for (const url of servers.splice(0, Math.max(0, servers.length - MAX_DISMISSED_SERVERS))) storage.removeItem(dismissedKey(url));
+  storage.setItem(serversKey, JSON.stringify(servers));
+}
 
 // The notifications of the server at agentAPIUrl the user closed: the
 // server replays its errors on every connection, so a reload would show
@@ -38,12 +71,14 @@ export function dismissedErrors(agentAPIUrl: string, storage: KeyValueStorage | 
 }
 
 // Remembers that the user closed the notification key, the latest
-// MAX_DISMISSED of them.
+// MAX_DISMISSED of them, of the latest MAX_DISMISSED_SERVERS servers.
 export function rememberDismissed(agentAPIUrl: string, key: string, storage: KeyValueStorage | null = browserStorage()) {
+  if (!storage) return;
   const keys = [...dismissedErrors(agentAPIUrl, storage)].filter((stored) => stored !== key);
   keys.push(key);
   try {
-    storage?.setItem(dismissedKey(agentAPIUrl), JSON.stringify(keys.slice(-MAX_DISMISSED)));
+    storage.setItem(dismissedKey(agentAPIUrl), JSON.stringify(keys.slice(-MAX_DISMISSED)));
+    keepServer(agentAPIUrl, storage);
   } catch {
     // Full or unavailable: the notification comes back after a reload.
   }

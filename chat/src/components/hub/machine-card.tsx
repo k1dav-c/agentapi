@@ -3,10 +3,11 @@
 import {memo, useCallback, useEffect, useId, useRef, useState} from "react";
 import {Folder, Server} from "lucide-react";
 import {displayName, finishedAt, hasRun, instanceState, stateLabel, usagePercent, type HubInstance} from "@/lib/hub";
-import {activity, formatAgo} from "@/lib/hub-format";
+import {formatAge, formatUSDShort} from "@/lib/format";
+import {activity} from "@/lib/hub-format";
 import {groupOf} from "@/lib/hub-groups";
 import {activeAgent, sharedVersion, tabOrder, type HubMachine} from "@/lib/hub-machines";
-import {formatUSD, spendTitle, spendTotals, tokenTotals} from "@/lib/hub-spend";
+import {spendTitle, spendTotals, tokenTotals} from "@/lib/hub-spend";
 import {instanceVersion, olderThanHub} from "@/lib/hub-version";
 import {changedAt, recentAgent, type ListOrder} from "@/lib/hub-order";
 import {MAX_TAB_PICKS, readHubSetting, writeHubSetting, type TabPick} from "@/lib/hub-settings";
@@ -94,7 +95,7 @@ export const MachineCard = memo(function MachineCard({card, machine, order, sele
   const recent = order === "recent";
   // The recent order puts the machine of the latest change first: the age
   // of its first agent's.
-  const latest = useHubTime((now) => (recent ? formatAgo(changedAt(instances[0]), now) : ""));
+  const latest = useHubTime((now) => (recent ? formatAge(changedAt(instances[0]), now) : ""));
   const tabs = tabOrder(instances);
   const single = tabs.length === 1;
   const shown = splitHost(hostname, prefix);
@@ -185,7 +186,7 @@ export const MachineCard = memo(function MachineCard({card, machine, order, sele
               <span className="tabular-nums" title={spent}>
                 <span className="sr-only">{spent}</span>
                 <span aria-hidden="true">
-                  {formatUSD(spend.day)}
+                  {formatUSDShort(spend.day)}
                   <span className="text-muted-foreground/60">/24h</span>
                 </span>
               </span>
@@ -237,7 +238,7 @@ const AgentPanel = memo(function AgentPanel({instance, named, versioned, selecte
   const usageShown = usage !== undefined && usage >= 60;
   const agent = agentName(instance) || "Agent";
   const doing = activity(instance);
-  const ago = useHubTime((now) => (recent && latest ? "" : formatAgo(recent ? changedAt(instance) : doing.since, now)));
+  const ago = useHubTime((now) => (recent && latest ? "" : formatAge(recent ? changedAt(instance) : doing.since, now)));
   const group = recent ? groupOf(instance) : "";
   const spend = summary?.spend;
   const lastKnown = instance.connection !== "connected";
@@ -288,7 +289,7 @@ const AgentPanel = memo(function AgentPanel({instance, named, versioned, selecte
               >
                 <span className="sr-only">{spendTitle(spend.day_usd, spend.week_usd, lastKnown, spend.day_tokens?.total)}</span>
                 <span aria-hidden="true">
-                  {formatUSD(spend.day_usd)}
+                  {formatUSDShort(spend.day_usd)}
                   <span className="text-muted-foreground/60">/24h</span>
                 </span>
               </span>

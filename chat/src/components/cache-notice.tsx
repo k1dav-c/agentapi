@@ -5,8 +5,8 @@ import { Archive, LoaderCircle, X } from "lucide-react";
 import { toast } from "sonner";
 import {useChatActions, useChatSelector} from "./chat-provider";
 import { getErrorMessage } from "@/lib/error-utils";
-import { formatTokenCount } from "@/lib/session-status";
-import { coldCache, formatAgo } from "@/lib/usage";
+import { formatAgo, formatTokens } from "@/lib/format";
+import { coldCache } from "@/lib/usage";
 import { usePersisted } from "@/lib/use-persisted";
 
 // Says, while the agent is idle, that its prompt cache expired with a large
@@ -79,7 +79,7 @@ export function CacheNotice() {
       <Archive className="size-3.5 shrink-0" aria-hidden="true" />
       <p className="min-w-0 flex-1">
         The prompt cache expired {formatAgo(cold.expiredAt, now)}: the next message reads all{" "}
-        {formatTokenCount(cold.tokens)} tokens of context again. Compact first to make it cheaper.
+        {formatTokens(cold.tokens)} tokens of context again. Compact first to make it cheaper.
       </p>
       <button
         type="button"

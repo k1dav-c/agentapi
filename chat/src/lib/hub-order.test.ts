@@ -4,7 +4,7 @@ import type {HubInstance, Summary} from "./hub";
 import type {HubAgent} from "./hub-filter";
 import {groupInstances} from "./hub-groups";
 import {machinesInOrder} from "./hub-machines";
-import {changedAt, listSections, movePin, parseListOrder, pinnedKey, pinOf, recentAgent, recentKey, sortPinned, sortRecent, type ListSection} from "./hub-order";
+import {changedAt, keepMachines, listSections, movePin, parseListOrder, pinnedKey, pinOf, recentAgent, recentKey, sortPinned, sortRecent, type ListSection} from "./hub-order";
 
 const summary = (overrides: Partial<Summary> = {}): Summary => baseSummary({seen_at: "2026-10-26T00:00:00Z", ...overrides});
 
@@ -375,5 +375,31 @@ describe("recentAgent", () => {
   test("the agent open beside the list over all of them; picks and agents of other cards don't count", () => {
     expect(recentAgent(machine, {id: "c", at: at(40)}, "b")).toBe("b");
     expect(recentAgent(machine, {id: "x", at: at(40)}, "y")).toBe("a");
+  });
+});
+
+describe("keepMachines", () => {
+  const view = {agents: none, filter: "all" as const, query: "", order: "groups" as const, byMachine: true};
+  const rows = [instance("a", {hostname: "dev-1"}), instance("b", {hostname: "dev-1"}), instance("c", {hostname: "dev-2"})];
+
+  test("a machine whose agents didn't change is the one shown before", () => {
+    const before = keepMachines(listSections(rows, view), []);
+    // An event for c: a new object for it, the others the same.
+    const after = keepMachines(listSections([rows[0], rows[1], {...rows[2], name: "renamed"}], view), before);
+    const [dev1, dev2] = after[0].machines!;
+    expect(dev1).toBe(before[0].machines![0]);
+    expect(dev2).not.toBe(before[0].machines![1]);
+    expect(dev2.instances[0].name).toBe("renamed");
+  });
+
+  test("a machine with an agent more, or less, or in another section, is new", () => {
+    const before = keepMachines(listSections(rows, view), []);
+    const more = keepMachines(listSections([...rows, instance("d", {hostname: "dev-1"})], view), before);
+    expect(more[0].machines![0]).not.toBe(before[0].machines![0]);
+    expect(ids(more[0].machines![0].instances)).toEqual(["a", "b", "d"]);
+    const less = keepMachines(listSections([rows[0], rows[2]], view), before);
+    expect(less[0].machines![0]).not.toBe(before[0].machines![0]);
+    const grouped = keepMachines(listSections([rows[0], rows[1], {...rows[2], group: "Ops"}], view), before);
+    expect(grouped.find((section) => section.key === "Ops")!.machines![0]).not.toBe(before[0].machines![1]);
   });
 });

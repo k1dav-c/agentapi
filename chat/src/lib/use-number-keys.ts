@@ -1,14 +1,14 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { numberKeyIndex } from "./keys";
+import { useLatest } from "./use-stable-callback";
 
 // Number keys pick an option of the decision card on screen (1 picks the
 // first of count), unless the key is meant for something else; see
 // numberKeyIndex.
 export function useNumberKeys(count: number, onKey: (index: number) => void) {
-  const handler = useRef(onKey);
-  handler.current = onKey;
+  const handler = useLatest(onKey);
   useEffect(() => {
     if (count === 0) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -19,5 +19,5 @@ export function useNumberKeys(count: number, onKey: (index: number) => void) {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [count]);
+  }, [count, handler]);
 }

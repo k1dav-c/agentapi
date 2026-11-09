@@ -1,10 +1,11 @@
 "use client";
 
-import {useEffect, useState} from "react";
+import {useEffect, useMemo, useState} from "react";
 import {Plus, RefreshCw, Trash2, TriangleAlert} from "lucide-react";
 import {Button} from "@/components/ui/button";
 import {Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle} from "@/components/ui/dialog";
-import {displayName, type HubInstance, type HubWire} from "@/lib/hub";
+import {displayName, type HubInstance} from "@/lib/hub";
+import {createHubAPI, hubErrorText} from "@/lib/hub-api";
 import {hubLimits} from "@/lib/hub-schema";
 import {JoinMachine} from "./join-machine";
 import {fieldClass, sectionClass} from "./styles";
@@ -23,29 +24,20 @@ export function AddInstance({root, open, onOpenChange, onAdded}: {root: string; 
   const [token, setToken] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const api = useMemo(() => createHubAPI(root), [root]);
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     setBusy(true);
     setError("");
     try {
-      const response = await fetch(`${root}/api/instances`, {
-        method: "POST",
-        credentials: "same-origin",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({url: url.trim(), token: token.trim()} satisfies HubWire["AddInstanceBody"]),
-      });
-      // The instance added, or why not.
-      const body = (await response.json().catch(() => ({}))) as Partial<HubWire["Instance"] & HubWire["ErrorBody"]>;
-      if (!response.ok) {
-        setError(body.error ?? `The hub answered ${response.status}.`);
-        return;
-      }
+      const id = await api.addInstance({url: url.trim(), token: token.trim()});
       setURL("");
       setToken("");
       onOpenChange(false);
-      onAdded((body as HubWire["Instance"]).id);
-    } catch {
-      setError("The hub didn't answer.");
+      onAdded(id);
+    } catch (error) {
+      // Why not, as the hub said it.
+      setError(hubErrorText(error));
     } finally {
       setBusy(false);
     }

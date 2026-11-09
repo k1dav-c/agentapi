@@ -4,7 +4,7 @@ import {useCallback, useEffect, useRef, useState} from "react";
 import {X} from "lucide-react";
 import {AgentMark} from "@/components/agent-mark";
 import {agentLabel, forgetBlocker, type DispatchHost, type DispatchJob} from "@/lib/hub-dispatch";
-import {formatAgo} from "@/lib/hub-format";
+import {formatAge} from "@/lib/format";
 import {cn} from "@/lib/utils";
 import {useHubTime} from "../clock";
 import {Capacity} from "./assign-menu";
@@ -13,7 +13,7 @@ import {ForgetMachineDialog} from "./forget-machine-dialog";
 // Machine is one machine in the strip; one offline has a button that
 // forgets it (onForget), off with the reason while its jobs still work.
 function Machine({host, blocker, onForget}: {host: DispatchHost; blocker: string | undefined; onForget: (hostname: string) => void}) {
-  const seen = useHubTime((now) => formatAgo(host.last_seen, now));
+  const seen = useHubTime((now) => formatAge(host.last_seen, now));
   const agents = host.agents ?? [];
   const status = !host.online ? `offline${seen ? ` ${seen}` : ""}` : host.active >= host.max_jobs ? "full" : `${host.max_jobs - host.active} free`;
   return (

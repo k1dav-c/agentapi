@@ -4,7 +4,8 @@ import {Bell, BellOff, CircleDot, Plus, Search, Settings, X} from "lucide-react"
 import {ModeToggle} from "@/components/mode-toggle";
 import {Button} from "@/components/ui/button";
 import type {ConnectionStatus} from "@/lib/event-source";
-import {formatUSD, spendTitle, type SpendTotals} from "@/lib/hub-spend";
+import {formatUSDShort} from "@/lib/format";
+import {spendTitle, type SpendTotals} from "@/lib/hub-spend";
 import {parseVersion} from "@/lib/hub-version";
 import {cn} from "@/lib/utils";
 import {HubMark} from "./brand";
@@ -114,7 +115,7 @@ export function HubListHeader({status, unreachable, hubVersion, spend, notify, o
           {/* Out of the live region: it changes every minute. */}
           {connected && spend.week > 0 && (
             <span className="min-w-0 truncate tabular-nums" title={spendTitle(spend.day, spend.week)}>
-              · {formatUSD(spend.day)}/24h
+              · {formatUSDShort(spend.day)}/24h
             </span>
           )}
         </p>

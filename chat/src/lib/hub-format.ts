@@ -68,18 +68,6 @@ export function shortError(error: string | undefined): string {
   return last ? last[0].toUpperCase() + last.slice(1) : error;
 }
 
-// formatAgo is a short age: "now", "45s", "12m", "3h", "2d".
-export function formatAgo(since: string | undefined, now: number): string {
-  if (!since) return "";
-  const seconds = Math.max(0, Math.round((now - Date.parse(since)) / 1000));
-  if (Number.isNaN(seconds)) return "";
-  if (seconds < 10) return "now";
-  if (seconds < 60) return `${seconds}s`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
-  return `${Math.floor(seconds / 86400)}d`;
-}
-
 // formatElapsed is a running duration: "45s", "2m 14s", "1h 05m".
 export function formatElapsed(since: string | undefined, now: number): string {
   if (!since) return "";

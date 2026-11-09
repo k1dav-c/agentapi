@@ -771,8 +771,8 @@ AgentAPI 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
   Lineage 面板（`lineage.tsx`）、檔案檢視器以及 shell
   終端機（`shell-view.tsx`，來自 `/terminal`）。
 - `lib/` 將邏輯封裝為獨立模組，並附有 Bun 測試：任務分組、工具格式化、檔案參照、diff、斜線
-  指令、設定、用量、花費（`cost.ts`：任務在工作階段呼叫中的份額、各期間的加總）、終端機按鍵、
-  驗證。`use-session-cost.ts` 會在回合結束時和回合執行中讀取 `GET /cost`；第一次讀取之後會帶上
+  指令、設定、用量、花費（`cost.ts`：任務在工作階段呼叫中的份額、各期間的加總）、chat 和 hub
+  顯示的數量、金額與時間（`format.ts`）、終端機按鍵、驗證。`use-session-cost.ts` 會在回合結束時和回合執行中讀取 `GET /cost`；第一次讀取之後會帶上
   `from` 和 `digest`，只取得之後新增的呼叫。用到 chat 狀態或只屬於某個元件的 hook，放在
   `components/` 裡、靠近使用它的地方；和 chat 無關的 hook（`use-loaded.ts`、`use-copy.ts`、
   `use-persisted.ts`）放在 `lib/`。測試共用的 fixture 和假物件放在 `src/test/`；需要執行 effect 的測試檔

@@ -4,7 +4,7 @@ import {startTransition, useCallback, useEffect, useRef, useState, type Dispatch
 import {toast} from "sonner";
 import {ChatStream} from "@/lib/chat-stream";
 import {initialConnectionState, type ConnectionState} from "@/lib/event-source";
-import {loadSession} from "@/lib/session-cache";
+import {loadSession, type CachedSession} from "@/lib/session-cache";
 import {bootstrapSession, ensureSession, reconnectWhenSignedIn, withCredentials} from "@/lib/auth";
 import {isLoginNotice} from "@/lib/login";
 import type {QueuedMessage} from "@/lib/queue";
@@ -33,6 +33,7 @@ export function useEventStream({
   applyQueue,
   queueMayHaveSent,
   onReplayed,
+  loadCache = loadSession,
 }: {
   agentAPIUrl: string;
   syncRef: RefObject<SyncTracker>;
@@ -48,6 +49,8 @@ export function useEventStream({
   // Called once the replay of what changed since the cache or the last
   // connection was applied: it doesn't tell of what the server dropped.
   onReplayed: () => void;
+  // Reads the cached transcript (loadSession; tests give their own).
+  loadCache?: (agentAPIUrl: string) => Promise<CachedSession | null>;
 }) {
   const [connection, setConnection] = useState<ConnectionState>(initialConnectionState);
   // Errors the server replays on every connection that this page showed
@@ -129,7 +132,7 @@ export function useEventStream({
     };
     if (cacheLoadedForRef.current !== agentAPIUrl) {
       cacheLoadedForRef.current = agentAPIUrl;
-      void loadSession(agentAPIUrl).then((cached) => {
+      void loadCache(agentAPIUrl).then((cached) => {
         if (cached && !started && !disposed) {
           syncRef.current.restore(cached.epoch, cached.seq);
           dispatch({type: "restore", cached});
@@ -146,7 +149,7 @@ export function useEventStream({
       stream.stop();
       streamRef.current = null;
     };
-  }, [agentAPIUrl, agentStatusRef, apply, dispatch, onReplayed, queueMayHaveSent, refreshQueue, syncRef, updateAgentStatus]);
+  }, [agentAPIUrl, agentStatusRef, apply, dispatch, loadCache, onReplayed, queueMayHaveSent, refreshQueue, syncRef, updateAgentStatus]);
 
   return {
     connectionStatus: connection.status,

@@ -4,7 +4,8 @@ import { Hash } from "lucide-react";
 import {useChatSelector} from "./chat-provider";
 import {AgentType} from "@/lib/agents";
 import {sameValue} from "@/lib/agent-status";
-import { formatTokenCount, getStatusMeta } from "@/lib/session-status";
+import { formatTokens } from "@/lib/format";
+import { getStatusMeta } from "@/lib/session-status";
 
 export function EmbedStatusBar() {
   const agentState = useChatSelector((chat) => chat.agentState);
@@ -39,7 +40,7 @@ export function EmbedStatusBar() {
       {tokenTotals.total > 0 && (
         <span className="flex shrink-0 items-center gap-1 tabular-nums text-muted-foreground">
           <Hash className="size-2.5" />
-          {formatTokenCount(tokenTotals.total)}
+          {formatTokens(tokenTotals.total)}
         </span>
       )}
     </div>

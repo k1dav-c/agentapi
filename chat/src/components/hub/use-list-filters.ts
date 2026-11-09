@@ -1,9 +1,9 @@
 "use client";
 
-import {useCallback, useMemo, useState} from "react";
+import {useCallback, useMemo, useRef, useState} from "react";
 import type {HubInstance} from "@/lib/hub";
 import {agentsIn, countAgents, countFilters, matchesAgents, shownAgents, type HubFilter} from "@/lib/hub-filter";
-import {listSections, type ListOrder} from "@/lib/hub-order";
+import {keepMachines, listSections, type ListOrder, type ListSection} from "@/lib/hub-order";
 import {useHubSetting} from "@/lib/hub-settings";
 
 // useListFilters is what the hub's list shows of the instances (all): the
@@ -22,7 +22,13 @@ export function useListFilters(all: HubInstance[], {order, byMachine}: {order: L
   // Each row of chips counts what the other row lets through.
   const statusCounts = useMemo(() => (agents.size === 0 ? counts : countFilters(all.filter((instance) => matchesAgents(instance, agents)))), [all, agents, counts]);
   const agentCounts = useMemo(() => countAgents(all, filter), [all, filter]);
-  const sections = useMemo(() => listSections(all, {filter, agents, query, order, byMachine}), [all, filter, agents, query, order, byMachine]);
+  // The machines whose agents didn't change stay the same objects, so their
+  // cards don't render again (keepMachines).
+  const shown = useRef<ListSection[]>([]);
+  const sections = useMemo(
+    () => (shown.current = keepMachines(listSections(all, {filter, agents, query, order, byMachine}), shown.current)),
+    [all, filter, agents, query, order, byMachine],
+  );
   // showAll takes the filters and the search away.
   const showAll = useCallback(() => {
     setFilter("all");

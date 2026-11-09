@@ -6,7 +6,7 @@ import { Button } from "./ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuTrigger } from "./ui/dropdown-menu";
 import type { RateLimit } from "@/lib/chat-api";
 import { contextPercent, formatResetIn, fullestLimit, usageTone, type UsageTone } from "@/lib/usage";
-import { formatTokenCount as formatTokens } from "@/lib/session-status";
+import { formatTokens } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 const TONE_STROKE: Record<UsageTone, string> = {

@@ -4,7 +4,8 @@ import {ArrowRight, CircleCheck, ClipboardList, Gauge, KeyRound, MessageCircleQu
 import {AgentMark} from "@/components/agent-mark";
 import {displayName, instanceState, type HubInstance, type InstanceState} from "@/lib/hub";
 import type {HubFilter} from "@/lib/hub-filter";
-import {activity, formatAgo, formatElapsed} from "@/lib/hub-format";
+import {formatAge} from "@/lib/format";
+import {activity, formatElapsed} from "@/lib/hub-format";
 import {instanceVersion} from "@/lib/hub-version";
 import {cn} from "@/lib/utils";
 import {useHubTime} from "./clock";
@@ -96,7 +97,7 @@ const cardClass =
 function NeedsCard({instance, hubVersion, onOpen}: {instance: HubInstance; hubVersion: string; onOpen: () => void}) {
   const {icon: Icon, label} = ask(instance);
   const since = activity(instance).since;
-  const ago = useHubTime((now) => formatAgo(since, now));
+  const ago = useHubTime((now) => formatAge(since, now));
   return (
     <button type="button" onClick={onOpen} className={cn(cardClass, "border-state-needs/35 hover:border-state-needs/60")}>
       <span className="flex items-center gap-2">
@@ -144,7 +145,7 @@ function WorkingCard({instance, hubVersion, onOpen}: {instance: HubInstance; hub
 
 function FinishedCard({instance, hubVersion, onOpen}: {instance: HubInstance; hubVersion: string; onOpen: () => void}) {
   const doing = activity(instance);
-  const ago = useHubTime((now) => formatAgo(doing.since, now));
+  const ago = useHubTime((now) => formatAge(doing.since, now));
   return (
     <button type="button" onClick={onOpen} className={cardClass}>
       <span className="flex items-center gap-2">

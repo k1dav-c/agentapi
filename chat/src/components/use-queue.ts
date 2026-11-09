@@ -3,24 +3,23 @@
 import {useCallback, useEffect, useRef, useState} from "react";
 import type {ChatAPI} from "@/lib/chat-api";
 import {sameValue} from "@/lib/agent-status";
-import {QueueView, type QueuedMessage} from "@/lib/queue";
+import {QueueView, sendsQueueEvents, type QueuedMessage} from "@/lib/queue";
 
-// How often the queue is read while no queue event came: a server that
-// sends none (older than queue_update) says nothing of a queued message it
-// sent.
+// How often the queue is read from a server that may send no queue events:
+// one older than queue_update says nothing of a queued message it sent.
 const QUEUE_POLL_MS = 60_000;
 
 // useQueue keeps the queued messages as the server has them, and changes
 // them. A server that sends queue_update events (sync clients) says every
 // change, applied with the other events (applyQueue). The queue is read
-// (GET /queue) on every connection; after the chat changed it, a status
-// change while it holds messages, and every QUEUE_POLL_MS, only while the
-// server sends no queue events.
-export function useQueue(api: ChatAPI) {
+// (GET /queue) on every connection; after the chat changed it and on a
+// status change while it holds messages, only while no queue event came;
+// and every QUEUE_POLL_MS while none came from a server that may send none
+// (sendsQueueEvents of serverVersion, its agentapi_version).
+export function useQueue(api: ChatAPI, serverVersion: string) {
   const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
   const viewRef = useRef<QueueView | null>(null);
   viewRef.current ??= new QueueView();
-  const lastEventAtRef = useRef(0);
 
   // The same queue keeps its object: the composer and the cards that
   // select it don't render again on every read.
@@ -42,7 +41,6 @@ export function useQueue(api: ChatAPI) {
   // A queue_update.
   const applyQueue = useCallback((queue: QueuedMessage[]) => {
     viewRef.current!.event(queue);
-    lastEventAtRef.current = Date.now();
     show();
   }, [show]);
 
@@ -58,12 +56,16 @@ export function useQueue(api: ChatAPI) {
     if (view.events === 0 && view.shown.length > 0) void refreshQueue();
   }, [refreshQueue]);
 
+  // A server that sends queue events says every change, and an idle
+  // queue's none: there is nothing to read.
+  const polls = !sendsQueueEvents(serverVersion);
   useEffect(() => {
+    if (!polls) return;
     const timer = setInterval(() => {
-      if (Date.now() - lastEventAtRef.current >= QUEUE_POLL_MS) void refreshQueue();
+      if (viewRef.current!.events === 0) void refreshQueue();
     }, QUEUE_POLL_MS);
     return () => clearInterval(timer);
-  }, [refreshQueue]);
+  }, [polls, refreshQueue]);
 
   const updateQueuedMessage = async (id: number, content: string) => {
     await api.updateQueuedMessage(id, content);

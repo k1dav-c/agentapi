@@ -11,7 +11,8 @@ import { AgentMark } from "@/components/agent-mark";
 import { Activity, BellOff, BellRing, Bot, MessageSquareText, CircleCheck, Copy, Download, Fingerprint, Hash, Keyboard, LayoutGrid, LoaderCircle, Tag } from "lucide-react";
 import { copyText } from "@/lib/clipboard";
 import { getErrorMessage } from "@/lib/error-utils";
-import { formatTokenCount, getStatusMeta } from "@/lib/session-status";
+import { formatTokens } from "@/lib/format";
+import { getStatusMeta } from "@/lib/session-status";
 import { useWorkingElapsed } from "@/lib/use-elapsed";
 import { openShortcuts } from "@/components/keyboard-shortcuts";
 import { useDialogFromMenu } from "@/lib/menu-dialog";
@@ -155,7 +156,7 @@ export function Header() {
                 <SessionDetail
                   icon={Hash}
                   label="Tokens"
-                  value={`${formatTokenCount(tokenTotals.input)} in · ${formatTokenCount(tokenTotals.output)} out`}
+                  value={`${formatTokens(tokenTotals.input)} in · ${formatTokens(tokenTotals.output)} out`}
                 />
               )}
             </div>
@@ -210,7 +211,7 @@ export function Header() {
             className="hidden h-7 items-center gap-1 rounded-full border px-2.5 text-xs tabular-nums text-muted-foreground md:flex"
             title={`${tokenTotals.input.toLocaleString()} input + ${tokenTotals.output.toLocaleString()} output tokens`}
           >
-            {formatTokenCount(tokenTotals.total)} tokens
+            {formatTokens(tokenTotals.total)} tokens
           </span>
         )}
         <div id={HEADER_ACTIONS_ID} className="flex items-center gap-0.5" />
