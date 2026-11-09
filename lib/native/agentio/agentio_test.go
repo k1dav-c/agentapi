@@ -1,6 +1,7 @@
 package agentio_test
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -75,6 +77,34 @@ func TestWriter(t *testing.T) {
 
 	w.Attach(writerFunc(func([]byte) (int, error) { return 0, io.ErrClosedPipe }))
 	assert.EqualError(t, w.Write(ctx, 1), "write to test: io: read/write on closed pipe")
+}
+
+// WriteAsync doesn't wait for an agent that doesn't read; its record goes
+// out once the agent does, and a failure is logged.
+func TestWriteAsync(t *testing.T) {
+	t.Parallel()
+	w := agentio.NewWriter("test")
+	pr, pw := io.Pipe()
+	defer pr.Close()
+	w.Attach(pw)
+	w.WriteAsync(map[string]string{"answer": "no"}, slog.New(slog.DiscardHandler))
+	line, err := bufio.NewReader(pr).ReadString('\n')
+	require.NoError(t, err)
+	assert.Equal(t, `{"answer":"no"}`+"\n", line)
+
+	var logged bytes.Buffer
+	var mu sync.Mutex
+	logger := slog.New(slog.NewTextHandler(writerFunc(func(p []byte) (int, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		return logged.Write(p)
+	}), &slog.HandlerOptions{Level: slog.LevelDebug}))
+	agentio.NewWriter("test").WriteAsync(1, logger)
+	assert.Eventually(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return strings.Contains(logged.String(), "Failed to write to the agent")
+	}, 5*time.Second, time.Millisecond)
 }
 
 // An agent that stops reading its input can't hold a write past its

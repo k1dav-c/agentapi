@@ -757,11 +757,9 @@ func (a *Adapter) handleControlRequest(f *frame) {
 // refuse answers a control request with an error, so the CLI doesn't wait,
 // without blocking the read loop.
 func (a *Adapter) refuse(requestID, message string) {
-	go func() {
-		_ = a.write(context.Background(), map[string]any{"type": "control_response", "response": map[string]any{
-			"subtype": "error", "request_id": requestID, "error": message,
-		}})
-	}()
+	a.writer.WriteAsync(map[string]any{"type": "control_response", "response": map[string]any{
+		"subtype": "error", "request_id": requestID, "error": message,
+	}}, a.log)
 }
 
 func (a *Adapter) handleSystem(f *frame) {

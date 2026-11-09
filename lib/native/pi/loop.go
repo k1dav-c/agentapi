@@ -560,11 +560,7 @@ func (a *Adapter) cancelTurnDialogs(withdraw bool) {
 		if withdraw {
 			a.loop.sink.RequestClosed(id)
 		}
-		go func(id string) {
-			if err := a.send(context.Background(), uiResponse{Type: "extension_ui_response", ID: id, Cancelled: true}); err != nil {
-				a.log.Debug("Failed to cancel a Pi dialog", "id", id, "error", err)
-			}
-		}(id)
+		a.writer.WriteAsync(uiResponse{Type: "extension_ui_response", ID: id, Cancelled: true}, a.log)
 	}
 }
 
