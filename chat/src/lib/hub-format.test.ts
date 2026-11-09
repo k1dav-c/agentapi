@@ -2,7 +2,7 @@ import {describe, expect, test} from "bun:test";
 import {idleInstance as instance, summary} from "./hub-fixtures";
 import {sortInstances, stateLabel} from "./hub";
 import {countFilters} from "./hub-filter";
-import {activity, formatAgo, formatElapsed, shortError} from "./hub-format";
+import {activity, formatAgo, formatElapsed, formatTimeAndDay, shortError} from "./hub-format";
 
 describe("what a row says", () => {
   test("a row says what the instance waits for or does, and since when", () => {
@@ -43,5 +43,17 @@ describe("what a row says", () => {
     expect(countFilters([muted])["needs-you"]).toBe(0);
     // Sorted after the idle ones.
     expect(sortInstances([muted, instance("b")]).map((i) => i.id)).toEqual(["b", "a"]);
+  });
+});
+
+describe("formatTimeAndDay", () => {
+  test("the time of day, with the day when it isn't today", () => {
+    const at = new Date(2026, 10, 9, 10, 20);
+    const now = new Date(2026, 10, 9, 15, 0).getTime();
+    const time = at.toLocaleTimeString(undefined, {hour: "2-digit", minute: "2-digit"});
+    expect(formatTimeAndDay(at.toISOString(), now)).toBe(time);
+    expect(formatTimeAndDay(at.toISOString(), now + 86_400_000)).toBe(`${at.toLocaleDateString(undefined, {month: "short", day: "numeric"})} ${time}`);
+    expect(formatTimeAndDay(undefined, now)).toBe("");
+    expect(formatTimeAndDay("not a time", now)).toBe("");
   });
 });

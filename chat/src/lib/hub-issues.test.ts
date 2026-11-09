@@ -6,7 +6,8 @@ import {
   boardCards,
   bySection,
   endReason,
-  formatDuration,
+  failureText,
+  formatRunDuration,
   headline,
   jobTotals,
   logPath,
@@ -206,8 +207,11 @@ describe("a job's story", () => {
   });
 
   test("formats durations and finds the log", () => {
-    expect([formatDuration(42), formatDuration(720), formatDuration(3900), formatDuration(93600)]).toEqual(["42s", "12m", "1h 05m", "1d 2h"]);
+    expect([formatRunDuration(42), formatRunDuration(720), formatRunDuration(3900), formatRunDuration(93600)]).toEqual(["42s", "12m", "1h 05m", "1d 2h"]);
     expect(logPath("its AgentAPI exited 5 times in 10m0s; see /home/dev/.agentapi/jobs/acme~web~9/agentapi.log")).toBe("/home/dev/.agentapi/jobs/acme~web~9/agentapi.log");
     expect(logPath("no log")).toBeUndefined();
+    // The error as the page says it: without the log, its first letter up.
+    expect(failureText("its AgentAPI exited 5 times in 10m0s; see /x/agentapi.log")).toBe("Its AgentAPI exited 5 times in 10m0s");
+    expect(failureText(undefined)).toBe("The job failed");
   });
 });

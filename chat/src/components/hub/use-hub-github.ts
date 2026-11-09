@@ -12,5 +12,3 @@ export function useHubGitHub(root: string) {
   useEffect(() => store.watch({window, document}), [store]);
   return {...state, read: store.read, disconnect: store.disconnect};
 }
-
-export type HubGitHubState = ReturnType<typeof useHubGitHub>;

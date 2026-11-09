@@ -126,8 +126,49 @@ describe("useDispatch's GitHub", () => {
       b(false);
     });
     await settle();
-    expect(hook.result.current.issuesError).toBe("");
+    expect(hook.result.current.issuesFailed).toEqual([]);
     expect(hook.result.current.reading).toBe(false);
+  });
+});
+
+describe("useDispatch's issues and actions under way", () => {
+  test("the repositories whose issues the hub couldn't read, each with why", async () => {
+    const root = "/hub-failed";
+    routeFetch({
+      [`${root}/api/github`]: () => json({connected: true, slug: "app", installations: [{id: 1, account: "acme", repository_selection: "all", avatar_url: ""}]}),
+      [`${root}/api/github/repos`]: () => json({repos: [{full_name: "acme/a"}, {full_name: "acme/b"}]}),
+      [`${root}/api/github/issues`]: (call) => (call.url.endsWith("acme%2Fb") ? json({message: "GitHub said no"}, 502) : json({issues: []})),
+    });
+    const hook = await renderHook(() => useDispatch(root, {hosts: [], jobs: []}), {});
+    unmount = hook.unmount;
+    await settle();
+    expect(hook.result.current.issuesFailed).toEqual([{repo: "acme/b", error: "GitHub said no"}]);
+  });
+
+  test("an issue being opened is apart from the issues an action is on", async () => {
+    const root = "/hub-creating";
+    let answer!: () => void;
+    routeFetch({
+      [`${root}/api/github`]: () => json({connected: false, installations: []}),
+      [`POST ${root}/api/github/issues`]: async () => {
+        await new Promise<void>((resolve) => (answer = resolve));
+        return json({issue: {number: 24, title: "New", html_url: "", labels: [], state: "open", body: "", user: {login: "me"}}});
+      },
+    });
+    const hook = await renderHook(() => useDispatch(root, {hosts: [], jobs: []}), {});
+    unmount = hook.unmount;
+    await settle();
+    let opened: Promise<unknown> = Promise.resolve();
+    await act(async () => {
+      opened = hook.result.current.actions.createIssue({repo: "acme/a", title: "New", body: ""});
+    });
+    expect(hook.result.current.creating).toBe(true);
+    expect(hook.result.current.busy.size).toBe(0);
+    await act(async () => {
+      answer();
+      await opened;
+    });
+    expect(hook.result.current.creating).toBe(false);
   });
 });
 

@@ -4,7 +4,7 @@ import type {HubInstance} from "@/lib/hub";
 import type {DispatchHost, DispatchJob} from "@/lib/hub-dispatch";
 import {boardCards, suggest, type Card} from "@/lib/hub-issues";
 import {FixedHubClock} from "../clock";
-import {failure, IssueCard, type CardActions} from "./issue-card";
+import {IssueCard, type CardActions} from "./issue-card";
 import {IssueDetail, type DetailActions} from "./issue-detail";
 import {HubListContext} from "../list-context";
 import {JobChip} from "./job-chip";
@@ -104,7 +104,6 @@ describe("an issue's card", () => {
     expect(shown).toContain("Its AgentAPI exited 5 times in 10m0s");
     expect(shown).not.toContain("/x/agentapi.log");
     expect(shown).toContain("Retry");
-    expect(failure(undefined)).toBe("The job failed");
   });
 
   test("waiting on you: what its agent asks, and Answer", () => {

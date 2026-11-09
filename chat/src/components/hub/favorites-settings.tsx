@@ -15,7 +15,7 @@ import {
   type Favorite,
 } from "@/lib/hub-favorites";
 import {cn} from "@/lib/utils";
-import {fieldClass} from "./dialogs";
+import {fieldClass} from "./styles";
 
 // newFavoriteID is the ID of a favorite added here: the hub keeps the IDs it
 // is sent, so the list keeps its keys while it saves. getRandomValues works

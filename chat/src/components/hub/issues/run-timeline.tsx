@@ -3,19 +3,11 @@
 import {CircleDot, Github, MessageSquareText} from "lucide-react";
 import {AgentMark} from "@/components/agent-mark";
 import {agentLabel, type DispatchJob} from "@/lib/hub-dispatch";
-import {endReason, formatDuration, messageFrom, runSeconds, timeline} from "@/lib/hub-issues";
+import {formatTimeAndDay} from "@/lib/hub-format";
+import {endReason, formatRunDuration, messageFrom, runSeconds, timeline} from "@/lib/hub-issues";
 import {cn} from "@/lib/utils";
 import {useHubTime} from "../clock";
 import {Money} from "./money";
-
-// clock is a time of day, with the day when it isn't today.
-export function clock(at: string | undefined, now: number): string {
-  if (!at) return "";
-  const date = new Date(at);
-  if (Number.isNaN(date.getTime())) return "";
-  const time = date.toLocaleTimeString(undefined, {hour: "2-digit", minute: "2-digit"});
-  return new Date(now).toDateString() === date.toDateString() ? time : `${date.toLocaleDateString(undefined, {month: "short", day: "numeric"})} ${time}`;
-}
 
 // RunTimeline is a job's story, the latest first: each run (the agent and
 // its machine, when it ran and for how long, what it cost and how it
@@ -41,7 +33,7 @@ export function RunTimeline({job, onOpenChat}: {job: DispatchJob; onOpenChat: (i
                   <span className="min-w-0">
                     <span className="font-medium text-foreground">{messageFrom(message)}</span> to {agentLabel(message.agent)}
                   </span>
-                  <span className="ml-auto shrink-0 tabular-nums">{clock(entry.at, now)}</span>
+                  <span className="ml-auto shrink-0 tabular-nums">{formatTimeAndDay(entry.at, now)}</span>
                 </p>
                 {message.text && (
                   <p className={cn("mt-1.5 rounded-xl rounded-tl-sm px-3 py-2 text-sm whitespace-pre-wrap [overflow-wrap:anywhere]", hub ? "bg-prompt" : "border bg-card")}>{message.text}</p>
@@ -73,13 +65,13 @@ export function RunTimeline({job, onOpenChat}: {job: DispatchJob; onOpenChat: (i
                 </span>
                 <span aria-hidden="true">·</span>
                 <span>
-                  {clock(run.started_at, now)}
-                  {run.ended_at && ` – ${clock(run.ended_at, now)}`}
+                  {formatTimeAndDay(run.started_at, now)}
+                  {run.ended_at && ` – ${formatTimeAndDay(run.ended_at, now)}`}
                 </span>
                 {seconds > 0 && (
                   <>
                     <span aria-hidden="true">·</span>
-                    <span className={cn(current && "text-state-working")}>{formatDuration(seconds)}</span>
+                    <span className={cn(current && "text-state-working")}>{formatRunDuration(seconds)}</span>
                   </>
                 )}
               </p>
@@ -99,7 +91,7 @@ export function RunTimeline({job, onOpenChat}: {job: DispatchJob; onOpenChat: (i
           <CircleDot className="size-3.5 text-muted-foreground/70" aria-hidden="true" />
         </span>
         <p className="flex-1 pt-1 text-xs text-muted-foreground">
-          Assigned <span className="tabular-nums">{clock(job.created_at, now)}</span>
+          Assigned <span className="tabular-nums">{formatTimeAndDay(job.created_at, now)}</span>
         </p>
       </li>
     </ol>

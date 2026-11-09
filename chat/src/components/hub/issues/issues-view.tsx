@@ -7,9 +7,12 @@ import {Button} from "@/components/ui/button";
 import type {DispatchBoard, HubInstance} from "@/lib/hub";
 import {jobCost, type DispatchHost} from "@/lib/hub-dispatch";
 import {boardCards, bySection, headline, sections, stageCounts, suggest, whyNoOption, type Card, type Option, type SectionID} from "@/lib/hub-issues";
+import {prefersReducedMotion} from "@/lib/reduced-motion";
 import {useMediaQuery} from "@/lib/use-media-query";
 import {cn} from "@/lib/utils";
 import {Constellation} from "../brand";
+import {ReadError} from "../read-error";
+import {sectionClass} from "../styles";
 import {IssueCard, type CardActions} from "./issue-card";
 import {IssueDetail, type DetailActions} from "./issue-detail";
 import {lookOf, type Look} from "./job-glyph";
@@ -25,10 +28,6 @@ import {useFlip} from "./use-flip";
 // How many done issues show before Show all.
 const doneShown = 3;
 const flashFor = 1600;
-
-const heading = "flex items-center gap-2 text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase";
-
-const reducedMotion = () => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 // useFlashes are the cards whose look changed since the last read, for a
 // moment: the ring they flash in their new state's color says what moved.
@@ -127,7 +126,7 @@ export function IssuesView({
   useEffect(() => {
     if (!selectedKey) return;
     const card = board.current?.querySelector<HTMLElement>(`[data-flip="${CSS.escape(selectedKey)}"]`);
-    card?.scrollIntoView({block: "nearest", behavior: reducedMotion() ? "auto" : "smooth"});
+    card?.scrollIntoView({block: "nearest", behavior: prefersReducedMotion() ? "auto" : "smooth"});
   }, [selectedKey]);
 
   // Who a tap on Assign gives an issue of each repository to.
@@ -163,7 +162,7 @@ export function IssuesView({
 
   const jump = (section: SectionID) => {
     if (section === "done") setAllDone(true);
-    document.getElementById(`issues-${section}`)?.scrollIntoView({behavior: reducedMotion() ? "auto" : "smooth", block: "start"});
+    document.getElementById(`issues-${section}`)?.scrollIntoView({behavior: prefersReducedMotion() ? "auto" : "smooth", block: "start"});
   };
 
   const closeDetail = () => {
@@ -347,15 +346,7 @@ export function IssuesView({
           </p>
 
           {d.github.state === "failed" && (
-            <div role="alert" className="mt-5 flex flex-wrap items-center gap-3 rounded-xl border border-state-fault/25 bg-state-fault/[0.06] px-3.5 py-2.5 text-sm">
-              <TriangleAlert className="size-4 shrink-0 text-state-fault" aria-hidden="true" />
-              <span className="min-w-0 flex-1">
-                Couldn&apos;t read the hub&apos;s GitHub setup <span className="text-muted-foreground">· {d.github.error}</span>
-              </span>
-              <Button size="sm" variant="outline" onClick={() => void d.retryGitHub()}>
-                Try again
-              </Button>
-            </div>
+            <ReadError what="Couldn't read the hub's GitHub setup" error={d.github.error} onRetry={() => void d.retryGitHub()} className="mt-5 py-2.5" />
           )}
 
           {loading ? (
@@ -403,19 +394,20 @@ export function IssuesView({
                 sections.map(({id, title: sectionTitle}) => {
                   const list = grouped[id];
                   const reading = id === "todo" && d.reading && list.length === 0;
-                  if (list.length === 0 && !reading && !(id === "todo" && d.issuesError)) return null;
+                  const failed = id === "todo" ? d.issuesFailed : [];
+                  if (list.length === 0 && !reading && failed.length === 0) return null;
                   const shown = id === "done" && !allDone ? list.slice(0, doneShown) : list;
                   return (
                     <section key={id} id={`issues-${id}`} aria-labelledby={`issues-${id}-title`} className="mt-10 scroll-mt-20">
-                      <h3 id={`issues-${id}-title`} data-flip={`section ${id}`} className={cn(heading, id === "attention" && "text-state-needs")}>
+                      <h3 id={`issues-${id}-title`} data-flip={`section ${id}`} className={cn("flex items-center gap-2", sectionClass, id === "attention" && "text-state-needs")}>
                         {sectionTitle}
                         <span className="tabular-nums opacity-60">{list.length}</span>
                       </h3>
-                      {id === "todo" && d.issuesError && (
+                      {failed.length > 0 && (
                         <p role="alert" className="mt-3 flex items-center gap-2 text-sm text-state-fault">
                           <TriangleAlert className="size-4 shrink-0" aria-hidden="true" />
-                          <span className="min-w-0 flex-1 truncate" title={d.issuesError}>
-                            Couldn&apos;t read the issues of {d.issuesError.split("\n").map((line) => line.split(":")[0]).join(", ")}
+                          <span className="min-w-0 flex-1 truncate" title={failed.map(({repo, error}) => `${repo}: ${error}`).join("\n")}>
+                            Couldn&apos;t read the issues of {failed.map(({repo}) => repo).join(", ")}
                           </span>
                           <button type="button" className="shrink-0 font-medium underline underline-offset-4" onClick={dispatch.refresh}>
                             Try again
@@ -491,7 +483,7 @@ export function IssuesView({
           initialRepo={d.scope}
           hosts={hosts}
           preferred={d.preferred}
-          busy={[...d.busy].some((key) => key.startsWith("new "))}
+          busy={d.creating}
           onCreate={async (request) => (await dispatch.createIssue(request)) !== undefined}
         />
       )}

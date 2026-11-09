@@ -23,6 +23,16 @@ import {useHubGitHub} from "../use-hub-github";
 // changed, as the hub lists them.
 export const recentRepos = 20;
 
+// What an action is on: an issue (its key), or a new issue in a
+// repository.
+type ActionOn = {issue: string} | {newIn: string};
+
+// A repository whose issues the hub couldn't read, and why.
+export interface IssuesFailure {
+  repo: string;
+  error: string;
+}
+
 // IssueTarget is the issue an action is on.
 export interface IssueTarget {
   repo: string;
@@ -71,7 +81,7 @@ export function useDispatch(root: string, live?: DispatchBoard) {
   const [issues, setIssues] = useState<ReadonlyMap<string, GitHubIssue[]>>(new Map());
   // The repositories whose issues are being read, and those that failed.
   const [reading, setReading] = useState(false);
-  const [issuesError, setIssuesError] = useState("");
+  const [issuesFailed, setIssuesFailed] = useState<readonly IssuesFailure[]>([]);
   // The jobs the hub answered an action with, until its stream has them
   // as new.
   const [answered, setAnswered] = useState<ReadonlyMap<string, DispatchJob>>(new Map());
@@ -79,8 +89,10 @@ export function useDispatch(root: string, live?: DispatchBoard) {
   useEffect(() => {
     if (streamed) setAnswered((answers) => pendingAnswers(answers, streamed));
   }, [streamed]);
-  // The keys of the issues an action is under way on.
+  // The keys of the issues an action is under way on, and the
+  // repositories an issue is being opened in.
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
+  const [creating, setCreating] = useState<ReadonlySet<string>>(new Set());
 
   // The repositories whose issues the scope shows.
   const repoNames = useMemo(() => repos.map((repo) => repo.full_name), [repos]);
@@ -109,8 +121,7 @@ export function useDispatch(root: string, live?: DispatchBoard) {
       });
       return next;
     });
-    const failed = results.flatMap((result, i) => (result.status === "rejected" ? [`${scoped[i]}: ${hubErrorText(result.reason)}`] : []));
-    setIssuesError(failed.join("\n"));
+    setIssuesFailed(results.flatMap((result, i) => (result.status === "rejected" ? [{repo: scoped[i], error: hubErrorText(result.reason)}] : [])));
     setReading(false);
   }, [api, scoped]);
 
@@ -129,10 +140,11 @@ export function useDispatch(root: string, live?: DispatchBoard) {
     if (job) setAnswered((all) => new Map(all).set(job.key, job));
   }, []);
 
-  // run does an action on key's issue and says how it went; it resolves to
-  // what the hub answered, undefined if it didn't go through.
-  const run = useCallback(async <T>(key: string, what: string, done: string, action: () => Promise<T>): Promise<T | undefined> => {
-    setBusy((keys) => new Set(keys).add(key));
+  // run does an action on an issue, or opens one, and says how it went; it
+  // resolves to what the hub answered, undefined if it didn't go through.
+  const run = useCallback(async <T>(on: ActionOn, what: string, done: string, action: () => Promise<T>): Promise<T | undefined> => {
+    const [setKeys, key] = "issue" in on ? [setBusy, on.issue] : [setCreating, on.newIn];
+    setKeys((keys) => new Set(keys).add(key));
     try {
       const result = await action();
       toast.success(done);
@@ -142,7 +154,7 @@ export function useDispatch(root: string, live?: DispatchBoard) {
       toast.error(title ? `Couldn't ${what}: ${title.toLowerCase()}` : `Couldn't ${what}`, {description});
       return undefined;
     } finally {
-      setBusy((keys) => {
+      setKeys((keys) => {
         const left = new Set(keys);
         left.delete(key);
         return left;
@@ -156,14 +168,14 @@ export function useDispatch(root: string, live?: DispatchBoard) {
     () => ({
       assign: async ({repo, number}, agent, host) => {
         const key = jobKey(repo, number);
-        const response = await run(key, `assign ${key}`, `${key} went to ${agent ? agentLabel(agent) : "the machine's default agent"}${host ? ` on ${host}` : ""}`, () =>
+        const response = await run({issue: key}, `assign ${key}`, `${key} went to ${agent ? agentLabel(agent) : "the machine's default agent"}${host ? ` on ${host}` : ""}`, () =>
           api.dispatch({action: "start", repo, issue: number, agent, host}),
         );
         merge(response?.job);
         return response !== undefined;
       },
       retry: async (job) => {
-        const response = await run(job.key, `retry ${job.key}`, `${agentLabel(job.agent)} starts ${job.key} again`, () =>
+        const response = await run({issue: job.key}, `retry ${job.key}`, `${agentLabel(job.agent)} starts ${job.key} again`, () =>
           api.dispatch({action: "start", repo: job.repo, issue: job.issue, agent: job.agent}),
         );
         merge(response?.job);
@@ -171,26 +183,26 @@ export function useDispatch(root: string, live?: DispatchBoard) {
       },
       switchTo: async (job, agent) => {
         setPreferred(agent);
-        const response = await run(job.key, `switch ${job.key} to ${agentLabel(agent)}`, `${agentLabel(agent)} takes over ${job.key}`, () =>
+        const response = await run({issue: job.key}, `switch ${job.key} to ${agentLabel(agent)}`, `${agentLabel(agent)} takes over ${job.key}`, () =>
           api.dispatch({action: "start", repo: job.repo, issue: job.issue, agent}),
         );
         merge(response?.job);
         return response !== undefined;
       },
       stop: async (job) => {
-        const response = await run(job.key, `stop ${job.key}`, `Stopped ${job.key}`, () => api.dispatch({action: "stop", repo: job.repo, issue: job.issue}));
+        const response = await run({issue: job.key}, `stop ${job.key}`, `Stopped ${job.key}`, () => api.dispatch({action: "stop", repo: job.repo, issue: job.issue}));
         merge(response?.job);
         return response !== undefined;
       },
       send: async (job, message) => {
-        const response = await run(job.key, `send ${job.key} a message`, `Sent to ${agentLabel(job.agent)}`, () =>
+        const response = await run({issue: job.key}, `send ${job.key} a message`, `Sent to ${agentLabel(job.agent)}`, () =>
           api.dispatch({action: "send", repo: job.repo, issue: job.issue, message, author: "hub"}),
         );
         merge(response?.job);
         return response !== undefined;
       },
       createIssue: async (request) => {
-        const response = await run(`new ${request.repo}`, `open the issue in ${request.repo}`, `Opened the issue in ${request.repo}`, () => api.createIssue(request));
+        const response = await run({newIn: request.repo}, `open the issue in ${request.repo}`, `Opened the issue in ${request.repo}`, () => api.createIssue(request));
         if (!response) return undefined;
         merge(response.job);
         setIssues((all) => new Map(all).set(request.repo, [response.issue, ...(all.get(request.repo) ?? []).filter((i) => i.number !== response.issue.number)]));
@@ -211,12 +223,12 @@ export function useDispatch(root: string, live?: DispatchBoard) {
     repos,
     issues,
     reading,
-    issuesError,
+    issuesFailed,
     hosts,
     jobs,
     busy,
+    // An issue is being opened.
+    creating: creating.size > 0,
     actions,
   };
 }
-
-export type Dispatch = ReturnType<typeof useDispatch>;

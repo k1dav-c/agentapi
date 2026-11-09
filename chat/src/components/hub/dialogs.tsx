@@ -7,10 +7,8 @@ import {Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, Di
 import {displayName, type HubInstance, type HubWire} from "@/lib/hub";
 import {hubLimits} from "@/lib/hub-schema";
 import {JoinMachine} from "./join-machine";
+import {fieldClass, sectionClass} from "./styles";
 
-export const fieldClass =
-  "h-11 w-full rounded-lg border bg-card px-3.5 text-sm shadow-xs outline-none transition-shadow placeholder:text-muted-foreground/70 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/40";
-export const sectionClass = "text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase";
 
 // The longest group name the hub takes.
 export const maxGroupName = hubLimits.max_group_name;
