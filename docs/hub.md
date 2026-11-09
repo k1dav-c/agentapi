@@ -937,10 +937,32 @@ failed.
 | `--bind` | all interfaces | Address to listen on, such as the VPN address |
 | `--allowed-hosts` | any | Names browsers open the hub by, besides IP addresses and `localhost` (comma-separated, `*` for any); instances' events come by any name |
 | `--log-level` | `AGENTAPI_HUB_LOG_LEVEL`, else `info` | Least important level to log: `debug`, `info`, `warn` or `error` |
+| `--dispatch-token` | `AGENTAPI_HUB_DISPATCH_TOKEN` | Token a client (a GitHub workflow's runner) calls `POST /api/dispatch` with, and nothing else ([Issues](#issues)) |
+| `--github-app-file` | `github-app.json` next to `--state` | The hub's GitHub App, which `/github/connect` registers |
 
 The hub reaches the instances through the proxy of the environment (`HTTP_PROXY`, `HTTPS_PROXY`,
 `ALL_PROXY`). It gives up connecting after 30 seconds (10 for the TLS handshake) and waiting for an
 answer's headers after 15; the summary streams and the pages it proxies stay open.
+
+### `agentapi host`
+
+[Issues](#issues) starts its jobs through a launcher on each machine, `agentapi host`, which reports
+to the hub with the machine's webhook settings (`agentapi hub join`) and starts an AgentAPI for each
+issue the hub dispatches there. On each machine:
+
+```sh
+agentapi hub join http://<hub>:3290/hooks --secret "$HUB_SECRET" --public-url 'http://{ip}:{port}'
+echo "$INSTANCE_TOKEN" > ~/.agentapi/instance.token && chmod 600 ~/.agentapi/instance.token  # the hub's --instance-token
+agentapi host install --now  # a systemd user service; agentapi host serve runs it in the foreground
+agentapi host status
+```
+
+The launcher's settings (the `host` section of `~/.agentapi/config.yaml`), its files and
+`agentapi host uninstall` are in the [CLI reference](../README.md#agentapi-host);
+[examples/issue-dispatch](../examples/issue-dispatch/README.md) sets up the hub's dispatch token,
+GitHub App and workflow too. The hub pins each machine's name to the launcher token
+(`~/.agentapi/host.token`) it first came with: a machine set up again, or whose token file was
+deleted, joins under its name only after `DELETE /api/hosts/{name}` ([Troubleshooting](#troubleshooting)).
 
 ### `agentapi hub join`, `leave`, `status`
 

@@ -60,7 +60,7 @@ flowchart TB
 
 | 路徑 | 內容 |
 | --- | --- |
-| `main.go`、`cmd/` | Cobra CLI：`server`（旗標、agent 類型、啟動 agent、訊號、原地重新啟動）、`list`（已登記的 AgentAPI 和它們的摘要）、`hub`（`serve`：hub；`join`、`leave`、`status`：設定檔和執行中 AgentAPI 的 hub webhook）、`restart`（讓已登記的 AgentAPI 原地重新啟動），以及 `update`（會驗證 checksum 的自我更新） |
+| `main.go`、`cmd/` | Cobra CLI：`server`（旗標、agent 類型、啟動 agent、訊號、原地重新啟動）、`list`（已登記的 AgentAPI 和它們的摘要）、`hub`（`serve`：hub；`join`、`leave`、`status`：設定檔和執行中 AgentAPI 的 hub webhook）、`restart`（讓已登記的 AgentAPI 原地重新啟動）、`update`（會驗證 checksum 的自我更新），以及 `host`（`cmd/host`：issue 派工的 launcher，`serve`、`status`，以及安裝與移除 systemd user service 的 `install`、`uninstall`，另有 job 執行的隱藏指令 `git-credential`、`gh-token`） |
 | `lib/httpapi/` | HTTP 伺服器：路由與處理常式、佇列、token 驗證、CORS、事件串流、檔案／終端機／webhook 端點；由它把下面三個套件接起來 |
 | `lib/httpmw/` | 伺服器和 hub 共用的 HTTP 元件：`Host` 檢查與 `--allowed-hosts`、`--allowed-origins`、`--bind` 的解析、跨來源防護、壓縮，以及嵌入的聊天介面的檔案伺服器（`lib/httpmw/chat/`） |
 | `lib/convstate/` | 用戶端讀取的對話狀態，不碰 HTTP：`EventEmitter`（變更以 epoch 和 seq 編號、訂閱與重播）、它推導出的任務和摘要、伺服器最後回報的佇列，以及它把每個變更交給的 `Persister` |
@@ -82,6 +82,10 @@ flowchart TB
 | `lib/instanceapi/` | AgentAPI 和同時監看多個 AgentAPI 的客戶端之間的約定：它是誰（`WebhookInstance`，出現在 webhook 事件、摘要和登記檔中，含它的 `AgentType`）、它的摘要、webhook 的外層格式和簽章（`Sign`、`Verify`），以及 hub 對每個實例顯示的狀態（`StateOf`）。它只匯入 `lib/agentstate` 和 `lib/util` |
 | `lib/hub/` | `agentapi hub serve`，建立在 `lib/instanceapi` 和 `lib/httpmw` 上，不經過伺服器：實例、頁面上設定的群組和釘選、每個實例這一列顯示的內容最近一次變動的時間，以及 hub 看到它工作的區段（`store.go`、`work.go`，由 `persist.go` 保存在檔案中）、我的最愛提示（`favorites.go`，`GET`／`PUT /api/favorites`，屬於 hub 的設定，保存在同一個檔案）、傳輸型別的 schema（`schema.go`、`hub-schema.json`，給頁面的型別用）、有簽章的 webhook 接收端（`webhook.go`）、每個實例的摘要串流（`watch.go`）、登入、瀏覽器的事件串流，以及到實例的代理（`hub.go`、`proxy.go`），還有主機怎麼加入（`join.go`：`GET /api/join` 和啟動 log 列出的位址）；使用說明見 [hub.zh-TW.md](hub.zh-TW.md) |
 | `lib/dispatch/` | hub 的 issue 派工，由 `lib/hub` 掛上：有 launcher 回報的主機（`host.*` 事件；主機名稱綁定第一次帶來的 launcher token）、job 與各次 run 的花費（`task.*` 事件）和最近 50 則送給 agent 的訊息（`send`，來自 hub 的頁面、review 或 `/agent` 留言）、`POST /api/dispatch`（`start` 在 job 進入 `starting` 時就回應，hub 在背景呼叫 launcher，並記下這次啟動直到有結果；沒收到回應時從主機下一次回報接回）、GitHub App，保存在 `dispatch.json` 和 `github-app.json`。`Subscribe` 與 `Board` 讓 hub 的串流在每次變動後送出主機和 job（`dispatch` 事件）；規格見 [issue-dispatch.zh-TW.md](specs/issue-dispatch.zh-TW.md) |
+| `lib/host/` | `agentapi host`，每台主機上的 launcher：設定（設定檔的 `host` 區段）、它有或會 clone 的 repo、hub 每啟動一個 job 就建一個 git worktree 和一個 AgentAPI（結束後重新啟動，記在 `jobs.json`）、給 hub 呼叫且需要 token 的 API（`server.go`）、送給 hub 的 `host.*` 事件與 heartbeat（`hub.go`），以及經由 unix socket 交給 job 的 `git`、`gh` 的 GitHub token（`credentials.go`） |
+| `lib/github/` | hub 的 GitHub App，只依賴標準函式庫：以 manifest 註冊、App 的 JWT、限單一 repo（快取到到期前 5 分鐘）或整個安裝的 installation token，以及派工以 App 身分呼叫的 REST API |
+| `lib/jsonapi/` | hub、派工和 launcher 共用的 JSON 工具：讀取 body（最多 1 MiB）、寫出回應，以及 `Error`：帶 HTTP 狀態和代碼的拒絕，回應為 `{"code", "message", "error"}` |
+| `lib/hub/schemagen` | `go generate` 執行的指令，依 `hub.Schema` 寫出 `lib/hub/hub-schema.json` |
 | `lib/sse/` | 依 HTML 標準讀寫 server-sent events：讀取端（合併多行 data:、略過註解、行尾可為 CR、LF 或 CRLF）和寫入端，hub 用它讀實例的摘要串流、寫給瀏覽器的串流。`lib/httpapi` 則用 huma 的 `sse` 寫它的串流 |
 | `lib/netaddr/` | 這台主機的 IPv4 位址：其他主機連得到的位址（hub 的加入網址），以及連到某台主機時使用的位址（`Resolver`，供 `--public-url` 的 `{ip}` 使用） |
 | `lib/userconfig/` | 使用者的設定檔 `~/.agentapi/config.yaml`：以旗標名稱設定，`agentapi server` 讀取、`agentapi hub` 寫入 |
@@ -107,6 +111,9 @@ flowchart TB
 - `lib/native` 與各 adapter、`lib/statedb` → `lib/agentstate`：只有伺服器會用到 `lib/native`
 - `cmd/hub`、`lib/hub` → `lib/instanceapi`、`lib/httpmw`（它不匯入本儲存庫的任何套件）：hub
   不會連同伺服器一起編譯
+- `lib/hub` → `lib/dispatch` → `lib/host`、`lib/github`、`lib/jsonapi`：派工使用 launcher 的型別；
+  `lib/github` 和 `lib/jsonapi` 不匯入本儲存庫的任何套件
+- `cmd/host` → `lib/host` → `lib/instanceapi`、`lib/jsonapi`：launcher 不會連同伺服器或 hub 一起編譯
 
 ## 啟動與關閉
 

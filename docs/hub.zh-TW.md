@@ -811,9 +811,29 @@ AgentAPI 的 log 會記下傳送失敗的 webhook。
 | `--bind` | 所有介面 | 監聽的位址，例如 VPN 位址 |
 | `--allowed-hosts` | 任何名稱 | 瀏覽器開啟 hub 用的名稱，IP 位址和 `localhost` 以外（以逗號分隔，`*` 表示任何名稱）；實例的事件不受限制 |
 | `--log-level` | `AGENTAPI_HUB_LOG_LEVEL`，否則 `info` | 記錄的最低層級：`debug`、`info`、`warn` 或 `error` |
+| `--dispatch-token` | `AGENTAPI_HUB_DISPATCH_TOKEN` | 用戶端（GitHub workflow 的 runner）呼叫 `POST /api/dispatch` 用的 token，不能做別的事（見 [Issues](#issues)） |
+| `--github-app-file` | `--state` 旁的 `github-app.json` | hub 的 GitHub App，由 `/github/connect` 註冊 |
 
 hub 透過環境變數中的 proxy（`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`）連到實例。連線 30 秒內沒建立（TLS
 交握 10 秒）、回應的標頭 15 秒內沒來，就放棄；摘要串流和經 proxy 開啟的頁面則一直保持連線。
+
+### `agentapi host`
+
+[Issues](#issues) 透過每台主機上的 launcher（`agentapi host`）啟動 job：它用主機的 webhook 設定
+（`agentapi hub join`）向 hub 回報，hub 派一個 issue 到這台主機，它就啟動一個 AgentAPI。在每台主機上：
+
+```sh
+agentapi hub join http://<hub>:3290/hooks --secret "$HUB_SECRET" --public-url 'http://{ip}:{port}'
+echo "$INSTANCE_TOKEN" > ~/.agentapi/instance.token && chmod 600 ~/.agentapi/instance.token  # hub 的 --instance-token
+agentapi host install --now  # 裝成 systemd user service；agentapi host serve 則在前景執行
+agentapi host status
+```
+
+launcher 的設定（`~/.agentapi/config.yaml` 的 `host` 區段）、它的檔案和 `agentapi host uninstall`
+見 [CLI 參考](../README.zh-TW.md#agentapi-host)；[examples/issue-dispatch](../examples/issue-dispatch/README.md)
+另外說明 hub 的 dispatch token、GitHub App 和 workflow 的架設。hub 會把主機名稱綁定到它第一次帶來的
+launcher token（`~/.agentapi/host.token`）：重灌過、或 token 檔被刪掉的主機，要先在 hub 上執行
+`DELETE /api/hosts/{name}` 才能以原名稱加入（見[疑難排解](#疑難排解)）。
 
 ### `agentapi hub join`、`leave`、`status`
 

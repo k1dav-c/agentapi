@@ -18,8 +18,19 @@
 
 ### Internal
 
+- `lib/dispatch` and `lib/host` use `lib/jsonapi`'s errors directly, the dispatch's enums are named
+  in the hub's schema (`DispatchJobState`, `LauncherJobState`, …), dead code is gone, and
+  `lib/github`, the launcher's credential helper, `agentapi host uninstall` and the dispatch's job
+  states have more tests.
 - The dispatch drops jobs that ended more than 30 days ago and old delivery IDs whether or not it
   keeps a state file (`agentapi hub serve` always gives it one).
+
+### Documentation
+
+- `agentapi host` has a CLI reference (README), and `agentapi hub serve`'s `--dispatch-token` and
+  `--github-app-file` are in its flag tables. The architecture guide lists `lib/host`,
+  `lib/github`, `lib/jsonapi` and `cmd/host`.
+- The changelog has the v3.11.0 entry it missed.
 
 ## v3.15.1
 
@@ -140,6 +151,34 @@
 - The board shows the issues of the 20 repositories pushed to or changed last
   (`GET /api/github/repos` lists them so, with `pushed_at` and `updated_at`); its menu finds any
   other.
+
+## v3.11.0
+
+### Features
+
+- Issue dispatch: the hub hands GitHub issues to agents on your machines. See
+  [Issues](docs/hub.md#issues) and [examples/issue-dispatch](examples/issue-dispatch/README.md).
+  - `agentapi host` is the launcher on each machine: it gives each issue a worktree on
+    `agent/issue-<n>` and an AgentAPI of its own, reports the machine to the hub in signed `host.*`
+    events, and hands the jobs' `git` and `gh` a token for their repository. `install` and
+    `uninstall` manage its systemd user service.
+  - The hub starts, messages, links and stops the jobs on the launchers (`POST /api/dispatch`, also
+    with `--dispatch-token` for a workflow's runner), and keeps their runs' cost. Switching agents
+    keeps the worktree.
+  - The hub registers a GitHub App from the browser through the manifest flow
+    (`/github/connect`), gives the jobs tokens for one repository, comments progress and spend on
+    the issue, and deletes the branch when the pull request closes.
+  - The hub's page has an Issues dialog: the machines, the app, a repository's open issues to
+    assign, each job's state, cost and pull request, a message to its agent, Retry, Switch, Stop
+    and New issue.
+  - `examples/issue-dispatch` has the GitHub workflow a self-hosted runner in the hub's network
+    runs to turn a repository's issues, reviews and `/agent` comments into dispatches.
+
+### Fixes
+
+- `agentapi server --print-openapi` (which `make gen` runs) no longer replaces the PID file of the
+  server it runs beside, and on Linux a PID file of another install of agentapi (another path, a
+  build from source) counts as one that runs rather than stale.
 
 ## v3.10.1
 
@@ -1614,6 +1653,10 @@
 
 - TTY mode key bar: the most used keys come first (↑, ↓, Enter, Esc, ←, →), so they fit a phone
   screen without scrolling; Enter is labelled "Enter".
+
+## v0.20.4
+
+No changes a user sees: a lint fix of v0.20.3.
 
 ## v0.20.3
 

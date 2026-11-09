@@ -61,7 +61,7 @@ emitter. Handlers call the conversation and read state from the emitter.
 
 | Path | What it holds |
 | --- | --- |
-| `main.go`, `cmd/` | The Cobra CLI: `server` (flags, agent type, starting the agent, signals, restarting in place), `list` (the registered AgentAPIs and their summaries), `hub` (`serve`: the hub; `join`, `leave` and `status`: a hub's webhook in the config file and in the running AgentAPIs), `restart` (has registered AgentAPIs restart in place) and `update` (self-update with checksum verification) |
+| `main.go`, `cmd/` | The Cobra CLI: `server` (flags, agent type, starting the agent, signals, restarting in place), `list` (the registered AgentAPIs and their summaries), `hub` (`serve`: the hub; `join`, `leave` and `status`: a hub's webhook in the config file and in the running AgentAPIs), `restart` (has registered AgentAPIs restart in place), `update` (self-update with checksum verification) and `host` (`cmd/host`: the issue dispatch's launcher, `serve`, `status`, `install` and `uninstall` of its systemd user service, and the hidden `git-credential` and `gh-token` its jobs run) |
 | `lib/httpapi/` | The HTTP server: routes and handlers, the queue, token auth, CORS, the event streams, the files, terminal and webhook endpoints; it wires the three packages below |
 | `lib/httpmw/` | What the server and the hub share of HTTP: the `Host` check and the parsing of `--allowed-hosts`, `--allowed-origins` and `--bind`, cross-origin protection, compression, and the embedded chat UI's file server (`lib/httpmw/chat/`) |
 | `lib/convstate/` | The conversation state clients read, without HTTP: the `EventEmitter` (its changes numbered by epoch and seq, subscriptions and replay), the tasks and the summary it derives, the queue as the server reported it, and the `Persister` it hands every change to |
@@ -83,6 +83,10 @@ emitter. Handlers call the conversation and read state from the emitter.
 | `lib/instanceapi/` | The contract between an AgentAPI and the clients that watch many: who it is (`WebhookInstance`, in its webhook events, summary and registry entry, with its `AgentType`), its summary, the webhook envelope with its signature (`Sign`, `Verify`), and the state a hub shows of each instance (`StateOf`). It imports only `lib/agentstate` and `lib/util` |
 | `lib/hub/` | `agentapi hub serve`, over `lib/instanceapi` and `lib/httpmw` rather than the server: the instances, the groups and pins set on its page, when each last changed what its row shows and when the hub saw each working (`store.go`, `work.go`, kept in a file by `persist.go`), the favorite prompts (`favorites.go`, `GET`/`PUT /api/favorites`, among the hub's settings in the same file), the schema of its wire types (`schema.go`, `hub-schema.json`, for the page's types), the signed webhook receiver (`webhook.go`), each instance's summary stream (`watch.go`), sign-in, the browser's event stream and the proxy to the instances (`hub.go`, `proxy.go`), where machines join it (`join.go`: its addresses for `GET /api/join` and the startup log); the user guide is [hub.md](hub.md) |
 | `lib/dispatch/` | The hub's issue dispatch, which `lib/hub` mounts: the machines whose launchers report (`host.*` events; each name pinned to the launcher token it first came with), the jobs with their runs' costs (`task.*` events) and the last 50 messages their agents were sent (`send`, from the hub's page, a review or an `/agent` comment), `POST /api/dispatch` (a start answers once its job is `starting`; the hub calls the launcher in the background and keeps the start until it ends, adopting it from the machine's next report if the answer was lost), the GitHub App, kept in `dispatch.json` and `github-app.json`. `Subscribe` and `Board` give the hub's stream the machines and jobs after each change (its `dispatch` event); the spec is [issue-dispatch.zh-TW.md](specs/issue-dispatch.zh-TW.md) |
+| `lib/host/` | `agentapi host`, the launcher on each machine: its settings (the `host` section of the config file), the repositories it has or clones, a git worktree and an AgentAPI for each job the hub starts (restarted after it exits, kept in `jobs.json`), its API for the hub behind its token (`server.go`), its `host.*` events and heartbeats to the hub (`hub.go`), and each job's GitHub token over a unix socket for its `git` and `gh` (`credentials.go`) |
+| `lib/github/` | The hub's GitHub App, with no dependency beyond the standard library: registering it from a manifest, its JWT, installation tokens for one repository (kept until five minutes before they expire) or all, and the REST calls the dispatch makes as the app |
+| `lib/jsonapi/` | The JSON plumbing the hub, the dispatch and the launcher share: reading a body (1 MiB at most), writing an answer, and `Error`, a refusal with its status and a code, answered as `{"code", "message", "error"}` |
+| `lib/hub/schemagen` | The command `go generate` runs to write `lib/hub/hub-schema.json` from `hub.Schema` |
 | `lib/sse/` | Server-sent events as the HTML standard defines them: a reader (data: lines joined, comments skipped, CR, LF or CRLF line ends) and a writer, used by the hub for the instances' summary streams and the browser's stream. `lib/httpapi` writes its streams with huma's `sse` |
 | `lib/netaddr/` | The machine's IPv4 addresses: those other machines may reach it at (the hub's join URLs), and the one it reaches a host from (`Resolver`, for `{ip}` in `--public-url`) |
 | `lib/userconfig/` | The user's settings file, `~/.agentapi/config.yaml`: flags by name, read by `agentapi server`, written by `agentapi hub` |
@@ -109,6 +113,10 @@ The internal imports point one way, from the commands to the leaves:
   `lib/native`
 - `cmd/hub`, `lib/hub` → `lib/instanceapi`, `lib/httpmw`, which imports no package of the
   repository: the hub doesn't build the server
+- `lib/hub` → `lib/dispatch` → `lib/host`, `lib/github`, `lib/jsonapi`: the dispatch uses the
+  launcher's types; `lib/github` and `lib/jsonapi` import no package of the repository
+- `cmd/host` → `lib/host` → `lib/instanceapi`, `lib/jsonapi`: the launcher doesn't build the
+  server or the hub
 
 ## Startup and shutdown
 
