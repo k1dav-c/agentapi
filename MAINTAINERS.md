@@ -57,7 +57,8 @@ the Go and Bun the release builds with, nor reach the files of the machine's own
 hub. `ghrunner-firewall.service` (`/usr/local/sbin/ghrunner-firewall`) keeps both users to the
 internet: they can't connect to the machine's services on fixed ports (its AgentAPIs, hub, ssh,
 Coder, Docker), nor to the LAN, Docker's networks, Tailscale or the cloud metadata address; DNS and
-the ephemeral ports their own tests listen on stay open. The jobs need `gcc` (the race detector),
+the ports their own tests listen on (20000-60999: the launcher's tests pick theirs below the
+ephemeral ports) stay open. The jobs need `gcc` (the race detector),
 `shellcheck`, `file`, `unzip` (to set up Bun) and `gh` on the machine; the workflows set up Go and
 Bun themselves, Bun at a pinned version, and pin each action to a commit.
 
