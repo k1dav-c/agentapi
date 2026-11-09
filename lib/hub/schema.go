@@ -48,12 +48,11 @@ var wireTypes = []reflect.Type{
 	reflect.TypeFor[sessionBody](),
 	reflect.TypeFor[signInBody](),
 	reflect.TypeFor[joinInfo](),
-	reflect.TypeFor[errorBody](),
+	reflect.TypeFor[jsonapi.ErrorBody](),
 	// The issue dispatch's (lib/dispatch), named Dispatch*, Launcher* and
 	// GitHub* by the package they come from (schemaNamer).
 	reflect.TypeFor[dispatch.Request](),
 	reflect.TypeFor[dispatch.Response](),
-	reflect.TypeFor[jsonapi.Error](),
 	reflect.TypeFor[dispatch.HostsBody](),
 	reflect.TypeFor[dispatch.JobsBody](),
 	reflect.TypeFor[dispatch.GitHubStatus](),
@@ -66,10 +65,9 @@ var wireTypes = []reflect.Type{
 // schemaPrefixes name the types of the dispatch's packages apart from the
 // hub's, whose names they share (host.Job and dispatch.Job).
 var schemaPrefixes = map[string]string{
-	reflect.TypeFor[dispatch.Job]().PkgPath():  "Dispatch",
-	reflect.TypeFor[host.Job]().PkgPath():      "Launcher",
-	reflect.TypeFor[github.Issue]().PkgPath():  "GitHub",
-	reflect.TypeFor[jsonapi.Error]().PkgPath(): "Dispatch",
+	reflect.TypeFor[dispatch.Job]().PkgPath(): "Dispatch",
+	reflect.TypeFor[host.Job]().PkgPath():     "Launcher",
+	reflect.TypeFor[github.Issue]().PkgPath(): "GitHub",
 }
 
 // schemaNamer is huma's namer, with the prefix of the type's package.

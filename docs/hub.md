@@ -1003,7 +1003,10 @@ running AgentAPIs, which then no longer follow their conversation for the webhoo
 | `/i/{id}/…` | The instance's own API and chat, through the hub; the page updates an instance with `POST /i/{id}/update` and cancels with `DELETE` |
 
 Every endpoint but `/hooks` and `/api/session` needs the session cookie or
-`Authorization: Bearer <hub token>`. Instance tokens never appear in any response.
+`Authorization: Bearer <hub token>`. Instance tokens never appear in any response. A refused or
+failed request answers `{"code": …, "message": …, "error": …}`: `code` is the route's own (such as
+`host_online`) or the HTTP status in snake case (such as `not_found`), and `error` repeats
+`message`, the only field older hubs answered on their own routes.
 
 ### Files
 

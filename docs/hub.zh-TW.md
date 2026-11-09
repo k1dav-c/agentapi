@@ -873,7 +873,9 @@ hub 透過環境變數中的 proxy（`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`�
 | `/i/{id}/…` | 透過 hub 存取實例自己的 API 和聊天介面；頁面用 `POST /i/{id}/update` 更新實例，用 `DELETE` 取消 |
 
 除了 `/hooks` 和 `/api/session`，每個端點都需要 session cookie 或
-`Authorization: Bearer <hub token>`。任何回應裡都不會出現實例 token。
+`Authorization: Bearer <hub token>`。任何回應裡都不會出現實例 token。請求被拒或失敗時回
+`{"code": …, "message": …, "error": …}`：`code` 是端點自己的代碼（例如 `host_online`），或 snake
+case 的 HTTP 狀態（例如 `not_found`）；`error` 和 `message` 相同，較舊的 hub 只回這個欄位。
 
 ### 檔案
 

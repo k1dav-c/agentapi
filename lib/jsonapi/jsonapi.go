@@ -1,9 +1,8 @@
 // Package jsonapi is the JSON plumbing the launcher's API (lib/host) and the
-// hub's dispatch (lib/dispatch) share: reading a request body, writing an
+// hub (lib/hub, lib/dispatch) share: reading a request body, writing an
 // answer, and Error, a refusal with its HTTP status and a code clients tell
-// apart. Its errors answer {"code", "message", "error"}: error repeats the
-// message in the shape the hub's other routes answer, so a client reads
-// either.
+// apart. Its errors answer ErrorBody, {"code", "message", "error"}: error
+// repeats the message, the shape the hub answered before it had codes.
 package jsonapi
 
 import (
@@ -12,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 // MaxBody is the most a request body may hold.
@@ -61,11 +61,20 @@ func Write(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// errorBody is an error's answer.
-type errorBody struct {
+// ErrorBody is an error's answer.
+type ErrorBody struct {
+	// Code tells the errors apart: one of the API's own, or the HTTP
+	// status's text in snake case (StatusCode).
 	Code    string `json:"code"`
 	Message string `json:"message"`
-	Error   string `json:"error"`
+	// Error is Message again.
+	Error string `json:"error"`
+}
+
+// StatusCode is the code of an Error that has none of its own: status's
+// text in snake case, such as not_found.
+func StatusCode(status int) string {
+	return strings.ToLower(strings.ReplaceAll(http.StatusText(status), " ", "_"))
 }
 
 // WriteError answers err: an Error with its status, anything else 500.
@@ -74,12 +83,12 @@ func WriteError(w http.ResponseWriter, err error) {
 	if !errors.As(err, &e) {
 		e = &Error{Status: http.StatusInternalServerError, Code: "internal", Message: err.Error()}
 	}
-	Write(w, e.Status, errorBody{Code: e.Code, Message: e.Message, Error: e.Message})
+	Write(w, e.Status, ErrorBody{Code: e.Code, Message: e.Message, Error: e.Message})
 }
 
 // ReadError reads an error answer's message, from any of its shapes.
 func ReadError(data []byte) (code, message string) {
-	var body errorBody
+	var body ErrorBody
 	if json.Unmarshal(data, &body) != nil {
 		return "", ""
 	}

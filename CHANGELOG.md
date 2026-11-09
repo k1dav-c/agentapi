@@ -12,6 +12,9 @@
 - The hub no longer writes its favorites a second time at the top level of `instances.json`, where
   hubs of 3.5 to 3.7 read them; it still reads them there when the file has no `settings`. Going
   back to such a hub starts it without favorites.
+- Every error the hub answers is `{"code", "message", "error"}`, as the issue dispatch's already
+  were: the hub's own routes answered `{"error"}` alone, and now add a `code` (the HTTP status in
+  snake case, such as `not_found`) and the same text in `message`.
 
 ## v3.15.1
 

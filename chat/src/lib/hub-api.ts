@@ -25,8 +25,8 @@ export class HubAPIError extends Error {
 export type InstanceChange = HubWire["InstanceChange"];
 
 // hubCall calls the hub's API at path, and returns its answer, or throws
-// HubAPIError: the hub's own error ({error}), the dispatch's ({message}) or
-// huma's ({detail}, {title}).
+// HubAPIError: the hub's error ({code, message, error}; older hubs
+// answered {error} on their own routes) or huma's ({detail}, {title}).
 export function hubCall(root: string, fetcher: Fetcher = (url, init) => fetch(url, init)) {
   return async (path: string, init: RequestInit = {}): Promise<Response> => {
     let response: Response;
@@ -36,7 +36,7 @@ export function hubCall(root: string, fetcher: Fetcher = (url, init) => fetch(ur
       throw new HubAPIError("The hub didn't answer.", 0);
     }
     if (response.ok) return response;
-    const body = (await response.json().catch(() => null)) as (Partial<HubWire["ErrorBody"]> & {message?: string; detail?: string; title?: string}) | null;
+    const body = (await response.json().catch(() => null)) as (Partial<HubWire["ErrorBody"]> & {detail?: string; title?: string}) | null;
     throw new HubAPIError(body?.error || body?.message || body?.detail || body?.title || `The hub answered ${response.status}.`, response.status);
   };
 }

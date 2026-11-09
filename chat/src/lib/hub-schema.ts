@@ -47,10 +47,6 @@ export interface components {
             issue: components["schemas"]["GitHubIssue"];
             job?: components["schemas"]["DispatchJob"];
         };
-        DispatchError: {
-            code: string;
-            message: string;
-        };
         DispatchGitHubStatus: {
             connected: boolean;
             html_url?: string;
@@ -196,7 +192,9 @@ export interface components {
             output: number;
         };
         ErrorBody: {
+            code: string;
             error: string;
+            message: string;
         };
         Favorite: {
             id: string;
@@ -355,8 +353,10 @@ export interface components {
             ids: string[];
         };
         PinsConflict: {
+            code: string;
             error: string;
             ids: string[];
+            message: string;
         };
         RemovedEvent: {
             id: string;

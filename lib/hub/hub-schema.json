@@ -148,22 +148,6 @@
         ],
         "type": "object"
       },
-      "DispatchError": {
-        "additionalProperties": false,
-        "properties": {
-          "code": {
-            "type": "string"
-          },
-          "message": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "code",
-          "message"
-        ],
-        "type": "object"
-      },
       "DispatchGitHubStatus": {
         "additionalProperties": false,
         "properties": {
@@ -720,11 +704,19 @@
       "ErrorBody": {
         "additionalProperties": false,
         "properties": {
+          "code": {
+            "type": "string"
+          },
           "error": {
+            "type": "string"
+          },
+          "message": {
             "type": "string"
           }
         },
         "required": [
+          "code",
+          "message",
           "error"
         ],
         "type": "object"
@@ -1219,6 +1211,9 @@
       "PinsConflict": {
         "additionalProperties": false,
         "properties": {
+          "code": {
+            "type": "string"
+          },
           "error": {
             "type": "string"
           },
@@ -1227,11 +1222,16 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "message": {
+            "type": "string"
           }
         },
         "required": [
-          "error",
-          "ids"
+          "ids",
+          "code",
+          "message",
+          "error"
         ],
         "type": "object"
       },

@@ -31,6 +31,7 @@ import (
 	"github.com/coder/agentapi/lib/dispatch"
 	"github.com/coder/agentapi/lib/httpmw"
 	"github.com/coder/agentapi/lib/instanceapi"
+	"github.com/coder/agentapi/lib/jsonapi"
 	"github.com/coder/agentapi/lib/netaddr"
 	"github.com/coder/agentapi/lib/sse"
 )
@@ -266,20 +267,15 @@ func (h *Hub) checkHost(next http.Handler) http.Handler {
 	})
 }
 
-// errorBody is the answer to a request the hub refuses.
-type errorBody struct {
-	Error string `json:"error"`
-}
-
 func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(body)
 }
 
-// writeError answers {"error": message}.
+// writeError answers jsonapi.ErrorBody, with the status's code.
 func writeError(w http.ResponseWriter, status int, message string) {
-	writeJSON(w, status, errorBody{Error: message})
+	jsonapi.WriteError(w, &jsonapi.Error{Status: status, Code: jsonapi.StatusCode(status), Message: message})
 }
 
 // instanceList is GET /api/instances, and the first event of the browser's
@@ -463,8 +459,8 @@ type pinsBody struct {
 // pinsConflict is PUT /api/pins with a list that isn't exactly the pinned
 // ones (409): why, and the pinned ones in their order.
 type pinsConflict struct {
-	Error string   `json:"error"`
-	IDs   []string `json:"ids" nullable:"false"`
+	jsonapi.ErrorBody
+	IDs []string `json:"ids" nullable:"false"`
 }
 
 // setPins orders the instances pinned to the top of the hub's page (PUT
@@ -493,7 +489,7 @@ func (h *Hub) setPins(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	case errors.Is(err, errPinsDiffer):
-		writeJSON(w, http.StatusConflict, pinsConflict{Error: err.Error(), IDs: pins})
+		writeJSON(w, http.StatusConflict, pinsConflict{ErrorBody: jsonapi.ErrorBody{Code: jsonapi.StatusCode(http.StatusConflict), Message: err.Error(), Error: err.Error()}, IDs: pins})
 		return
 	}
 	writeJSON(w, http.StatusOK, pinsBody{IDs: pins})
