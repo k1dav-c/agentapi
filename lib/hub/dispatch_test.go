@@ -81,9 +81,11 @@ func TestHubDispatch(t *testing.T) {
 	var resp dispatch.Response
 	require.Equal(t, http.StatusCreated, request(t, http.MethodPost, srv.URL+"/api/dispatch", "dispatch-token", start, &resp))
 	assert.Equal(t, "pve", resp.Job.Host)
-	assert.Equal(t, int32(1), starts.Load())
-	for b := board(); len(b.Jobs) == 0; b = board() {
+	assert.Equal(t, dispatch.JobStarting, resp.Job.State, "the launcher starts it after the answer")
+	// The stream says when it works.
+	for b := board(); len(b.Jobs) == 0 || b.Jobs[0].State != dispatch.JobWorking; b = board() {
 	}
+	assert.Equal(t, int32(1), starts.Load())
 	// A signed-in browser dispatches too.
 	require.Equal(t, http.StatusOK, request(t, http.MethodPost, srv.URL+"/api/dispatch", hubToken, start, &resp))
 	assert.Equal(t, http.StatusUnauthorized, request(t, http.MethodGet, srv.URL+"/api/instances", "dispatch-token", nil, nil))

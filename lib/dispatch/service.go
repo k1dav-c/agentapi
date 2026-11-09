@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"crypto/hmac"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"hash/fnv"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -78,6 +80,15 @@ type Service struct {
 	// jobLocks serialize the dispatches of a job, by the key's hash: a
 	// fixed set, so they don't grow with the jobs.
 	jobLocks [64]sync.Mutex
+	// attempts are the starts the hub hasn't heard the end of, by job
+	// key, kept in dispatch.json; running those a goroutine of this hub
+	// calls the launcher for now (runStart), which ctx ends on Close and
+	// starts waits for.
+	attempts map[string]*startAttempt
+	running  map[string]*startAttempt
+	ctx      context.Context
+	cancel   context.CancelFunc
+	starts   sync.WaitGroup
 
 	// The state file is written in the background (writeLoop): saveLocked
 	// leaves the latest in pending.
@@ -98,10 +109,30 @@ type storedHost struct {
 
 // stateFile is dispatch.json.
 type stateFile struct {
-	Version    int                  `json:"version"`
-	Hosts      []storedHost         `json:"hosts"`
-	Jobs       []*Job               `json:"jobs"`
-	Deliveries map[string]time.Time `json:"deliveries"`
+	Version    int                      `json:"version"`
+	Hosts      []storedHost             `json:"hosts"`
+	Jobs       []*Job                   `json:"jobs"`
+	Deliveries map[string]time.Time     `json:"deliveries"`
+	Starts     map[string]*startAttempt `json:"starts,omitempty"`
+}
+
+// startAttempt is a start the hub asked a launcher for, or is about to,
+// and hasn't heard the end of. Kept until it has, it lets the hub adopt a
+// job the launcher reports though the hub lost the answer of its start
+// (the call failed, the hub restarted), and stop one no start asked for.
+type startAttempt struct {
+	Host  string `json:"host"`
+	Agent string `json:"agent"`
+	// Previous is the agent of the run the start replaces, for the
+	// takeover prompt; Switch has the hub stop that agent first, keeping
+	// its worktree (an agent switch, not a failed job started again).
+	Previous string `json:"previous,omitempty"`
+	Switch   bool   `json:"switch,omitempty"`
+	// Pick is a start on a machine the hub picked: another may take it if
+	// the launcher has no room.
+	Pick       bool      `json:"pick,omitempty"`
+	DeliveryID string    `json:"delivery_id,omitempty"`
+	At         time.Time `json:"at"`
 }
 
 const stateVersion = 1
@@ -116,6 +147,11 @@ const (
 	writeDelay = 200 * time.Millisecond
 	// missedHeartbeats a machine may miss before it counts as offline.
 	missedHeartbeats = 3
+	// startTimeout bounds a start on a launcher, which clones or fetches
+	// and waits for the job's AgentAPI within host.StartTimeout.
+	startTimeout = host.StartTimeout + 2*time.Minute
+	// callTimeout bounds the other calls to a launcher.
+	callTimeout = 2 * time.Minute
 )
 
 // New returns the dispatch of config, with what it kept.
@@ -133,9 +169,13 @@ func New(config Config) (*Service, error) {
 		config.GitHub = github.NewClient()
 	}
 	if config.HTTP == nil {
-		config.HTTP = &http.Client{Timeout: 5 * time.Minute}
+		// Each call has its deadline (callLauncher): a start takes longer
+		// than the others.
+		config.HTTP = &http.Client{}
 	}
+	ctx, cancel := context.WithCancel(context.Background())
 	s := &Service{
+		ctx: ctx, cancel: cancel, attempts: map[string]*startAttempt{}, running: map[string]*startAttempt{},
 		config: config, logger: config.Logger, gh: config.GitHub,
 		hosts: map[string]*Host{}, jobs: map[string]*Job{}, deliveries: map[string]time.Time{},
 		states: map[string]time.Time{}, tokenRequests: map[string]time.Time{},
@@ -170,6 +210,11 @@ func New(config Config) (*Service, error) {
 			}
 			if file.Deliveries != nil {
 				s.deliveries = file.Deliveries
+			}
+			for key, a := range file.Starts {
+				if s.jobs[key] != nil && a != nil {
+					s.attempts[key] = a
+				}
 			}
 		}
 	}
@@ -216,7 +261,12 @@ func (s *Service) saveLocked() {
 			delete(s.deliveries, id)
 		}
 	}
-	file := stateFile{Version: stateVersion, Deliveries: s.deliveries}
+	for key := range s.attempts {
+		if s.jobs[key] == nil {
+			delete(s.attempts, key)
+		}
+	}
+	file := stateFile{Version: stateVersion, Deliveries: s.deliveries, Starts: s.attempts}
 	for _, h := range s.hosts {
 		file.Hosts = append(file.Hosts, storedHost{Host: *h, Token: h.Token})
 	}
@@ -277,9 +327,14 @@ func (s *Service) Flush() {
 	}
 }
 
-// Close writes what waits and stops writing.
+// Close ends the starts on their way, which the launchers finish and the
+// hub adopts when they report them, writes what waits and stops writing.
 func (s *Service) Close() {
 	s.closeOnce.Do(func() {
+		s.mu.Lock()
+		s.cancel()
+		s.mu.Unlock()
+		s.starts.Wait()
 		close(s.done)
 		<-s.stopped
 		s.Flush()
@@ -409,30 +464,39 @@ func (s *Service) markOnlineLocked() {
 
 // HostEvent takes a launcher's host.* event, signed with the hub's
 // secret.
+//
+// The hub's secret is every machine's that joined, so it doesn't name one:
+// a machine's name is pinned to the launcher's token it first came with
+// (trust on first use), and an event with another token is refused, the
+// machine online or not, whatever the event (host.stopped too). Otherwise
+// a machine with the secret could take over another's name, and with it
+// its jobs' GitHub tokens and the dispatches to it. A launcher that lost
+// its token is admitted again once the machine is forgotten (ForgetHost).
 func (s *Service) HostEvent(eventType string, data json.RawMessage) error {
 	var d host.HostEventData
 	if err := json.Unmarshal(data, &d); err != nil || d.Hostname == "" || d.URL == "" {
 		return errors.New("a host event names no hostname or URL")
 	}
+	if d.Token == "" {
+		return errors.New("a host event has no launcher's token")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.config.Now()
 	h := s.hosts[d.Hostname]
-	if h == nil {
+	switch {
+	case h == nil:
 		s.logger.Info("A machine's launcher joined", "host", d.Hostname, "url", d.URL)
-		h = &Host{}
+		h = &Host{Token: d.Token}
 		s.hosts[d.Hostname] = h
+	case h.Token == "":
+		// Kept by a hub that didn't pin the token.
+		h.Token = d.Token
+	case !hmac.Equal([]byte(d.Token), []byte(h.Token)):
+		s.logger.Warn("Refused a host event with another launcher's token than the machine's", "host", d.Hostname, "url", d.URL, "event", eventType)
+		return fmt.Errorf("the machine %s has another launcher's token: forget the machine on the hub to admit this launcher", d.Hostname)
 	}
-	// A machine that has the hub's secret mustn't take over another's
-	// name, and with it its jobs' tokens: while the machine is online,
-	// its launcher's token can't change.
-	if h.Token != "" && d.Token != "" && d.Token != h.Token && s.online(h) && eventType != host.EventHostStopped {
-		s.logger.Warn("Refused a host event with another token for a machine online", "host", d.Hostname, "url", d.URL)
-		return fmt.Errorf("the machine %s is online with another launcher's token", d.Hostname)
-	}
-	token := h.Token
 	h.HostInfo = d.HostInfo
-	h.Token = cmp.Or(d.Token, token)
 	h.HeartbeatSeconds = d.HeartbeatSeconds
 	h.LastSeen = now
 	h.Stopped = eventType == host.EventHostStopped
@@ -443,9 +507,38 @@ func (s *Service) HostEvent(eventType string, data json.RawMessage) error {
 	return nil
 }
 
+// ForgetHost removes a machine and the launcher's token its name is
+// pinned to, so a launcher with another token can join under the name. A
+// machine online, or with jobs that work, isn't forgotten: stop its jobs
+// first.
+func (s *Service) ForgetHost(name string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	h := s.hosts[name]
+	if h == nil {
+		return errorf(http.StatusNotFound, "host_not_found", "no machine %s", name)
+	}
+	if s.online(h) {
+		return errorf(http.StatusConflict, "host_online", "%s is online: stop its launcher first", name)
+	}
+	for _, j := range s.jobs {
+		if j.Host == name && j.working() {
+			return errorf(http.StatusConflict, "host_busy", "%s works on %s: stop it first", name, j.Key)
+		}
+	}
+	delete(s.hosts, name)
+	delete(s.onlineSeen, name)
+	s.logger.Info("Forgot a machine", "host", name)
+	s.saveLocked()
+	return nil
+}
+
 // reconcileLocked compares the jobs of h the hub knows with those the
 // launcher reports: one the launcher dropped while the hub was away ended,
-// one it reports failed failed. s.mu is held.
+// one it reports failed failed. A start the hub lost the answer of is
+// adopted from the report, or failed if the launcher never had it; a job
+// the launcher runs that no start of the hub asked for is stopped, its
+// worktree kept. s.mu is held.
 func (s *Service) reconcileLocked(h *Host) {
 	reported := map[string]host.JobInfo{}
 	for _, j := range h.Jobs {
@@ -455,6 +548,27 @@ func (s *Service) reconcileLocked(h *Host) {
 	// A run the hub started lately may be newer than the report, which the
 	// launcher made before it.
 	grace := 2 * time.Duration(cmp.Or(h.HeartbeatSeconds, 60)) * time.Second
+	for key, a := range s.attempts {
+		if a.Host != h.Hostname || s.running[key] != nil {
+			continue
+		}
+		s.settleLocked(s.jobs[key], a, reported, now.Sub(a.At) > grace)
+	}
+	for key, lj := range reported {
+		// A job being started there (no AgentAPI yet), or failed, holds
+		// nothing the hub must free.
+		if lj.InstanceID == "" || lj.State == host.JobFailed || s.running[key] != nil {
+			continue
+		}
+		if a := s.attempts[key]; a != nil && a.Host == h.Hostname {
+			continue
+		}
+		if job := s.jobs[key]; job != nil && job.Host == h.Hostname && (job.working() || job.State == JobFailed || job.State == JobStopped) {
+			continue
+		}
+		s.logger.Warn("A machine runs a job no start of the hub asked for; stopping it, keeping its worktree", "job", key, "host", h.Hostname)
+		go s.stopOnLauncher(*h, key, true)
+	}
 	for _, job := range s.jobs {
 		if run := job.current(); run != nil && now.Sub(run.StartedAt) < grace {
 			continue
@@ -467,7 +581,7 @@ func (s *Service) reconcileLocked(h *Host) {
 		case job.State == JobStopped:
 			if ok {
 				// Stopped while the machine was offline: stop it there now.
-				go s.stopOnLauncher(*h, job.Key)
+				go s.stopOnLauncher(*h, job.Key, false)
 			} else {
 				job.State, job.UpdatedAt = JobDone, now
 			}
@@ -480,14 +594,45 @@ func (s *Service) reconcileLocked(h *Host) {
 	}
 }
 
-func (s *Service) stopOnLauncher(h Host, key string) {
+// settleLocked ends the start a of job, which no goroutine of the hub
+// waits for, from what its launcher reports: the job it started, or
+// failed, or, once late, none. s.mu is held.
+func (s *Service) settleLocked(job *Job, a *startAttempt, reported map[string]host.JobInfo, late bool) {
+	if job == nil {
+		return
+	}
+	lj, ok := reported[job.Key]
+	switch {
+	case ok && lj.InstanceID == "":
+		// The launcher is still at it (a clone).
+	case ok && lj.Agent != a.Agent && a.Switch:
+		// The old agent was never stopped: it goes on.
+		delete(s.attempts, job.Key)
+		job.State, job.Agent, job.Error = JobWorking, a.Previous, fmt.Sprintf("the switch to %s didn't finish; start it again", a.Agent)
+		job.UpdatedAt = s.config.Now()
+	case ok && lj.State == host.JobFailed:
+		s.failStartLocked(job, a, errors.New(lj.Error))
+	case ok && lj.Agent == a.Agent:
+		s.logger.Info("Adopted a job its machine started though the hub missed the answer", "job", job.Key, "host", a.Host)
+		s.finishStartLocked(job, a, lj)
+	case late:
+		s.failStartLocked(job, a, fmt.Errorf("%s didn't start the job", a.Host))
+	}
+}
+
+// stopOnLauncher stops key on h, keeping its worktree and state if keep.
+func (s *Service) stopOnLauncher(h Host, key string, keep bool) {
 	k, err := host.ParseKey(key)
 	if err != nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	if err := s.callLauncher(ctx, h, http.MethodDelete, "/jobs/"+k.Slug(), nil, nil); err != nil && !isCode(err, "job_not_found") {
+	path := "/jobs/" + k.Slug()
+	if keep {
+		path += "?keep_worktree=true&keep_state=true"
+	}
+	if err := s.callLauncher(ctx, h, http.MethodDelete, path, nil, nil); err != nil && !isCode(err, "job_not_found") {
 		s.logger.Warn("Couldn't stop a job on its machine", "job", key, "host", h.Hostname, "error", err)
 	}
 }
@@ -609,8 +754,12 @@ func (s *Service) Dispatch(ctx context.Context, req Request) (Response, error) {
 	}
 	if req.DeliveryID != "" {
 		s.mu.Lock()
-		s.deliveries[req.DeliveryID] = s.config.Now()
-		s.saveLocked()
+		// A start keeps its delivery when it takes it (reserveStart): one
+		// that fails after it answered forgets it.
+		if !resp.starting {
+			s.deliveries[req.DeliveryID] = s.config.Now()
+			s.saveLocked()
+		}
 		s.mu.Unlock()
 	}
 	return resp, nil
@@ -687,15 +836,22 @@ func supports(h Host, agent string) bool {
 // has, the fewest jobs first.
 func (s *Service) pickHost(key host.Key, agent, want string) (Host, error) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.pickHostLocked(key, agent, want, nil)
+}
+
+// pickHostLocked is pickHost but for the machines in skip. The jobs
+// starting count toward a machine's room: a pick and its job's start
+// (reserveStart) under one hold of s.mu reserve the place. s.mu is held.
+func (s *Service) pickHostLocked(key host.Key, agent, want string, skip []string) (Host, error) {
 	var hosts []Host
 	for _, h := range s.hosts {
-		if s.online(h) {
+		if s.online(h) && !slices.Contains(skip, h.Hostname) {
 			c := *h
 			c.Active = s.activeLocked(h)
 			hosts = append(hosts, c)
 		}
 	}
-	s.mu.Unlock()
 	slices.SortFunc(hosts, func(a, b Host) int {
 		return cmp.Or(cmp.Compare(a.Active, b.Active), strings.Compare(a.Hostname, b.Hostname))
 	})
@@ -764,6 +920,10 @@ func (s *Service) readIssue(ctx context.Context, as github.As, ok bool, key host
 	return meta, nil
 }
 
+// start starts work on key, or has another agent take it over. It
+// answers once the machine is picked and the job is starting: the
+// launcher clones, fetches and starts the job's AgentAPI in the
+// background (runStart), longer than a client waits for an answer.
 func (s *Service) start(ctx context.Context, key host.Key, req Request) (Response, error) {
 	as, gh, err := s.repoClient(ctx, key.Repo())
 	if err != nil {
@@ -772,6 +932,9 @@ func (s *Service) start(ctx context.Context, key host.Key, req Request) (Respons
 	job := s.job(key.String())
 	if job != nil && !job.State.ended() && job.State != JobFailed && (req.Agent == "" || req.Agent == job.Agent) {
 		return Response{Job: *job}, nil
+	}
+	if job != nil && job.State == JobStarting {
+		return Response{}, errorf(http.StatusConflict, "job_starting", "%s starts %s; stop it, or wait until it works, to switch agents", key, job.Agent)
 	}
 	if job != nil && !job.State.ended() && req.Agent != "" && req.Agent != job.Agent && req.Replace != nil && !*req.Replace {
 		return Response{}, errorf(http.StatusConflict, "job_active", "%s works on %s; replace to switch agents", job.Agent, key)
@@ -782,118 +945,241 @@ func (s *Service) start(ctx context.Context, key host.Key, req Request) (Respons
 	if err != nil {
 		return Response{}, err
 	}
-	if job != nil && !job.State.ended() && job.State != JobFailed {
-		return s.switchAgent(ctx, key, req, job, meta, as, gh)
-	}
-	return s.launch(ctx, key, req, job, meta, as, gh, "")
-}
-
-// launch starts key on a machine: the one it works on (a failed job, an
-// agent switch) or a new pick. previous is the agent another run left the
-// worktree by, for the takeover prompt. A launch that fails on the job's
-// machine leaves the job failed, with why.
-func (s *Service) launch(ctx context.Context, key host.Key, req Request, job *Job, meta issueMeta, as github.As, gh bool, previous string) (resp Response, err error) {
-	ongoing := job != nil && !job.State.ended()
-	if ongoing {
-		defer func() {
-			if err != nil {
-				s.update(key.String(), func(j *Job) {
-					s.endRunLocked(j, "failed")
-					j.State, j.Error = JobFailed, err.Error()
-				})
-			}
-		}()
-	}
-	agent := req.Agent
-	var h Host
-	if ongoing {
-		var ok bool
-		if h, ok = s.hostByName(job.Host); !ok {
-			return Response{}, errorf(http.StatusServiceUnavailable, "host_offline", "%s works on %s, which isn't online", key, job.Host)
-		}
-		agent = cmp.Or(agent, job.Agent)
-		if !supports(h, agent) {
-			return Response{}, errorf(http.StatusUnprocessableEntity, "agent_unavailable", "%s, where %s's worktree is, doesn't run %q", h.Hostname, key, agent)
-		}
-		if job.State == JobFailed && agent != job.Agent {
-			// The machine starts the failed job again with another agent,
-			// in the same worktree.
-			previous = job.Agent
-		}
-	} else if h, err = s.pickHost(key, agent, req.Host); err != nil {
+	a, updated, err := s.reserveStart(key, req, meta, gh)
+	if err != nil {
 		return Response{}, err
 	}
-	agent = cmp.Or(agent, h.DefaultAgent)
-	data := promptData{Repo: key.Repo(), Issue: key.Issue, IssueURL: meta.url, DefaultBranch: cmp.Or(meta.defaultBranch, "main"), Credentials: gh, PreviousAgent: agentName(previous)}
-	if ongoing {
-		data.PRURL = job.PRURL
-	}
+	data := promptData{Repo: key.Repo(), Issue: key.Issue, IssueURL: meta.url, DefaultBranch: cmp.Or(meta.defaultBranch, "main"), Credentials: gh, PreviousAgent: agentName(a.Previous), PRURL: updated.PRURL}
 	prompt := render("start", data)
-	if previous != "" {
+	if a.Previous != "" {
 		prompt = render("takeover", data)
 	}
-	start := host.StartRequest{Repo: key.Repo(), Issue: key.Issue, Agent: agent, DefaultBranch: meta.defaultBranch, Prompt: prompt}
+	start := host.StartRequest{Repo: key.Repo(), Issue: key.Issue, Agent: a.Agent, DefaultBranch: meta.defaultBranch, Prompt: prompt}
 	if gh {
 		app := s.currentApp()
 		start.GitUser = &host.GitUser{Name: app.BotName(), Email: app.BotEmail()}
 		start.Credentials = host.CredentialsHub
 	}
-	var started host.StartResponse
-	if err := s.callLauncher(ctx, h, http.MethodPost, "/jobs", start, &started); err != nil {
-		return Response{}, err
-	}
-	now := s.config.Now()
-	created := !ongoing
-	updated := s.update(key.String(), func(j *Job) {
-		if created {
-			// A new round: its own pull request and cost comment; the runs
-			// of the rounds before stay, for the spend of the job.
-			j.Round++
-			j.PRURL, j.CostCommentID = "", 0
+	go s.runStart(key, a, req.Agent, start, func(ctx context.Context, job Job) {
+		if !gh {
+			return
 		}
-		if run := j.current(); run != nil && run.Agent == agent && previous == "" {
-			// A failed job's AgentAPI started again: the same run goes on.
-			run.Missed = true
-		} else {
-			s.endRunLocked(j, "replaced")
-			j.Runs = append(j.Runs, Run{Round: j.Round, Agent: agent, Host: h.Hostname, InstanceID: started.Job.InstanceID, StartedAt: now})
-		}
-		j.Repo, j.Issue, j.Title, j.IssueURL = key.Repo(), key.Issue, cmp.Or(meta.title, j.Title), meta.url
-		j.Host, j.Agent, j.InstanceID = h.Hostname, agent, started.Job.InstanceID
-		j.DefaultBranch, j.Credentials = started.Job.DefaultBranch, gh
-		j.State, j.Error = JobWorking, ""
-	})
-	s.logger.Info("Dispatched an issue", "job", key.String(), "host", h.Hostname, "agent", agent, "instance", started.Job.InstanceID)
-	if gh {
 		verb := "開始處理這個 issue"
-		if previous != "" {
-			verb = fmt.Sprintf("接手這個 issue（之前由 %s 處理）", agentName(previous))
+		if a.Previous != "" {
+			verb = fmt.Sprintf("接手這個 issue（之前由 %s 處理）", agentName(a.Previous))
 		}
-		s.comment(ctx, as, key, key.Issue, fmt.Sprintf("🤖 %s 在 `%s` 上%s。%s", agentName(agent), h.Hostname, verb, s.hubLink(started.Job.InstanceID)))
-		s.dropOtherAgentLabels(ctx, as, key, meta.labels, agent)
-	}
-	return Response{Job: updated, Created: created}, nil
+		s.comment(ctx, as, key, key.Issue, fmt.Sprintf("🤖 %s 在 `%s` 上%s。%s", agentName(job.Agent), job.Host, verb, s.hubLink(job.InstanceID)))
+		s.dropOtherAgentLabels(ctx, as, key, meta.labels, job.Agent)
+	}, func(ctx context.Context, job Job) {
+		if gh {
+			s.comment(ctx, as, key, key.Issue, fmt.Sprintf("🤖 %s 沒能在 `%s` 上開始處理這個 issue：%s", agentName(job.Agent), job.Host, job.Error))
+		}
+	})
+	return Response{Job: updated, Created: job == nil || job.State.ended(), starting: true}, nil
 }
 
-// switchAgent stops the agent that works on job, keeping its worktree, and
-// has another take over. From the stop on, a failure leaves the job failed
-// (launch), not as if the old agent still worked.
-func (s *Service) switchAgent(ctx context.Context, key host.Key, req Request, job *Job, meta issueMeta, as github.As, gh bool) (Response, error) {
-	h, ok := s.hostByName(job.Host)
-	if !ok {
-		return Response{}, errorf(http.StatusServiceUnavailable, "host_offline", "%s works on %s, which isn't online", key, job.Host)
+// reserveStart picks the machine of key's start and has the job starting
+// on it, under one hold of s.mu, so that the job holds its place there: a
+// job that works or failed stays on its machine, where its worktree is;
+// a new one (or a new round) goes where pickHost says. s.mu isn't held.
+func (s *Service) reserveStart(key host.Key, req Request, meta issueMeta, gh bool) (*startAttempt, Job, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ctx.Err() != nil {
+		return nil, Job{}, errorf(http.StatusServiceUnavailable, "hub_stopping", "the hub is stopping")
 	}
-	if !supports(h, req.Agent) {
-		return Response{}, errorf(http.StatusUnprocessableEntity, "agent_unavailable", "%s, where %s's worktree is, doesn't run %q", h.Hostname, key, req.Agent)
+	if s.running[key.String()] != nil {
+		return nil, Job{}, errorf(http.StatusConflict, "job_busy", "a start of %s before is still on its way; try again in a while", key)
 	}
-	s.update(key.String(), func(j *Job) { j.State = JobStarting })
-	if err := s.callLauncher(ctx, h, http.MethodDelete, "/jobs/"+key.Slug()+"?keep_worktree=true&keep_state=true", nil, nil); err != nil && !isCode(err, "job_not_found") {
-		s.update(key.String(), func(j *Job) { j.State, j.Error = JobFailed, err.Error() })
-		return Response{}, err
+	job := s.jobs[key.String()]
+	ongoing := job != nil && !job.State.ended()
+	agent := req.Agent
+	var h Host
+	if ongoing {
+		known := s.hosts[job.Host]
+		if known == nil || !s.online(known) {
+			return nil, Job{}, errorf(http.StatusServiceUnavailable, "host_offline", "%s works on %s, which isn't online", key, job.Host)
+		}
+		h = *known
+		agent = cmp.Or(agent, job.Agent)
+		if !supports(h, agent) {
+			return nil, Job{}, errorf(http.StatusUnprocessableEntity, "agent_unavailable", "%s, where %s's worktree is, doesn't run %q", h.Hostname, key, agent)
+		}
+	} else {
+		var err error
+		if h, err = s.pickHostLocked(key, agent, req.Host, nil); err != nil {
+			return nil, Job{}, err
+		}
 	}
-	previous := job.Agent
-	s.update(key.String(), func(j *Job) { s.endRunLocked(j, "replaced") })
-	return s.launch(ctx, key, req, job, meta, as, gh, previous)
+	now := s.config.Now()
+	a := &startAttempt{Host: h.Hostname, Agent: cmp.Or(agent, h.DefaultAgent), Pick: !ongoing && req.Host == "", DeliveryID: req.DeliveryID, At: now}
+	if ongoing && a.Agent != job.Agent {
+		a.Previous = job.Agent
+		a.Switch = job.State != JobFailed
+	}
+	if job == nil {
+		job = &Job{Key: key.String(), CreatedAt: now}
+		s.jobs[key.String()] = job
+	}
+	if !ongoing {
+		// A new round: its own pull request and cost comment; the runs of
+		// the rounds before stay, for the spend of the job.
+		job.Round++
+		job.PRURL, job.CostCommentID = "", 0
+	}
+	job.Repo, job.Issue, job.Title, job.IssueURL = key.Repo(), key.Issue, cmp.Or(meta.title, job.Title), meta.url
+	job.Host, job.Agent, job.Credentials = h.Hostname, a.Agent, gh
+	job.State, job.Error, job.UpdatedAt = JobStarting, "", now
+	s.attempts[key.String()], s.running[key.String()] = a, a
+	// Under s.mu, which Close cancels s.ctx under before it waits.
+	s.starts.Add(1)
+	if req.DeliveryID != "" {
+		s.deliveries[req.DeliveryID] = now
+	}
+	s.saveLocked()
+	return a, job.clone(), nil
+}
+
+// runStart has the launcher start a's job, apart from the request that
+// asked: an agent switch stops the old agent first, and a launcher with
+// no room has another machine take a job the hub picked one for. started
+// and failed tell GitHub. A launcher that doesn't answer (the call failed
+// on the way, or the hub closed) leaves the start to the machine's next
+// report (reconcileLocked).
+func (s *Service) runStart(key host.Key, a *startAttempt, asked string, start host.StartRequest, started, failed func(context.Context, Job)) {
+	defer s.starts.Done()
+	defer func() {
+		s.mu.Lock()
+		delete(s.running, key.String())
+		s.mu.Unlock()
+	}()
+	ctx, cancel := context.WithTimeout(s.ctx, startTimeout)
+	defer cancel()
+	var tried []string
+	target := func() Host {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if h := s.hosts[a.Host]; h != nil {
+			return *h
+		}
+		return Host{HostInfo: host.HostInfo{Hostname: a.Host}}
+	}
+	if a.Switch {
+		err := s.callLauncher(ctx, target(), http.MethodDelete, "/jobs/"+key.Slug()+"?keep_worktree=true&keep_state=true", nil, nil)
+		if isCode(err, "job_not_found") {
+			err = nil
+		}
+		if !s.afterCall(key, a, err, failed, func(job *Job) { s.endRunLocked(job, "replaced") }) {
+			return
+		}
+	}
+	for {
+		h := target()
+		start.Agent = a.Agent
+		var answer host.StartResponse
+		err := s.callLauncher(ctx, h, http.MethodPost, "/jobs", start, &answer)
+		if isCode(err, "capacity") && a.Pick && s.movePick(key, a, asked, append(tried, h.Hostname)) {
+			tried = append(tried, h.Hostname)
+			continue
+		}
+		var job Job
+		if s.afterCall(key, a, err, failed, func(j *Job) {
+			s.finishStartLocked(j, a, answer.Job)
+			job = j.clone()
+		}) {
+			s.logger.Info("Dispatched an issue", "job", key.String(), "host", job.Host, "agent", job.Agent, "instance", job.InstanceID)
+			ghCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
+			started(ghCtx, job)
+			cancel()
+		}
+		return
+	}
+}
+
+// afterCall takes the end of a call of a's start: done changes the job
+// when the call went through, a launcher's refusal fails the job, and a
+// call that got no answer leaves the start to the machine's next report.
+// A start no longer the job's (the job was stopped) is stopped on the
+// launcher. It reports whether the start goes on.
+func (s *Service) afterCall(key host.Key, a *startAttempt, err error, failed func(context.Context, Job), done func(*Job)) bool {
+	s.mu.Lock()
+	job := s.jobs[key.String()]
+	if job == nil || s.attempts[key.String()] != a {
+		h := s.hosts[a.Host]
+		s.mu.Unlock()
+		if h != nil && (err == nil || isCode(err, "host_no_answer")) {
+			s.logger.Info("Stopping a job stopped while it started", "job", key.String(), "host", a.Host)
+			s.stopOnLauncher(*h, key.String(), false)
+		}
+		return false
+	}
+	switch {
+	case err == nil:
+		done(job)
+		s.saveLocked()
+		s.mu.Unlock()
+		return true
+	case isCode(err, "host_no_answer") || s.ctx.Err() != nil:
+		s.mu.Unlock()
+		s.logger.Warn("A machine didn't answer a start; its next report says how it went", "job", key.String(), "host", a.Host, "error", err)
+		return false
+	}
+	s.failStartLocked(job, a, err)
+	failedJob := job.clone()
+	s.mu.Unlock()
+	s.logger.Warn("A start failed", "job", key.String(), "host", a.Host, "error", err)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	failed(ctx, failedJob)
+	return false
+}
+
+// movePick has a's job start on another machine than those in tried,
+// which had no room, if one has. s.mu isn't held.
+func (s *Service) movePick(key host.Key, a *startAttempt, asked string, tried []string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	job := s.jobs[key.String()]
+	if job == nil || s.attempts[key.String()] != a {
+		return false
+	}
+	h, err := s.pickHostLocked(key, asked, "", tried)
+	if err != nil {
+		return false
+	}
+	s.logger.Info("A machine had no room for a start; trying another", "job", key.String(), "full", a.Host, "host", h.Hostname)
+	a.Host, a.Agent = h.Hostname, cmp.Or(asked, h.DefaultAgent)
+	job.Host, job.Agent, job.UpdatedAt = a.Host, a.Agent, s.config.Now()
+	s.saveLocked()
+	return true
+}
+
+// finishStartLocked has job work on the AgentAPI its launcher started for
+// a, as lj. s.mu is held.
+func (s *Service) finishStartLocked(job *Job, a *startAttempt, lj host.JobInfo) {
+	now := s.config.Now()
+	delete(s.attempts, job.Key)
+	if run := job.current(); run != nil && run.Agent == a.Agent && a.Previous == "" {
+		// A failed job's AgentAPI started again: the same run goes on.
+		run.Missed = true
+	} else {
+		s.endRunLocked(job, "replaced")
+		job.Runs = append(job.Runs, Run{Round: job.Round, Agent: a.Agent, Host: a.Host, InstanceID: lj.InstanceID, StartedAt: now})
+	}
+	job.Host, job.Agent, job.InstanceID = a.Host, a.Agent, lj.InstanceID
+	job.DefaultBranch = lj.DefaultBranch
+	job.State, job.Error, job.UpdatedAt = JobWorking, "", now
+}
+
+// failStartLocked leaves job failed with err, forgetting the delivery of
+// its start: the workflow run again starts it again. s.mu is held.
+func (s *Service) failStartLocked(job *Job, a *startAttempt, err error) {
+	delete(s.attempts, job.Key)
+	if a.DeliveryID != "" {
+		delete(s.deliveries, a.DeliveryID)
+	}
+	s.endRunLocked(job, "failed")
+	job.State, job.Error, job.UpdatedAt = JobFailed, err.Error(), s.config.Now()
 }
 
 func (s *Service) send(ctx context.Context, key host.Key, req Request) (Response, error) {
@@ -903,6 +1189,9 @@ func (s *Service) send(ctx context.Context, key host.Key, req Request) (Response
 	}
 	if job.State.ended() {
 		return Response{}, errorf(http.StatusConflict, "job_ended", "the work on %s ended", key)
+	}
+	if job.State == JobStarting {
+		return Response{}, errorf(http.StatusConflict, "job_starting", "%s is starting on %s; send again once it works", key, job.Host)
 	}
 	if strings.TrimSpace(req.Message) == "" && len(req.Comments) == 0 {
 		return Response{}, errorf(http.StatusBadRequest, "bad_request", "a send has a message or comments")
@@ -964,7 +1253,7 @@ func (s *Service) linkPR(key host.Key, req Request) (Response, error) {
 	}
 	updated := s.update(key.String(), func(j *Job) {
 		j.PRURL = req.PRURL
-		if !j.State.ended() && j.State != JobFailed {
+		if j.working() && j.State != JobStarting {
 			j.State = JobReview
 		}
 	})
@@ -980,7 +1269,13 @@ func (s *Service) stop(ctx context.Context, key host.Key) (Response, error) {
 		return Response{Job: *job}, nil
 	}
 	state := JobDone
-	if h, ok := s.hostByName(job.Host); ok {
+	s.mu.Lock()
+	starting := s.running[key.String()] != nil
+	s.mu.Unlock()
+	if starting {
+		// The launcher holds the job while it starts it: the start, once
+		// it answers, stops it (afterCall).
+	} else if h, ok := s.hostByName(job.Host); ok {
 		if err := s.callLauncher(ctx, h, http.MethodDelete, "/jobs/"+key.Slug(), nil, nil); err != nil && !isCode(err, "job_not_found") {
 			return Response{}, err
 		}
@@ -997,6 +1292,7 @@ func (s *Service) stop(ctx context.Context, key host.Key) (Response, error) {
 		}
 	}
 	updated := s.update(key.String(), func(j *Job) {
+		delete(s.attempts, key.String())
 		s.endRunLocked(j, "stopped")
 		j.State = state
 	})
@@ -1082,6 +1378,11 @@ func (s *Service) callLauncher(ctx context.Context, h Host, method, path string,
 	if err != nil {
 		return err
 	}
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, callTimeout)
+		defer cancel()
+	}
 	req, err := http.NewRequestWithContext(ctx, method, strings.TrimSuffix(u, "/")+path, reader)
 	if err != nil {
 		return err
@@ -1092,7 +1393,12 @@ func (s *Service) callLauncher(ctx context.Context, h Host, method, path string,
 	}
 	resp, err := s.config.HTTP.Do(req)
 	if err != nil {
-		return errorf(http.StatusBadGateway, "host_unreachable", "the machine %s: %v", h.Hostname, err)
+		// A call that never reached the launcher did nothing there; one
+		// that got no answer may have.
+		if op := (*net.OpError)(nil); errors.As(err, &op) && op.Op == "dial" {
+			return errorf(http.StatusBadGateway, "host_unreachable", "the machine %s: %v", h.Hostname, err)
+		}
+		return errorf(http.StatusGatewayTimeout, "host_no_answer", "the machine %s didn't answer: %v", h.Hostname, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))

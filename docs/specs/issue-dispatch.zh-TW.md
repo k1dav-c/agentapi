@@ -125,6 +125,8 @@ host:
 7. 分配 port，啟動子行程（§4.4）。
 8. 等 `/status` 回 `ready`（最多 60 秒），回 201 與 job。
 
+整個啟動不隨 hub 的請求取消：hub 的連線中斷、逾時或 hub 重啟時，launcher 仍會做完，只受自己的時限約束（git 合計最多 10 分鐘，AgentAPI 最多 60 秒，合計 `StartTimeout` 11 分鐘），hub 再從下一次 heartbeat 接回（§5.3）。還在準備（clone、fetch）的 job 在 `GET /jobs` 與 `host.*` 事件裡以 `starting`、沒有 `instance_id` 回報，讓 hub 知道它還在路上。
+
 ### 4.4 子行程
 
 ```
@@ -145,6 +147,7 @@ agentapi server
 - （e2e 測過：繼承 `AGENTAPI_PID_FILE` 會蓋掉別的 instance 的 PID 檔；`--api-token <值>` 用空白分隔時會被當成 agent 指令。）
 - run 從 1 起算，每換一次 agent 加 1（取第一個還沒有 state db 的編號），所以不同 agent 的對話不會混在同一個 db。
 - 子行程用 `setsid` 脫離 launcher；launcher 重啟後依 `jobs.json` 記下的 PID 接回（某個參數必須完全等於 instance ID，才算是這個 job 的 AgentAPI；`--pid-file` 只是讓同一個 job 不會跑兩個 server），行程已不在的 job 以同樣參數重啟（`--state-db` 會接回對話，initial prompt 不會重送）。
+- launcher 每 5 秒檢查一次。AgentAPI 自己結束（或 60 秒內沒開始服務而被停掉）時，job 進入 `restarting`，依最近 30 分鐘內已重啟的次數等 5 秒、15 秒、45 秒、2 分鐘、5 分鐘後再啟動；重啟 5 次後又結束，job 就標為 `failed`（約 8 分鐘內反覆當掉才會失敗，30 分鐘前的重啟不再計入）。重啟時間與下一次的時間記在 `jobs.json`（`restarts`、`restart_at`），launcher 重啟後照樣等待、累計。launcher 自己重啟時接回已停的 job 不算一次重啟。
 - 工作目錄是 worktree。webhook 設定沿用 `config.yaml`，所以 instance 會自動出現在 hub。
 
 ### 4.5 GitHub 憑證（自動續期）
@@ -194,7 +197,7 @@ TCP 介面全部需要 `Authorization: Bearer <host token>`（hub 呼叫）；un
 送到 hub `/hooks`，簽章與 `instance.*` 相同：
 
 - `host.started`、`host.heartbeat`（60 秒）、`host.stopped`
-- `data`：`hostname`、`url`（launcher API）、`token`（host token，只在 `host.started` 與 hub 回應要求時附帶）、`agentapi_version`、`repos`、`agents`、`max_jobs`、`jobs: [{key, port, instance_id, state}]`
+- `data`：`hostname`、`url`（launcher API）、`token`（host token，每個事件都附帶；hub 以它確認主機身分，見 §11）、`agentapi_version`、`repos`、`agents`、`max_jobs`、`jobs: [{key, port, instance_id, state}]`（準備中的 job 沒有 `instance_id`，見 §4.3）
 
 ### 4.8 權限與檔案
 
@@ -236,7 +239,7 @@ hub 畫面的 **+**（加入主機）同時列出這三行。
 
 ### 5.1 儲存
 
-機器與 job 存在 `instances.json` 旁邊的 `dispatch.json`（0600，版本 1），不動 `instances.json`，hub 原有的 instance 儲存邏輯不受影響。內容：hosts、jobs，以及 24 小時內處理過的 `delivery_id`：
+機器與 job 存在 `instances.json` 旁邊的 `dispatch.json`（0600，版本 1），不動 `instances.json`，hub 原有的 instance 儲存邏輯不受影響。內容：hosts、jobs、24 小時內處理過的 `delivery_id`，以及還沒得到結果的啟動（`starts`，以 job key 為鍵：主機、agent、是否換 agent、`delivery_id`、開始時間；§5.3）：
 
 ```json
 {
@@ -268,6 +271,7 @@ GitHub App 另外存在 `~/.agentapi/hub/github-app.json`（0600，不併入 `in
 | 方法 | 路徑 | 驗證 | 說明 |
 |---|---|---|---|
 | GET | `/api/hosts` | session | 主機、repo、agents |
+| DELETE | `/api/hosts/{name}` | session | 移除主機與它綁定的 launcher token（§11）；主機在線（`host_online`）或還有進行中的 job（`host_busy`）時回 409 |
 | GET | `/api/jobs` | session | job 列表 |
 | POST | `/api/dispatch` | session **或** dispatch token | §7.1 |
 | GET | `/api/github` | session | App 設定狀態：未設定、已建立未安裝、已安裝；App 與各安裝的 GitHub 連結（設定頁、安裝頁、大頭貼）與帳號類型（§6.5） |
@@ -283,7 +287,7 @@ GitHub App 另外存在 `~/.agentapi/hub/github-app.json`（0600，不併入 `in
 - hub 的瀏覽器串流（`GET /api/events`）多了 `dispatch` 事件：主機與 job 的完整內容（同 `/api/hosts`、`/api/jobs`），一開始送一次，之後每次變動再送（短時間內的多次變動合併成一次）；主機因漏掉 heartbeat 而離線時，hub 自己的 heartbeat 也會送一次。3.12 以前的頁面不聽這個事件。
 - 新增 `--dispatch-token`（`AGENTAPI_HUB_DISPATCH_TOKEN`）：只能呼叫 `/api/dispatch`。
 - `/api/github/token`：簽章以 secret 驗證，並以簽章本身去重（delivery ID 不在簽章內）；另須帶該主機的 host token。只發給在該主機上進行中（不含 failed）、用 hub 憑證的 job。
-- `host.*` 事件：已知主機在線時，若事件的 host token 與 hub 記的不同就拒絕，避免其他持有 secret 的機器冒名；主機離線超過 3 次 heartbeat 後才接受新的 token（重灌的機器）。
+- `host.*` 事件：主機名稱綁定第一次帶來的 host token（§11）；token 不同或沒帶 token 的事件一律拒絕，不論主機是否在線、事件是不是 `host.stopped`。重灌而換了 token 的主機，要先以 `DELETE /api/hosts/{name}` 移除。
 - dispatch.json 在背景寫入（不在鎖內做磁碟 I/O），hub 結束時寫完。
 - `/github/callback`、`/github/setup` 是瀏覽器跳轉，需要已登入 hub；沒登入時先登入再跳回。
 
@@ -292,11 +296,16 @@ GitHub App 另外存在 `~/.agentapi/hub/github-app.json`（0600，不併入 `in
 `start`：
 1. 已有同 key、狀態不是 done 的 job：
    - agent 相同（或 dispatch 沒指定 agent）：回傳它（冪等）。
-   - agent 不同：照 §5.7 換 agent。
+   - agent 不同：照 §5.7 換 agent；job 還在 `starting` 時回 409 `job_starting`。
 2. 有指定 `host`：用它；不符合（沒 repo 又不能 clone、沒有該 agent）時回 422。
 3. 沒指定：在線、支援該 agent、job 數低於上限的主機中，先挑有 repo 的，再挑 job 最少的；都沒有 repo 時挑允許 clone 的。
 4. 都不行：回 503 `no_host`。
-5. 成功後以 App 身分在 issue 留言：主機、agent、hub 上的 instance 連結。
+5. 挑好主機後，在同一個鎖內把 job 記為那台主機上的 `starting`，記下這次啟動與 `delivery_id`，就回應（201，job 為 `starting`）。`starting` 的 job 算進主機的 job 數，所以同時進來的多個 start 不會把同一台主機塞過上限。
+6. hub 在背景呼叫 launcher 的 `POST /jobs`（換 agent 時先停舊 agent），不用 dispatch 請求的 context，時限為 launcher 的 `StartTimeout` 再加 2 分鐘：
+   - 成功：job 改為 `working`，以 App 身分在 issue 留言：主機、agent、hub 上的 instance 連結。
+   - launcher 回 409 `capacity`，且主機是 hub 挑的：排除這台，照第 3 點改挑另一台再試；沒有可挑的主機時失敗。
+   - launcher 拒絕或失敗：job 標為 `failed`（附 launcher 的錯誤），有 App 時在 issue 留言說明，並忘掉這次的 `delivery_id`，讓 workflow 重跑時能再開工。
+   - 沒得到回應（連線中途斷了、逾時、hub 正在關閉）：維持 `starting`，交給主機下一次 heartbeat 判斷（§5.4）。
 
 `send`：找 job → 轉給該主機。job 不存在回 404；主機離線回 503。
 
@@ -309,7 +318,10 @@ GitHub App 另外存在 `~/.agentapi/hub/github-app.json`（0600，不併入 `in
 4. job 標為 `done`，保留紀錄 30 天（花費統計需要）。
 - 主機離線時仍刪遠端分支，job 標為 `stopped (host offline)`；主機回來後由下一次 heartbeat 比對，自動清理已不存在的 job。
 
-所有 dispatch 以 `delivery_id` 去重（保留 24 小時）。
+- 停止還在背景啟動中的 job：hub 立即把它標為 `done`，等 launcher 回應啟動後再呼叫 `DELETE /jobs/{key}` 停掉它；在那之前同一個 issue 的 `start` 回 409 `job_busy`。
+- `send` 給還在 `starting` 的 job 回 409 `job_starting`。
+
+所有 dispatch 以 `delivery_id` 去重（保留 24 小時）；背景啟動失敗時會忘掉它。
 
 ### 5.4 job 狀態
 
@@ -320,8 +332,12 @@ starting ──► working ──► review ──► done
     └────────► failed     stopped
 ```
 
+- `starting`：hub 已替 job 保留主機上的名額，launcher 正在 clone、fetch 或啟動 AgentAPI（§5.3）。
 - `working` / `review` 之間由 instance 的 `task.started`、`task.completed` 與 `link_pr` 推動。
 - 主機離線超過 3 次 heartbeat：job 顯示 `host offline`，不改 state。
+- 每次 `host.*` 事件，hub 比對主機回報的 job 與自己的紀錄：
+  - hub 沒收到結果的啟動（呼叫失敗、hub 重啟）：主機回報了這個 job 且 agent 相符時接回，改為 `working`；回報的是 `failed` 時標 `failed`；回報為準備中（沒有 `instance_id`）時繼續等；啟動已超過 2 次 heartbeat 主機卻沒有這個 job 時標 `failed`。換 agent 時舊 agent 沒被停掉的，job 照舊由舊 agent 繼續，並附上「換 agent 沒有完成」的錯誤。
+  - 主機回報、但沒有任何 hub 的啟動要求過的 job（hub 不知道、在別台主機上或已 `done`）：在那台主機上停掉，保留 worktree 與 state db（`?keep_worktree=true&keep_state=true`）。準備中與 `failed` 的 job 不動。
 
 ### 5.5 畫面
 
@@ -359,7 +375,7 @@ hub 的 **Issues** 頁（標題列的 ◎，或按 `i`）取代總覽的位置�
 - issue 加上另一個 `agent:<type>` label，或
 - hub 畫面 **Switch agent**（dispatch `start` 帶不同的 `agent`）。
 
-job 還沒結束時（`starting`、`working`、`review`、`failed`）：
+job 還沒結束時（`working`、`review`、`failed`；還在 `starting` 時回 409 `job_starting`）。hub 先把 job 標為 `starting` 並回應，以下在背景進行（§5.3）：
 1. launcher 停掉舊的 instance（SIGTERM：AgentAPI 存好狀態再停 agent，所以不另外先 interrupt），**保留 worktree 與分支**（`DELETE /jobs/{key}?keep_worktree=true&keep_state=true`），舊 run 標 `replaced`，記下花費。
 2. 以新 agent 在同一個 worktree 啟動 instance，state db 另開新檔（`state-<n>.db`；不同 agent 的對話無法互通），用 §8 的「接手」prompt。
 3. job 的 `agent` 改為新的，PR 保持不變。
@@ -475,7 +491,7 @@ job 已結束（`done`）時：視為新的一輪開發。遠端與本機分支�
 - 不再帶 `github_token`：token 一律由 hub 產生。
 - `default_branch`、`issue_url` 由 hub 以 App 查詢，不信任 dispatch 的值。
 
-回應：`{"job": {...}, "created": true|false}`。
+回應：`{"job": {...}, "created": true|false}`。`start` 在 job 於主機上進入 `starting` 時就回應（§5.3），不等 clone 與 agent 啟動；之後的結果經 hub 的串流、`GET /api/jobs`，以及有 App 時 issue 上的留言得知。
 
 ## 8. Prompt
 
@@ -608,17 +624,24 @@ jobs:
    | installation token | job（經 launcher 快取） | 只限一個 repo、一小時 |
    | App private key | 只有 hub | 產生 installation token |
 
-4. **換 token 的檢查**：hub 只對「這台主機上、狀態不是 done 的 job，且 repo 相符」發 token。webhook secret 外洩時能拿到的只是現有 job 的 repo token；輪替 secret 後所有主機需重新 `hub join`。
+4. **換 token 的檢查**：hub 只對「這台主機上、狀態不是 done 的 job，且 repo 相符」發 token。webhook secret 外洩時，冒用已登記的主機名稱會被拒絕（第 7 點），外洩者只能以新的名稱加入，拿到 hub 派給它的 job 的 repo token；輪替 secret 後所有主機需重新 `hub join`。
 5. `github-app.json` 0600；hub 的 log 不輸出 token 與 key。
 6. launcher 與 job instance 都必須有 token；launcher 建議 `bind` 內網位址。
 
-7. **同一使用者的信任邊界**：主機上的 job 都以同一個使用者執行，agent 讀得到 `~/.agentapi/` 裡的 secret 與 host token。token 只發給 job 自己的 process（Linux），但同一台主機上的 agent 仍可讀其他檔案；需要更強的隔離時，以不同使用者或不同主機跑 job。
+7. **主機身分（trust on first use）**：webhook secret 是所有加入的主機共用的，所以它不代表某一台主機。hub 第一次收到某個主機名稱的 `host.*` 事件時，記下事件裡的 host token，之後這個名稱只接受同一個 token：token 不同或沒帶 token 的事件一律拒絕（不論主機是否在線，`host.stopped` 也一樣），`/api/github/token` 也只認這個 token。否則持有 secret 的機器可以先送 `host.stopped` 再冒名送 heartbeat，取得那台主機上 job 的 GitHub token，並讓 hub 把派工送到自己那裡。主機重灌或 `host.token` 遺失時，先停掉它的 job，等它離線後以 `DELETE /api/hosts/{name}` 移除，新的 launcher 下一次 heartbeat 就會重新加入。
+8. **同一使用者的信任邊界**：主機上的 job 都以同一個使用者執行，agent 讀得到 `~/.agentapi/` 裡的 secret 與 host token。token 只發給 job 自己的 process（Linux），但同一台主機上的 agent 仍可讀其他檔案；需要更強的隔離時，以不同使用者或不同主機跑 job。
 
 ## 12. 失敗處理
 
 | 情況 | 處理 |
 |---|---|
 | 主機離線 | dispatch 回 503，workflow 失敗並留言；可在 Actions 重跑 |
+| clone 與 agent 啟動很久 | hub 在 job 進入 `starting` 時就回應 workflow（不受 curl 的 60 秒限制）；launcher 的 git 最多 10 分鐘、AgentAPI 最多 60 秒 |
+| 背景啟動失敗 | job 標 `failed`，有 App 時在 issue 留言；`delivery_id` 不保留，可在 Actions 重跑 |
+| hub 呼叫 launcher 沒得到回應、或 hub 中途重啟 | launcher 照樣做完；hub 由下一次 heartbeat 接回，主機沒有這個 job 時標 `failed`（§5.4） |
+| 主機上有 hub 不知道的 job | 停掉，保留 worktree 與 state db（§5.4） |
+| 同時開工、或 hub 記的容量與主機不同 | 挑主機與記下 `starting` 在同一個鎖內；launcher 回 409 `capacity` 時改挑另一台 |
+| launcher 換了 host token | hub 拒絕它的事件（§11）；移除主機後重新加入 |
 | 重複事件（workflow 重跑） | `delivery_id` 去重；`start` 本身冪等 |
 | port 或容量不足 | 409，留言說明 |
 | repo 不在且不允許 clone | 422 `repo_missing` |
@@ -626,7 +649,7 @@ jobs:
 | hub 未設定 GitHub App | 照常派工，但不經 GitHub：不留言、不刪分支，job 用主機自己的憑證（`credentials` 為空）；`/api/github/*` 回 412 `github_not_connected` |
 | App 未安裝在該 repo | `start` 回 412 `github_not_installed`，留言附安裝連結 |
 | 換 token 失敗 | git / gh 回錯誤；agent 回報後停下；hub 畫面在 job 上標示 |
-| job instance 當掉 | launcher 依 PID 檔偵測，以同樣參數重啟 |
+| job instance 當掉 | launcher 依 PID 檔偵測，等 5 秒到 5 分鐘不等後以同樣參數重啟；30 分鐘內重啟 5 次後又當掉就標 `failed`（§4.4） |
 | 用量限制 / API 暫時錯誤 | 沿用 AgentAPI 既有的 limit stop 與 retry，佇列中的訊息不會遺失 |
 
 ## 13. 相容性

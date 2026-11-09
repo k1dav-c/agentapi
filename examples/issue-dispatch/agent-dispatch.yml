@@ -139,7 +139,10 @@ jobs:
           esac
 
           # A run run again counts once: the hub keeps the ID of a dispatch
-          # it took, and a failed one isn't kept.
+          # it took, and a failed one isn't kept. A start answers once the
+          # job is starting on a machine, which then clones and starts the
+          # agent; the hub comments on the issue how that went, and forgets
+          # the ID of a start that failed there.
           body="$(jq --arg id "github-$GITHUB_REPOSITORY-$GITHUB_RUN_ID" '. + {delivery_id: $id}' <<<"$body")"
           echo "Dispatching: $(jq -c '{action, repo, issue, agent}' <<<"$body")"
           answer="$(mktemp)"

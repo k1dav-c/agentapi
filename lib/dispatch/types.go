@@ -80,6 +80,9 @@ type Response struct {
 	Created bool `json:"created"`
 	// Duplicate is a dispatch whose delivery ID the hub took already.
 	Duplicate bool `json:"duplicate,omitempty"`
+	// starting is a start the hub took now, which keeps its delivery ID
+	// itself.
+	starting bool
 }
 
 // Host is a machine whose launcher reports to the hub.

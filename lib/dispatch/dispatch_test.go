@@ -1,6 +1,7 @@
 package dispatch
 
 import (
+	"cmp"
 	"context"
 	"crypto"
 	"crypto/rand"
@@ -16,6 +17,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -43,6 +45,11 @@ type fakeLauncher struct {
 	stops  []string
 	sends  []host.MessageRequest
 	jobs   map[string]host.JobInfo
+	// gate, when set, holds POST /jobs until it closes; onStart, when set,
+	// answers it, after the start is recorded.
+	gate    chan struct{}
+	onStart func(w http.ResponseWriter, job host.JobInfo)
+	maxJobs int
 }
 
 func newFakeLauncher(t *testing.T, name string) *fakeLauncher {
@@ -61,12 +68,22 @@ func newFakeLauncher(t *testing.T, name string) *fakeLauncher {
 		var req host.StartRequest
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
 		f.mu.Lock()
-		defer f.mu.Unlock()
 		f.starts = append(f.starts, req)
+		gate, onStart := f.gate, f.onStart
+		f.mu.Unlock()
+		if gate != nil {
+			<-gate
+		}
 		key := host.Key{Issue: req.Issue}
 		key.Owner, key.Name, _ = host.ParseRepo(req.Repo)
 		job := host.JobInfo{Key: key.String(), Agent: req.Agent, InstanceID: f.name + "~" + key.Slug(), DefaultBranch: "main", State: host.JobRunning}
+		if onStart != nil {
+			onStart(w, job)
+			return
+		}
+		f.mu.Lock()
 		f.jobs[key.String()] = job
+		f.mu.Unlock()
 		jsonapi.Write(w, http.StatusCreated, host.StartResponse{Job: job, Created: true})
 	})
 	r.Post("/jobs/{key}/message", func(w http.ResponseWriter, r *http.Request) {
@@ -100,7 +117,7 @@ func (f *fakeLauncher) event(agents ...string) host.HostEventData {
 	return host.HostEventData{
 		HostInfo: host.HostInfo{
 			Hostname: f.name, URL: f.srv.URL, Repos: []string{"acme/widget"}, Agents: agents,
-			DefaultAgent: agents[0], MaxJobs: 2, Clone: true, Jobs: jobs,
+			DefaultAgent: agents[0], MaxJobs: cmp.Or(f.maxJobs, 2), Clone: true, Jobs: jobs,
 		},
 		Token: f.token, HeartbeatSeconds: 60,
 	}
@@ -262,6 +279,11 @@ func TestDispatchWithoutGitHub(t *testing.T) {
 	resp, err := s.Dispatch(ctx, Request{Action: ActionStart, DeliveryID: "run-1", Repo: "acme/widget", Issue: 12})
 	require.NoError(t, err)
 	assert.True(t, resp.Created)
+	// The hub answers once the job starts; the launcher starts it after.
+	assert.Equal(t, JobStarting, resp.Job.State)
+	assert.Equal(t, "pve-1", resp.Job.Host)
+	s.waitStarts()
+	resp.Job = *s.job("acme/widget#12")
 	assert.Equal(t, JobWorking, resp.Job.State)
 	assert.Equal(t, "pve-1", resp.Job.Host)
 	assert.Equal(t, "claude", resp.Job.Agent)
@@ -352,6 +374,7 @@ func TestPickHost(t *testing.T) {
 	// says so.
 	_, err = s.Dispatch(context.Background(), Request{Action: ActionStart, Repo: "acme/widget", Issue: 9, Agent: "codex"})
 	require.NoError(t, err)
+	s.waitStarts()
 	_, err = s.pickHost(key, "codex", "")
 	assert.True(t, isCode(err, "no_host"), "b is full")
 	assert.Equal(t, 1, s.Hosts()[1].Active)
@@ -396,8 +419,7 @@ func TestDispatchWithGitHubApp(t *testing.T) {
 	_, err = s.Dispatch(ctx, Request{Action: ActionStart, Repo: "acme/other", Issue: 1})
 	assert.True(t, isCode(err, "github_not_installed"))
 
-	started, err := s.Dispatch(ctx, Request{Action: ActionStart, Repo: "acme/widget", Issue: 12, Agent: "claude"})
-	require.NoError(t, err)
+	started := startJob(t, s, Request{Repo: "acme/widget", Issue: 12, Agent: "claude"})
 	start := l.starts[0]
 	assert.Equal(t, host.CredentialsHub, start.Credentials)
 	assert.Equal(t, &host.GitUser{Name: "agentapi-hub-x[bot]", Email: "99+agentapi-hub-x[bot]@users.noreply.github.com"}, start.GitUser)
@@ -458,8 +480,7 @@ func TestDispatchWithGitHubApp(t *testing.T) {
 	replaced, err := s.Dispatch(ctx, Request{Action: ActionStart, Repo: "acme/widget", Issue: 12, Agent: "codex", Replace: ptr(false)})
 	assert.True(t, isCode(err, "job_active"))
 	assert.Empty(t, replaced.Job.Key)
-	replaced, err = s.Dispatch(ctx, Request{Action: ActionStart, Repo: "acme/widget", Issue: 12, Agent: "codex"})
-	require.NoError(t, err)
+	replaced = startJob(t, s, Request{Repo: "acme/widget", Issue: 12, Agent: "codex"})
 	assert.Equal(t, []string{"acme~widget~12?keep_worktree=true&keep_state=true"}, l.stops)
 	require.Len(t, l.starts, 2)
 	assert.Equal(t, "codex", l.starts[1].Agent)
@@ -489,8 +510,7 @@ func TestDispatchWithGitHubApp(t *testing.T) {
 
 	// A new round on the same issue adds to the same job and edits the
 	// same comment.
-	_, err = s.Dispatch(ctx, Request{Action: ActionStart, Repo: "acme/widget", Issue: 12, Agent: "claude"})
-	require.NoError(t, err)
+	startJob(t, s, Request{Repo: "acme/widget", Issue: 12, Agent: "claude"})
 	_, err = s.Dispatch(ctx, Request{Action: ActionStop, Repo: "acme/widget", Issue: 12})
 	require.NoError(t, err)
 	job := s.job("acme/widget#12")
@@ -508,12 +528,10 @@ func TestDispatchWithGitHubApp(t *testing.T) {
 func ptr[T any](v T) *T { return &v }
 
 func TestHostReconcile(t *testing.T) {
-	ctx := context.Background()
 	s, now := newService(t, nil)
 	l := newFakeLauncher(t, "pve-1")
 	join(t, s, l, "claude")
-	_, err := s.Dispatch(ctx, Request{Action: ActionStart, Repo: "acme/widget", Issue: 5})
-	require.NoError(t, err)
+	startJob(t, s, Request{Repo: "acme/widget", Issue: 5})
 	// A heartbeat the launcher made before it started the job comes after
 	// it: the job, just started, stays.
 	l.mu.Lock()
@@ -530,16 +548,16 @@ func TestHostReconcile(t *testing.T) {
 	assert.Equal(t, 0, s.Hosts()[0].Active, "a failed job holds no place")
 
 	// Started again, it gets a run of its own: its tasks' cost counts.
-	again, err := s.Dispatch(ctx, Request{Action: ActionStart, Repo: "acme/widget", Issue: 5})
-	require.NoError(t, err)
+	again := startJob(t, s, Request{Repo: "acme/widget", Issue: 5})
 	require.Len(t, again.Job.Runs, 2)
 	assert.Equal(t, "failed", again.Job.Runs[0].EndReason)
 	s.TaskEvent(again.Job.InstanceID, "task.completed", json.RawMessage(`{"cost":{"usd":0.4}}`))
 	assert.InDelta(t, 0.4, s.job("acme/widget#5").Runs[1].Cost.USD, 1e-9)
 }
 
-// Another machine that has the hub's secret can't take over a machine's
-// name while it is online.
+// A machine's name is pinned to the launcher's token it first came with:
+// another machine that has the hub's secret can't take it over, by any
+// event, online or not.
 func TestHostTakeOverRefused(t *testing.T) {
 	s, now := newService(t, nil)
 	l := newFakeLauncher(t, "pve-1")
@@ -547,11 +565,97 @@ func TestHostTakeOverRefused(t *testing.T) {
 	forged := l.event("claude")
 	forged.Token, forged.URL = "attacker", "http://attacker:3291"
 	data, _ := json.Marshal(forged)
+	pinned := func() {
+		t.Helper()
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		assert.Equal(t, l.token, s.hosts["pve-1"].Token)
+		assert.Equal(t, l.srv.URL, s.hosts["pve-1"].URL)
+	}
+
+	// A forged stop doesn't stop the machine, nor free its name for the
+	// heartbeat after it.
+	assert.Error(t, s.HostEvent(host.EventHostStopped, data))
+	assert.True(t, s.Hosts()[0].Online)
 	assert.Error(t, s.HostEvent(host.EventHostHeartbeat, data))
-	assert.Equal(t, l.srv.URL, s.Hosts()[0].URL)
-	// A machine offline for long can come back with a new launcher.
+	assert.Error(t, s.HostEvent(host.EventHostStarted, data))
+	pinned()
+
+	// Nor once the machine is offline, stopped or silent.
+	real, _ := json.Marshal(l.event("claude"))
+	require.NoError(t, s.HostEvent(host.EventHostStopped, real))
+	assert.Error(t, s.HostEvent(host.EventHostHeartbeat, data))
 	*now = now.Add(10 * time.Minute)
-	assert.NoError(t, s.HostEvent(host.EventHostHeartbeat, data))
+	assert.Error(t, s.HostEvent(host.EventHostStarted, data))
+	pinned()
+
+	// An event without a token doesn't count.
+	forged.Token = ""
+	data, _ = json.Marshal(forged)
+	assert.Error(t, s.HostEvent(host.EventHostHeartbeat, data))
+	pinned()
+
+	// The real launcher comes back.
+	require.NoError(t, s.HostEvent(host.EventHostStarted, real))
+	assert.True(t, s.Hosts()[0].Online)
+}
+
+// Forgetting a machine frees its name for a launcher with another token:
+// not while it is online or has jobs that work.
+func TestForgetHost(t *testing.T) {
+	s, now := newService(t, nil)
+	l := newFakeLauncher(t, "pve-1")
+	join(t, s, l, "claude")
+	_, err := s.Dispatch(context.Background(), Request{Action: ActionStart, Repo: "acme/widget", Issue: 4})
+	require.NoError(t, err)
+	s.waitStarts()
+
+	r := chi.NewRouter()
+	s.MountSession(r)
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+	forget := func(name string) (int, string) {
+		req, _ := http.NewRequest(http.MethodDelete, srv.URL+"/api/hosts/"+name, nil)
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer func() { _ = resp.Body.Close() }()
+		data, _ := io.ReadAll(resp.Body)
+		code, _ := jsonapi.ReadError(data)
+		return resp.StatusCode, code
+	}
+	status, code := forget("nowhere")
+	assert.Equal(t, http.StatusNotFound, status)
+	assert.Equal(t, "host_not_found", code)
+	status, code = forget("pve-1")
+	assert.Equal(t, http.StatusConflict, status)
+	assert.Equal(t, "host_online", code)
+
+	// The machine went away with its launcher's token; a new launcher
+	// under its name is refused.
+	*now = now.Add(10 * time.Minute)
+	rekeyed := newFakeLauncher(t, "pve-1")
+	rekeyed.token = "a-new-token"
+	data, _ := json.Marshal(rekeyed.event("claude"))
+	assert.Error(t, s.HostEvent(host.EventHostStarted, data))
+	status, code = forget("pve-1")
+	assert.Equal(t, http.StatusConflict, status)
+	assert.Equal(t, "host_busy", code, "its job works")
+
+	_, err = s.Dispatch(context.Background(), Request{Action: ActionStop, Repo: "acme/widget", Issue: 4})
+	require.NoError(t, err)
+	assert.Equal(t, JobStopped, s.job("acme/widget#4").State, "stopped while the machine was offline")
+	status, _ = forget("pve-1")
+	assert.Equal(t, http.StatusNoContent, status)
+	assert.Empty(t, s.Hosts())
+
+	// The new launcher joins; the job stopped while it was away is done.
+	require.NoError(t, s.HostEvent(host.EventHostStarted, data))
+	require.Len(t, s.Hosts(), 1)
+	assert.True(t, s.Hosts()[0].Online)
+	s.mu.Lock()
+	assert.Equal(t, "a-new-token", s.hosts["pve-1"].Token)
+	s.mu.Unlock()
+	assert.Equal(t, JobDone, s.job("acme/widget#4").State)
 }
 
 // A switch that fails after the old agent stopped leaves the job failed,
@@ -561,8 +665,7 @@ func TestSwitchAgentFailure(t *testing.T) {
 	s, _ := newService(t, nil)
 	l := newFakeLauncher(t, "pve-1")
 	join(t, s, l, "claude", "codex")
-	_, err := s.Dispatch(ctx, Request{Action: ActionStart, Repo: "acme/widget", Issue: 7, Agent: "claude"})
-	require.NoError(t, err)
+	startJob(t, s, Request{Repo: "acme/widget", Issue: 7, Agent: "claude"})
 	l.srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			jsonapi.WriteError(w, jsonapi.Errorf(http.StatusInternalServerError, "start_failed", "codex didn't start"))
@@ -570,8 +673,10 @@ func TestSwitchAgentFailure(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
-	_, err = s.Dispatch(ctx, Request{Action: ActionStart, Repo: "acme/widget", Issue: 7, Agent: "codex"})
-	require.Error(t, err)
+	// The hub answers before the launcher refuses.
+	_, err := s.Dispatch(ctx, Request{Action: ActionStart, Repo: "acme/widget", Issue: 7, Agent: "codex"})
+	require.NoError(t, err)
+	s.waitStarts()
 	job := s.job("acme/widget#7")
 	assert.Equal(t, JobFailed, job.State)
 	assert.Contains(t, job.Error, "codex didn't start")
@@ -617,6 +722,7 @@ func TestJobMessages(t *testing.T) {
 	join(t, s, l, "claude", "codex")
 	_, err := s.Dispatch(ctx, Request{Action: ActionStart, Repo: "acme/widget", Issue: 12})
 	require.NoError(t, err)
+	s.waitStarts()
 
 	_, err = s.Dispatch(FromHub(ctx), Request{Action: ActionSend, Repo: "acme/widget", Issue: 12, Author: "hub", Message: "  Also the docs  "})
 	require.NoError(t, err)
@@ -657,7 +763,6 @@ func TestJobMessages(t *testing.T) {
 // The dispatch's subscribers hear of each change of the machines and the
 // jobs, and of a machine that goes offline without a word.
 func TestBoardSubscribe(t *testing.T) {
-	ctx := context.Background()
 	s, now := newService(t, nil)
 	changes, cancel := s.Subscribe()
 	defer cancel()
@@ -679,8 +784,7 @@ func TestBoardSubscribe(t *testing.T) {
 	assert.True(t, board.Hosts[0].Online)
 	assert.Empty(t, board.Jobs)
 
-	_, err := s.Dispatch(ctx, Request{Action: ActionStart, Repo: "acme/widget", Issue: 12})
-	require.NoError(t, err)
+	startJob(t, s, Request{Repo: "acme/widget", Issue: 12})
 	assert.True(t, heard(), "a job started")
 	assert.False(t, heard(), "changes close together come as one")
 	require.Len(t, s.Board().Jobs, 1)
@@ -722,8 +826,7 @@ func TestMessageSourceOverHTTP(t *testing.T) {
 	s, _ := newService(t, nil)
 	l := newFakeLauncher(t, "pve-1")
 	join(t, s, l, "claude")
-	_, err := s.Dispatch(context.Background(), Request{Action: ActionStart, Repo: "acme/widget", Issue: 12})
-	require.NoError(t, err)
+	startJob(t, s, Request{Repo: "acme/widget", Issue: 12})
 	r := chi.NewRouter()
 	s.MountDispatch(r, func(*http.Request) bool { return true })
 	srv := httptest.NewServer(r)
@@ -826,4 +929,287 @@ func TestReconnectReplacesTheAppOnlyOnceSaved(t *testing.T) {
 	_, err = s.gh.RepoToken(ctx, s.currentApp(), "acme/widget")
 	require.NoError(t, err)
 	assert.Equal(t, 2, g.tokens, "a token of the new app, not the old one's kept")
+}
+
+// waitStarts waits for the starts on their way.
+func (s *Service) waitStarts() { s.starts.Wait() }
+
+// startJob dispatches req, a start, and waits until the launcher answered.
+func startJob(t *testing.T, s *Service, req Request) Response {
+	t.Helper()
+	req.Action = ActionStart
+	resp, err := s.Dispatch(context.Background(), req)
+	require.NoError(t, err)
+	s.waitStarts()
+	if resp.Job.Key != "" {
+		resp.Job = *s.job(resp.Job.Key)
+	}
+	return resp
+}
+
+// hangUp is an onStart that closes the connection without an answer.
+func hangUp(w http.ResponseWriter, _ host.JobInfo) {
+	conn, _, err := w.(http.Hijacker).Hijack()
+	if err == nil {
+		_ = conn.Close()
+	}
+}
+
+func (f *fakeLauncher) startCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.starts)
+}
+
+func (f *fakeLauncher) stopped() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.stops)
+}
+
+// dispatchSoon is s.Dispatch(ctx, req), which must answer within seconds.
+func dispatchSoon(t *testing.T, s *Service, ctx context.Context, req Request) (Response, error) {
+	t.Helper()
+	type result struct {
+		resp Response
+		err  error
+	}
+	done := make(chan result, 1)
+	go func() {
+		resp, err := s.Dispatch(ctx, req)
+		done <- result{resp, err}
+	}()
+	select {
+	case r := <-done:
+		return r.resp, r.err
+	case <-time.After(5 * time.Second):
+		t.Fatal("the dispatch didn't answer while the launcher starts the job")
+		return Response{}, nil
+	}
+}
+
+// The hub answers a start once the job is starting on a machine, while
+// the launcher clones and starts it; the start goes on when the request
+// that asked for it ends.
+func TestStartAnswersAtOnce(t *testing.T) {
+	s, _ := newService(t, nil)
+	l := newFakeLauncher(t, "pve-1")
+	l.gate = make(chan struct{})
+	join(t, s, l, "claude")
+	ctx, cancel := context.WithCancel(context.Background())
+	resp, err := dispatchSoon(t, s, ctx, Request{Action: ActionStart, Repo: "acme/widget", Issue: 12})
+	require.NoError(t, err)
+	assert.True(t, resp.Created)
+	assert.Equal(t, JobStarting, resp.Job.State)
+	assert.Equal(t, "pve-1", resp.Job.Host)
+	assert.Equal(t, "claude", resp.Job.Agent)
+	assert.Equal(t, 1, s.Hosts()[0].Active, "the starting job holds its place")
+	cancel()
+
+	// Starting, it is the same start again, and gets no messages yet.
+	again, err := s.Dispatch(context.Background(), Request{Action: ActionStart, Repo: "acme/widget", Issue: 12})
+	require.NoError(t, err)
+	assert.False(t, again.Created)
+	_, err = s.Dispatch(context.Background(), Request{Action: ActionSend, Repo: "acme/widget", Issue: 12, Message: "hi"})
+	assert.True(t, isCode(err, "job_starting"))
+	_, err = s.Dispatch(context.Background(), Request{Action: ActionStart, Repo: "acme/widget", Issue: 12, Agent: "codex"})
+	assert.True(t, isCode(err, "job_starting"))
+
+	close(l.gate)
+	s.waitStarts()
+	job := s.job("acme/widget#12")
+	assert.Equal(t, JobWorking, job.State)
+	assert.Equal(t, "pve-1~acme~widget~12", job.InstanceID)
+	require.Len(t, job.Runs, 1)
+	assert.Equal(t, 1, l.startCount())
+}
+
+// A start whose answer the hub lost (the call failed after the launcher
+// took it, or the hub restarted) is adopted from the machine's next
+// report; one the launcher never had fails once the report is late.
+func TestStartWithoutAnswer(t *testing.T) {
+	s, now := newService(t, nil)
+	l := newFakeLauncher(t, "pve-1")
+	join(t, s, l, "claude")
+	l.onStart = func(w http.ResponseWriter, job host.JobInfo) {
+		l.mu.Lock()
+		l.jobs[job.Key] = job
+		l.mu.Unlock()
+		hangUp(w, job)
+	}
+	_, err := s.Dispatch(context.Background(), Request{Action: ActionStart, DeliveryID: "run-1", Repo: "acme/widget", Issue: 12})
+	require.NoError(t, err)
+	s.waitStarts()
+	assert.Equal(t, JobStarting, s.job("acme/widget#12").State, "no answer isn't a failure")
+
+	// The hub restarts, then hears from the machine.
+	s.Close()
+	s, err = New(s.config)
+	require.NoError(t, err)
+	t.Cleanup(s.Close)
+	join(t, s, l, "claude")
+	job := s.job("acme/widget#12")
+	assert.Equal(t, JobWorking, job.State)
+	assert.Equal(t, "pve-1~acme~widget~12", job.InstanceID)
+	require.Len(t, job.Runs, 1)
+	assert.Equal(t, "pve-1", job.Runs[0].Host)
+	assert.Empty(t, l.stopped(), "adopted, not stopped")
+
+	// A start the launcher never had.
+	l.onStart = hangUp
+	_, err = s.Dispatch(context.Background(), Request{Action: ActionStart, DeliveryID: "run-2", Repo: "acme/widget", Issue: 13})
+	require.NoError(t, err)
+	s.waitStarts()
+	join(t, s, l, "claude")
+	assert.Equal(t, JobStarting, s.job("acme/widget#13").State, "the report may be older than the start")
+	*now = now.Add(3 * time.Minute)
+	join(t, s, l, "claude")
+	job = s.job("acme/widget#13")
+	assert.Equal(t, JobFailed, job.State)
+	assert.Contains(t, job.Error, "didn't start")
+
+	// Its delivery is forgotten: the workflow run again starts it again.
+	l.onStart = nil
+	resp, err := s.Dispatch(context.Background(), Request{Action: ActionStart, DeliveryID: "run-2", Repo: "acme/widget", Issue: 13})
+	require.NoError(t, err)
+	assert.False(t, resp.Duplicate)
+	s.waitStarts()
+	assert.Equal(t, JobWorking, s.job("acme/widget#13").State)
+}
+
+// A launcher's refusal fails the job, and forgets the start's delivery.
+func TestStartRefused(t *testing.T) {
+	g := newFakeGitHub(t)
+	s, _ := newService(t, g)
+	l := newFakeLauncher(t, "pve-1")
+	join(t, s, l, "claude")
+	s.app = &github.App{ID: 42, Slug: "agentapi-hub-x", PEM: g.pem(), Installations: []github.Installation{{ID: 7, Account: "acme"}}}
+	l.onStart = func(w http.ResponseWriter, _ host.JobInfo) {
+		jsonapi.WriteError(w, jsonapi.Errorf(http.StatusInternalServerError, "start_failed", "the clone failed"))
+	}
+	_, err := s.Dispatch(context.Background(), Request{Action: ActionStart, DeliveryID: "run-1", Repo: "acme/widget", Issue: 12})
+	require.NoError(t, err)
+	s.waitStarts()
+	job := s.job("acme/widget#12")
+	assert.Equal(t, JobFailed, job.State)
+	assert.Contains(t, job.Error, "the clone failed")
+	g.mu.Lock()
+	var said string
+	for _, c := range g.comments {
+		said += c
+	}
+	g.mu.Unlock()
+	assert.Contains(t, said, "沒能在 `pve-1` 上開始處理這個 issue")
+
+	l.onStart = nil
+	resp, err := s.Dispatch(context.Background(), Request{Action: ActionStart, DeliveryID: "run-1", Repo: "acme/widget", Issue: 12})
+	require.NoError(t, err)
+	assert.False(t, resp.Duplicate)
+	s.waitStarts()
+	assert.Equal(t, JobWorking, s.job("acme/widget#12").State)
+}
+
+// A job stopped while it starts is stopped on the launcher once the start
+// answers, and a new start waits until then.
+func TestStopWhileStarting(t *testing.T) {
+	s, _ := newService(t, nil)
+	l := newFakeLauncher(t, "pve-1")
+	l.gate = make(chan struct{})
+	join(t, s, l, "claude")
+	_, err := dispatchSoon(t, s, context.Background(), Request{Action: ActionStart, Repo: "acme/widget", Issue: 12})
+	require.NoError(t, err)
+	stopped, err := dispatchSoon(t, s, context.Background(), Request{Action: ActionStop, Repo: "acme/widget", Issue: 12})
+	require.NoError(t, err)
+	assert.Equal(t, JobDone, stopped.Job.State)
+	_, err = s.Dispatch(context.Background(), Request{Action: ActionStart, Repo: "acme/widget", Issue: 12})
+	assert.True(t, isCode(err, "job_busy"))
+
+	close(l.gate)
+	s.waitStarts()
+	assert.Equal(t, []string{"acme~widget~12?"}, l.stopped())
+	assert.Equal(t, JobDone, s.job("acme/widget#12").State)
+}
+
+// A job a machine runs that no start of the hub asked for is stopped
+// there, its worktree kept; one it is still starting, or that failed, is
+// left.
+func TestOrphanJobsStopped(t *testing.T) {
+	s, _ := newService(t, nil)
+	l := newFakeLauncher(t, "pve-1")
+	l.jobs["acme/widget#77"] = host.JobInfo{Key: "acme/widget#77", Agent: "claude", InstanceID: "pve-1~acme~widget~77", State: host.JobRunning}
+	l.jobs["acme/widget#78"] = host.JobInfo{Key: "acme/widget#78", Agent: "claude", InstanceID: "pve-1~acme~widget~78", State: host.JobFailed}
+	l.jobs["acme/widget#79"] = host.JobInfo{Key: "acme/widget#79", Agent: "claude", State: host.JobStarting}
+	join(t, s, l, "claude")
+	require.Eventually(t, func() bool { return len(l.stopped()) == 1 }, 5*time.Second, 10*time.Millisecond)
+	assert.Equal(t, []string{"acme~widget~77?keep_worktree=true&keep_state=true"}, l.stopped())
+	assert.Nil(t, s.job("acme/widget#77"))
+}
+
+// Concurrent starts don't pick the same machine past its room: the pick
+// holds the place.
+func TestConcurrentStartsSpread(t *testing.T) {
+	s, _ := newService(t, nil)
+	gate := make(chan struct{})
+	var launchers []*fakeLauncher
+	for _, name := range []string{"a", "b"} {
+		l := newFakeLauncher(t, name)
+		l.gate, l.maxJobs = gate, 1
+		join(t, s, l, "claude")
+		launchers = append(launchers, l)
+	}
+	var wg sync.WaitGroup
+	errs := make([]error, 3)
+	for i := range 3 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, errs[i] = s.Dispatch(context.Background(), Request{Action: ActionStart, Repo: "acme/widget", Issue: 20 + i})
+		}()
+	}
+	waited := make(chan struct{})
+	go func() { wg.Wait(); close(waited) }()
+	select {
+	case <-waited:
+	case <-time.After(5 * time.Second):
+		close(gate)
+		t.Fatal("the starts didn't answer")
+	}
+	close(gate)
+	s.waitStarts()
+	refused := 0
+	for _, err := range errs {
+		if err != nil {
+			assert.True(t, isCode(err, "no_host"), err)
+			refused++
+		}
+	}
+	assert.Equal(t, 1, refused, "two machines with room for one each")
+	assert.Equal(t, 1, launchers[0].startCount())
+	assert.Equal(t, 1, launchers[1].startCount())
+}
+
+// A machine the hub picked that has no room after all has another take
+// the job; one asked for doesn't.
+func TestCapacityRefusalTriesAnother(t *testing.T) {
+	s, _ := newService(t, nil)
+	full := func(w http.ResponseWriter, _ host.JobInfo) {
+		jsonapi.WriteError(w, jsonapi.Errorf(http.StatusConflict, "capacity", "this machine runs 2 jobs, its most"))
+	}
+	a := newFakeLauncher(t, "a")
+	a.onStart = full
+	b := newFakeLauncher(t, "b")
+	join(t, s, a, "claude")
+	join(t, s, b, "codex")
+
+	job := startJob(t, s, Request{Repo: "acme/widget", Issue: 30}).Job
+	assert.Equal(t, JobWorking, job.State)
+	assert.Equal(t, "b", job.Host)
+	assert.Equal(t, "codex", job.Agent, "b's default agent")
+	assert.Equal(t, 1, a.startCount())
+	assert.Equal(t, "codex", b.starts[0].Agent)
+
+	job = startJob(t, s, Request{Repo: "acme/widget", Issue: 31, Host: "a"}).Job
+	assert.Equal(t, JobFailed, job.State)
+	assert.Equal(t, "a", job.Host)
+	assert.Contains(t, job.Error, "its most")
 }

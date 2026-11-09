@@ -208,6 +208,13 @@ func (s *Service) MountSession(r chi.Router) {
 	r.Get("/api/hosts", func(w http.ResponseWriter, _ *http.Request) {
 		jsonapi.Write(w, http.StatusOK, HostsBody{Hosts: s.Hosts()})
 	})
+	r.Delete("/api/hosts/{name}", func(w http.ResponseWriter, r *http.Request) {
+		if err := s.ForgetHost(chi.URLParam(r, "name")); err != nil {
+			jsonapi.WriteError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
 	r.Get("/api/jobs", func(w http.ResponseWriter, _ *http.Request) {
 		jsonapi.Write(w, http.StatusOK, JobsBody{Jobs: s.Jobs()})
 	})
