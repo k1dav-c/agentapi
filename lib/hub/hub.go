@@ -90,6 +90,9 @@ type Hub struct {
 	clock         quartz.Clock
 	// interfaces lists the machine's network interfaces, for the join URLs.
 	interfaces func() ([]netaddr.Interface, error)
+	// streamWriteTimeout is how long a write to a browser's stream may
+	// take (streamWriteTimeout by default).
+	streamWriteTimeout time.Duration
 
 	ctx      context.Context
 	watchMu  sync.Mutex
@@ -136,6 +139,7 @@ func New(config Config) (*Hub, error) {
 		config: config, logger: config.Logger, store: st, client: client, clock: config.Clock,
 		deliveries: newDeliveries(deliveriesFile, config.Logger, config.Clock.Now()),
 		interfaces: netaddr.Interfaces, watchers: map[string]context.CancelFunc{},
+		streamWriteTimeout: streamWriteTimeout,
 	}, nil
 }
 
@@ -536,6 +540,11 @@ func (h *Hub) forgetStopped(w http.ResponseWriter, r *http.Request) {
 // hubHeartbeat is how often the browser's stream gets a heartbeat.
 const hubHeartbeat = 15 * time.Second
 
+// streamWriteTimeout is how long a browser's stream may take to take an
+// event: one that stops reading ends, rather than keep its handler and
+// subscriptions.
+const streamWriteTimeout = 30 * time.Second
+
 // removedEvent is the removed event of the browser's stream: the instance
 // the hub forgot.
 type removedEvent struct {
@@ -566,8 +575,7 @@ type hubEvents struct {
 // all of them; with the dispatch, its machines and jobs (dispatch) at
 // first and after each change.
 func (h *Hub) streamEvents(w http.ResponseWriter, r *http.Request) {
-	flusher, ok := w.(http.Flusher)
-	if !ok {
+	if _, ok := w.(http.Flusher); !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 		return
 	}
@@ -576,15 +584,24 @@ func (h *Hub) streamEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("X-Accel-Buffering", "no")
+	// Each event gets streamWriteTimeout to reach the browser (in real
+	// time: the connection's clock); between events the stream may idle.
+	rc := http.NewResponseController(w)
 	send := func(event string, data any) bool {
 		encoded, err := json.Marshal(data)
 		if err != nil {
 			return false
 		}
+		deadline := rc.SetWriteDeadline(time.Now().Add(h.streamWriteTimeout)) == nil
 		if err := sse.Write(w, event, encoded); err != nil {
 			return false
 		}
-		flusher.Flush()
+		if err := rc.Flush(); err != nil {
+			return false
+		}
+		if deadline {
+			_ = rc.SetWriteDeadline(time.Time{})
+		}
 		return true
 	}
 	if !send("instances", newInstanceList(instances, h.clock.Now())) {
