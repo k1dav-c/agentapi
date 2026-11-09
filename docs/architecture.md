@@ -673,7 +673,7 @@ The queue is persisted with the conversation, on every change (`storeQueue`, fro
   and starts without stored state. Up to 3.7.2 the three had a key each
   (`settings`, `limit_stop`, `retry_wait`). The first open of such a file
   moves them into `conversation_state` and deletes them, in one
-  transaction. 3.7.3 to 3.15 wrote the old keys next to the object; the
+  transaction. 3.7.3 to 3.15.1 wrote the old keys next to the object; the
   object wins and the open deletes them. AgentAPI 3.7.2 or earlier opened
   on a newer file starts without the stored settings, limit stop and retry
   wait (the conversation is kept), and what it stores there is ignored.
@@ -706,7 +706,7 @@ only when a span starts or ends), are ones an older hub of the envelope ignores.
 settings, `"settings": {"favorites": [...]}` next to `instances` (`hubSettings`, changed through
 `store.updateSettings`); such a hub drops them at its next write, and the `.bak` it made keeps them.
 Hubs of 3.5 to 3.7 kept the favorites at the top level, `"favorites": [...]`, which the hub reads
-when `settings` is missing; 3.8 to 3.15 wrote that copy too, and later hubs don't. A new version
+when `settings` is missing; 3.8 to 3.15.1 wrote that copy too, and later hubs don't. A new version
 instead would make every older hub refuse the file. The delivery
 IDs of the webhook events it took, each until its signature no longer holds, go the same way into
 `instances.deliveries.json`, so a copy replayed after a restart is refused too.

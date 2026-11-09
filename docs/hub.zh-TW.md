@@ -921,7 +921,7 @@ cd ~/.agentapi/hub && jq .instances instances.json > instances.json.new && mv in
 檔案時就把它丟掉。3.0.1 以前的 hub 對 `confirmed_url`（hub 最後一次讀到實例摘要的網址）也一樣，
 3.5 以前的 hub 對我的最愛（和 `instances` 並列的 `"favorites": [...]`）也一樣。改回這種 hub 之後，
 它啟動時留下的 `.bak` 仍保有我的最愛。hub 把我的最愛存在 `"settings": {"favorites": [...]}`；
-沒有 `settings` 時，讀 3.5 到 3.7 的 hub 寫在最上層的 `"favorites"`。3.8 到 3.15 的 hub 也會在最上層
+沒有 `settings` 時，讀 3.5 到 3.7 的 hub 寫在最上層的 `"favorites"`。3.8 到 3.15.1 的 hub 也會在最上層
 多寫一份，現在不寫了，所以用 3.5 到 3.7 的 hub 開這個檔案時沒有我的最愛；它啟動時留下的 `.bak` 仍保有，可以給新版 hub 用。
 
 ## 限制

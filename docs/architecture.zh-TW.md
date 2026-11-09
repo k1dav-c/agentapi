@@ -508,7 +508,7 @@ context 結束，避免不再讀取的 agent 佔住 `s.mu`。
   重設時保留。新增欄位不改版本，較舊的 AgentAPI 讀它認得的部分；會誤導舊版的改變才提高版本，
   遇到更高版本的 AgentAPI 不動這個物件，啟動時不帶保存的狀態。3.7.2 以前這三項各有一個 key
   （`settings`、`limit_stop`、`retry_wait`），第一次開啟這種檔案時，會在同一個交易裡搬進
-  `conversation_state` 並刪除舊 key。3.7.3 到 3.15 會在物件旁一併寫舊 key；以物件為準，開啟時
+  `conversation_state` 並刪除舊 key。3.7.3 到 3.15.1 會在物件旁一併寫舊 key；以物件為準，開啟時
   刪除舊 key。用 3.7.2 以前的 AgentAPI 開啟較新的檔案，會讀不到保存的設定、用量限制停止和重試
   等待（對話仍在），它存下的這些也不會被讀取。
 - 較舊的 AgentAPI 不認得的資料，它重設或移除訊息時也不會清掉。還原時，訊息已不存在或已換成
@@ -531,7 +531,7 @@ hub（`lib/hub`，`persist.go`）把實例保存在 JSON 檔案裡，格式是
 格式的舊 hub 會略過。hub 的設定（和 `instances` 並列的 `"settings": {"favorites": [...]}`，即
 `hubSettings`，經由 `store.updateSettings` 修改）也一樣：這種 hub 下次寫入時會丟掉它，它留下的 `.bak`
 則還保有。3.5 到 3.7 的 hub 把我的最愛放在最上層（`"favorites": [...]`），沒有 `settings` 時 hub 會讀它；
-3.8 到 3.15 也會在最上層多寫一份，之後的版本不再寫。改用新的版本號反而會讓所有舊 hub 拒絕這個檔案。hub 處理過的
+3.8 到 3.15.1 也會在最上層多寫一份，之後的版本不再寫。改用新的版本號反而會讓所有舊 hub 拒絕這個檔案。hub 處理過的
 webhook 事件的 delivery ID 也以同樣方式寫入 `instances.deliveries.json`，保留到各自的簽章失效，所以
 重新啟動後重送的事件同樣會被拒絕。
 

@@ -1056,7 +1056,7 @@ ignores it, and drops it the next time it writes the file. So does a hub before 
 the favorites (`"favorites": [...]` next to `instances`). After going back to such a hub, the
 `.bak` it made as it started still has them. The hub keeps the favorites in `"settings":
 {"favorites": [...]}`, and reads the top-level `"favorites"` of a hub of 3.5 to 3.7 when there are
-no settings. Hubs of 3.8 to 3.15 wrote that copy too; this one doesn't, so a hub of 3.5 to 3.7 run
+no settings. Hubs of 3.8 to 3.15.1 wrote that copy too; this one doesn't, so a hub of 3.5 to 3.7 run
 on its file starts without favorites; the `.bak` it makes as it starts keeps them for this one.
 
 ## Limits
