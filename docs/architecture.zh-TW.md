@@ -78,7 +78,7 @@ flowchart TB
 | `lib/native/demo` | `native-demo`，開發聊天介面用的模擬 agent |
 | `lib/native/nativetest` | 測試用、可以寫腳本控制的假 adapter |
 | `lib/native/procutil` | 子行程：行程群組（process group）與正常關閉流程 |
-| `lib/statedb/` | `--state-db` 的 SQLite 持久保存，以及 `--state-file` 的匯入 |
+| `lib/statedb/` | `--state-db` 的 SQLite 持久保存 |
 | `lib/instanceapi/` | AgentAPI 和同時監看多個 AgentAPI 的客戶端之間的約定：它是誰（`WebhookInstance`，出現在 webhook 事件、摘要和登記檔中，含它的 `AgentType`）、它的摘要、webhook 的外層格式和簽章（`Sign`、`Verify`），以及 hub 對每個實例顯示的狀態（`StateOf`）。它只匯入 `lib/agentstate` 和 `lib/util` |
 | `lib/hub/` | `agentapi hub serve`，建立在 `lib/instanceapi` 和 `lib/httpmw` 上，不經過伺服器：實例、頁面上設定的群組和釘選、每個實例這一列顯示的內容最近一次變動的時間，以及 hub 看到它工作的區段（`store.go`、`work.go`，由 `persist.go` 保存在檔案中）、我的最愛提示（`favorites.go`，`GET`／`PUT /api/favorites`，屬於 hub 的設定，保存在同一個檔案）、傳輸型別的 schema（`schema.go`、`hub-schema.json`，給頁面的型別用）、有簽章的 webhook 接收端（`webhook.go`）、每個實例的摘要串流（`watch.go`）、登入、瀏覽器的事件串流，以及到實例的代理（`hub.go`、`proxy.go`），還有主機怎麼加入（`join.go`：`GET /api/join` 和啟動 log 列出的位址）；使用說明見 [hub.zh-TW.md](hub.zh-TW.md) |
 | `lib/dispatch/` | hub 的 issue 派工，由 `lib/hub` 掛上：有 launcher 回報的主機（`host.*` 事件；主機名稱綁定第一次帶來的 launcher token）、job 與各次 run 的花費（`task.*` 事件）和最近 50 則送給 agent 的訊息（`send`，來自 hub 的頁面、review 或 `/agent` 留言）、`POST /api/dispatch`（`start` 在 job 進入 `starting` 時就回應，hub 在背景呼叫 launcher，並記下這次啟動直到有結果；沒收到回應時從主機下一次回報接回）、GitHub App，保存在 `dispatch.json` 和 `github-app.json`。`Subscribe` 與 `Board` 讓 hub 的串流在每次變動後送出主機和 job（`dispatch` 事件）；規格見 [issue-dispatch.zh-TW.md](specs/issue-dispatch.zh-TW.md) |
@@ -129,12 +129,11 @@ flowchart TB
    webhook 網址那條路由的來源位址。`refreshIP` 在 emitter 的鎖之外透過 `netaddr.Resolver` 查詢這個
    位址（結果保留 30 秒，每次查詢最多等 `netaddr.DialTimeout`）：`instance.started` 之前、設定變更後、
    每次 heartbeat 之前，以及每 30 秒一次。事件只讀取最後查到的位址。agent 類型取自 `--type`；沒有指定時，
-   取自 agent 指令的名稱（`claude`、`codex`、`pi` 或 `native-demo`）。其他 agent 和
-   `--transport pty` 都會被拒絕，並指向最後一個提供 PTY transport 的版本 v2.5.1。
+   取自 agent 指令的名稱（`claude`、`codex`、`pi` 或 `native-demo`）。其他 agent 都會被拒絕，
+   並指向最後一個提供 PTY transport 的版本 v2.5.1。
 2. `nativeFactory` 依 agent 類型建立 `native.Factory`（Claude Code、Codex、Pi 或
    `native-demo`）。每個 adapter 會先檢查 agent 的參數，拒絕和它的協定衝突的參數。
-3. 使用 `--state-db`（或 `--state-file` 旁的資料庫）時，`statedb.Open` 會開啟檔案、取得它的獨占鎖，
-   並執行資料表結構的 migration；資料庫還沒有對話時，會匯入 `--state-file`。
+3. 使用 `--state-db` 時，`statedb.Open` 會開啟檔案、取得它的獨占鎖，並執行資料表結構的 migration。
 4. `httpapi.NewServer` 建立 emitter、還原保存的狀態（檔案若屬於其他 agent 類型或
    工作目錄就拒絕使用）、建立對話、註冊路由，並啟動對話、佇列迴圈與 webhook 傳送器。`Start` 開始監聽後寫入登記檔（除非 `--registry=false`），
    再開始服務。
@@ -508,10 +507,10 @@ context 結束，避免不再讀取的 agent 佔住 `s.mu`。
   JSON 物件：`{"version": 1, "settings": {...}, "limit_stop": {...}, "retry_wait": {...}}`；
   重設時保留。新增欄位不改版本，較舊的 AgentAPI 讀它認得的部分；會誤導舊版的改變才提高版本，
   遇到更高版本的 AgentAPI 不動這個物件，啟動時不帶保存的狀態。3.7.2 以前這三項各有一個 key
-  （`settings`、`limit_stop`、`retry_wait`），第一次開啟這種檔案時，會在同一個交易裡搬進
-  `conversation_state` 並刪除舊 key。3.7.3 到 3.15.1 會在物件旁一併寫舊 key；以物件為準，開啟時
-  刪除舊 key。用 3.7.2 以前的 AgentAPI 開啟較新的檔案，會讀不到保存的設定、用量限制停止和重試
-  等待（對話仍在），它存下的這些也不會被讀取。
+  （`settings`、`limit_stop`、`retry_wait`），AgentAPI 3.7.3 到 3.16 第一次開啟時會把它們搬進物件；
+  AgentAPI 4 不讀這些 key，所以只被 3.7.2 以前版本開啟過的檔案，啟動時不會帶保存的設定、用量限制
+  停止和重試等待（對話仍在）。用 3.7.2 以前的 AgentAPI 開啟較新的檔案也一樣讀不到，它存下的這些
+  也不會被讀取。
 - 較舊的 AgentAPI 不認得的資料，它重設或移除訊息時也不會清掉。還原時，訊息已不存在或已換成
   另一則的任務會被丟棄；訊息資料列無法讀取的任務也一樣。
 - 上傳的檔案放在 `<state-db>.uploads`，與資料庫一起保留（沒有狀態資料庫時放在暫存目錄，停止時
@@ -536,10 +535,8 @@ hub（`lib/hub`，`persist.go`）把實例保存在 JSON 檔案裡，格式是
 webhook 事件的 delivery ID 也以同樣方式寫入 `instances.deliveries.json`，保留到各自的簽章失效，所以
 重新啟動後重送的事件同樣會被拒絕。
 
-`--state-file` 是 1.0 之前 PTY transport 的保存機制（關閉時寫出 JSON），已棄用：`cmd/server`
-會把它一次性匯入旁邊的狀態資料庫（`statedb.ImportStateFile`，只匯入空的資料庫），之後由資料庫
-保存對話；agent 會在它下方開始新的工作階段。SIGUSR1
-會把排隊中的變更寫入狀態資料庫。
+SIGUSR1 會把排隊中的變更寫入狀態資料庫。`--state-file` 是 1.0 之前 PTY transport 的保存機制
+（關閉時寫出 JSON），AgentAPI 3 會把它匯入旁邊的狀態資料庫；AgentAPI 4 已移除。
 
 ## 重新啟動與更新
 

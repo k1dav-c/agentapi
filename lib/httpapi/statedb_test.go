@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/agentapi/lib/agentstate"
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/convstate"
 	"github.com/coder/agentapi/lib/httpapi"
 	"github.com/coder/agentapi/lib/instanceapi"
@@ -407,28 +408,28 @@ func TestStateDB_RestoresSettings(t *testing.T) {
 	assert.Equal(t, agentstate.Settings{PermissionMode: agentstate.PermissionModeAsk, Model: "plain"}, *status.Settings)
 }
 
-// A conversation AgentAPI 2's PTY transport kept (here imported from a
-// --state-file) comes back: the agent starts a new session below it, and
-// the database says native from then on. One of another transport, or of
-// another agent, is refused.
+// A conversation AgentAPI 2's PTY transport kept comes back: the agent
+// starts a new session below it, and the database says native from then
+// on. One of another transport, or of another agent, is refused.
 func TestStateDB_ContinuesAPTYConversation(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path, cwd := filepath.Join(dir, "state.db"), "/work"
-	file := filepath.Join(dir, "state.json")
-	require.NoError(t, os.WriteFile(file, []byte(`{"version":1,"messages":[
-		{"id":0,"message":"Fix the bug","role":"user","time":"2026-10-20T10:00:01Z"},
-		{"id":1,"message":"Fixed.","role":"agent","time":"2026-10-20T10:00:02Z"}
-	]}`), 0o600))
 	db, err := statedb.Open(path, nil)
 	require.NoError(t, err)
-	n, err := db.ImportStateFile(file, map[string]string{
-		statedb.MetaAgentType: string(instanceapi.AgentTypeClaude),
-		statedb.MetaTransport: "pty",
-		statedb.MetaCWD:       cwd,
-	})
+	_, err = db.Load()
 	require.NoError(t, err)
-	require.Equal(t, 2, n)
+	db.SetMeta(statedb.MetaAgentType, string(instanceapi.AgentTypeClaude))
+	db.SetMeta(statedb.MetaTransport, "pty")
+	db.SetMeta(statedb.MetaCWD, cwd)
+	for i, m := range []conv.Message{
+		{Message: "Fix the bug", Role: conv.RoleUser, Time: time.Date(2026, 10, 20, 10, 0, 1, 0, time.UTC)},
+		{Message: "Fixed.", Role: conv.RoleAgent, Time: time.Date(2026, 10, 20, 10, 0, 2, 0, time.UTC)},
+	} {
+		m.Id = i
+		db.PutMessage(m, uint64(i+1))
+	}
+	db.SetSeq("pty-epoch", 2)
 	require.NoError(t, db.Close())
 
 	ns, srv, db, err := persistentServer(t, path, cwd)

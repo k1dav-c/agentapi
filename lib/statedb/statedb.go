@@ -452,9 +452,6 @@ func (d *DB) Load() (Snapshot, error) {
 	if err := d.loadMeta(&snap); err != nil {
 		return snap, err
 	}
-	if err := d.migrateState(&snap); err != nil {
-		return snap, err
-	}
 	if err := scanRows(d, "messages", "SELECT seq, data FROM messages ORDER BY id", func(m conv.Message, seq uint64) {
 		snap.Messages = append(snap.Messages, Message{Message: m, Seq: seq})
 	}); err != nil {

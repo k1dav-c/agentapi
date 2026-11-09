@@ -105,12 +105,12 @@ func TestRestartRefusedByValidate(t *testing.T) {
 	next := filepath.Join(scratch, "bin", "agentapi.new")
 	build(ctx, t, root, next, "1.0.0-b")
 	require.NoError(t, os.Rename(next, bin))
-	require.NoError(t, os.WriteFile(config, []byte("transport: bogus\n"), 0o600))
+	require.NoError(t, os.WriteFile(config, []byte("retry-delays: bogus\n"), 0o600))
 
 	const refused = "Received SIGUSR2, but can't restart in place; still serving"
 	require.NoError(t, server.Process.Signal(syscall.SIGUSR2))
 	require.Eventually(t, func() bool { return strings.Contains(logs.String(), refused) }, time.Minute, 50*time.Millisecond)
-	assert.Contains(t, logs.String(), `wouldn't start: unknown --transport \"bogus\": AgentAPI 3 drives every agent natively`)
+	assert.Contains(t, logs.String(), `wouldn't start: invalid --retry-delays`)
 	assert.Equal(t, before.ServerID, serverID(), "the same server serves on")
 	entries, err := registry.List(reg)
 	require.NoError(t, err)

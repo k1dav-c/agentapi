@@ -1,7 +1,6 @@
 package statedb
 
 import (
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,21 +26,6 @@ type storedState struct {
 	agentstate.StoredState
 }
 
-// Up to AgentAPI 3.7.2 each part of the stored state had a key of its own:
-// the settings chosen (JSON, always set), the limit stop and the retry wait
-// (JSON, empty for none). The first open of such a database moves them into
-// MetaState and deletes them (see migrateState). AgentAPI 3.7.3 to 3.15
-// wrote them next to MetaState too; MetaState wins, and the open deletes
-// them.
-const (
-	legacySettings  = "settings"
-	legacyLimitStop = "limit_stop"
-	legacyRetryWait = "retry_wait"
-)
-
-// legacyKeys are the keys MetaState replaces.
-var legacyKeys = []string{legacySettings, legacyLimitStop, legacyRetryWait}
-
 // SetStoredState stores the part of the conversation's state that survives
 // a restart, which replaces what was stored. It may keep state.
 func (d *DB) SetStoredState(state agentstate.StoredState) {
@@ -60,12 +44,14 @@ func encodeStoredState(state agentstate.StoredState) (string, error) {
 }
 
 // StoredState returns the stored part of the conversation's state. A part
-// that can't be read is left out, and named in the error.
+// that can't be read is left out, and named in the error. A database
+// without MetaState has none: AgentAPI 3.7.2 and earlier kept each part
+// under a key of its own, which isn't read anymore.
 func (s Snapshot) StoredState() (agentstate.StoredState, error) {
 	if data, ok := s.Meta[MetaState]; ok {
 		return decodeStoredState(data)
 	}
-	return s.legacyState()
+	return agentstate.StoredState{}, nil
 }
 
 // decodeStoredState decodes a MetaState value.
@@ -78,84 +64,4 @@ func decodeStoredState(data string) (agentstate.StoredState, error) {
 		return agentstate.StoredState{}, fmt.Errorf("%w: version %d, this AgentAPI knows up to %d", errNewerState, stored.Version, storedStateVersion)
 	}
 	return stored.StoredState, nil
-}
-
-// legacyState reads the old keys.
-func (s Snapshot) legacyState() (agentstate.StoredState, error) {
-	var state agentstate.StoredState
-	var errs []error
-	if data := s.Meta[legacySettings]; data != "" {
-		if err := json.Unmarshal([]byte(data), &state.Settings); err != nil {
-			state.Settings = agentstate.Settings{}
-			errs = append(errs, fmt.Errorf("decode the stored settings: %w", err))
-		}
-	}
-	var err error
-	if state.LimitStop, err = legacyJSON[agentstate.LimitStop](s, legacyLimitStop, "limit stop"); err != nil {
-		errs = append(errs, err)
-	}
-	if state.RetryWait, err = legacyJSON[agentstate.RetryWait](s, legacyRetryWait, "retry wait"); err != nil {
-		errs = append(errs, err)
-	}
-	return state, errors.Join(errs...)
-}
-
-// legacyJSON decodes the JSON stored under key, or returns nil when there
-// is none. what names it in errors.
-func legacyJSON[T any](s Snapshot, key, what string) (*T, error) {
-	data := s.Meta[key]
-	if data == "" {
-		return nil, nil
-	}
-	var v T
-	if err := json.Unmarshal([]byte(data), &v); err != nil {
-		return nil, fmt.Errorf("decode the stored %s: %w", what, err)
-	}
-	return &v, nil
-}
-
-// migrateState deletes the old keys, after it writes MetaState from them
-// when it is missing (a database of AgentAPI 3.7.2 or earlier), in one
-// transaction, and updates snap to match. Load calls it.
-func (d *DB) migrateState(snap *Snapshot) error {
-	var present []string
-	for _, key := range legacyKeys {
-		if _, ok := snap.Meta[key]; ok {
-			present = append(present, key)
-		}
-	}
-	if len(present) == 0 {
-		return nil
-	}
-	data, write := "", false
-	if _, ok := snap.Meta[MetaState]; !ok {
-		state, err := snap.legacyState()
-		if err != nil {
-			d.logger.Warn("Moving the readable part of the stored conversation state", "error", err)
-		}
-		if data, err = encodeStoredState(state); err != nil {
-			return fmt.Errorf("encode the conversation state: %w", err)
-		}
-		write = true
-	}
-	var ops []op
-	if write {
-		ops = append(ops, op{run: metaWrite(MetaState, data)})
-	}
-	for _, key := range present {
-		ops = append(ops, op{run: func(tx *sql.Tx) error {
-			_, err := tx.Exec("DELETE FROM meta WHERE key = ?", key)
-			return err
-		}})
-	}
-	if err := d.apply(ops); err != nil {
-		return fmt.Errorf("store the conversation state: %w", err)
-	}
-	if write {
-		snap.Meta[MetaState] = data
-	}
-	for _, key := range present {
-		delete(snap.Meta, key)
-	}
-	return nil
 }

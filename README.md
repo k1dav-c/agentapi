@@ -211,8 +211,7 @@ agentapi server --state-db ~/.agentapi/myproject.db -- codex
 agentapi server --type pi -- ./my-pi-wrapper
 ```
 
-Any other agent, or `--transport pty`, stops AgentAPI 3 at startup with an error that names
-v2.5.1. To run Aider, Goose, Gemini CLI, Amp, Cursor CLI, Auggie, Amazon Q, Opencode, Copilot, Kimi
+Any other agent stops AgentAPI at startup with an error that names v2.5.1. To run Aider, Goose, Gemini CLI, Amp, Cursor CLI, Auggie, Amazon Q, Opencode, Copilot, Kimi
 Code or another terminal program, use AgentAPI v2.5.1, the last release with the PTY transport:
 download its binary from the [v2.5.1 release](https://github.com/k1dav-c/agentapi/releases/tag/v2.5.1)
 and keep it. `agentapi update` only installs the latest release. An AgentAPI 2 that runs such an
@@ -220,9 +219,9 @@ agent with `--allow-update` checks the new program before it restarts into it, r
 and keeps serving; but the update already replaced the program on disk, so put v2.5.1 back before
 that AgentAPI restarts some other way.
 
-`--transport` is deprecated and takes only `native`. The experimental ACP transport
-(`--transport acp`, `--experimental-acp`) was removed earlier; those flags stop AgentAPI with an
-error.
+AgentAPI 4 has no `--transport` flag: drop it from command lines and config files. The
+experimental ACP transport (`--experimental-acp`) was removed earlier; that flag stops AgentAPI with
+an error.
 
 ## Chat UI
 
@@ -845,13 +844,12 @@ state-db: ~/.agentapi/state/{port}.db
 - The time a client last showed the conversation (`POST /tasks/seen`) is
   kept, so a task that ended unseen is still [unread](#watching-many-instances)
   after a restart. A database written before 1.2 treats its tasks as seen.
-- `--state-file <file>`, the PTY transport's persistence before v1.0.0, is
-  deprecated. The conversation it holds is imported the first time into a
-  state database next to it (the same name with `.db`, or `--state-db`), which
-  keeps the conversation from then on, and the agent starts a new session
-  below it; the file isn't written anymore.
-  `--load-state=false` skips the import, and `--save-state` has no effect.
-  SIGUSR1 writes what the state database hasn't written yet.
+- SIGUSR1 writes what the state database hasn't written yet.
+- AgentAPI 4 no longer reads `--state-file`, the PTY transport's persistence
+  before v1.0.0. AgentAPI 3 imported such a file into a state database next to
+  it (the same name with `.db`) the first time it started with it: start with
+  `--state-db` on that database. To import a file that never was, run AgentAPI
+  3.16 once with `--state-file`.
 - [`agentapi restart`](#agentapi-restart) (SIGUSR2) and
   `agentapi update --restart` keep the conversation, and the agent's
   session, of an AgentAPI with `--state-db`. Without it they keep the
@@ -1847,14 +1845,11 @@ state-db: ~/.agentapi/state/{port}.db
 | `-t`, `--type` | from the agent command | Agent type: `claude`, `codex`, `pi` or `native-demo`; see [Agents](#agents) |
 | `-p`, `--port` | `3284` | Port to listen on |
 | `--bind` | all interfaces | Address to listen on; see [Bind address](#bind-address) |
-| `--transport` | `native` | Deprecated: `native` is the only transport; `pty` stops AgentAPI with an error |
 | `--state-db` | | SQLite file that keeps the conversation and resumes the agent's session; `{port}` and `{hostname}` are filled in; see [Persistent sessions](#persistent-sessions) |
 | `--terminal` | `true` | Shell in the agent's working directory for the chat; see [Terminal](#terminal) |
 | `--auto-continue` | `false` | Continue a turn stopped by a usage limit once the limit resets; see [Usage limits](#usage-limits) |
 | `--retry-delays` | `30s,1m,2m,5m*12` | Waits before a turn that failed on a transient API error is tried again, one per retry (`5m*12`: twelve times); `off` turns retries off; see [Transient API errors](#transient-api-errors) |
 | `--prices` | | JSON file of model prices per million tokens, which add to or replace the built-in ones; see [Session costs](#session-costs) |
-| `-s`, `--state-file` | | Deprecated: the PTY transport's former persistence, imported once into a state database next to it (`--state-db` names another) |
-| `--load-state`, `--save-state` | | Deprecated: `--load-state=false` skips the import; `--save-state` has no effect |
 | `-I`, `--initial-prompt` | | First message for the agent; read from stdin when piped |
 | `-W`, `--term-width`, `-H`, `--term-height` | | Deprecated and without effect: the PTY transport's terminal size |
 | `--api-token` | off | Require a Bearer token; without a value, a random token is generated and printed; see [API token authentication](#api-token-authentication) |
@@ -1864,7 +1859,7 @@ state-db: ~/.agentapi/state/{port}.db
 | `--webhook-events` | `run.status_changed` | Events to send: types, groups (`task.*`) or `*` |
 | `--webhook-secret` | | Secret that signs every delivery (`X-AgentAPI-Signature-256`) |
 | `--webhook-heartbeat` | `60s` | How often `instance.heartbeat` is sent; `0` turns it off |
-| `--instance-id` | `<hostname>:<port>` | Identifies this AgentAPI in `GET /summary` and every webhook event; see [Watching many instances](#watching-many-instances) (`--webhook-instance-id` is its deprecated old name) |
+| `--instance-id` | `<hostname>:<port>` | Identifies this AgentAPI in `GET /summary` and every webhook event; see [Watching many instances](#watching-many-instances) |
 | `--name` | the working directory's name | What clients that watch many AgentAPIs call this one |
 | `--registry` | `true` | Keep an entry in the registry directory while serving; see [Watching many instances](#watching-many-instances) |
 | `--registry-dir` | `~/.agentapi/instances` | Registry directory |

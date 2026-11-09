@@ -36,7 +36,6 @@ func TestLoadServerOptions(t *testing.T) {
 				assert.Equal(t, instanceapi.AgentTypeClaude, opts.agentType)
 				assert.Equal(t, "claude", opts.agent)
 				assert.Equal(t, []string{"--model", "opus"}, opts.agentArgs)
-				assert.Empty(t, opts.stateFile)
 				assert.Empty(t, opts.stateDB)
 			},
 		},
@@ -52,33 +51,11 @@ func TestLoadServerOptions(t *testing.T) {
 				}
 			},
 		},
-		"--transport native, deprecated, and --term-width, without effect, are accepted": {
-			values: map[string]any{FlagTransport: "native", FlagTermWidth: uint16(5)},
-			check:  func(*testing.T, serverOptions) {},
-		},
 		"--type names a wrapper's agent": {
 			args:   []string{"my-wrapper"},
 			values: map[string]any{FlagType: "codex"},
 			check: func(t *testing.T, opts serverOptions) {
 				assert.Equal(t, instanceapi.AgentTypeCodex, opts.agentType)
-			},
-		},
-		"a state file is imported into a state DB next to it": {
-			values: map[string]any{FlagStateFile: "/tmp/state.json"},
-			check: func(t *testing.T, opts serverOptions) {
-				assert.Equal(t, "/tmp/state.json", opts.stateFile)
-				assert.True(t, opts.importState)
-				assert.Equal(t, "/tmp/state.db", opts.stateDB)
-			},
-		},
-		"--load-state=false skips the import; --state-db names the database": {
-			values: map[string]any{FlagStateFile: "/tmp/state.db", FlagLoadState: false, FlagSaveState: true},
-			check: func(t *testing.T, opts serverOptions) {
-				assert.False(t, opts.importState)
-				assert.Equal(t, "/tmp/state.db.sqlite", opts.stateDB, "not the state file itself")
-				named, err := loadServerOptions(flagsWith(map[string]any{FlagStateFile: "/tmp/s.json", FlagStateDB: "/tmp/agent.db"}), []string{"claude"})
-				require.NoError(t, err)
-				assert.Equal(t, "/tmp/agent.db", named.stateDB)
 			},
 		},
 		"retries wait the default delays": {
@@ -151,10 +128,6 @@ func TestLoadServerOptions(t *testing.T) {
 				other, err := loadServerOptions(flagsWith(map[string]any{FlagStateDB: "~/.agentapi/state/{port}.db", FlagPort: 3285}), []string{"codex"})
 				require.NoError(t, err)
 				assert.Equal(t, filepath.Join(home, ".agentapi", "state", "3285.db"), other.stateDB, "another port, another file")
-				file, err := loadServerOptions(flagsWith(map[string]any{FlagStateFile: "~/state.json"}), []string{"claude"})
-				require.NoError(t, err)
-				assert.Equal(t, filepath.Join(home, "state.json"), file.stateFile)
-				assert.Equal(t, filepath.Join(home, "state.db"), file.stateDB)
 			},
 		},
 		"--public-url fills in {port}": {
@@ -163,14 +136,11 @@ func TestLoadServerOptions(t *testing.T) {
 				assert.Equal(t, "http://dev-1.vpn:3290", opts.webhook.PublicURL)
 			},
 		},
-		"--instance-id and --name name the instance; --webhook-instance-id is the old name": {
-			values: map[string]any{FlagInstanceID: "build-box", FlagName: "API", FlagWebhookInstanceID: "old"},
+		"--instance-id and --name name the instance": {
+			values: map[string]any{FlagInstanceID: "build-box", FlagName: "API"},
 			check: func(t *testing.T, opts serverOptions) {
 				assert.Equal(t, "build-box", opts.webhook.InstanceID)
 				assert.Equal(t, "API", opts.name)
-				old, err := loadServerOptions(flagsWith(map[string]any{FlagWebhookInstanceID: "old"}), []string{"claude"})
-				require.NoError(t, err)
-				assert.Equal(t, "old", old.webhook.InstanceID)
 			},
 		},
 	} {
@@ -195,15 +165,10 @@ func TestLoadServerOptionsRefuses(t *testing.T) {
 	}{
 		"an unknown agent type":          {map[string]any{FlagType: "nope"}, "AgentAPI 3 runs Claude Code, Codex and Pi natively, not nope"},
 		"an agent of AgentAPI 2":         {map[string]any{FlagType: "aider"}, "for other agents, use AgentAPI v2.5.1"},
-		"PTY, removed":                   {map[string]any{FlagTransport: "pty"}, "AgentAPI 3 has no PTY transport: it runs Claude Code, Codex and Pi natively; drop --transport pty (or AGENTAPI_TRANSPORT=pty), or use AgentAPI v2.5.1"},
-		"--load-state without a file":    {map[string]any{FlagLoadState: true}, "--load-state requires --state-file to be set"},
-		"--save-state without a file":    {map[string]any{FlagSaveState: true}, "--save-state requires --state-file to be set"},
 		"a retry delay that isn't one":   {map[string]any{FlagRetryDelays: "30s,soon"}, `invalid --retry-delays: time: invalid duration "soon"`},
 		"a retry delay of no time":       {map[string]any{FlagRetryDelays: "-1s"}, "invalid --retry-delays: -1s: a delay is longer than 0"},
 		"a retry delay repeated no time": {map[string]any{FlagRetryDelays: "5m*0"}, "invalid --retry-delays: 5m*0: repeat a delay 1 or more times"},
 		"too many retries":               {map[string]any{FlagRetryDelays: "30s,5m*100"}, "invalid --retry-delays: more than 100 retries"},
-		"an unknown transport":           {map[string]any{FlagTransport: "ssh"}, `unknown --transport "ssh": AgentAPI 3 drives every agent natively`},
-		"ACP, removed":                   {map[string]any{FlagTransport: "acp"}, "the experimental ACP transport was removed"},
 		"--experimental-acp, removed":    {map[string]any{FlagExperimentalACP: true}, "the experimental ACP transport was removed"},
 		"a bind address with a port":     {map[string]any{FlagBind: "127.0.0.1:3284"}, "invalid --bind: '127.0.0.1:3284' must not include a port; use --port"},
 		"a bind address that isn't one":  {map[string]any{FlagBind: "not a host"}, "invalid --bind"},
