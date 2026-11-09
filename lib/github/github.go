@@ -359,6 +359,18 @@ type Repo struct {
 	DefaultBranch string `json:"default_branch"`
 	Private       bool   `json:"private"`
 	HTMLURL       string `json:"html_url"`
+	// PushedAt and UpdatedAt are when it was last pushed to, and changed
+	// (an issue, a setting): how recent it is.
+	PushedAt  time.Time `json:"pushed_at,omitzero"`
+	UpdatedAt time.Time `json:"updated_at,omitzero"`
+}
+
+// Latest is when the repository was last pushed to or changed.
+func (r Repo) Latest() time.Time {
+	if r.PushedAt.After(r.UpdatedAt) {
+		return r.PushedAt
+	}
+	return r.UpdatedAt
 }
 
 // As calls the API with an installation token.

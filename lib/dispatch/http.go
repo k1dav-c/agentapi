@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -30,7 +31,11 @@ import (
 // client with the dispatch token.
 func (s *Service) MountDispatch(r chi.Router, signedIn func(*http.Request) bool) {
 	r.Post("/api/dispatch", func(w http.ResponseWriter, r *http.Request) {
-		if !signedIn(r) && !s.dispatchToken(r) {
+		// A client with the dispatch token is the workflow's runner, even
+		// on a hub without sign-in.
+		token := s.dispatchToken(r)
+		browser := !token && signedIn(r)
+		if !browser && !token {
 			jsonapi.WriteError(w, errorf(http.StatusUnauthorized, "unauthorized", "sign in to the hub, or send the dispatch token"))
 			return
 		}
@@ -38,7 +43,11 @@ func (s *Service) MountDispatch(r chi.Router, signedIn func(*http.Request) bool)
 		if !jsonapi.Read(w, r, &req) {
 			return
 		}
-		resp, err := s.Dispatch(r.Context(), req)
+		ctx := r.Context()
+		if browser {
+			ctx = FromHub(ctx)
+		}
+		resp, err := s.Dispatch(ctx, req)
 		if err != nil {
 			jsonapi.WriteError(w, err)
 			return
@@ -200,6 +209,7 @@ func (s *Service) listRepos(w http.ResponseWriter, r *http.Request) {
 		}
 		repos = append(repos, list...)
 	}
+	sortRepos(repos)
 	jsonapi.Write(w, http.StatusOK, ReposBody{Repos: repos})
 }
 
@@ -223,6 +233,12 @@ func (s *Service) listIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonapi.Write(w, http.StatusOK, IssuesBody{Issues: issues})
+}
+
+// sortRepos puts the repositories pushed to or changed latest first: the
+// page reads the issues of the first ones.
+func sortRepos(repos []github.Repo) {
+	slices.SortStableFunc(repos, func(a, b github.Repo) int { return b.Latest().Compare(a.Latest()) })
 }
 
 // CreateIssueRequest is POST /api/github/issues.
