@@ -249,7 +249,7 @@ The handlers are grouped by file:
 | `restart.go`, `statedb.go` | Restarts (`beginRestart`); restoring and persisting the state |
 | `update.go` | Updating AgentAPI through its API (`POST /update`, `DELETE /update`, the `updater`) and the summary's `update`; see [Restarts and updates](#restarts-and-updates) |
 | `models.go` | The API's types |
-| `uploads.go` | Uploaded files (`uploadAPI`, which serves `POST /upload` from the operation's middleware: huma v2.32 changes the shared operation on every multipart request) |
+| `uploads.go` | Uploaded files (`uploadAPI`: `POST /upload`, and the images `GET /uploads` serves) |
 
 Chi routes outside huma serve the chat (`/chat/*`, with `/` redirecting there), uploaded images
 (`/uploads/{checksum}/{name}`) and workspace images (`/files/image`).

@@ -205,7 +205,7 @@ flowchart TB
 | `restart.go`、`statedb.go` | 重新啟動（`beginRestart`）；還原與保存狀態 |
 | `update.go` | 透過 API 更新 AgentAPI（`POST /update`、`DELETE /update`、`updater`）與摘要的 `update`；見[重新啟動與更新](#重新啟動與更新) |
 | `models.go` | API 的型別 |
-| `uploads.go` | 上傳的檔案（`uploadAPI`，它從操作的 middleware 處理 `POST /upload`：huma v2.32 每次處理 multipart 請求都會改動共用的操作） |
+| `uploads.go` | 上傳的檔案（`uploadAPI`：`POST /upload`，以及 `GET /uploads` 送出的圖片） |
 
 huma 以外的 chi 路由提供聊天介面（`/chat/*`，`/` 會重新導向到這裡）、上傳圖片
 （`/uploads/{checksum}/{name}`）與工作目錄圖片（`/files/image`）。

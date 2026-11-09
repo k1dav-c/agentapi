@@ -1189,8 +1189,8 @@ The [HTTP API reference](#http-api-reference) lists all the endpoints.
   status until the agent is back.
 - `GET /tasks` returns the conversation's [tasks](#tasks).
 - `GET /title` returns the session's human-readable title.
-- `POST /upload` stores a file (up to 100 MB; a body over 101 MiB is refused
-  before it is read) and returns its path, which a message references as
+- `POST /upload` stores a file (up to 100 MB, else 400; a body over 101 MiB
+  gets 413 when that much is read) and returns its path, which a message references as
   `@"<path>"`. The file keeps the base name it was sent with, without control
   characters and cut to 255 bytes; a name of `.` or `..` gets 400. A file
   the conversation doesn't refer to is removed after 7 days.
