@@ -151,7 +151,7 @@ export const hubEventNames = ["instances", "instance", "removed", "favorites", "
 // instances, also has the hub's own version (hubVersion), which the page
 // compares the instances' with; favorites has all of them, on every change
 // (a hub before 3.5 sends none); dispatch, the issue dispatch's machines
-// and jobs, whole, on every change (a hub before 3.12 sends none).
+// and jobs, whole, on every change.
 export type HubEvent =
   | {type: "instances"; instances: HubInstance[]; hubVersion: string}
   | {type: "instance"; instance: HubInstance}

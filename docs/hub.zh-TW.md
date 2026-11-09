@@ -557,7 +557,7 @@ agent。最後依區塊列出 issue：
 
 每張卡片顯示 issue 編號、狀態和標題，負責的 agent 與主機、PR、各次 run 的花費與次數，以及這個狀態
 下該做的那件事：**Assign**、**Answer**、**Review #21**、**Retry**。卡片換狀態時，會移到新的區塊。主機
-和 job 有變動時，hub 會透過串流推給頁面；3.12 以前的 hub 不會推送，這時頁面每 10 秒自己讀一次。
+和 job 有變動時，hub 會透過串流推給頁面。你在頁面上做的操作，hub 一回應就會顯示，之後再以串流為準。
 
 上方的 repo 選單決定看板的範圍。**Recent repositories** 顯示 hub 的 GitHub App 看得到的 repo 中，最近
 有 push 或變動的 20 個的 open issue，以及所有 repo 的 job。選一個 repo 就只看它的 issue；超過八個時

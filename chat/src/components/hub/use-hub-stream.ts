@@ -21,7 +21,7 @@ export function useHubStream(root: string) {
   const [hubVersion, setHubVersion] = useState("");
   const [favorites, setFavorites] = useState<Favorite[] | undefined>(undefined);
   // The issue dispatch's machines and jobs; undefined until the hub sends
-  // them, and from a hub before 3.12, which doesn't.
+  // them.
   const [dispatch, setDispatch] = useState<DispatchBoard | undefined>(undefined);
   // The last session check after the stream failed found the hub
   // unreachable.

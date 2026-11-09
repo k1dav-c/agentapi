@@ -99,14 +99,39 @@ export function prNumber(url: string | undefined): number | undefined {
   return match ? Number(match[1]) : undefined;
 }
 
+// caughtUp reports whether the stream's job is as new as an answer to an
+// action on it (updated_at), or newer: the answer has done its part.
+function caughtUp(streamed: DispatchJob | undefined, answer: DispatchJob): boolean {
+  if (!streamed) return false;
+  const at = Date.parse(answer.updated_at);
+  return Number.isNaN(at) || Date.parse(streamed.updated_at) >= at;
+}
+
+// pendingAnswers are the answers the hub gave the page's actions (by job
+// key) that the stream's jobs haven't caught up with: the same map when
+// none has.
+export function pendingAnswers(answers: ReadonlyMap<string, DispatchJob>, streamed: DispatchJob[]): ReadonlyMap<string, DispatchJob> {
+  const byKey = new Map(streamed.map((job) => [job.key, job]));
+  const left = [...answers].filter(([key, answer]) => !caughtUp(byKey.get(key), answer));
+  return left.length === answers.size ? answers : new Map(left);
+}
+
+// withAnswers are the stream's jobs with the answers it hasn't caught up
+// with in their place, and those it hasn't sent yet first: an action shows
+// on the board as the hub answers it, and the stream takes over from there.
+export function withAnswers(streamed: DispatchJob[], answers: ReadonlyMap<string, DispatchJob>): DispatchJob[] {
+  const pending = pendingAnswers(answers, streamed);
+  if (pending.size === 0) return streamed;
+  const keys = new Set(streamed.map((job) => job.key));
+  return [...[...pending.values()].filter((job) => !keys.has(job.key)), ...streamed.map((job) => pending.get(job.key) ?? job)];
+}
+
 export function createDispatchAPI(root: string, fetcher: Fetcher = (url, init) => fetch(url, init)) {
   const fetchHub = hubCall(root, fetcher);
   const call = async <T>(path: string, init: RequestInit = {}): Promise<T> => (await (await fetchHub(path, init)).json()) as T;
   const post = (body: unknown): RequestInit => ({method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
   return {
     github: () => call<GitHubStatus>("/api/github"),
-    hosts: async () => (await call<HubWire["DispatchHostsBody"]>("/api/hosts")).hosts ?? [],
-    jobs: async () => (await call<HubWire["DispatchJobsBody"]>("/api/jobs")).jobs ?? [],
     repos: async () => (await call<HubWire["DispatchReposBody"]>("/api/github/repos")).repos ?? [],
     issues: async (repo: string) => (await call<HubWire["DispatchIssuesBody"]>(`/api/github/issues?repo=${encodeURIComponent(repo)}`)).issues ?? [],
     dispatch: (request: DispatchRequest) => call<DispatchResponse>("/api/dispatch", post(request)),

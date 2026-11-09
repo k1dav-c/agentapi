@@ -84,8 +84,8 @@ export function IssuesView({
 }: {
   root: string;
   instances: ReadonlyMap<string, HubInstance>;
-  // live is the machines and jobs from the hub's stream; undefined from a
-  // hub before 3.12, which the view reads them from itself.
+  // live is the machines and jobs from the hub's stream; undefined until
+  // its first dispatch event.
   live?: DispatchBoard;
   // The issue open in the detail (owner/repo#n), which a list row's chip
   // opens too.
@@ -346,14 +346,6 @@ export function IssuesView({
             )}
           </p>
 
-          {d.pollError && (
-            <p role="status" className="mt-5 flex items-center gap-2 rounded-xl border border-state-fault/25 bg-state-fault/[0.06] px-3.5 py-2.5 text-sm">
-              <TriangleAlert className="size-4 shrink-0 text-state-fault" aria-hidden="true" />
-              <span className="min-w-0 flex-1">
-                Can&apos;t read the machines and jobs <span className="text-muted-foreground">· showing the last read · retrying</span>
-              </span>
-            </p>
-          )}
           {d.github.state === "failed" && (
             <div role="alert" className="mt-5 flex flex-wrap items-center gap-3 rounded-xl border border-state-fault/25 bg-state-fault/[0.06] px-3.5 py-2.5 text-sm">
               <TriangleAlert className="size-4 shrink-0 text-state-fault" aria-hidden="true" />

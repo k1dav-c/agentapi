@@ -1,6 +1,6 @@
 import {describe, expect, test} from "bun:test";
 import {HubAPIError} from "./hub-api";
-import {active, createDispatchAPI, hostAgents, hostsFor, jobCost, parseIssueRef, prNumber, type DispatchHost, type DispatchJob} from "./hub-dispatch";
+import {active, createDispatchAPI, hostAgents, hostsFor, jobCost, parseIssueRef, pendingAnswers, prNumber, withAnswers, type DispatchHost, type DispatchJob} from "./hub-dispatch";
 
 const host = (over: Partial<DispatchHost>): DispatchHost => ({
   hostname: "pve",
@@ -90,15 +90,15 @@ describe("createDispatchAPI", () => {
       calls.push(`${init.method ?? "GET"} ${url} ${init.body ?? ""}`);
       if (url.endsWith("/api/dispatch")) return new Response(JSON.stringify({code: "no_host", message: "no machine online runs codex"}), {status: 503});
       if (url.includes("/api/github/issues")) return new Response(JSON.stringify({issues: null}));
-      return new Response(JSON.stringify({hosts: [host({})]}));
+      return new Response(JSON.stringify({repos: [{full_name: "acme/widget"}]}));
     });
-    expect((await api.hosts()).map((h) => h.hostname)).toEqual(["pve"]);
+    expect((await api.repos()).map((r) => r.full_name)).toEqual(["acme/widget"]);
     expect(await api.issues("acme/my repo")).toEqual([]);
     const refused = api.dispatch({action: "start", repo: "acme/widget", issue: 12, agent: "codex"});
     await expect(refused).rejects.toThrow("no machine online runs codex");
     await expect(refused).rejects.toBeInstanceOf(HubAPIError);
     expect(calls).toEqual([
-      "GET http://hub/api/hosts ",
+      "GET http://hub/api/github/repos ",
       "GET http://hub/api/github/issues?repo=acme%2Fmy%20repo ",
       'POST http://hub/api/dispatch {"action":"start","repo":"acme/widget","issue":12,"agent":"codex"}',
     ]);
@@ -106,13 +106,42 @@ describe("createDispatchAPI", () => {
 
   test("the hub's sign-in error, which has error and no message", async () => {
     const api = createDispatchAPI("", async () => new Response(JSON.stringify({error: "sign in to the hub"}), {status: 401}));
-    await expect(api.jobs()).rejects.toThrow("sign in to the hub");
+    await expect(api.github()).rejects.toThrow("sign in to the hub");
   });
 
   test("a hub that doesn't answer", async () => {
     const api = createDispatchAPI("", async () => {
       throw new TypeError("offline");
     });
-    await expect(api.jobs()).rejects.toThrow("The hub didn't answer.");
+    await expect(api.github()).rejects.toThrow("The hub didn't answer.");
+  });
+});
+
+describe("the answers to the page's actions on the board", () => {
+  const at = (minute: number) => `2026-11-08T10:${String(minute).padStart(2, "0")}:00Z`;
+  const answer = job({state: "stopped", updated_at: at(5)});
+  const answers = new Map([[answer.key, answer]]);
+
+  test("an answer stands in for the stream's job until the stream has it as new", () => {
+    const late = job({state: "working", updated_at: at(4)});
+    expect(withAnswers([late], answers)).toEqual([answer]);
+    expect(pendingAnswers(answers, [late])).toBe(answers);
+    // As new, or newer: the stream's.
+    const caught = job({state: "stopped", updated_at: at(5)});
+    expect(withAnswers([caught], answers)).toEqual([caught]);
+    expect(pendingAnswers(answers, [caught]).size).toBe(0);
+    const newer = job({state: "starting", updated_at: at(6)});
+    expect(withAnswers([newer], answers)).toEqual([newer]);
+  });
+
+  test("a job the stream hasn't sent yet comes first; the others keep their place", () => {
+    const other = job({key: "acme/widget#13", issue: 13});
+    expect(withAnswers([other], answers)).toEqual([answer, other]);
+    expect(withAnswers([other], new Map())).toEqual([other]);
+  });
+
+  test("an answer without a time it changed gives way to the stream's job", () => {
+    const odd = job({updated_at: ""});
+    expect(pendingAnswers(new Map([[odd.key, odd]]), [job({})]).size).toBe(0);
   });
 });

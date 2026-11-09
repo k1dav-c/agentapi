@@ -1,12 +1,14 @@
 "use client";
 
-import {useCallback, useEffect, useMemo, useRef, useState} from "react";
+import {useCallback, useEffect, useMemo, useState} from "react";
 import {toast} from "sonner";
 import {HubAPIError, hubErrorText} from "@/lib/hub-api";
 import {
   agentLabel,
   createDispatchAPI,
   jobKey,
+  pendingAnswers,
+  withAnswers,
   type CreateIssueRequest,
   type DispatchHost,
   type DispatchJob,
@@ -16,12 +18,6 @@ import {
 } from "@/lib/hub-dispatch";
 import type {DispatchBoard} from "@/lib/hub";
 import {useHubSetting} from "@/lib/hub-settings";
-
-// How often the view reads the machines and the jobs again from a hub
-// whose stream doesn't carry them (before 3.12); faster while a job
-// starts.
-const refreshEvery = 10_000;
-const refreshStarting = 3_000;
 
 // The most repositories whose issues All reads: the latest pushed or
 // changed, as the hub lists them.
@@ -66,8 +62,8 @@ function refusal(error: unknown): {title?: string; description: string} {
 
 // useDispatch reads the dispatch while the Issues view is open: the hub's
 // GitHub App, its repositories and their open issues, and the machines and
-// the jobs, from live (the hub's stream) or, from an older hub, read every
-// few seconds; and does what the view asks of them.
+// the jobs from live (the hub's stream; undefined until its first dispatch
+// event); and does what the view asks of them.
 // githubChanges counts the changes to the app made elsewhere (the hub's
 // settings): each reads it again.
 export function useDispatch(root: string, live?: DispatchBoard, githubChanges = 0) {
@@ -80,28 +76,15 @@ export function useDispatch(root: string, live?: DispatchBoard, githubChanges = 
   // The repositories whose issues are being read, and those that failed.
   const [reading, setReading] = useState(false);
   const [issuesError, setIssuesError] = useState("");
-  const [polledHosts, setHosts] = useState<Load<DispatchHost[]>>({state: "loading"});
-  const [polledJobs, setJobs] = useState<DispatchJob[]>([]);
-  // The jobs the hub answered an action with, until its stream says more.
+  // The jobs the hub answered an action with, until its stream has them
+  // as new.
   const [answered, setAnswered] = useState<ReadonlyMap<string, DispatchJob>>(new Map());
-  useEffect(() => setAnswered(new Map()), [live]);
-  const [pollError, setPollError] = useState("");
+  const streamed = live?.jobs;
+  useEffect(() => {
+    if (streamed) setAnswered((answers) => pendingAnswers(answers, streamed));
+  }, [streamed]);
   // The keys of the issues an action is under way on.
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
-
-  const isLive = live !== undefined;
-  const refreshJobs = useCallback(async () => {
-    if (isLive) return;
-    try {
-      const [h, j] = await Promise.all([api.hosts(), api.jobs()]);
-      setHosts({state: "ready", value: h});
-      setJobs(j);
-      setPollError("");
-    } catch (e) {
-      setPollError(hubErrorText(e));
-      setHosts((previous) => (previous.state === "ready" ? previous : {state: "failed", error: hubErrorText(e)}));
-    }
-  }, [api, isLive]);
 
   const readGitHub = useCallback(async () => {
     try {
@@ -133,47 +116,23 @@ export function useDispatch(root: string, live?: DispatchBoard, githubChanges = 
   }, [api, scoped]);
 
   useEffect(() => {
-    void refreshJobs();
-  }, [refreshJobs]);
-  useEffect(() => {
     void readGitHub();
   }, [readGitHub, githubChanges]);
   useEffect(() => {
     void readIssues();
   }, [readIssues]);
 
-  const hosts: Load<DispatchHost[]> = live ? {state: "ready", value: live.hosts} : polledHosts;
-  const jobs = useMemo(() => {
-    const list = live ? live.jobs : polledJobs;
-    return answered.size === 0 ? list : [...answered.values(), ...list.filter((job) => !answered.has(job.key))];
-  }, [live, polledJobs, answered]);
-
-  // From an older hub: poll, faster while a job starts; at once when the
-  // page shows again.
-  const starting = jobs.some((job) => job.state === "starting");
-  useEffect(() => {
-    if (isLive) return;
-    const timer = setInterval(() => void refreshJobs(), starting ? refreshStarting : refreshEvery);
-    const onShow = () => {
-      if (document.visibilityState === "visible") void refreshJobs();
-    };
-    document.addEventListener("visibilitychange", onShow);
-    return () => {
-      clearInterval(timer);
-      document.removeEventListener("visibilitychange", onShow);
-    };
-  }, [refreshJobs, starting, isLive]);
+  const hosts: Load<DispatchHost[]> = live ? {state: "ready", value: live.hosts} : {state: "loading"};
+  const jobs = useMemo(() => withAnswers(streamed ?? [], answered), [streamed, answered]);
 
   // A job the hub answered with goes on the board at once, before the
-  // next poll.
+  // stream tells of it.
   const merge = (job: DispatchJob | undefined) => {
     if (job) setAnswered((all) => new Map(all).set(job.key, job));
   };
 
-  // run does an action on key's issue, says how it went, and reads the
-  // jobs again; it resolves to whether it went through.
-  const latest = useRef({refreshJobs});
-  latest.current = {refreshJobs};
+  // run does an action on key's issue and says how it went; it resolves to
+  // what the hub answered, undefined if it didn't go through.
   const run = useCallback(async <T>(key: string, what: string, done: string, action: () => Promise<T>): Promise<T | undefined> => {
     setBusy((keys) => new Set(keys).add(key));
     try {
@@ -190,7 +149,6 @@ export function useDispatch(root: string, live?: DispatchBoard, githubChanges = 
         left.delete(key);
         return left;
       });
-      void latest.current.refreshJobs();
     }
   }, []);
 
@@ -237,10 +195,7 @@ export function useDispatch(root: string, live?: DispatchBoard, githubChanges = 
       setIssues((all) => new Map(all).set(request.repo, [response.issue, ...(all.get(request.repo) ?? []).filter((i) => i.number !== response.issue.number)]));
       return response.issue;
     },
-    refresh: () => {
-      void refreshJobs();
-      void readIssues();
-    },
+    refresh: () => void readIssues(),
   };
 
   return {
@@ -256,7 +211,6 @@ export function useDispatch(root: string, live?: DispatchBoard, githubChanges = 
     issuesError,
     hosts,
     jobs,
-    pollError,
     busy,
     actions,
   };

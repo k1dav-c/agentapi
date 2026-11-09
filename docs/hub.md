@@ -651,8 +651,8 @@ by section:
 A card shows the issue's number, state and title, the agent and machine on it, its pull request,
 what its runs cost and how many there were, and the one thing its state asks for: **Assign**,
 **Answer**, **Review #21**, **Retry**. When a card changes state, it moves to its new section. The
-page gets the machines and jobs from the hub's stream as they change; a hub before 3.12 doesn't
-send them, and the page reads them every 10 seconds instead.
+page gets the machines and jobs from the hub's stream as they change. What you do on the page
+shows at once, as the hub answers it; the stream takes over from there.
 
 The repository menu at the top picks the board's scope. **Recent repositories** shows the open
 issues of the 20 that the hub's GitHub App can see that were pushed to or changed last, and the
