@@ -164,7 +164,7 @@ export type DispatchBoard = {jobs: HubWire["DispatchJob"][]; hosts: HubWire["Dis
 
 // objectsWith are the items of value that are objects with a string field
 // key that isn't empty.
-function objectsWith<T>(value: unknown, key: string): T[] {
+export function objectsWith<T>(value: unknown, key: string): T[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item) => !!item && typeof item === "object" && typeof item[key] === "string" && item[key] !== "") as T[];
 }

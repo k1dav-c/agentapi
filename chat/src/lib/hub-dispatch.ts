@@ -3,10 +3,11 @@
 // GitHub App and its repositories' issues, and POST /api/dispatch, which
 // starts, messages and stops the work on an issue. The types are the
 // hub's (hub-schema.ts); the calls throw HubAPIError as the rest of the
-// hub's API does.
+// hub's API does, and for an answer that isn't what its route sends (each
+// is checked at the door, as the stream's events are).
 
-import type {HubWire} from "./hub";
-import {hubCall} from "./hub-api";
+import {objectsWith, type HubWire} from "./hub";
+import {HubAPIError, hubCall} from "./hub-api";
 import type {Fetcher} from "./hub-update";
 
 export type DispatchHost = HubWire["DispatchHost"];
@@ -126,16 +127,48 @@ export function withAnswers(streamed: DispatchJob[], answers: ReadonlyMap<string
   return [...[...pending.values()].filter((job) => !keys.has(job.key)), ...streamed.map((job) => pending.get(job.key) ?? job)];
 }
 
+// Fields of an answer, unchecked until read.
+type Fields<T> = Partial<Record<keyof T, unknown>>;
+
+const isObject = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
+const isJob = (value: unknown): value is DispatchJob => isObject(value) && typeof value.key === "string" && value.key !== "" && typeof value.state === "string";
+const isIssue = (value: unknown): value is GitHubIssue => isObject(value) && typeof value.number === "number";
+
+// The hub's answers, read: what each route sends, or undefined.
+const read = {
+  github: (body: unknown): GitHubStatus | undefined => {
+    if (!isObject(body) || typeof body.connected !== "boolean") return undefined;
+    return {...(body as GitHubStatus), installations: objectsWith((body as Fields<GitHubStatus>).installations, "account")};
+  },
+  repos: (body: unknown): GitHubRepo[] | undefined => (isObject(body) ? objectsWith((body as Fields<HubWire["DispatchReposBody"]>).repos, "full_name") : undefined),
+  issues: (body: unknown): GitHubIssue[] | undefined => {
+    if (!isObject(body)) return undefined;
+    const {issues} = body as Fields<HubWire["DispatchIssuesBody"]>;
+    return Array.isArray(issues) ? issues.filter(isIssue) : [];
+  },
+  dispatch: (body: unknown): DispatchResponse | undefined => (isObject(body) && isJob(body.job) ? (body as DispatchResponse) : undefined),
+  createIssue: (body: unknown): CreateIssueResponse | undefined => {
+    if (!isObject(body) || !isIssue(body.issue)) return undefined;
+    return {issue: body.issue, job: isJob(body.job) ? body.job : undefined};
+  },
+};
+
 export function createDispatchAPI(root: string, fetcher: Fetcher = (url, init) => fetch(url, init)) {
   const fetchHub = hubCall(root, fetcher);
-  const call = async <T>(path: string, init: RequestInit = {}): Promise<T> => (await (await fetchHub(path, init)).json()) as T;
+  // call reads the answer to path with parse; one it can't read throws.
+  const call = async <T>(path: string, parse: (body: unknown) => T | undefined, init: RequestInit = {}): Promise<T> => {
+    const response = await fetchHub(path, init);
+    const value = parse(await response.json().catch(() => undefined));
+    if (value === undefined) throw new HubAPIError(`The hub's answer to ${path.split("?")[0]} isn't one the page can read.`, response.status);
+    return value;
+  };
   const post = (body: unknown): RequestInit => ({method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
   return {
-    github: () => call<GitHubStatus>("/api/github"),
-    repos: async () => (await call<HubWire["DispatchReposBody"]>("/api/github/repos")).repos ?? [],
-    issues: async (repo: string) => (await call<HubWire["DispatchIssuesBody"]>(`/api/github/issues?repo=${encodeURIComponent(repo)}`)).issues ?? [],
-    dispatch: (request: DispatchRequest) => call<DispatchResponse>("/api/dispatch", post(request)),
-    createIssue: (request: CreateIssueRequest) => call<CreateIssueResponse>("/api/github/issues", post(request)),
+    github: () => call("/api/github", read.github),
+    repos: () => call("/api/github/repos", read.repos),
+    issues: (repo: string) => call(`/api/github/issues?repo=${encodeURIComponent(repo)}`, read.issues),
+    dispatch: (request: DispatchRequest) => call("/api/dispatch", read.dispatch, post(request)),
+    createIssue: (request: CreateIssueRequest) => call("/api/github/issues", read.createIssue, post(request)),
     // The hub forgets its GitHub App.
     disconnect: async () => void (await fetchHub("/api/github", {method: "DELETE"})),
   };

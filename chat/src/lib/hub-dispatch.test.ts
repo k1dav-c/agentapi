@@ -104,6 +104,27 @@ describe("createDispatchAPI", () => {
     ]);
   });
 
+  test("answers checked at the door: what doesn't belong is left out, an answer it can't read throws", async () => {
+    const answers: Record<string, unknown> = {
+      "/api/github": {connected: true, slug: "app", installations: [{id: 1, account: "acme"}, {id: 2}, "junk"]},
+      "/api/github/repos": {repos: [{full_name: "acme/widget"}, {name: "no full name"}, null]},
+      "/api/github/issues": {issues: [{number: 3, title: "Fix"}, {title: "no number"}]},
+      "/api/dispatch": {created: true},
+    };
+    const api = createDispatchAPI("", async (url) => new Response(JSON.stringify(answers[url.split("?")[0]])));
+    expect((await api.github()).installations?.map((i) => i.account)).toEqual(["acme"]);
+    expect((await api.repos()).map((r) => r.full_name)).toEqual(["acme/widget"]);
+    expect((await api.issues("acme/widget")).map((i) => i.number)).toEqual([3]);
+    // No job: not a dispatch's answer.
+    const odd = api.dispatch({action: "stop", repo: "acme/widget", issue: 3});
+    await expect(odd).rejects.toThrow("The hub's answer to /api/dispatch isn't one the page can read.");
+    await expect(odd).rejects.toBeInstanceOf(HubAPIError);
+    answers["/api/github"] = {slug: "no connected"};
+    await expect(api.github()).rejects.toThrow("isn't one the page can read");
+    answers["/api/github/issues"] = {issue: {number: 24, title: "New"}, job: {key: ""}};
+    expect(await api.createIssue({repo: "acme/widget", title: "New", body: ""})).toMatchObject({issue: {number: 24, title: "New"}, job: undefined});
+  });
+
   test("the hub's sign-in error, which has error and no message", async () => {
     const api = createDispatchAPI("", async () => new Response(JSON.stringify({error: "sign in to the hub"}), {status: 401}));
     await expect(api.github()).rejects.toThrow("sign in to the hub");
