@@ -35,7 +35,6 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "15.4.10",
-    "gh-pages": "^6.3.0",
     "openapi-typescript": "7.13.0",
     "tailwindcss": "^4",
     "tw-animate-css": "^1.3.0",
@@ -45,12 +44,10 @@
   "private": true,
   "scripts": {
     "build": "next build",
-    "deploy-gh-pages": "GITHUB_PAGES=true next build && gh-pages -d out --nojekyll -e chat -f",
     "dev": "next dev --turbopack",
     "export": "GITHUB_PAGES=true next build",
     "gen:api": "openapi-typescript ../openapi.json -o src/lib/api-schema.ts && bun scripts/hub-schema.ts",
     "lint": "eslint src",
-    "serve-static": "npx serve out",
     "start": "next start",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
