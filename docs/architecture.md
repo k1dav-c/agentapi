@@ -1060,13 +1060,13 @@ chat and `parseFromFrame` in the hub.
 - `golangci-lint` (including the exhaustive check over enums),
   `paralleltestctx` and `make gen` (the OpenAPI schema must match the code)
   run in CI; the chat has eslint, `bun test` and `tsc`. CI also runs the
-  tests of `lib/` and `cmd/` with the race detector, every test on macOS,
-  and on Windows builds every test and runs those of the packages with
-  Windows code. The Release workflow runs these tests (`go-test.yml`, called
-  as a reusable workflow) on the commit it releases and releases only once
-  the Linux jobs pass, for a push to `main`, a manual run and a published
-  release alike; the macOS and Windows jobs run in a second call that the
-  release doesn't wait for. Pull requests run every job on their own. The
+  tests of `lib/` and `cmd/` with the race detector, on the repository's
+  self-hosted Linux runner; nothing tests macOS or Windows. The Release
+  workflow runs these tests (`go-test.yml`, called as a reusable workflow)
+  on the commit it releases and releases only once they pass, for a push to
+  `main`, a manual run and a published release alike. Pull requests run
+  every job on their own, except those from forks, whose code would run on
+  the runner's machine. The
   Release workflow checks that each binary is built for its platform, and a
   push that a later push's release already holds, or that is no longer on
   `main`, releases nothing.
