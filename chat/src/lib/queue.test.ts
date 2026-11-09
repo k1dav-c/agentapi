@@ -1,5 +1,5 @@
 import {describe, expect, test} from "bun:test";
-import {QueueView, queuedWaiting, type QueuedMessage} from "./queue";
+import {QueueView, queuedWaiting, sendsQueueEvents, type QueuedMessage} from "./queue";
 
 const queued = (id: number): QueuedMessage => ({id, content: `task ${id}`, time: "2026-10-22T10:00:00Z"});
 const ids = (view: QueueView) => view.shown.map((message) => message.id);
@@ -51,5 +51,12 @@ describe("queuedWaiting", () => {
     expect(queuedWaiting(0, "for it")).toBe("");
     expect(queuedWaiting(1, "for it")).toBe(" 1 queued task waits for it.");
     expect(queuedWaiting(3, "until then")).toBe(" 3 queued tasks wait until then.");
+  });
+});
+
+describe("sendsQueueEvents", () => {
+  test("every release since 1.0.0 sends queue events; others may not", () => {
+    for (const version of ["1.0.0", "v3.16.1", "10.0.0"]) expect(sendsQueueEvents(version)).toBe(true);
+    for (const version of ["0.27.0", "", "0.0.0-dev", "3.16.1-4-gabcdef0"]) expect(sendsQueueEvents(version)).toBe(false);
   });
 });

@@ -302,7 +302,7 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
   const requestsRef = useRef(requests);
   requestsRef.current = requests;
   const {queuedMessages, refreshQueue, applyQueue, queueChanged, queueMayHaveSent, updateQueuedMessage, deleteQueuedMessage, steerQueuedMessage, reorderQueue} =
-    useQueue(api);
+    useQueue(api, agentapiVersion);
   // Reads the requests from the REST API; see mergeListedRequests.
   const refreshRequests = async () => {
     const heldWhenAsked = requestsRef.current;

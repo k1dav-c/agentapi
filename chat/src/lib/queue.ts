@@ -4,6 +4,7 @@
 // it.
 
 import type {components} from "./api-schema";
+import {compareVersions} from "./hub-version";
 
 export type QueuedMessage = components["schemas"]["QueuedMessage"];
 
@@ -48,6 +49,15 @@ export class QueueView {
     if (ok && this.order) this.server = inOrder(this.server, this.order);
     this.order = null;
   }
+}
+
+// sendsQueueEvents reports whether the AgentAPI of version sends
+// queue_update events to the chat (a sync client), which every release
+// since 1.0.0 does: it says every change of its queue, and nothing while
+// the queue stays as it is. A development build, or a version the server
+// didn't say, may not.
+export function sendsQueueEvents(version: string): boolean {
+  return (compareVersions(version, "1.0.0") ?? -1) >= 0;
 }
 
 // The messages of queue in the order of ids; those ids leave out (queued
