@@ -1,6 +1,7 @@
 package host
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -65,6 +66,30 @@ func unitPath() (string, error) {
 	return filepath.Join(dir, "systemd", "user", serviceName), nil
 }
 
+// checkSystemd fails when there is no systemd user instance to run the
+// service.
+func checkSystemd(ctx context.Context) error {
+	if _, err := exec.LookPath("systemctl"); err != nil {
+		return errors.New("systemctl isn't installed: run agentapi host serve under another supervisor")
+	}
+	if _, err := run(ctx, "systemctl", "--user", "show-environment"); err != nil {
+		return fmt.Errorf("no systemd user instance (%w): run agentapi host serve under another supervisor", err)
+	}
+	return nil
+}
+
+// writeUnit writes the service's unit file, and returns its path.
+func writeUnit(program, configPath string) (string, error) {
+	path, err := unitPath()
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", err
+	}
+	return path, os.WriteFile(path, []byte(unitFile(program, configPath)), 0o644)
+}
+
 func installCmd() *cobra.Command {
 	var (
 		configPath string
@@ -83,11 +108,8 @@ func installCmd() *cobra.Command {
 			}
 			ctx := cmd.Context()
 			out := cmd.OutOrStdout()
-			if _, err := exec.LookPath("systemctl"); err != nil {
-				return errors.New("systemctl isn't installed: run agentapi host serve under another supervisor")
-			}
-			if _, err := run(ctx, "systemctl", "--user", "show-environment"); err != nil {
-				return fmt.Errorf("no systemd user instance (%w): run agentapi host serve under another supervisor", err)
+			if err := checkSystemd(ctx); err != nil {
+				return err
 			}
 			config, err := host.LoadConfig(configPath)
 			if err != nil {
@@ -101,14 +123,8 @@ func installCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			path, err := unitPath()
+			path, err := writeUnit(program, configPath)
 			if err != nil {
-				return err
-			}
-			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-				return err
-			}
-			if err := os.WriteFile(path, []byte(unitFile(program, configPath)), 0o644); err != nil {
 				return err
 			}
 			_, _ = fmt.Fprintf(out, "Wrote %s (%s host serve)\n", path, program)

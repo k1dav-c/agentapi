@@ -165,13 +165,29 @@ func (c Config) withDefaults(home string) (Config, error) {
 	if c.MaxJobs <= 0 {
 		c.MaxJobs = 4
 	}
+	if err := c.setAgents(); err != nil {
+		return Config{}, err
+	}
+	if c.AgentAPI == "" {
+		if c.AgentAPI, err = Executable(); err != nil {
+			return Config{}, err
+		}
+	}
+	c.AgentAPI = expand(c.AgentAPI)
+	return c, nil
+}
+
+// setAgents completes the agents: their commands (the defaults, with
+// agent-commands over them), the agents to run (those whose command is
+// installed, when none are listed) and the default agent (the first).
+func (c *Config) setAgents() error {
 	commands := map[string][]string{}
 	for agent, command := range defaultAgentCommands {
 		commands[agent] = command
 	}
 	for agent, command := range c.AgentCommands {
 		if len(command) == 0 {
-			return Config{}, fmt.Errorf("agent-commands.%s is empty", agent)
+			return fmt.Errorf("agent-commands.%s is empty", agent)
 		}
 		commands[agent] = command
 	}
@@ -185,22 +201,16 @@ func (c Config) withDefaults(home string) (Config, error) {
 	}
 	for _, agent := range c.Agents {
 		if _, ok := commands[agent]; !ok {
-			return Config{}, fmt.Errorf("agent %q has no command: add it to agent-commands", agent)
+			return fmt.Errorf("agent %q has no command: add it to agent-commands", agent)
 		}
 	}
 	if c.Agent == "" && len(c.Agents) > 0 {
 		c.Agent = c.Agents[0]
 	}
 	if c.Agent != "" && !slices.Contains(c.Agents, c.Agent) {
-		return Config{}, fmt.Errorf("agent %q isn't one of this machine's agents %v", c.Agent, c.Agents)
+		return fmt.Errorf("agent %q isn't one of this machine's agents %v", c.Agent, c.Agents)
 	}
-	if c.AgentAPI == "" {
-		if c.AgentAPI, err = Executable(); err != nil {
-			return Config{}, err
-		}
-	}
-	c.AgentAPI = expand(c.AgentAPI)
-	return c, nil
+	return nil
 }
 
 // CloneMissing is whether the launcher clones a repository it doesn't have.

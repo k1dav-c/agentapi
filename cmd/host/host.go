@@ -242,8 +242,9 @@ func ghTokenCmd() *cobra.Command {
 	return cmd
 }
 
-// run runs a command, returning its output and an error naming it.
-func run(ctx context.Context, name string, args ...string) (string, error) {
+// run runs a command, returning its output and an error naming it. Tests
+// replace it, so they don't reach the machine's systemd.
+var run = func(ctx context.Context, name string, args ...string) (string, error) {
 	out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
 	if err != nil {
 		return string(out), fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(string(out)))

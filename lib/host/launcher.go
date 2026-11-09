@@ -904,33 +904,10 @@ func (l *Launcher) Stop(ctx context.Context, key Key, opts StopOptions) error {
 	l.saveLocked()
 	l.mu.Unlock()
 
-	if alive(pid, marker) {
-		if err := terminate(pid); err != nil {
-			l.logger.Warn("Couldn't stop a job's AgentAPI", "job", key.String(), "pid", pid, "error", err)
-		}
-		deadline := l.now().Add(stopTimeout)
-		for alive(pid, marker) && l.now().Before(deadline) {
-			time.Sleep(200 * time.Millisecond)
-		}
-		if alive(pid, marker) {
-			l.logger.Warn("A job's AgentAPI didn't stop; killing it", "job", key.String(), "pid", pid)
-			kill(pid)
-		}
-	}
+	l.stopProcess(key, pid, marker)
 	var errs []error
 	if !opts.KeepWorktree {
-		defer l.locks.lock("repo:" + key.Repo())()
-		if _, err := os.Stat(worktree); err == nil {
-			if _, err := git(ctx, repo, nil, "worktree", "remove", "--force", worktree); err != nil {
-				errs = append(errs, err)
-			}
-		}
-		_, _ = git(ctx, repo, nil, "worktree", "prune")
-		if _, err := git(ctx, repo, nil, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err == nil {
-			if _, err := git(ctx, repo, nil, "branch", "--quiet", "-D", branch); err != nil {
-				errs = append(errs, err)
-			}
-		}
+		errs = l.removeWorktree(ctx, key, repo, worktree, branch)
 	}
 	files := l.config.jobFiles(key)
 	if opts.KeepState {
@@ -948,6 +925,43 @@ func (l *Launcher) Stop(ctx context.Context, key Key, opts StopOptions) error {
 		return jsonapi.Errorf(http.StatusInternalServerError, "cleanup_failed", "stopped %s, but: %v", key, err)
 	}
 	return nil
+}
+
+// stopProcess stops a job's AgentAPI, pid if marker still names it: it
+// asks, then kills it after stopTimeout.
+func (l *Launcher) stopProcess(key Key, pid int, marker string) {
+	if !alive(pid, marker) {
+		return
+	}
+	if err := terminate(pid); err != nil {
+		l.logger.Warn("Couldn't stop a job's AgentAPI", "job", key.String(), "pid", pid, "error", err)
+	}
+	deadline := l.now().Add(stopTimeout)
+	for alive(pid, marker) && l.now().Before(deadline) {
+		time.Sleep(200 * time.Millisecond)
+	}
+	if alive(pid, marker) {
+		l.logger.Warn("A job's AgentAPI didn't stop; killing it", "job", key.String(), "pid", pid)
+		kill(pid)
+	}
+}
+
+// removeWorktree removes a job's worktree and its local branch from repo.
+func (l *Launcher) removeWorktree(ctx context.Context, key Key, repo, worktree, branch string) []error {
+	defer l.locks.lock("repo:" + key.Repo())()
+	var errs []error
+	if _, err := os.Stat(worktree); err == nil {
+		if _, err := git(ctx, repo, nil, "worktree", "remove", "--force", worktree); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	_, _ = git(ctx, repo, nil, "worktree", "prune")
+	if _, err := git(ctx, repo, nil, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err == nil {
+		if _, err := git(ctx, repo, nil, "branch", "--quiet", "-D", branch); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errs
 }
 
 // Jobs are the launcher's jobs, with those being prepared (a clone, a
