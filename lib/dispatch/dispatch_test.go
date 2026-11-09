@@ -603,3 +603,144 @@ func TestForgetWhileAsking(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// A job keeps the messages its agents were sent: from the hub's page, a
+// review or an /agent comment, the last maxMessages, each cut short.
+func TestJobMessages(t *testing.T) {
+	ctx := context.Background()
+	s, now := newService(t, nil)
+	l := newFakeLauncher(t, "pve-1")
+	join(t, s, l, "claude", "codex")
+	_, err := s.Dispatch(ctx, Request{Action: ActionStart, Repo: "acme/widget", Issue: 12})
+	require.NoError(t, err)
+
+	_, err = s.Dispatch(FromHub(ctx), Request{Action: ActionSend, Repo: "acme/widget", Issue: 12, Author: "hub", Message: "  Also the docs  "})
+	require.NoError(t, err)
+	*now = now.Add(time.Minute)
+	_, err = s.Dispatch(ctx, Request{Action: ActionSend, Repo: "acme/widget", Issue: 12, Author: "dave", ReviewState: "changes_requested", Message: "Rename it", Comments: []ReviewComment{{Path: "a.go", Body: "x"}, {Path: "b.go", Body: "y"}}})
+	require.NoError(t, err)
+	_, err = s.Dispatch(ctx, Request{Action: ActionSend, Repo: "acme/widget", Issue: 12, Author: "erin", Message: "please rebase"})
+	require.NoError(t, err)
+
+	job := s.job("acme/widget#12")
+	require.Len(t, job.Messages, 3)
+	assert.Equal(t, Message{At: now.Add(-time.Minute), Source: SourceHub, Agent: "claude", Text: "Also the docs"}, job.Messages[0], "the hub's page has no author")
+	assert.Equal(t, Message{At: *now, Source: SourceReview, Author: "dave", Agent: "claude", Text: "Rename it", ReviewState: "changes_requested", Comments: 2}, job.Messages[1])
+	assert.Equal(t, SourceComment, job.Messages[2].Source)
+	assert.Equal(t, "erin", job.Messages[2].Author)
+
+	for i := range maxMessages {
+		_, err = s.Dispatch(ctx, Request{Action: ActionSend, Repo: "acme/widget", Issue: 12, Message: fmt.Sprintf("m%d %s", i, strings.Repeat("é", maxMessageText))})
+		require.NoError(t, err)
+	}
+	job = s.job("acme/widget#12")
+	require.Len(t, job.Messages, maxMessages)
+	assert.True(t, strings.HasPrefix(job.Messages[0].Text, "m0 "), "the oldest went")
+	assert.Equal(t, maxMessageText, len([]rune(job.Messages[0].Text)))
+	assert.True(t, strings.HasSuffix(job.Messages[0].Text, "…"))
+
+	// dispatch.json keeps them; a file of a hub before them reads.
+	s.Flush()
+	again, err := New(s.config)
+	require.NoError(t, err)
+	defer again.Close()
+	assert.Len(t, again.job("acme/widget#12").Messages, maxMessages)
+	var old Job
+	require.NoError(t, json.Unmarshal([]byte(`{"key":"acme/widget#1","state":"done","runs":[]}`), &old))
+	assert.Empty(t, old.Messages)
+}
+
+// The dispatch's subscribers hear of each change of the machines and the
+// jobs, and of a machine that goes offline without a word.
+func TestBoardSubscribe(t *testing.T) {
+	ctx := context.Background()
+	s, now := newService(t, nil)
+	changes, cancel := s.Subscribe()
+	defer cancel()
+	heard := func() bool {
+		select {
+		case <-changes:
+			return true
+		default:
+			return false
+		}
+	}
+	assert.False(t, heard())
+
+	l := newFakeLauncher(t, "pve-1")
+	join(t, s, l, "claude")
+	assert.True(t, heard(), "a machine joined")
+	board := s.Board()
+	require.Len(t, board.Hosts, 1)
+	assert.True(t, board.Hosts[0].Online)
+	assert.Empty(t, board.Jobs)
+
+	_, err := s.Dispatch(ctx, Request{Action: ActionStart, Repo: "acme/widget", Issue: 12})
+	require.NoError(t, err)
+	assert.True(t, heard(), "a job started")
+	assert.False(t, heard(), "changes close together come as one")
+	require.Len(t, s.Board().Jobs, 1)
+
+	s.CheckOnline()
+	assert.False(t, heard(), "nothing changed")
+	*now = now.Add(4 * time.Minute)
+	s.CheckOnline()
+	assert.True(t, heard(), "three heartbeats missed")
+	assert.False(t, s.Board().Hosts[0].Online)
+	s.CheckOnline()
+	assert.False(t, heard(), "told once")
+
+	cancel()
+	join(t, s, l, "claude")
+	assert.False(t, heard(), "cancelled")
+}
+
+// The repositories come the latest pushed or changed first.
+func TestReposLatestFirst(t *testing.T) {
+	at := func(s string) time.Time { v, _ := time.Parse(time.DateOnly, s); return v }
+	repos := []github.Repo{
+		{FullName: "a/old", PushedAt: at("2026-01-01")},
+		{FullName: "a/new", PushedAt: at("2026-11-01")},
+		{FullName: "a/touched", PushedAt: at("2026-02-01"), UpdatedAt: at("2026-11-05")},
+		{FullName: "a/never"},
+	}
+	sortRepos(repos)
+	var names []string
+	for _, r := range repos {
+		names = append(names, r.FullName)
+	}
+	assert.Equal(t, []string{"a/touched", "a/new", "a/old", "a/never"}, names)
+}
+
+// Over HTTP, a signed-in browser's send is the hub's; one with the
+// dispatch token is the workflow's, even on a hub without sign-in.
+func TestMessageSourceOverHTTP(t *testing.T) {
+	s, _ := newService(t, nil)
+	l := newFakeLauncher(t, "pve-1")
+	join(t, s, l, "claude")
+	_, err := s.Dispatch(context.Background(), Request{Action: ActionStart, Repo: "acme/widget", Issue: 12})
+	require.NoError(t, err)
+	r := chi.NewRouter()
+	s.MountDispatch(r, func(*http.Request) bool { return true })
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+	send := func(bearer string) {
+		body := strings.NewReader(`{"action":"send","repo":"acme/widget","issue":12,"author":"hub","message":"hi"}`)
+		req, _ := http.NewRequest(http.MethodPost, srv.URL+"/api/dispatch", body)
+		if bearer != "" {
+			req.Header.Set("Authorization", "Bearer "+bearer)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		_ = resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+	}
+	send("")
+	send("dispatch-token")
+	messages := s.job("acme/widget#12").Messages
+	require.Len(t, messages, 2)
+	assert.Equal(t, SourceHub, messages[0].Source)
+	assert.Empty(t, messages[0].Author)
+	assert.Equal(t, SourceComment, messages[1].Source)
+	assert.Equal(t, "hub", messages[1].Author)
+}

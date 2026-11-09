@@ -48,6 +48,12 @@ describe("hub", () => {
     const a = instance("a");
     expect(parseHubEvent("instances", JSON.stringify({instances: [a, {name: "no id"}], hub_version: "3.7.3"}))).toEqual({type: "instances", instances: [a], hubVersion: "3.7.3"});
     expect(parseHubEvent("instances", JSON.stringify({instances: []}))).toEqual({type: "instances", instances: [], hubVersion: ""});
+    // The dispatch's machines and jobs: those without their name or key left out.
+    expect(parseHubEvent("dispatch", JSON.stringify({jobs: [{key: "a/b#1", state: "working"}, {state: "x"}], hosts: [{hostname: "pve"}, 3]}))).toEqual({
+      type: "dispatch",
+      board: {jobs: [{key: "a/b#1", state: "working"}], hosts: [{hostname: "pve"}]} as never,
+    });
+    expect(parseHubEvent("dispatch", JSON.stringify({}))).toEqual({type: "dispatch", board: {jobs: [], hosts: []}});
     expect(parseHubEvent("instance", JSON.stringify(a))).toEqual({type: "instance", instance: a});
     expect(parseHubEvent("removed", JSON.stringify({id: "a"}))).toEqual({type: "removed", id: "a"});
     expect(parseHubEvent("favorites", JSON.stringify({favorites: [{id: "f", text: "Hi"}, {text: "no id"}]}))).toEqual({type: "favorites", favorites: [{id: "f", text: "Hi"}]});
