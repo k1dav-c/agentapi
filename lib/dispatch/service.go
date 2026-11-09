@@ -823,16 +823,9 @@ func supports(h Host, agent string) bool {
 	return slices.Contains(h.Agents, agent)
 }
 
-// pickHost is the machine to start key on: the one asked for, else one
-// online that runs the agent and has room, with the repository if one
-// has, the fewest jobs first.
-func (s *Service) pickHost(key host.Key, agent, want string) (Host, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.pickHostLocked(key, agent, want, nil)
-}
-
-// pickHostLocked is pickHost but for the machines in skip. The jobs
+// pickHostLocked is the machine to start key on, other than those in
+// skip: the one asked for, else one online that runs the agent and has
+// room, with the repository if one has, the fewest jobs first. The jobs
 // starting count toward a machine's room: a pick and its job's start
 // (reserveStart) under one hold of s.mu reserve the place. s.mu is held.
 func (s *Service) pickHostLocked(key host.Key, agent, want string, skip []string) (Host, error) {
@@ -973,7 +966,7 @@ func (s *Service) start(ctx context.Context, key host.Key, req Request) (Respons
 // reserveStart picks the machine of key's start and has the job starting
 // on it, under one hold of s.mu, so that the job holds its place there: a
 // job that works or failed stays on its machine, where its worktree is;
-// a new one (or a new round) goes where pickHost says. s.mu isn't held.
+// a new one (or a new round) goes where pickHostLocked says. s.mu isn't held.
 func (s *Service) reserveStart(key host.Key, req Request, meta issueMeta, gh bool) (*startAttempt, Job, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

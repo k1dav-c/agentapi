@@ -665,7 +665,7 @@ func TestLauncherHTTP(t *testing.T) {
 		data, _ := io.ReadAll(resp.Body)
 		return resp.StatusCode, string(data)
 	}
-	token := e.launcher.HostToken()
+	token := e.launcher.hostToken
 	status, _ := do("GET", "/host", "", "")
 	assert.Equal(t, http.StatusUnauthorized, status)
 	status, _ = do("GET", "/host", "wrong", "")

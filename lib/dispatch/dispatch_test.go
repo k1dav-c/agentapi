@@ -350,6 +350,13 @@ func TestDispatchWithoutGitHub(t *testing.T) {
 	assert.Len(t, again.Hosts(), 1)
 }
 
+// pickHost is pickHostLocked with s.mu held.
+func (s *Service) pickHost(key host.Key, agent, want string) (Host, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.pickHostLocked(key, agent, want, nil)
+}
+
 func TestPickHost(t *testing.T) {
 	s, now := newService(t, nil)
 	a := newFakeLauncher(t, "a")

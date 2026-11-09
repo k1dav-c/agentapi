@@ -93,7 +93,7 @@ func TestReportToHub(t *testing.T) {
 	data, _ := json.Marshal(f.events[0].Data)
 	var d HostEventData
 	require.NoError(t, json.Unmarshal(data, &d))
-	assert.Equal(t, l.HostToken(), d.Token)
+	assert.Equal(t, l.hostToken, d.Token)
 	assert.Equal(t, []string{"native-demo"}, d.Agents)
 	assert.True(t, d.HubCredentials)
 

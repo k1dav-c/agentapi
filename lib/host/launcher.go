@@ -131,9 +131,6 @@ func New(config Config, logger *slog.Logger) (*Launcher, error) {
 
 var errUnsupportedPlatform = errors.New("agentapi host runs on Linux and macOS")
 
-// HostToken is the token the hub calls the launcher with.
-func (l *Launcher) HostToken() string { return l.hostToken }
-
 // credentialsMode is where a job's git and gh get their token: the hub
 // (CredentialsHub) when it asks and the launcher reports to one, else the
 // token file if there is one, else none (the machine's own credentials).
