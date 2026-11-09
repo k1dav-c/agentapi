@@ -28,6 +28,17 @@ type Entry struct {
 	// RestartsInPlace: the server restarts in place on SIGUSR2 (agentapi
 	// restart); earlier releases ignore the signal.
 	RestartsInPlace bool `json:"restarts_in_place,omitempty"`
+	// ProcessStart is when the process PID started, as the system counts
+	// it (ProcessStart): another process that got the PID after a crash
+	// started at another time. Empty where the system doesn't tell.
+	ProcessStart string `json:"process_start,omitempty"`
+}
+
+// ProcessStart is when process pid started, as an opaque value that
+// differs for another process that gets the same PID later; empty where it
+// can't be told (a platform without it, or a process gone).
+func ProcessStart(pid int) string {
+	return processStart(pid)
 }
 
 // DefaultDir is the directory entries go to unless told otherwise:
@@ -78,7 +89,8 @@ func Write(dir string, entry Entry) (string, error) {
 }
 
 // List returns the entries in dir, the earliest started first. An entry
-// whose process is gone (an AgentAPI that crashed) is removed and left out;
+// whose process is gone (an AgentAPI that crashed) is removed and left out,
+// also when another process got its PID since (its ProcessStart differs);
 // so are files that aren't entries. A missing dir lists none.
 func List(dir string) ([]Entry, error) {
 	files, err := os.ReadDir(dir)
@@ -105,7 +117,7 @@ func List(dir string) ([]Entry, error) {
 		}
 		// A directory shared between machines holds others' entries, whose
 		// processes can't be checked from here.
-		if entry.Hostname == hostname && entry.PID > 0 && !alive(entry.PID) {
+		if entry.Hostname == hostname && entry.PID > 0 && !running(entry) {
 			_ = os.Remove(path)
 			continue
 		}
@@ -113,4 +125,17 @@ func List(dir string) ([]Entry, error) {
 	}
 	slices.SortFunc(entries, func(a, b Entry) int { return a.StartedAt.Compare(b.StartedAt) })
 	return entries, nil
+}
+
+// running reports whether entry's process still runs: its PID does, and
+// started when the entry says, where both are known.
+func running(entry Entry) bool {
+	if !alive(entry.PID) {
+		return false
+	}
+	if entry.ProcessStart == "" {
+		return true
+	}
+	start := processStart(entry.PID)
+	return start == "" || start == entry.ProcessStart
 }

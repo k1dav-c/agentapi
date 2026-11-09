@@ -112,6 +112,7 @@ func serveCmd() *cobra.Command {
 				Addr:              net.JoinHostPort(bind, strconv.Itoa(port)),
 				Handler:           h.Handler(),
 				ReadHeaderTimeout: 10 * time.Second,
+				IdleTimeout:       2 * time.Minute,
 			}
 			done := make(chan struct{})
 			go func() {

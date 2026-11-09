@@ -869,6 +869,8 @@ func (d *DB) write() {
 	}
 }
 
+// apply runs ops in one transaction, which it commits when they all
+// succeed.
 func (d *DB) apply(ops []op) error {
 	tx, err := d.db.Begin()
 	if err != nil {

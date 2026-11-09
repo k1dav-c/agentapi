@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -129,6 +130,47 @@ func TestWebhookSend(t *testing.T) {
 	assert.Equal(t, event.Type, receivedHeader.Get("X-AgentAPI-Event"))
 	assert.Equal(t, "1700000000", receivedHeader.Get("X-AgentAPI-Timestamp"))
 	assert.Empty(t, receivedHeader.Get("X-AgentAPI-Signature-256"))
+}
+
+// The receiver's answer is read to its end before it is closed, so its
+// connection takes the next delivery.
+func TestWebhookSendReadsTheAnswer(t *testing.T) {
+	t.Parallel()
+	dispatcher, err := New(Config{URL: "http://receiver.test/hooks"}, slog.New(slog.DiscardHandler), instanceapi.AgentTypeClaude, quartz.NewReal())
+	require.NoError(t, err)
+	for _, status := range []int{http.StatusOK, http.StatusServiceUnavailable} {
+		body := &answerBody{Reader: strings.NewReader(`{"ok": true, "note": "` + strings.Repeat("x", 1000) + `"}`)}
+		client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: status, Status: http.StatusText(status), Body: body, Request: r, Header: http.Header{}}, nil
+		})}
+		event := instanceapi.WebhookEvent{ID: "delivery-1", CreatedAt: time.Now()}
+		_, _ = dispatcher.send(t.Context(), dispatcher.config, client, event, []byte(`{}`))
+		assert.True(t, body.closed, status)
+		assert.True(t, body.readToEnd, "read before it was closed (%d)", status)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// answerBody records whether it was read to its end before Close.
+type answerBody struct {
+	io.Reader
+	eof, readToEnd, closed bool
+}
+
+func (b *answerBody) Read(p []byte) (int, error) {
+	n, err := b.Reader.Read(p)
+	if err == io.EOF {
+		b.eof = true
+	}
+	return n, err
+}
+
+func (b *answerBody) Close() error {
+	b.readToEnd, b.closed = b.eof, true
+	return nil
 }
 
 func TestWebhookSendRejectsNonSuccessfulResponse(t *testing.T) {

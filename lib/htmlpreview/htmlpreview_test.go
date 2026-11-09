@@ -1,7 +1,10 @@
 package htmlpreview_test
 
 import (
+	"context"
 	"encoding/base64"
+	"fmt"
+	"io/fs"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -18,7 +21,7 @@ func dataURL(mediaType, content string) string {
 
 func inline(t *testing.T, fsys fstest.MapFS, name string) htmlpreview.Page {
 	t.Helper()
-	page, err := htmlpreview.Inline(fsys, name, fsys[name].Data)
+	page, err := htmlpreview.Inline(t.Context(), fsys, name, fsys[name].Data)
 	require.NoError(t, err)
 	return page
 }
@@ -181,4 +184,68 @@ func storageShim(html string) string {
 	}
 	end := strings.Index(html[start:], "</script>")
 	return html[start : start+end+len("</script>")]
+}
+
+// countingFS counts the files opened.
+type countingFS struct {
+	fs.FS
+	opened map[string]int
+}
+
+func (c countingFS) Open(name string) (fs.File, error) {
+	c.opened[name]++
+	return c.FS.Open(name)
+}
+
+func (c countingFS) Stat(name string) (fs.FileInfo, error) { return fs.Stat(c.FS, name) }
+
+// Stylesheets that import each other many times over are read once each:
+// the work is bounded by the files, not by the imports.
+func TestImportFanOutReadsEachFileOnce(t *testing.T) {
+	t.Parallel()
+	fsys := fstest.MapFS{
+		"index.html": {Data: []byte(`<link rel="stylesheet" href="a.css"><style>@import "a.css";</style>`)},
+		"d.css":      {Data: []byte(`p{}`)},
+	}
+	for _, f := range []string{"a", "b", "c"} {
+		next := string(rune(f[0] + 1))
+		fsys[f+".css"] = &fstest.MapFile{Data: []byte(strings.Repeat(`@import "`+next+`.css";`, 20))}
+	}
+	counting := countingFS{FS: fsys, opened: map[string]int{}}
+	page, err := htmlpreview.Inline(t.Context(), counting, "index.html", fsys["index.html"].Data)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]int{"a.css": 1, "b.css": 1, "c.css": 1, "d.css": 1}, counting.opened)
+	assert.Empty(t, page.Missing)
+}
+
+// Once the page's budget is spent, the files left aren't read.
+func TestInlineStopsReadingWhenTheBudgetIsSpent(t *testing.T) {
+	t.Parallel()
+	var html strings.Builder
+	fsys := fstest.MapFS{}
+	for i := range 30 {
+		name := fmt.Sprintf("%d.png", i)
+		fsys[name] = &fstest.MapFile{Data: make([]byte, 1<<20)}
+		fmt.Fprintf(&html, `<img src="%s">`, name)
+	}
+	fsys["index.html"] = &fstest.MapFile{Data: []byte(html.String())}
+	counting := countingFS{FS: fsys, opened: map[string]int{}}
+	page, err := htmlpreview.Inline(t.Context(), counting, "index.html", fsys["index.html"].Data)
+	require.NoError(t, err)
+	// 1 MiB is 1.33 MiB as a data: URL: 11 fit in 16 MiB.
+	assert.Len(t, counting.opened, 11)
+	assert.Len(t, page.Missing, 19)
+	assert.Equal(t, "the page's 16 MiB of inlined files are used up", page.Missing[0].Reason)
+}
+
+func TestInlineStopsWithTheContext(t *testing.T) {
+	t.Parallel()
+	fsys := fstest.MapFS{
+		"index.html": {Data: []byte(`<img src="a.png">`)},
+		"a.png":      {Data: []byte("png")},
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := htmlpreview.Inline(ctx, fsys, "index.html", fsys["index.html"].Data)
+	assert.ErrorIs(t, err, context.Canceled)
 }

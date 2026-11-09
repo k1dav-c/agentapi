@@ -239,6 +239,8 @@ type turnState struct {
 	ended chan struct{}
 	// interrupted: the user interrupted it.
 	interrupted bool
+	// interruptAccepted: the CLI answered the interrupt.
+	interruptAccepted bool
 	// authFailed: the CLI reported a login failure in it.
 	authFailed bool
 	// result is its latest result.
@@ -352,7 +354,7 @@ func (a *Adapter) issueControl(ctx context.Context, subtype string, fields map[s
 		request[k] = v
 	}
 	if err := a.write(ctx, map[string]any{"type": "control_request", "request_id": id, "request": request}); err != nil {
-		a.calls.Drop(id)
+		a.calls.WriteFailed(id, err)
 		return "", nil, err
 	}
 	return id, call, nil
@@ -481,6 +483,7 @@ func (a *Adapter) Steer(ctx context.Context, input native.Input) error {
 func (a *Adapter) Interrupt(ctx context.Context) error {
 	a.mu.Lock()
 	busy := a.turn.phase != turnIdle
+	ended := a.turn.ended
 	if busy {
 		a.turn.interrupted = true
 	}
@@ -488,24 +491,32 @@ func (a *Adapter) Interrupt(ctx context.Context) error {
 	if !busy {
 		return native.ErrNoActiveTurn
 	}
-	_, err := a.request(ctx, "interrupt", nil, a.interruptAccepted)
+	_, err := a.request(ctx, "interrupt", nil, func(json.RawMessage) { a.interruptAccepted(ended) })
 	if err != nil {
-		// Not interrupted: the turn ends as it ends, its error included.
+		// Not interrupted, unless the CLI accepts it later: the turn ends
+		// as it ends, its error included.
 		a.mu.Lock()
-		a.turn.interrupted = false
+		if a.turn.ended == ended && !a.turn.interruptAccepted {
+			a.turn.interrupted = false
+		}
 		a.mu.Unlock()
 	}
 	return err
 }
 
 // interruptAccepted starts the wait for the end of the interrupted turn
-// (see wake). It runs in the read loop.
-func (a *Adapter) interruptAccepted(json.RawMessage) {
+// (see wake), the one that ends closes. It runs in the read loop, also for
+// an answer that came after Interrupt stopped waiting.
+func (a *Adapter) interruptAccepted(ended chan struct{}) {
 	a.mu.Lock()
 	// The turn may have ended before the answer came.
-	interrupted := a.turn.interrupted
+	same := ended != nil && a.turn.ended == ended
+	if same {
+		a.turn.interrupted = true
+		a.turn.interruptAccepted = true
+	}
 	a.mu.Unlock()
-	if interrupted {
+	if same {
 		a.interrupt.Start()
 	}
 }
@@ -514,7 +525,7 @@ func (a *Adapter) interruptAccepted(json.RawMessage) {
 func (a *Adapter) Respond(ctx context.Context, requestID string, response agentstate.Response) error {
 	a.mu.Lock()
 	p, ok := a.requests[requestID]
-	if !ok || p.answering {
+	if !ok || p.answer.Answering {
 		a.mu.Unlock()
 		return native.ErrRequestNotFound
 	}
@@ -523,7 +534,7 @@ func (a *Adapter) Respond(ctx context.Context, requestID string, response agents
 		a.mu.Unlock()
 		return err
 	}
-	p.answering = true
+	p.answer.Begin()
 	a.mu.Unlock()
 	err = a.write(ctx, map[string]any{
 		"type": "control_response",
@@ -533,17 +544,13 @@ func (a *Adapter) Respond(ctx context.Context, requestID string, response agents
 	})
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	switch {
-	case err == nil:
-		if a.requests[requestID] == p {
-			delete(a.requests, requestID)
-		}
-	case !errors.Is(err, native.ErrUnconfirmed):
-		// The CLI didn't get the answer: the request is still open.
-		p.answering = false
+	// An answer the CLI didn't get leaves the request open; an unconfirmed
+	// one may yet reach the CLI: the request takes no other until the CLI
+	// cancels it or the turn ends.
+	p.answer.Written(err)
+	if err == nil && a.requests[requestID] == p {
+		delete(a.requests, requestID)
 	}
-	// An unconfirmed answer may yet reach the CLI: the request takes no
-	// other until the CLI cancels it or the turn ends.
 	return err
 }
 
@@ -577,7 +584,7 @@ func (a *Adapter) interruptForClose(ctx context.Context) <-chan struct{} {
 	// whose closing stdin makes it fail. Sent although the adapter is
 	// closing, which refuses other requests.
 	go func() {
-		if _, _, err := a.issueControl(ctx, "interrupt", nil, a.interruptAccepted); err != nil {
+		if _, _, err := a.issueControl(ctx, "interrupt", nil, func(json.RawMessage) { a.interruptAccepted(ended) }); err != nil {
 			a.log.Debug("Failed to interrupt the turn before closing", "error", err)
 		}
 	}()
@@ -746,11 +753,9 @@ func (a *Adapter) handleControlRequest(f *frame) {
 // refuse answers a control request with an error, so the CLI doesn't wait,
 // without blocking the read loop.
 func (a *Adapter) refuse(requestID, message string) {
-	go func() {
-		_ = a.write(context.Background(), map[string]any{"type": "control_response", "response": map[string]any{
-			"subtype": "error", "request_id": requestID, "error": message,
-		}})
-	}()
+	a.writer.WriteAsync(map[string]any{"type": "control_response", "response": map[string]any{
+		"subtype": "error", "request_id": requestID, "error": message,
+	}}, a.log)
 }
 
 func (a *Adapter) handleSystem(f *frame) {

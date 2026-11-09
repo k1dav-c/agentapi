@@ -237,3 +237,21 @@ func TestExitStopsGroup(t *testing.T) {
 		assert.NoError(t, p.Kill(), "signals after the group is gone are no-ops")
 	})
 }
+
+// The pipe is closed once its output ended, not only when the grace passes.
+func TestOutputReaderClosesAtEOF(t *testing.T) {
+	t.Parallel()
+	pr, pw, err := os.Pipe()
+	require.NoError(t, err)
+	r := &outputReader{f: pr}
+	_, err = pw.Write([]byte("last"))
+	require.NoError(t, err)
+	require.NoError(t, pw.Close())
+	got, err := io.ReadAll(r)
+	require.NoError(t, err)
+	assert.Equal(t, "last", string(got))
+	assert.ErrorIs(t, pr.Close(), os.ErrClosed, "the read end is closed")
+	n, err := r.Read(make([]byte, 1))
+	assert.Zero(t, n)
+	assert.ErrorIs(t, err, io.EOF)
+}

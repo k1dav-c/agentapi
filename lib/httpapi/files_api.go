@@ -189,8 +189,8 @@ func (s *Server) registerFilePreviewRoutes() {
 	s.router.Get("/files/image", f.serveFileImage)
 }
 
-func (f *fileAPI) getFilePreview(_ context.Context, input *FilePathQuery) (*FilePreviewResponse, error) {
-	page, rel, err := f.dir().Preview(input.Path)
+func (f *fileAPI) getFilePreview(ctx context.Context, input *FilePathQuery) (*FilePreviewResponse, error) {
+	page, rel, err := f.dir().Preview(ctx, input.Path)
 	if err != nil {
 		return nil, fileError(err)
 	}

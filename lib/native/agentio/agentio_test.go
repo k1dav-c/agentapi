@@ -1,6 +1,7 @@
 package agentio_test
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -75,6 +77,34 @@ func TestWriter(t *testing.T) {
 
 	w.Attach(writerFunc(func([]byte) (int, error) { return 0, io.ErrClosedPipe }))
 	assert.EqualError(t, w.Write(ctx, 1), "write to test: io: read/write on closed pipe")
+}
+
+// WriteAsync doesn't wait for an agent that doesn't read; its record goes
+// out once the agent does, and a failure is logged.
+func TestWriteAsync(t *testing.T) {
+	t.Parallel()
+	w := agentio.NewWriter("test")
+	pr, pw := io.Pipe()
+	defer func() { _ = pr.Close() }()
+	w.Attach(pw)
+	w.WriteAsync(map[string]string{"answer": "no"}, slog.New(slog.DiscardHandler))
+	line, err := bufio.NewReader(pr).ReadString('\n')
+	require.NoError(t, err)
+	assert.Equal(t, `{"answer":"no"}`+"\n", line)
+
+	var logged bytes.Buffer
+	var mu sync.Mutex
+	logger := slog.New(slog.NewTextHandler(writerFunc(func(p []byte) (int, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		return logged.Write(p)
+	}), &slog.HandlerOptions{Level: slog.LevelDebug}))
+	agentio.NewWriter("test").WriteAsync(1, logger)
+	assert.Eventually(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return strings.Contains(logged.String(), "Failed to write to the agent")
+	}, 5*time.Second, time.Millisecond)
 }
 
 // An agent that stops reading its input can't hold a write past its
@@ -207,6 +237,30 @@ func TestCallsAwait(t *testing.T) {
 	assert.ErrorIs(t, err, native.ErrUnconfirmed)
 	assert.False(t, calls.Resolve("b", 1, nil), "the request is dropped")
 
+	// A request with an onResult stays registered: a response that comes
+	// after its caller gave up still runs it.
+	var late []int
+	detached, err := calls.Add("d", func(v int, _ error) { late = append(late, v) })
+	require.NoError(t, err)
+	_, err = calls.Await(ctx, "d", detached)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.ErrorIs(t, err, native.ErrUnconfirmed)
+	assert.True(t, calls.Resolve("d", 9, nil), "the request still waits for its response")
+	assert.Equal(t, []int{9}, late)
+	assert.False(t, calls.Resolve("d", 10, nil))
+
+	// So does one whose write may yet reach the agent; one that surely
+	// didn't is dropped.
+	_, err = calls.Add("e", func(v int, _ error) { late = append(late, v) })
+	require.NoError(t, err)
+	calls.WriteFailed("e", native.Unconfirmed(context.Canceled))
+	assert.True(t, calls.Resolve("e", 11, nil))
+	assert.Equal(t, []int{9, 11}, late)
+	_, err = calls.Add("f", func(v int, _ error) { late = append(late, v) })
+	require.NoError(t, err)
+	calls.WriteFailed("f", context.Canceled)
+	assert.False(t, calls.Resolve("f", 12, nil))
+
 	exited := errors.New("the agent exited")
 	waiting, err := calls.Add("c", nil)
 	require.NoError(t, err)
@@ -230,4 +284,24 @@ func TestCallsClose(t *testing.T) {
 	calls.Close(errors.New("again"))
 	_, err = calls.Add(3, nil)
 	assert.ErrorIs(t, err, exited, "the first error stays")
+}
+
+// An answer takes the request until its write fails before it went out.
+func TestAnswer(t *testing.T) {
+	t.Parallel()
+	var a agentio.Answer
+	require.True(t, a.Begin())
+	assert.False(t, a.Begin(), "one answer at a time")
+	a.Written(errors.New("broken pipe"))
+	assert.Equal(t, agentio.Answer{}, a, "it never went out: answer again")
+
+	require.True(t, a.Begin())
+	a.Written(native.Unconfirmed(context.DeadlineExceeded))
+	assert.Equal(t, agentio.Answer{Answering: true, Unconfirmed: true}, a, "the agent may yet get it")
+	assert.False(t, a.Begin())
+
+	a = agentio.Answer{}
+	require.True(t, a.Begin())
+	a.Written(nil)
+	assert.Equal(t, agentio.Answer{Answering: true}, a)
 }

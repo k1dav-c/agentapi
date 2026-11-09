@@ -75,7 +75,7 @@ emitter. Handlers call the conversation and read state from the emitter.
 | `lib/native/` | The native transport: `Conversation`, the `Adapter` and `Sink` contracts, requests, settings, usage, logins, the queue's hold (`hold.go`: a usage limit stop or a failed turn that waits to be tried again), its `Policy` (`policy.go`: continue, retry and restart delays) and `ClassifyFailure` (a failed turn's stop reason) |
 | `lib/agentstate/` | The values a native agent reports and the API serves: capabilities, login, settings, usage, requests, the limit stop and the retry wait, and `ConversationState`, the conversation's state the observer gets whole, with the `StoredState` that survives a restart. A leaf package (huma and `lib/util` only), so the packages that serve them don't depend on `lib/native` |
 | `lib/native/claude`, `codex`, `pi` | One adapter per agent protocol |
-| `lib/native/agentio` | What those adapters share to run their agent: the process and its loop (`Host`), writing to its stdin, matching its responses to the requests waiting for them, lenient decoding with drift warnings, the snapshot throttle |
+| `lib/native/agentio` | What those adapters share to run their agent: the process and its loop (`Host`), writing to its stdin, matching its responses to the requests waiting for them, where the answer to one of its requests stands (`Answer`), lenient decoding with drift warnings, the snapshot throttle |
 | `lib/native/demo` | `native-demo`, a simulated agent for working on the chat |
 | `lib/native/nativetest` | A scriptable fake adapter for tests |
 | `lib/native/procutil` | Child process groups and graceful shutdown |
@@ -90,7 +90,7 @@ emitter. Handlers call the conversation and read state from the emitter.
 | `lib/sse/` | Server-sent events as the HTML standard defines them: a reader (data: lines joined, comments skipped, CR, LF or CRLF line ends) and a writer, used by the hub for the instances' summary streams and the browser's stream. `lib/httpapi` writes its streams with huma's `sse` |
 | `lib/netaddr/` | The machine's IPv4 addresses: those other machines may reach it at (the hub's join URLs), and the one it reaches a host from (`Resolver`, for `{ip}` in `--public-url`) |
 | `lib/userconfig/` | The user's settings file, `~/.agentapi/config.yaml`: flags by name, read by `agentapi server`, written by `agentapi hub` |
-| `lib/registry/` | The entries of the AgentAPIs running on a machine (`~/.agentapi/instances`): writing one atomically, listing them and removing those whose process is gone |
+| `lib/registry/` | The entries of the AgentAPIs running on a machine (`~/.agentapi/instances`): writing one atomically, listing them and removing those whose process is gone, or whose PID another process got (its start time differs, on Linux and macOS) |
 | `lib/atomicfile/` | Replacing a file at once so a crash leaves the old data or the new: a temporary file, synced, renamed into place, then the directory synced (the settings file, registry entries, the hub's file of instances) |
 | `lib/selfupdate/` | Installs the latest release of k1dav-c/agentapi in place of the program (`agentapi update`, `POST /update`): the lookup on GitHub, the binary for the platform, its check against the release's `checksums.txt` and that it runs as that version, and the rename under a lock file next to the program, the file and then the directory synced to disk (`Install`); whether the user can replace the program, with the one-time fix (`Program.Blocked`); `selfupdatetest` serves a fake release for tests |
 | `lib/shellterm/` | The shared shell terminal |
@@ -465,7 +465,9 @@ type Factory func(resume Resume) (Adapter, error)
   its output, line by line, to one loop goroutine, which also runs the
   functions posted to it and one timer: for the snapshots the throttle held
   back (`agentio.Throttle`, 100 ms) and the 10-second wait for an
-  interrupted turn to end (`agentio.InterruptDeadline`). That goroutine
+  interrupted turn to end (`agentio.InterruptDeadline`), which starts when
+  the agent accepts the interrupt, also after `Interrupt` stopped waiting for
+  that answer. That goroutine
   calls the Sink. The agent has exited, for `Wait`, once the process is gone
   and the loop has handled its output, or 2 seconds after the process is
   gone: a process the agent started can keep the output open. Stopping it
@@ -793,7 +795,9 @@ client subscribes and keeps running after all clients disconnect. Its output goe
 scrollback, trimmed at a line start, and to each watcher's buffer. The scrollback is a ring, so adding
 output takes time in proportion to the output, not to the scrollback. A watcher that falls 512 chunks
 behind is dropped and reconnects for the scrollback. `GET /terminal` streams base64-encoded `output`
-and `exit` events. `POST /terminal/input` sends input, and `/terminal/resize` changes the
+and `exit` events. `POST /terminal/input` sends input, one request at a time; a program that
+doesn't read it, once the terminal's buffers are full, gets it for 10 seconds, after which the
+request gives up with 503 (also when the client leaves). `/terminal/resize` changes the
 dimensions; the most recent resize applies. Closing hangs up the terminal and kills the shell's
 process group after 2 seconds.
 
@@ -813,7 +817,8 @@ Previews use the same working-directory root. `GET /files/preview` (`lib/htmlpre
 HTML file with the stylesheets, scripts, images, fonts and media it references by relative path
 embedded as data URLs: only files whose extension matches their resource type (a stylesheet must be
 `.css`, a script `.js`), none in a hidden directory or above the working directory, up to 4 MiB
-each and 16 MiB in all. The chat shows the page in an iframe sandboxed with `allow-scripts` but
+each and 16 MiB in all. Each file is read once, however often stylesheets import it; once the
+16 MiB are spent nothing more is read, and a request that ends stops the work. The chat shows the page in an iframe sandboxed with `allow-scripts` but
 without `allow-same-origin`: the page has no origin, so its scripts can't read the chat, send its
 session cookie or call the API with it, and nothing it refers to is loaded from AgentAPI (which a
 proxy's cookie wouldn't reach either). `GET /files/image` serves raster images judged by content, as
@@ -842,6 +847,10 @@ of the content's SHA-256, so a path never changes; unused ones are removed after
   a page of another origin is refused unless that origin is listed; `*`
   trusts none (`lib/httpmw/crossorigin.go`: net/http's
   `CrossOriginProtection`, and the listed origins that hold a `*`).
+- The server, the hub and the launcher give a client 10 seconds to send a
+  request's headers and close a keep-alive connection after 2 idle minutes.
+  Nothing limits how long an answer takes to write, as the event streams stay
+  open.
 - Uploads go to a private directory, and only images are served back. Files
   outside the working directory can't be opened.
 - The webhook sends its configured events, the conversation included, to
@@ -870,7 +879,8 @@ of the content's SHA-256, so a path never changes; unused ones are removed after
   can still point a new instance ID, or one whose address stopped answering,
   at an address of its own and get `--instance-token`; a key per machine
   would close that. Browsers sign in with the hub token for an HttpOnly, SameSite=Lax cookie
-  derived from it. The proxy drops their cookies and `Authorization`, `Origin`,
+  that holds its issue time, signed with the token, which the hub refuses
+  after 30 days. The proxy drops their cookies and `Authorization`, `Origin`,
   `Referer` and `Sec-Fetch-*` headers and the instances' `Set-Cookie`, so
   neither side's credentials reach the other. The hub refuses requests that
   change something from pages of other origins, as AgentAPI does, and with

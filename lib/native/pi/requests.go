@@ -12,6 +12,7 @@ import (
 	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/native/agentio"
 )
 
 // Question IDs of the requests made from extension dialogs.
@@ -38,12 +39,11 @@ type dialog struct {
 	approval bool
 	options  []string
 	timer    *quartz.Timer
-	// answering: Respond is writing the answer. The dialog stays open
-	// until the write succeeded, so a failed answer can be sent again.
-	answering bool
-	// unconfirmed: the answer's write didn't finish, so Pi may yet get it.
-	// The dialog takes no other answer, and isn't cancelled.
-	unconfirmed bool
+	// answer: Respond is writing the answer. The dialog stays open until
+	// the write succeeded, so a failed answer can be sent again; one whose
+	// write didn't finish (Unconfirmed) Pi may yet get, so the dialog
+	// takes no other answer, and isn't cancelled.
+	answer agentio.Answer
 }
 
 func (d *dialog) stopTimer() {

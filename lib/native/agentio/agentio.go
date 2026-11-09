@@ -149,16 +149,6 @@ func (w *Writer) writeLocked(data []byte) error {
 	return nil
 }
 
-// Writing reports whether a write is under way, waiting for the agent to
-// read: tests catch an adapter blocked on a write with it.
-func (w *Writer) Writing() bool {
-	if w.mu.TryLock() {
-		w.mu.Unlock()
-		return false
-	}
-	return true
-}
-
 // WriteAsync writes v from a goroutine of its own, for the adapter's loop,
 // which must not wait for an agent that doesn't read. A failure is logged.
 func (w *Writer) WriteAsync(v any, logger *slog.Logger) {
@@ -167,6 +157,40 @@ func (w *Writer) WriteAsync(v any, logger *slog.Logger) {
 			logger.Debug("Failed to write to the agent", "agent", w.name, "error", err)
 		}
 	}()
+}
+
+// Answer is where the answer to an agent's request (an approval, a
+// question, a dialog) stands. The adapter holds its lock around Begin and
+// Written, and writes the answer between them without it.
+type Answer struct {
+	// Answering: an answer is being written, or went out; the request
+	// takes no other.
+	Answering bool
+	// Unconfirmed: the answer's write didn't finish, so the agent may yet
+	// get it. The request stays Answering, and takes no other.
+	Unconfirmed bool
+}
+
+// Begin starts an answer; false if the request has one already.
+func (a *Answer) Begin() bool {
+	if a.Answering {
+		return false
+	}
+	a.Answering = true
+	return true
+}
+
+// Written records how the answer's write ended. One that failed before it
+// went out leaves the request open for another answer; one that went out
+// unconfirmed is Unconfirmed.
+func (a *Answer) Written(err error) {
+	switch {
+	case err == nil:
+	case errors.Is(err, native.ErrUnconfirmed):
+		a.Unconfirmed = true
+	default:
+		a.Answering = false
+	}
 }
 
 // Calls matches an agent's responses to the requests waiting for them,
@@ -261,6 +285,23 @@ func (c *Calls[K, R]) Detach(id K, value R, err error) bool {
 	return call.Deliver(value, err)
 }
 
+// WriteFailed handles request id whose write failed with err: it is
+// dropped, unless the write may yet reach the agent (native.ErrUnconfirmed)
+// and it has an onResult, which its response then runs.
+func (c *Calls[K, R]) WriteFailed(id K, err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	call := c.calls[id]
+	if call == nil {
+		return
+	}
+	if call.onResult != nil && errors.Is(err, native.ErrUnconfirmed) {
+		call.waiting.Store(false)
+		return
+	}
+	delete(c.calls, id)
+}
+
 // Drop forgets request id, whose caller stopped waiting.
 func (c *Calls[K, R]) Drop(id K) {
 	c.mu.Lock()
@@ -268,17 +309,32 @@ func (c *Calls[K, R]) Drop(id K) {
 	delete(c.calls, id)
 }
 
-// Await waits for the response to request id, which was sent, with
-// call.Wait. A caller that stops waiting, or whose request Close failed,
-// drops the request and gets the error marked native.ErrUnconfirmed: the
-// agent may carry it out all the same.
+// Await waits for the response to request id, which was sent. A caller
+// that stops waiting, or whose request Close failed, gets the error marked
+// native.ErrUnconfirmed: the agent may carry it out all the same. A
+// request with an onResult stays registered when its caller stops
+// waiting, so a response that comes later still runs it; one without is
+// dropped.
 func (c *Calls[K, R]) Await(ctx context.Context, id K, call *Call[R]) (R, error) {
-	value, err := call.Wait(ctx)
-	if err != nil {
-		c.Drop(id)
-		return value, native.Unconfirmed(err)
+	var r result[R]
+	select {
+	case r = <-call.done:
+	case <-ctx.Done():
+		if call.waiting.CompareAndSwap(true, false) {
+			if call.onResult == nil {
+				c.Drop(id)
+			}
+			var zero R
+			return zero, native.Unconfirmed(ctx.Err())
+		}
+		// Handed over meanwhile.
+		r = <-call.done
 	}
-	return value, nil
+	if r.err != nil {
+		c.Drop(id)
+		return r.value, native.Unconfirmed(r.err)
+	}
+	return r.value, nil
 }
 
 // Close fails the requests still waiting with err, and refuses new ones

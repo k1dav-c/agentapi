@@ -456,7 +456,7 @@ func (a *Adapter) Interrupt(ctx context.Context) error {
 func (a *Adapter) Respond(ctx context.Context, requestID string, response agentstate.Response) error {
 	a.mu.Lock()
 	d := a.dialogs[requestID]
-	if a.exited || d == nil || d.answering {
+	if a.exited || d == nil || d.answer.Answering {
 		a.mu.Unlock()
 		return native.ErrRequestNotFound
 	}
@@ -465,23 +465,16 @@ func (a *Adapter) Respond(ctx context.Context, requestID string, response agents
 		a.mu.Unlock()
 		return err
 	}
-	d.answering = true
+	d.answer.Begin()
 	a.mu.Unlock()
 	err = a.send(ctx, reply)
 	a.mu.Lock()
-	switch {
-	case err == nil:
-		d.answering = false
-		if a.dialogs[requestID] == d {
-			d.stopTimer()
-			delete(a.dialogs, requestID)
-		}
-	case errors.Is(err, native.ErrUnconfirmed):
-		// Pi may yet get the answer: the dialog stays answering until Pi
-		// closes it or the turn ends.
-		d.unconfirmed = true
-	default:
-		d.answering = false
+	// An unconfirmed answer Pi may yet get: the dialog stays answering
+	// until Pi closes it or the turn ends.
+	d.answer.Written(err)
+	if err == nil && a.dialogs[requestID] == d {
+		d.stopTimer()
+		delete(a.dialogs, requestID)
 	}
 	a.mu.Unlock()
 	return err

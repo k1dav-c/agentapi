@@ -644,8 +644,9 @@ Ctrl 和 Alt 按鈕會按住修飾鍵，套用到下一個輸入的按鍵。
 
 - `GET /terminal` 以 server-sent events 串流輸出（`output` 事件帶 base64 資料，第一個
   事件是最近的輸出，供重播；shell 結束時送出 `exit`），shell 沒有在執行時會啟動它。
-- `POST /terminal/input`（`{"data": "..."}`）輸入按鍵，`POST /terminal/resize`
-  （`{"cols": 120, "rows": 40}`）調整大小。
+- `POST /terminal/input`（`{"data": "..."}`）輸入按鍵，一次一個請求；`POST /terminal/resize`
+  （`{"cols": 120, "rows": 40}`）調整大小。忙碌的程式 10 秒內沒讀走的輸入會得到 503，可能已經
+  輸入了一部分。
 - 預設開啟，`--terminal=false` 可以關閉。它和 API 的其他部分受到相同
   的保護，所以別人連得到伺服器時，請使用 `--api-token`。
 
@@ -1091,8 +1092,9 @@ AgentAPI，用[人工回覆 API](#人工回覆-api)讓機器人代為回覆 agen
 要找出一台主機上的實例，可以讀取登記目錄：每個 AgentAPI 執行期間會在 `~/.agentapi/instances`
 （`--registry-dir`；`--registry=false` 可關閉）保留一份登記檔，內容有 `id`、`name`、`server_id`、
 `url`（`--public-url`，沒有的話是監聽位址）、PID、目錄、agent、`auth_required`（不含 token）和
-`restarts_in_place`（收到 SIGUSR2 會原地重新啟動，見 [`agentapi restart`](#agentapi-restart)）。
-停止時會刪除登記檔；行程已經不在（當掉）的登記檔，會在列出登記目錄時刪除。使用前請先確認
+`restarts_in_place`（收到 SIGUSR2 會原地重新啟動，見 [`agentapi restart`](#agentapi-restart)），
+在 Linux 和 macOS 上還有 `process_start`（系統記錄的行程啟動時間）。停止時會刪除登記檔；行程已經
+不在（當掉）的登記檔，會在列出登記目錄時刪除，PID 後來被別的行程拿到（啟動時間不同）時也一樣。使用前請先確認
 `GET /summary` 回傳的 `server_id` 與登記檔相同：該 port 可能已被另一個 AgentAPI 使用。
 [`agentapi list`](#agentapi-list) 會列出已登記的實例和它們的摘要。
 

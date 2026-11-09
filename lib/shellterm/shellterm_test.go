@@ -4,6 +4,7 @@ package shellterm
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"log/slog"
 	"os"
@@ -47,13 +48,13 @@ func newTerminal(t *testing.T) *Terminal {
 func TestTerminal(t *testing.T) {
 	t.Parallel()
 	term := newTerminal(t)
-	require.ErrorIs(t, term.Write([]byte("x")), ErrNotRunning, "nothing runs before someone watches")
+	require.ErrorIs(t, term.Write(t.Context(), []byte("x")), ErrNotRunning, "nothing runs before someone watches")
 
 	history, output, stop, err := term.Watch()
 	require.NoError(t, err)
 	assert.Empty(t, history)
 	require.NoError(t, term.Resize(120, 40))
-	require.NoError(t, term.Write([]byte("echo \"size $(stty size)\"; pwd\r")))
+	require.NoError(t, term.Write(t.Context(), []byte("echo \"size $(stty size)\"; pwd\r")))
 	var got bytes.Buffer
 	readUntil(t, output, &got, "size 40 120")
 
@@ -61,7 +62,7 @@ func TestTerminal(t *testing.T) {
 	history2, output2, stop2, err := term.Watch()
 	require.NoError(t, err)
 	assert.Contains(t, string(history2), "size 40 120")
-	require.NoError(t, term.Write([]byte("echo second\r")))
+	require.NoError(t, term.Write(t.Context(), []byte("echo second\r")))
 	var got2 bytes.Buffer
 	readUntil(t, output2, &got2, "second")
 	stop2()
@@ -70,7 +71,7 @@ func TestTerminal(t *testing.T) {
 	}
 
 	// The shell exits: the watch ends; the next watch starts a new shell.
-	require.NoError(t, term.Write([]byte("exit 3\r")))
+	require.NoError(t, term.Write(t.Context(), []byte("exit 3\r")))
 	readUntil(t, output, &got, "exited with status 3")
 	for range output {
 	}
@@ -79,7 +80,7 @@ func TestTerminal(t *testing.T) {
 	require.NoError(t, err)
 	defer stop()
 	assert.Contains(t, string(history), "exited with status 3")
-	require.NoError(t, term.Write([]byte("echo again\r")))
+	require.NoError(t, term.Write(t.Context(), []byte("echo again\r")))
 	got.Reset()
 	readUntil(t, output, &got, "again")
 }
@@ -90,7 +91,7 @@ func TestTerminalClose(t *testing.T) {
 	_, output, _, err := term.Watch()
 	require.NoError(t, err)
 	// A job that ignores the hangup is killed with the shell's group.
-	require.NoError(t, term.Write([]byte("trap '' HUP; sleep 60 & echo started\r")))
+	require.NoError(t, term.Write(t.Context(), []byte("trap '' HUP; sleep 60 & echo started\r")))
 	var got bytes.Buffer
 	readUntil(t, output, &got, "started")
 	done := make(chan struct{})
@@ -137,26 +138,70 @@ func TestTerminalWithABackgroundJob(t *testing.T) {
 	_, output, stop, err := term.Watch()
 	require.NoError(t, err)
 	defer stop()
-	require.NoError(t, term.Write([]byte("sleep 20 & echo started\r")))
+	require.NoError(t, term.Write(t.Context(), []byte("sleep 20 & echo started\r")))
 	var got bytes.Buffer
 	readUntil(t, output, &got, "started")
 	// The shell exits while the job holds the terminal: the exit is
 	// noticed, and the next watch starts a new shell.
-	require.NoError(t, term.Write([]byte("exit\r")))
+	require.NoError(t, term.Write(t.Context(), []byte("exit\r")))
 	readUntil(t, output, &got, "exited with status")
 	_, again, stopAgain, err := term.Watch()
 	require.NoError(t, err)
 	defer stopAgain()
-	require.NoError(t, term.Write([]byte("echo new\r")))
+	require.NoError(t, term.Write(t.Context(), []byte("echo new\r")))
 	got.Reset()
 	readUntil(t, again, &got, "new")
 
 	// Close doesn't wait for a job either, once the read loop is back in
 	// Read.
-	require.NoError(t, term.Write([]byte("sleep 20 & echo second\r")))
+	require.NoError(t, term.Write(t.Context(), []byte("sleep 20 & echo second\r")))
 	readUntil(t, again, &got, "second")
 	time.Sleep(200 * time.Millisecond)
 	start := time.Now()
 	require.NoError(t, term.Close())
 	assert.Less(t, time.Since(start), 4*time.Second)
+}
+
+func TestWriteGivesUpOnInputNobodyReads(t *testing.T) {
+	t.Parallel()
+	term := newTerminal(t)
+	term.writeTimeout = 500 * time.Millisecond
+	_, output, stop, err := term.Watch()
+	require.NoError(t, err)
+	defer stop()
+	require.NoError(t, term.Write(t.Context(), []byte("stty raw -echo; echo busy; sleep 30\r")))
+	var got bytes.Buffer
+	readUntil(t, output, &got, "busy")
+
+	// sleep reads nothing, as a full-screen program that is busy: in raw
+	// mode a paste larger than the terminal's buffers stalls, and Write
+	// gives up.
+	paste := bytes.Repeat([]byte("x"), 1<<20)
+	start := time.Now()
+	require.ErrorIs(t, term.Write(t.Context(), paste), ErrInputStalled)
+	assert.Less(t, time.Since(start), 5*time.Second)
+
+	// So does a write whose request ends first.
+	term.writeTimeout = time.Minute
+	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	defer cancel()
+	start = time.Now()
+	require.ErrorIs(t, term.Write(ctx, paste), context.DeadlineExceeded)
+	assert.Less(t, time.Since(start), 5*time.Second)
+}
+
+func TestWritesTakeTurns(t *testing.T) {
+	t.Parallel()
+	term := newTerminal(t)
+	_, _, stop, err := term.Watch()
+	require.NoError(t, err)
+	defer stop()
+	// Another write holds the turn: this one waits for it, and gives up
+	// with its context.
+	term.writing <- struct{}{}
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	require.ErrorIs(t, term.Write(ctx, []byte("echo never\r")), context.DeadlineExceeded)
+	<-term.writing
+	require.NoError(t, term.Write(t.Context(), []byte("echo now\r")))
 }

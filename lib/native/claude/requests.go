@@ -8,6 +8,7 @@ import (
 
 	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/native/agentio"
 )
 
 // canUseTool is the request of a can_use_tool control request.
@@ -47,8 +48,8 @@ type pendingRequest struct {
 	// questions maps question IDs to the question text Claude Code keys
 	// answers by.
 	questions map[string]string
-	// answering: an answer is being written to the CLI.
-	answering bool
+	// answer: an answer is being written to the CLI, or went out.
+	answer agentio.Answer
 }
 
 type askQuestion struct {

@@ -357,7 +357,8 @@ func (p *process) readStderr() {
 // exited, a Read that gets no output for OutputGrace means a process the
 // agent started holds the pipe open; the pipe is then closed and the
 // reader sees EOF. Output already written is always read first, however
-// long the reader takes to come back for it.
+// long the reader takes to come back for it. The pipe is closed at EOF
+// too, so a restarted agent doesn't leave one open.
 type outputReader struct {
 	f *os.File
 
@@ -381,7 +382,10 @@ func (r *outputReader) Read(b []byte) (int, error) {
 		r.timer.Stop()
 	}
 	r.mu.Unlock()
-	if errors.Is(err, os.ErrClosed) {
+	switch {
+	case errors.Is(err, io.EOF):
+		_ = r.f.Close()
+	case errors.Is(err, os.ErrClosed):
 		err = io.EOF
 	}
 	return n, err

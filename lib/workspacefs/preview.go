@@ -1,6 +1,7 @@
 package workspacefs
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -17,7 +18,7 @@ const MaxPreviewPage = 4 << 20
 // Preview returns the HTML file at path as a page that shows by itself,
 // with what it refers to by relative path inlined (htmlpreview), and its
 // path relative to the directory, with slashes.
-func (d Dir) Preview(path string) (htmlpreview.Page, string, error) {
+func (d Dir) Preview(ctx context.Context, path string) (htmlpreview.Page, string, error) {
 	rel, err := d.Resolve(path)
 	if err != nil {
 		return htmlpreview.Page{}, "", err
@@ -39,7 +40,7 @@ func (d Dir) Preview(path string) (htmlpreview.Page, string, error) {
 	if len(data) > MaxPreviewPage {
 		return htmlpreview.Page{}, "", refuse(Invalid, fmt.Sprintf("%s is larger than %d MiB, too large to preview", path, MaxPreviewPage>>20))
 	}
-	page, err := htmlpreview.Inline(root.FS(), filepath.ToSlash(rel), data)
+	page, err := htmlpreview.Inline(ctx, root.FS(), filepath.ToSlash(rel), data)
 	if err != nil {
 		return htmlpreview.Page{}, "", fmt.Errorf("preview %s: %w", path, err)
 	}

@@ -1,5 +1,54 @@
 # Changelog
 
+## Unreleased
+
+### Changes
+
+- The hub's session cookie holds the time it was issued, signed with the hub token, and the hub
+  refuses one older than 30 days itself, where only the browser dropped it. A browser signed in to
+  an older hub is signed out once and signs in again.
+
+### Fixes
+
+- The server gives a client 10 seconds to send a request's headers, and closes a keep-alive
+  connection after 2 idle minutes, where a client that sent nothing held its connection open
+  forever; the hub and the launcher close idle connections after 2 minutes too.
+- `POST /terminal/input` no longer waits forever when the terminal's program doesn't read its
+  input (a paste into a busy full-screen program): it gives up after 10 seconds with 503, part of
+  the input perhaps typed, or when the client leaves. Two inputs no longer interleave.
+- The hub ends a browser's stream (`/api/events`) whose browser takes no event for 30 seconds,
+  where one that stopped reading kept its handler and subscriptions for good.
+- The HTML preview (`GET /files/preview`) reads each file once, however often stylesheets
+  `@import` it, stops reading once its 16 MiB are spent, and stops when the request ends, where
+  stylesheets importing each other many times over could keep it reading for a long time.
+- Pi's adapter remembers the last 256 message IDs it gave out, which tell apart messages of the
+  same millisecond, where it kept every one for the life of the agent.
+- The registry entry of an AgentAPI that crashed is removed when another process got its PID: the
+  entry has when its process started (`process_start`, on Linux and macOS), where it stayed listed
+  as long as the PID ran.
+- A webhook delivery reads the receiver's answer (up to 4 KiB) before it closes it, so the next
+  delivery uses the same connection, where each delivery with an answer opened a new one.
+- The pipe of an agent's output is closed when the output ends, where each start of the agent
+  again left one open until AgentAPI exited.
+- An interrupt Claude Code or Codex accepts after `POST /interrupt` stopped waiting for the answer
+  still ends the turn within 10 seconds when the agent doesn't, where the turn could stay running.
+
+### Internal
+
+- The launcher's tests give their fake AgentAPIs ports of their own, picked at random below the
+  ephemeral ports, where every test process used 47300-47399: two test runs at once on one machine
+  (the CI runners share one) took each other's ports, and a fake that couldn't listen exited. A
+  fake that can't listen says so in its log. An agent host test no longer fails on a busy machine
+  when the fake agent takes over 10 ms to exit.
+- `agentio.Writer.Writing`, a hook only tests used, is gone (the tests' fake agents count their
+  blocked writes), and `webhook.Dispatcher.SetResolver` takes the lookups' lock.
+- The Claude, Codex and Pi adapters share where an answer to the agent's request stands
+  (`agentio.Answer`), and write their fire-and-forget answers with `agentio.WriteAsync`;
+  `statedb` runs its transactions through one helper.
+- `lib/workspacefs` tests its diffs in the package: each status, a working directory below the
+  repository's top, a file too large to compare, a symlink out, and that a repository's filters,
+  textconv and external diff don't run.
+
 ## v3.16.3
 
 ### Changes

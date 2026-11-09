@@ -754,8 +754,10 @@ press. The Ctrl and Alt buttons hold the modifier for the next key.
 - `GET /terminal` streams its output as server-sent events (`output` events
   with base64 data, the first one the recent output to replay; `exit` when the
   shell exits) and starts the shell if it doesn't run.
-- `POST /terminal/input` (`{"data": "..."}`) types into it and
-  `POST /terminal/resize` (`{"cols": 120, "rows": 40}`) sizes it.
+- `POST /terminal/input` (`{"data": "..."}`) types into it, one request at a
+  time, and `POST /terminal/resize` (`{"cols": 120, "rows": 40}`) sizes it.
+  Input a busy program doesn't read gets 503 after 10 seconds, perhaps partly
+  typed.
 - It is on by default; `--terminal=false` turns it off. It is as protected as the rest of the API, so use `--api-token` when
   the server is reachable by others.
 
@@ -1307,8 +1309,10 @@ To find the instances on a machine, read the registry: while it serves, each Age
 entry in `~/.agentapi/instances` (`--registry-dir`; `--registry=false` turns it off) with its `id`,
 `name`, `server_id`, `url` (`--public-url`, else its listen address), PID, directory, agent,
 `auth_required` (never the token) and `restarts_in_place` (it restarts in place on SIGUSR2, see
-[`agentapi restart`](#agentapi-restart)). It removes the entry when it stops; an entry whose process is
-gone (after a crash) is removed when the registry is listed. Check that `GET /summary` returns the
+[`agentapi restart`](#agentapi-restart)) and, on Linux and macOS, `process_start` (when its process
+started, as the system counts it). It removes the entry when it stops; an entry whose process is
+gone (after a crash) is removed when the registry is listed, also when another process got its PID
+since (it started at another time). Check that `GET /summary` returns the
 entry's `server_id` before using one: another AgentAPI may have taken the port.
 [`agentapi list`](#agentapi-list) shows the registered instances with their summaries.
 

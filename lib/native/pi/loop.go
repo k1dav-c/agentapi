@@ -31,8 +31,10 @@ type loopState struct {
 
 	// stream is the assistant message being streamed.
 	stream *streamMessage
-	// usedIDs are the message IDs already given out.
-	usedIDs map[string]bool
+	// usedIDs are the last maxUsedIDs message IDs given out, the oldest
+	// first in usedOrder.
+	usedIDs   map[string]bool
+	usedOrder []string
 	// tools are the tool calls running, in start order.
 	tools []runningTool
 	// throttle holds back the snapshots of messages that stream.
@@ -541,11 +543,11 @@ func (a *Adapter) cancelTurnDialogs(withdraw bool) {
 		d := a.dialogs[id]
 		switch {
 		case d == nil:
-		case d.unconfirmed:
+		case d.answer.Unconfirmed:
 			// It may have its answer: no cancel contradicts it.
 			d.stopTimer()
 			delete(a.dialogs, id)
-		case !d.answering:
+		case !d.answer.Answering:
 			d.stopTimer()
 			delete(a.dialogs, id)
 			cancel = append(cancel, id)
@@ -558,21 +560,28 @@ func (a *Adapter) cancelTurnDialogs(withdraw bool) {
 		if withdraw {
 			a.loop.sink.RequestClosed(id)
 		}
-		go func(id string) {
-			if err := a.send(context.Background(), uiResponse{Type: "extension_ui_response", ID: id, Cancelled: true}); err != nil {
-				a.log.Debug("Failed to cancel a Pi dialog", "id", id, "error", err)
-			}
-		}(id)
+		a.writer.WriteAsync(uiResponse{Type: "extension_ui_response", ID: id, Cancelled: true}, a.log)
 	}
 }
 
-// uniqueID returns base, or base with a suffix if it was given out.
+// maxUsedIDs is how many message IDs uniqueID remembers. An ID is the
+// message's role and millisecond, so only messages close in time share
+// one.
+const maxUsedIDs = 256
+
+// uniqueID returns base, or base with a suffix if it was given out
+// recently.
 func (l *loopState) uniqueID(base string) string {
 	id := base
 	for n := 2; l.usedIDs[id]; n++ {
 		id = fmt.Sprintf("%s-%d", base, n)
 	}
+	if len(l.usedOrder) == maxUsedIDs {
+		delete(l.usedIDs, l.usedOrder[0])
+		l.usedOrder = l.usedOrder[1:]
+	}
 	l.usedIDs[id] = true
+	l.usedOrder = append(l.usedOrder, id)
 	return id
 }
 

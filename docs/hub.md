@@ -202,8 +202,9 @@ Open `http://hub.vpn:3290/` on a desktop or a phone that is on the VPN, and sign
 
 ![The hub's sign-in](screenshots/hub-sign-in.png)
 
-The token goes to the hub once and comes back as an HttpOnly cookie derived from it; the page never
-stores the token. Changing `--token` signs every browser out. A wrong token is refused on the spot,
+The token goes to the hub once and comes back as an HttpOnly cookie signed with it; the page never
+stores the token. The cookie lasts 30 days from the sign-in, which the hub checks itself. Changing
+`--token` signs every browser out. A wrong token is refused on the spot,
 and the eye button shows what you pasted.
 
 A hub behind a sign-in of its own, such as a Coder workspace app or a private VPN, can run
@@ -850,8 +851,10 @@ right is forgotten, it closes.
   connected: it reads that instance's summary at its URL. While it connects, after the hub
   restarts, a stream drops or an event moved the instance, the proxy answers 503 and sends
   nothing.
-- The session cookie is HttpOnly and SameSite=Lax, derived from the hub token rather than holding
-  it. The proxy drops the browser's cookies and its `Authorization`, `Origin`, `Referer` and
+- The session cookie is HttpOnly and SameSite=Lax, and holds the time it was issued, signed with
+  the hub token (HMAC), rather than the token. The hub refuses one older than 30 days, whatever the
+  browser keeps. Signing out only clears the browser's copy: a cookie copied elsewhere still works
+  until it expires or `--token` changes. The proxy drops the browser's cookies and its `Authorization`, `Origin`, `Referer` and
   `Sec-Fetch-*` headers, and drops the instance's `Set-Cookie`, so neither side's credentials
   reach the other.
 - A page of another site can't make the hub change anything or send an instance a task, with or
@@ -1019,7 +1022,7 @@ running AgentAPIs, which then no longer follow their conversation for the webhoo
 | `PUT /api/pins` | `{"ids": […]}` orders the pinned instances, from the top. It lists each pinned instance once and no other; 409, with the pinned ones in their order (`ids`), when it doesn't, such as after one was pinned, unpinned or forgotten; 404 for an instance the hub doesn't have |
 | `GET /api/favorites` | The [favorites](#favorites), in their order: `{"favorites": [{"id", "title", "text"}, …]}`; a favorite without a title has none |
 | `PUT /api/favorites` | `{"favorites": […]}` replaces them, in that order. At most 100; a title has at most 100 characters, on one line; a text isn't blank and has at most 20,000; an ID has 1 to 64 letters, digits, `-` or `_`, once. A favorite sent without an ID gets one; the answer is the list as the hub keeps it. 400, changing nothing, for a list it refuses |
-| `GET /api/events` | Server-sent events: `instances` (all of them and `hub_version`, as `GET /api/instances` has them) and `favorites` (as `GET /api/favorites` has them), then `instance` (one changed what the page shows, or its work time moved by a minute; when it was last heard of counts only while it is offline), `removed` (`{"id"}`), `favorites` (all of them, after a change), `dispatch` (the [issue dispatch's](#issues) machines and jobs, as `GET /api/hosts` and `GET /api/jobs` have them, at first and after each change) and a `heartbeat` every 15 s |
+| `GET /api/events` | Server-sent events: `instances` (all of them and `hub_version`, as `GET /api/instances` has them) and `favorites` (as `GET /api/favorites` has them), then `instance` (one changed what the page shows, or its work time moved by a minute; when it was last heard of counts only while it is offline), `removed` (`{"id"}`), `favorites` (all of them, after a change), `dispatch` (the [issue dispatch's](#issues) machines and jobs, as `GET /api/hosts` and `GET /api/jobs` have them, at first and after each change) and a `heartbeat` every 15 s. A browser that takes no event for 30 s loses the stream |
 | `GET /api/hosts` | The machines whose launchers report: their agents, repositories, jobs and room, and whether each is `online` |
 | `DELETE /api/hosts/{name}` | Forgets a machine and the launcher token the hub pinned its name to, so a launcher with a new token can join under the name. 409 while the machine is online (`host_online`) or has a job that works (`host_busy`): stop its jobs first; 404 for a machine the hub doesn't have |
 | `GET /api/jobs` | The jobs, each an issue's work: its state, agent and machine, pull request, runs with their cost, and the last 50 messages its agents were sent (`messages`: `at`, `source` `hub`, `review` or `comment`, `author`, `agent`, `text`, up to 2,000 characters) |

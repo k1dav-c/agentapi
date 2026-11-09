@@ -138,19 +138,17 @@ func (d *DB) migrateState(snap *Snapshot) error {
 		}
 		write = true
 	}
-	if err := d.inTx(func(tx *sql.Tx) error {
-		if write {
-			if err := metaWrite(MetaState, data)(tx); err != nil {
-				return err
-			}
-		}
-		for _, key := range present {
-			if _, err := tx.Exec("DELETE FROM meta WHERE key = ?", key); err != nil {
-				return err
-			}
-		}
-		return nil
-	}); err != nil {
+	var ops []op
+	if write {
+		ops = append(ops, op{run: metaWrite(MetaState, data)})
+	}
+	for _, key := range present {
+		ops = append(ops, op{run: func(tx *sql.Tx) error {
+			_, err := tx.Exec("DELETE FROM meta WHERE key = ?", key)
+			return err
+		}})
+	}
+	if err := d.apply(ops); err != nil {
 		return fmt.Errorf("store the conversation state: %w", err)
 	}
 	if write {
@@ -160,17 +158,4 @@ func (d *DB) migrateState(snap *Snapshot) error {
 		delete(snap.Meta, key)
 	}
 	return nil
-}
-
-// inTx runs fn in a transaction, which it commits when fn succeeds.
-func (d *DB) inTx(fn func(*sql.Tx) error) error {
-	tx, err := d.db.Begin()
-	if err != nil {
-		return err
-	}
-	if err := fn(tx); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	return tx.Commit()
 }

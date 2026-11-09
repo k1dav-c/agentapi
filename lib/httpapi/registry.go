@@ -88,7 +88,10 @@ func (s *Server) newInstanceRegistry(dir string, bind string, restartsInPlace bo
 			}
 			instance.Port = port
 			instance.PID = os.Getpid()
-			return registry.Entry{WebhookInstance: instance, AuthRequired: s.auth != nil, StartedAt: started, RestartsInPlace: restartsInPlace}
+			return registry.Entry{
+				WebhookInstance: instance, AuthRequired: s.auth != nil, StartedAt: started, RestartsInPlace: restartsInPlace,
+				ProcessStart: registry.ProcessStart(instance.PID),
+			}
 		},
 	}
 }

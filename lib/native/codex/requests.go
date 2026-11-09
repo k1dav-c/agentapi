@@ -3,7 +3,6 @@ package codex
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"path/filepath"
 	"slices"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/native/agentio"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -50,10 +50,9 @@ type pendingRequest struct {
 	// an MCP form elicitation.
 	questions []agentstate.Question
 	form      map[string]formField
-	answered  bool
-	// unconfirmed: the answer went out, but its write didn't finish, so
-	// app-server may not have it. The request takes no other answer.
-	unconfirmed bool
+	// answered: the answer is being written, or went out; Unconfirmed when
+	// its write didn't finish, so app-server may not have it.
+	answered agentio.Answer
 	// answer is the result of the request_user_input tool call once it is
 	// answered, as the chat shows it.
 	answer string
@@ -616,7 +615,7 @@ func (a *Adapter) Respond(ctx context.Context, requestID string, response agents
 		return a.answerPlan(ctx, requestID, response)
 	}
 	r := a.requests[requestID]
-	if r == nil || r.answered {
+	if r == nil || r.answered.Answering {
 		a.mu.Unlock()
 		return native.ErrRequestNotFound
 	}
@@ -625,24 +624,18 @@ func (a *Adapter) Respond(ctx context.Context, requestID string, response agents
 		a.mu.Unlock()
 		return err
 	}
-	r.answered = true
+	r.answered.Begin()
 	if r.method == methodRequestUserInput {
 		// The tool call shows it once app-server has it (requestResolved).
 		r.answer = string(mustJSON(r.userInputResponse(response.Answers, true)))
 	}
 	a.mu.Unlock()
 
-	if err := a.write(ctx, rpcResponse{JSONRPC: "2.0", ID: r.rpcID, Result: result}); err != nil {
-		a.mu.Lock()
-		if errors.Is(err, native.ErrUnconfirmed) {
-			r.unconfirmed = true
-		} else {
-			r.answered = false
-		}
-		a.mu.Unlock()
-		return err
-	}
-	return nil
+	err = a.write(ctx, rpcResponse{JSONRPC: "2.0", ID: r.rpcID, Result: result})
+	a.mu.Lock()
+	r.answered.Written(err)
+	a.mu.Unlock()
+	return err
 }
 
 // requestResolved handles serverRequest/resolved: app-server no longer
@@ -661,7 +654,7 @@ func (s *loopState) requestResolved(rpcID string) {
 	}
 	answered, unconfirmed, answer := false, false, ""
 	if r != nil {
-		answered, unconfirmed, answer = r.answered, r.unconfirmed, r.answer
+		answered, unconfirmed, answer = r.answered.Answering, r.answered.Unconfirmed, r.answer
 	}
 	s.a.mu.Unlock()
 	if r == nil {
@@ -696,7 +689,7 @@ func (s *loopState) closeTurnRequests() {
 	defer s.a.mu.Unlock()
 	for id, r := range s.a.requests {
 		delete(s.a.requests, id)
-		if result, ok := r.dismissal(); ok && !r.answered {
+		if result, ok := r.dismissal(); ok && !r.answered.Answering {
 			s.a.writeAsync(rpcResponse{JSONRPC: "2.0", ID: r.rpcID, Result: result})
 		}
 	}

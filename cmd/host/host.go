@@ -73,7 +73,9 @@ func serveCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			srv := &http.Server{Handler: launcher.Handler(), ReadHeaderTimeout: 10 * time.Second}
+			srv := &http.Server{
+				Handler: launcher.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute,
+			}
 			errs := make(chan error, 2)
 			go func() { errs <- srv.Serve(ln) }()
 			go func() { errs <- launcher.ServeSocket(ctx) }()

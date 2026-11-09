@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/coder/quartz"
 	"github.com/danielgtaylor/huma/v2"
@@ -303,8 +304,15 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	// Register API routes
 	s.registerRoutes()
 	// Created here rather than in Start, so Stop can shut it down whichever
-	// runs first.
-	s.srv = &http.Server{Addr: s.ListenAddr(), Handler: s.router}
+	// runs first. A client gets 10 s to send a request's headers and an idle
+	// keep-alive connection is closed after 2 minutes; there is no write
+	// timeout, as the event streams stay open.
+	s.srv = &http.Server{
+		Addr:              s.ListenAddr(),
+		Handler:           s.router,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+	}
 
 	// Without a factory (--print-openapi) no agent runs.
 	if config.Native.Factory != nil {
