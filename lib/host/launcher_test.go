@@ -750,6 +750,11 @@ func TestLauncherRestartBackoff(t *testing.T) {
 	clock2.Advance(restartDelays[1])
 	l2.check(ctx)
 	assert.NotEqual(t, pid, l2.Jobs()[0].PID)
+	// Serving, it recorded itself, for the cleanup to stop it.
+	waitFor(t, func() bool {
+		l2.check(ctx)
+		return l2.Jobs()[0].State == JobRunning
+	})
 	l2.mu.Lock()
 	assert.Len(t, l2.store.get("acme/widget#26").Restarts, 2)
 	l2.mu.Unlock()
