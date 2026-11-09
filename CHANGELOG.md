@@ -12,6 +12,12 @@
 - An IPv6 address without brackets in `--allowed-hosts` is refused as not a valid host, where the
   error said it must not include a port.
 
+### Fixes
+
+- The server gives a client 10 seconds to send a request's headers, and closes a keep-alive
+  connection after 2 idle minutes, where a client that sent nothing held its connection open
+  forever; the hub and the launcher close idle connections after 2 minutes too.
+
 ### Internal
 
 - AgentAPI builds with Go 1.26.10, huma v2.40.0 and the latest golang.org/x modules and

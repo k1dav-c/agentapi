@@ -629,6 +629,8 @@ Content-Security-Policy。
   瀏覽器呼叫 API。其他來源的網頁送出會造成改動的請求（GET、HEAD、OPTIONS 以外）時，除非那個來源
   列在清單上，否則一律拒絕；`*` 不信任任何來源（`lib/httpmw/crossorigin.go`：net/http 的
   `CrossOriginProtection`，加上清單裡含 `*` 的來源）。
+- server、hub 和 launcher 給用戶端 10 秒送完請求的標頭，閒置 2 分鐘的 keep-alive 連線會被關閉。
+  回應寫多久則不設限，因為事件串流會一直開著。
 - 上傳的檔案存放在私有目錄，只回傳圖片。工作目錄以外的檔案無法開啟。
 - webhook 會把設定要送的內容（包括對話）送到它的網址，而 `PUT /webhook` 可以修改網址；它的
   HMAC secret 只能寫入、無法讀回。
