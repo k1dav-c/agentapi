@@ -1755,7 +1755,7 @@ host:
 
 | 檔案 | 內容 |
 | --- | --- |
-| `~/.agentapi/host.token` | hub 呼叫 launcher 用的 token，第一次啟動時產生。hub 會把主機名稱綁定到它：換了 token 的 launcher（檔案被刪、主機重灌）要等 hub 上執行 `DELETE /api/hosts/{name}` 後才能加入（見[疑難排解](docs/hub.zh-TW.md#疑難排解)） |
+| `~/.agentapi/host.token` | hub 呼叫 launcher 用的 token，第一次啟動時產生。hub 會把主機名稱綁定到它：換了 token 的 launcher（檔案被刪、主機重灌）要等 hub 移除這台主機後才能加入：在 hub 的 Issues 按主機的 **×**，或呼叫 `DELETE /api/hosts/{name}`（見[疑難排解](docs/hub.zh-TW.md#疑難排解)） |
 | `~/.agentapi/instance.token` | 所有 job 的 AgentAPI 共用的 API token，必須等於 hub 的 `--instance-token` |
 | `~/.agentapi/host.sock` | job 的 `git` 和 `gh` 向 launcher 拿 GitHub token 的地方 |
 | `~/.agentapi/jobs.json`、`~/.agentapi/jobs/` | job 清單，以及各 job 的狀態資料庫、log 和 `gh` shim |

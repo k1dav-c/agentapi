@@ -639,8 +639,12 @@ The page puts the issues of the repositories it shows on one board. The headline
 you, and the line under it counts the stages. The bar under them shows how many issues are at
 each stage, To do, In progress, In review and Done, in proportion; In progress also says how many
 of its issues wait on you and how many failed. Below are the machines whose launchers report:
-online or not, their jobs against their room (●●●○), and the agents each runs. Then the issues,
-by section:
+online or not, their jobs against their room (●●●○), and the agents each runs. An offline machine
+has **×**, which forgets it after a dialog: the hub drops the machine and the launcher token it
+pinned its name to, so a launcher set up again, with a new token, can join under the name. The
+button is off while one of its jobs still works (all but done, stopped and failed); stop them
+first. Nothing changes on the machine, and a launcher that reports again shows up again. Then the
+issues, by section:
 
 - **Needs you**: a failed job, then an agent that waits on you (an approval, a question), then a
   pull request to review.
@@ -716,8 +720,9 @@ Issues.
 Before the hub has a GitHub App, Issues shows **Connect GitHub**, which registers one from a
 manifest, for your account or an organization. [GitHub settings](#github-settings) changes the
 app's repositories, connects another app, or disconnects it. An issue can still be started by its reference
-(`owner/repo#12`, or its URL); the machine then works with its own GitHub login. Without a launcher
-on any machine, the page shows the command that installs one.
+(`owner/repo#12`, or its URL); the machine then works with its own GitHub login. The machines show
+above it, with **×** on an offline one, as on the board. Without a launcher on any machine, the page
+shows the command that installs one.
 
 | The board on a phone | An issue on a phone |
 | --- | --- |
@@ -914,7 +919,7 @@ right is forgotten, it closes.
 | A connected agent's **⋯** menu has nothing about updating it | Its AgentAPI is too old to update from the hub | Update it by hand ([Updating by hand](#updating-by-hand)) |
 | The hub logs "The hub's file of instances doesn't parse" | The file was damaged, such as by an edit by hand, or a hub of 2.2 or earlier started on a newer hub's file | The hub moved it aside (`instances.json.corrupt-<time>`) and started empty. Joined instances come back with their next heartbeat. To get the rest back, stop the hub and copy `instances.json.bak` (the file as the hub's previous start found it) over `instances.json`; for a hub of 2.2 or earlier, see [Files](#files) |
 | The hub doesn't start: `instances.json is of a newer hub` | A newer hub wrote the file | Run the newer hub, or start from `instances.json.bak` |
-| A machine stays offline in Issues; the hub logs "Refused a host event with another launcher's token than the machine's" | The hub pins a machine's name to the launcher token it first came with. The launcher has a new token (its `~/.agentapi/host.token` was deleted, or the machine was set up again), or another machine with the hub's secret uses the name | If it is your machine: stop its jobs, and once it shows offline, forget it with `curl -X DELETE -H "Authorization: Bearer <hub token>" http://<hub>:3290/api/hosts/<name>`; it joins with its next heartbeat. If it isn't, change the hub's `--secret` and join your machines again |
+| A machine stays offline in Issues; the hub logs "Refused a host event with another launcher's token than the machine's" | The hub pins a machine's name to the launcher token it first came with. The launcher has a new token (its `~/.agentapi/host.token` was deleted, or the machine was set up again), or another machine with the hub's secret uses the name | If it is your machine: stop its jobs, and once it shows offline, forget it with its **×** in Issues ([Issues](#issues)); it joins with its next heartbeat. If it isn't, change the hub's `--secret` and join your machines again |
 | An issue stays **Starting** for minutes | The machine clones or fetches a big repository (up to 10 minutes), then waits up to a minute for the agent | Wait; `~/.agentapi/jobs/<owner>~<repo>~<issue>/agentapi.log` on the machine has the agent's side. A start the hub lost the answer of works or fails with the machine's next heartbeat |
 
 `agentapi hub status` on an instance's machine shows which hub its config file names and where
@@ -962,7 +967,8 @@ The launcher's settings (the `host` section of `~/.agentapi/config.yaml`), its f
 [examples/issue-dispatch](../examples/issue-dispatch/README.md) sets up the hub's dispatch token,
 GitHub App and workflow too. The hub pins each machine's name to the launcher token
 (`~/.agentapi/host.token`) it first came with: a machine set up again, or whose token file was
-deleted, joins under its name only after `DELETE /api/hosts/{name}` ([Troubleshooting](#troubleshooting)).
+deleted, joins under its name only after the hub forgets it: **×** on the machine in [Issues](#issues),
+or `DELETE /api/hosts/{name}` ([Troubleshooting](#troubleshooting)).
 
 ### `agentapi hub join`, `leave`, `status`
 
