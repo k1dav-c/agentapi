@@ -1220,3 +1220,30 @@ func TestCapacityRefusalTriesAnother(t *testing.T) {
 	assert.Equal(t, "a", job.Host)
 	assert.Contains(t, job.Error, "its most")
 }
+
+// A dispatch without a state file drops old jobs and delivery IDs too,
+// which the browsers' stream would carry on otherwise.
+func TestPruneWithoutStateFile(t *testing.T) {
+	now := time.Date(2026, 11, 8, 10, 0, 0, 0, time.UTC)
+	s, err := New(Config{Secret: "hub-secret", GitHub: github.NewClient(), Now: func() time.Time { return now }, Location: time.UTC})
+	require.NoError(t, err)
+	t.Cleanup(s.Close)
+
+	s.mu.Lock()
+	s.jobs["acme/widget#1"] = &Job{Key: "acme/widget#1", State: JobDone, UpdatedAt: now.Add(-keepJobs - time.Hour)}
+	s.jobs["acme/widget#2"] = &Job{Key: "acme/widget#2", State: JobFailed, UpdatedAt: now.Add(-keepJobs + time.Hour)}
+	s.jobs["acme/widget#3"] = &Job{Key: "acme/widget#3", State: JobWorking, UpdatedAt: now.Add(-keepJobs - time.Hour)}
+	s.deliveries["old"] = now.Add(-deliveryTTL - time.Minute)
+	s.deliveries["new"] = now
+	s.saveLocked()
+	s.mu.Unlock()
+
+	var keys []string
+	for _, j := range s.Board().Jobs {
+		keys = append(keys, j.Key)
+	}
+	assert.ElementsMatch(t, []string{"acme/widget#2", "acme/widget#3"}, keys)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	assert.Equal(t, map[string]time.Time{"new": now}, s.deliveries)
+}

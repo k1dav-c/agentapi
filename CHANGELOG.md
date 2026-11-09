@@ -16,6 +16,11 @@
   were: the hub's own routes answered `{"error"}` alone, and now add a `code` (the HTTP status in
   snake case, such as `not_found`) and the same text in `message`.
 
+### Internal
+
+- The dispatch drops jobs that ended more than 30 days ago and old delivery IDs whether or not it
+  keeps a state file (`agentapi hub serve` always gives it one).
+
 ## v3.15.1
 
 ### Fixes

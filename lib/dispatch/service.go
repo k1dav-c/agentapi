@@ -240,17 +240,18 @@ func LoadApp(path string) (*github.App, error) {
 	return &app, nil
 }
 
-// saveLocked has dispatch.json written with the state now, in the
-// background. s.mu is held.
-func (s *Service) saveLocked() {
-	s.notifyLocked()
-	if s.config.StatePath == "" {
-		return
-	}
-	now := s.config.Now()
+// pruneLocked drops the delivery IDs past deliveryTTL, the jobs that
+// ended or failed more than keepJobs ago, and the starts of jobs gone,
+// with a state file or without. s.mu is held.
+func (s *Service) pruneLocked(now time.Time) {
 	for id, at := range s.deliveries {
 		if now.Sub(at) > deliveryTTL {
 			delete(s.deliveries, id)
+		}
+	}
+	for key, j := range s.jobs {
+		if (j.State.ended() || j.State == JobFailed) && now.Sub(j.UpdatedAt) > keepJobs {
+			delete(s.jobs, key)
 		}
 	}
 	for key := range s.attempts {
@@ -258,15 +259,21 @@ func (s *Service) saveLocked() {
 			delete(s.attempts, key)
 		}
 	}
+}
+
+// saveLocked has dispatch.json written with the state now, in the
+// background. s.mu is held.
+func (s *Service) saveLocked() {
+	s.pruneLocked(s.config.Now())
+	s.notifyLocked()
+	if s.config.StatePath == "" {
+		return
+	}
 	file := stateFile{Version: stateVersion, Deliveries: s.deliveries, Starts: s.attempts}
 	for _, h := range s.hosts {
 		file.Hosts = append(file.Hosts, storedHost{Host: *h, Token: h.Token})
 	}
-	for key, j := range s.jobs {
-		if (j.State.ended() || j.State == JobFailed) && now.Sub(j.UpdatedAt) > keepJobs {
-			delete(s.jobs, key)
-			continue
-		}
+	for _, j := range s.jobs {
 		file.Jobs = append(file.Jobs, j)
 	}
 	slices.SortFunc(file.Hosts, func(a, b storedHost) int { return strings.Compare(a.Hostname, b.Hostname) })
