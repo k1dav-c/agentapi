@@ -1,6 +1,6 @@
-// The hub page's keys: / searches, j and k (or the arrows) move between
-// the rows, p pins or unpins the row with the focus, Esc clears the search
-// or goes back to the overview. The rows' keys are the list's: they work
+// The hub page's keys: / searches, i opens Issues, j and k (or the arrows)
+// move between the rows, p pins or unpins the row with the focus, Esc
+// clears the search or goes back to the overview. The rows' keys are the list's: they work
 // with the focus in it (data-hub-list) or on nothing, not in the overview,
 // the header's buttons, a menu or a dialog, which take the arrows
 // themselves.
@@ -9,6 +9,7 @@ export type HubKey =
   | {type: "search"}
   | {type: "clear-search"}
   | {type: "overview"}
+  | {type: "issues"}
   | {type: "pin"; id: string}
   | {type: "step"; step: 1 | -1};
 
@@ -38,6 +39,8 @@ export function hubKey(
     return focus.menuOrDialogOpen ? undefined : {type: "overview"};
   }
   if (focus.typing || focus.inMenuOrDialog || event.metaKey || event.ctrlKey || event.altKey) return undefined;
+  // From anywhere but a field, a menu or a dialog.
+  if (event.key === "i") return focus.menuOrDialogOpen ? undefined : {type: "issues"};
   if (!focus.inList && !focus.onBody) return undefined;
   if (event.key === "p") return focus.row ? {type: "pin", id: focus.row} : undefined;
   if (event.key === "j" || event.key === "ArrowDown") return {type: "step", step: 1};

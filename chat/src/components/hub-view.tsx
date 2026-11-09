@@ -3,7 +3,9 @@
 import {useMemo, useRef, useState} from "react";
 import {Button} from "@/components/ui/button";
 import {chatURL, displayName, hubRoot, type HubInstance} from "@/lib/hub";
+import type {DispatchJob} from "@/lib/hub-dispatch";
 import {stoppedOf} from "@/lib/hub-filter";
+import {needsYou} from "@/lib/hub-issues";
 import {groupNames, groupOf} from "@/lib/hub-groups";
 import {hostPrefix, machineOf} from "@/lib/hub-machines";
 import {movePin, pinOf, sortPinned} from "@/lib/hub-order";
@@ -14,7 +16,8 @@ import {HubMark} from "./hub/brand";
 import {AddInstance, ForgetStopped, GroupName, type Naming} from "./hub/dialogs";
 import {HubClock} from "./hub/clock";
 import {HubList} from "./hub/hub-list";
-import {IssuesDialog} from "./hub/issues-dialog";
+import {IssuesView} from "./hub/issues/issues-view";
+import {useIssuesRoute} from "./hub/issues/use-issues-route";
 import {basePath, FrameFavorites, FrameInfo, InstanceBar} from "./hub/instance-bar";
 import {HubListContext, type HubList as HubListShared, type RowActions} from "./hub/list-context";
 import {ListEdge, useListWidth} from "./hub/list-edge";
@@ -29,7 +32,7 @@ import {cancelFromHub} from "./hub/update";
 import {useCollapsedGroups} from "./hub/use-collapsed-groups";
 import {useHubActions} from "./hub/use-hub-actions";
 import {useHubFrame} from "./hub/use-hub-frame";
-import {useHubHistory} from "./hub/use-hub-history";
+import {agentDepth, useHubHistory} from "./hub/use-hub-history";
 import {useHubKeys} from "./hub/use-hub-keys";
 import {useHubStream} from "./hub/use-hub-stream";
 import {useListFilters} from "./hub/use-list-filters";
@@ -41,10 +44,24 @@ import {useNotify} from "./hub/use-notify";
 // the one picked. On a narrow screen the list and the chat take turns.
 export function HubView() {
   const root = useMemo(() => (typeof window === "undefined" ? "" : hubRoot(basePath, window.location.origin)), []);
-  const {session, signedIn, retrySession, instances, hubVersion, favorites, setFavorites, unreachable, status} = useHubStream(root);
+  const {session, signedIn, retrySession, instances, hubVersion, favorites, setFavorites, dispatch, unreachable, status} = useHubStream(root);
   const {selected, select} = useHubHistory();
   const [adding, setAdding] = useState(false);
-  const [issues, setIssues] = useState(false);
+  // The Issues view, beside the list where the overview is.
+  const issues = useIssuesRoute();
+  // The issue open in its detail, which a list row's chip opens too.
+  const [issueKey, setIssueKey] = useState<string | null>(null);
+  // The jobs by the ID of each AgentAPI that worked on one, for the rows'
+  // chips; and how many issues need you, for the Issues button.
+  const jobsByInstance = useMemo(() => {
+    const byID = new Map<string, DispatchJob>();
+    for (const job of dispatch?.jobs ?? []) {
+      for (const run of job.runs ?? []) byID.set(run.instance_id, job);
+      if (job.instance_id) byID.set(job.instance_id, job);
+    }
+    return byID;
+  }, [dispatch]);
+  const issuesNeedYou = useMemo(() => (dispatch ? needsYou(dispatch.jobs, instances) : 0), [dispatch, instances]);
   const [naming, setNaming] = useState<Naming | null>(null);
   const [settings, setSettings] = useState<SettingsSection | null>(null);
   // The stopped agents the dialog asks to forget.
@@ -93,11 +110,36 @@ export function HubView() {
     search,
     query: filters.query,
     onClearSearch: () => filters.setQuery(""),
-    onOverview: () => select(undefined),
+    // Esc steps back: from an agent opened from Issues to Issues, from
+    // Issues to the overview.
+    onOverview: () => (selected ? select(undefined) : issues.show(false)),
+    onIssues: () => {
+      if (!issues.open || selected) openIssues();
+    },
     onPin: (id) => {
       const instance = actions.instance(id);
       if (instance) void actions.setPinned(id, pinOf(instance) === undefined);
     },
+  });
+
+  // The list header's Issues: opens the view, or closes it; from an agent,
+  // shows the view (the one it was opened from, or a new one).
+  const openIssues = () => {
+    if (!selected) return issues.show(!issues.open);
+    if (issues.open || agentDepth(history.state) === 0) {
+      select(undefined);
+      if (!issues.open) issues.show(true);
+      return;
+    }
+    // Back past the agents first, then the view's page on top.
+    window.addEventListener("popstate", () => issues.show(true), {once: true});
+    select(undefined);
+  };
+
+  // A row's chip opens its issue in Issues.
+  const openIssue = useStableCallback((key: string) => {
+    setIssueKey(key);
+    if (!issues.open || selected) openIssues();
   });
 
   // Forget closes the agent once the hub forgot it.
@@ -126,10 +168,14 @@ export function HubView() {
       mute: (id, muted) => void actions.setMuted(id, muted),
       pin: (id, pinned) => void actions.setPinned(id, pinned),
       move: (id, step) => void movePinned(id, step),
+      openIssue,
     }),
-    [select, forget, actions, movePinned],
+    [select, forget, actions, movePinned, openIssue],
   );
-  const list = useMemo<HubListShared>(() => ({hubVersion, root, groups: names, prefix, actions: rowActions}), [hubVersion, root, names, prefix, rowActions]);
+  const list = useMemo<HubListShared>(
+    () => ({hubVersion, root, groups: names, prefix, jobs: jobsByInstance, actions: rowActions}),
+    [hubVersion, root, names, prefix, jobsByInstance, rowActions],
+  );
   const renameGroup = async (from: string, to: string) => {
     // A folded group stays folded under its new name.
     collapsed.rename(from, to);
@@ -169,7 +215,7 @@ export function HubView() {
         <aside
           id="hub-list"
           style={{"--hub-list-width": `${listWidth.width}px`} as React.CSSProperties}
-          className={cn("relative flex w-full flex-col border-r bg-background md:w-(--hub-list-width) md:shrink-0", current ? "hidden md:flex" : "flex")}
+          className={cn("relative flex w-full flex-col border-r bg-background md:w-(--hub-list-width) md:shrink-0", current || issues.open ? "hidden md:flex" : "flex")}
         >
           <HubListHeader
             status={status}
@@ -179,7 +225,9 @@ export function HubView() {
             onToggleNotify={() => void toggleNotify()}
             onSettings={() => setSettings("favorites")}
             onAdd={() => setAdding(true)}
-            onIssues={() => setIssues(true)}
+            issuesOpen={issues.open}
+            issuesNeedYou={issuesNeedYou}
+            onIssues={openIssues}
             search={search}
             filters={filters}
             view={view}
@@ -198,7 +246,7 @@ export function HubView() {
             />
           </HubListContext.Provider>
           <p className="hidden border-t px-4 py-2 text-[11px] text-muted-foreground md:block" aria-hidden="true">
-            <kbd className="font-mono">/</kbd> search · <kbd className="font-mono">j</kbd> <kbd className="font-mono">k</kbd> move ·{" "}
+            <kbd className="font-mono">/</kbd> search · <kbd className="font-mono">i</kbd> issues · <kbd className="font-mono">j</kbd> <kbd className="font-mono">k</kbd> move ·{" "}
             {view.byMachine && (
               <>
                 <kbd className="font-mono">←</kbd> <kbd className="font-mono">→</kbd> agent ·{" "}
@@ -209,7 +257,7 @@ export function HubView() {
           <ListEdge controls="hub-list" {...listWidth} />
         </aside>
 
-        <section className={cn("min-w-0 flex-1 flex-col bg-[color-mix(in_oklch,var(--muted)_45%,var(--background))]", current ? "flex" : "hidden md:flex")}>
+        <section className={cn("min-w-0 flex-1 flex-col bg-[color-mix(in_oklch,var(--muted)_45%,var(--background))]", current || issues.open ? "flex" : "hidden md:flex")}>
           {current ? (
             <>
               {framed?.instance === current.id ? (
@@ -229,7 +277,7 @@ export function HubView() {
                 className={cn("min-h-0 w-full flex-1 border-0 bg-background", framed?.instance === current.id && "pt-[env(safe-area-inset-top)]")}
               />
             </>
-          ) : (
+          ) : issues.open ? null : (
             <Overview
               root={root}
               instances={all}
@@ -242,6 +290,20 @@ export function HubView() {
               onForgetStopped={() => setForgetting(stopped)}
             />
           )}
+          {/* Kept under an agent opened from it, so Back finds it as it was. */}
+          {issues.open && (
+            <div className={cn("min-h-0 flex-1", current && "hidden")}>
+              <IssuesView
+                root={root}
+                instances={instances}
+                live={dispatch}
+                selectedKey={issueKey}
+                onSelect={setIssueKey}
+                onClose={() => issues.show(false)}
+                onOpenChat={select}
+              />
+            </div>
+          )}
         </section>
 
         {/* Assertive: an agent that needs you. role="status" would make it polite. */}
@@ -249,7 +311,6 @@ export function HubView() {
           {announcement}
         </div>
         <AddInstance root={root} open={adding} onOpenChange={setAdding} onAdded={(id) => select(id)} />
-        <IssuesDialog root={root} open={issues} onOpenChange={setIssues} onOpen={select} />
         <HubSettings root={root} section={settings} onClose={() => setSettings(null)} favorites={favorites} onFavoritesSaved={setFavorites} />
         <ForgetStopped instances={forgetting} onClose={() => setForgetting(null)} onForget={forgetStopped} />
         <GroupName

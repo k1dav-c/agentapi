@@ -1,7 +1,7 @@
 "use client";
 
 import {useEffect, useState} from "react";
-import {applyHubEvent, hubEventNames, parseHubEvent, type HubEventName, type HubInstance} from "@/lib/hub";
+import {applyHubEvent, hubEventNames, parseHubEvent, type DispatchBoard, type HubEventName, type HubInstance} from "@/lib/hub";
 import type {Favorite} from "@/lib/hub-favorites";
 import {checkHubSession, type HubSession} from "@/lib/hub-session";
 import {getReconnectDelay} from "@/lib/reconnect";
@@ -20,6 +20,9 @@ export function useHubStream(root: string) {
   const [instances, setInstances] = useState<Map<string, HubInstance>>(new Map());
   const [hubVersion, setHubVersion] = useState("");
   const [favorites, setFavorites] = useState<Favorite[] | undefined>(undefined);
+  // The issue dispatch's machines and jobs; undefined until the hub sends
+  // them, and from a hub before 3.12, which doesn't.
+  const [dispatch, setDispatch] = useState<DispatchBoard | undefined>(undefined);
   // The last session check after the stream failed found the hub
   // unreachable.
   const [unreachable, setUnreachable] = useState(false);
@@ -61,6 +64,10 @@ export function useHubStream(root: string) {
           setFavorites(event.favorites);
           return;
         }
+        if (event.type === "dispatch") {
+          setDispatch(event.board);
+          return;
+        }
         if (event.type === "instances") setHubVersion(event.hubVersion);
         setInstances((previous) => applyHubEvent(previous, event));
       };
@@ -88,6 +95,7 @@ export function useHubStream(root: string) {
     // The favorites as the hub answered a change, before its stream tells
     // of it.
     setFavorites,
+    dispatch,
     unreachable,
     status: stream.status,
   };

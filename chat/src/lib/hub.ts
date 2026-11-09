@@ -145,17 +145,29 @@ export function needsYou(instances: Iterable<HubInstance>): number {
 // HubEventName is an event of the hub's stream (/api/events); the page
 // listens for these, not the heartbeat.
 export type HubEventName = Exclude<keyof HubWire["HubEvents"], "heartbeat">;
-export const hubEventNames = ["instances", "instance", "removed", "favorites"] as const satisfies readonly HubEventName[];
+export const hubEventNames = ["instances", "instance", "removed", "favorites", "dispatch"] as const satisfies readonly HubEventName[];
 
 // HubEvent is an event of the stream as the page reads it. The first,
 // instances, also has the hub's own version (hubVersion), which the page
 // compares the instances' with; favorites has all of them, on every change
-// (a hub before 3.5 sends none).
+// (a hub before 3.5 sends none); dispatch, the issue dispatch's machines
+// and jobs, whole, on every change (a hub before 3.12 sends none).
 export type HubEvent =
   | {type: "instances"; instances: HubInstance[]; hubVersion: string}
   | {type: "instance"; instance: HubInstance}
   | {type: "removed"; id: string}
-  | {type: "favorites"; favorites: Favorite[]};
+  | {type: "favorites"; favorites: Favorite[]}
+  | {type: "dispatch"; board: DispatchBoard};
+
+// DispatchBoard is the issue dispatch's machines and jobs.
+export type DispatchBoard = {jobs: HubWire["DispatchJob"][]; hosts: HubWire["DispatchHost"][]};
+
+// objectsWith are the items of value that are objects with a string field
+// key that isn't empty.
+function objectsWith<T>(value: unknown, key: string): T[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item) => !!item && typeof item === "object" && typeof item[key] === "string" && item[key] !== "") as T[];
+}
 
 // isInstance tells what the hub sent for an instance from anything else:
 // an object with an ID.
@@ -189,11 +201,15 @@ export function parseHubEvent(type: HubEventName, data: string): HubEvent | unde
       const favorites = parseFavorites((parsed as Partial<Record<keyof HubWire["FavoritesBody"], unknown>>).favorites);
       return favorites ? {type, favorites} : undefined;
     }
+    case "dispatch": {
+      const body = parsed as Partial<Record<keyof HubWire["DispatchBoard"], unknown>>;
+      return {type, board: {jobs: objectsWith(body.jobs, "key"), hosts: objectsWith(body.hosts, "hostname")}};
+    }
   }
 }
 
 // applyHubEvent returns the instances by ID after event.
-export function applyHubEvent(instances: ReadonlyMap<string, HubInstance>, event: Exclude<HubEvent, {type: "favorites"}>): Map<string, HubInstance> {
+export function applyHubEvent(instances: ReadonlyMap<string, HubInstance>, event: Exclude<HubEvent, {type: "favorites" | "dispatch"}>): Map<string, HubInstance> {
   switch (event.type) {
     case "instances":
       return new Map(event.instances.map((instance) => [instance.id, instance]));
