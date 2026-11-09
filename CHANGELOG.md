@@ -28,6 +28,8 @@
 - The HTML preview (`GET /files/preview`) reads each file once, however often stylesheets
   `@import` it, stops reading once its 16 MiB are spent, and stops when the request ends, where
   stylesheets importing each other many times over could keep it reading for a long time.
+- Pi's adapter remembers the last 256 message IDs it gave out, which tell apart messages of the
+  same millisecond, where it kept every one for the life of the agent.
 - The pipe of an agent's output is closed when the output ends, where each start of the agent
   again left one open until AgentAPI exited.
 - An interrupt Claude Code or Codex accepts after `POST /interrupt` stopped waiting for the answer
