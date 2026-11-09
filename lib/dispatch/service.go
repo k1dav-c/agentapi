@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"crypto/hmac"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -409,30 +410,38 @@ func (s *Service) markOnlineLocked() {
 
 // HostEvent takes a launcher's host.* event, signed with the hub's
 // secret.
+//
+// The hub's secret is every machine's that joined, so it doesn't name one:
+// a machine's name is pinned to the launcher's token it first came with
+// (trust on first use), and an event with another token is refused, the
+// machine online or not, whatever the event (host.stopped too). Otherwise
+// a machine with the secret could take over another's name, and with it
+// its jobs' GitHub tokens and the dispatches to it.
 func (s *Service) HostEvent(eventType string, data json.RawMessage) error {
 	var d host.HostEventData
 	if err := json.Unmarshal(data, &d); err != nil || d.Hostname == "" || d.URL == "" {
 		return errors.New("a host event names no hostname or URL")
 	}
+	if d.Token == "" {
+		return errors.New("a host event has no launcher's token")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.config.Now()
 	h := s.hosts[d.Hostname]
-	if h == nil {
+	switch {
+	case h == nil:
 		s.logger.Info("A machine's launcher joined", "host", d.Hostname, "url", d.URL)
-		h = &Host{}
+		h = &Host{Token: d.Token}
 		s.hosts[d.Hostname] = h
+	case h.Token == "":
+		// Kept by a hub that didn't pin the token.
+		h.Token = d.Token
+	case !hmac.Equal([]byte(d.Token), []byte(h.Token)):
+		s.logger.Warn("Refused a host event with another launcher's token than the machine's", "host", d.Hostname, "url", d.URL, "event", eventType)
+		return fmt.Errorf("the machine %s has another launcher's token", d.Hostname)
 	}
-	// A machine that has the hub's secret mustn't take over another's
-	// name, and with it its jobs' tokens: while the machine is online,
-	// its launcher's token can't change.
-	if h.Token != "" && d.Token != "" && d.Token != h.Token && s.online(h) && eventType != host.EventHostStopped {
-		s.logger.Warn("Refused a host event with another token for a machine online", "host", d.Hostname, "url", d.URL)
-		return fmt.Errorf("the machine %s is online with another launcher's token", d.Hostname)
-	}
-	token := h.Token
 	h.HostInfo = d.HostInfo
-	h.Token = cmp.Or(d.Token, token)
 	h.HeartbeatSeconds = d.HeartbeatSeconds
 	h.LastSeen = now
 	h.Stopped = eventType == host.EventHostStopped

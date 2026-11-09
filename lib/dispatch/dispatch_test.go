@@ -538,8 +538,9 @@ func TestHostReconcile(t *testing.T) {
 	assert.InDelta(t, 0.4, s.job("acme/widget#5").Runs[1].Cost.USD, 1e-9)
 }
 
-// Another machine that has the hub's secret can't take over a machine's
-// name while it is online.
+// A machine's name is pinned to the launcher's token it first came with:
+// another machine that has the hub's secret can't take it over, by any
+// event, online or not.
 func TestHostTakeOverRefused(t *testing.T) {
 	s, now := newService(t, nil)
 	l := newFakeLauncher(t, "pve-1")
@@ -547,11 +548,39 @@ func TestHostTakeOverRefused(t *testing.T) {
 	forged := l.event("claude")
 	forged.Token, forged.URL = "attacker", "http://attacker:3291"
 	data, _ := json.Marshal(forged)
+	pinned := func() {
+		t.Helper()
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		assert.Equal(t, l.token, s.hosts["pve-1"].Token)
+		assert.Equal(t, l.srv.URL, s.hosts["pve-1"].URL)
+	}
+
+	// A forged stop doesn't stop the machine, nor free its name for the
+	// heartbeat after it.
+	assert.Error(t, s.HostEvent(host.EventHostStopped, data))
+	assert.True(t, s.Hosts()[0].Online)
 	assert.Error(t, s.HostEvent(host.EventHostHeartbeat, data))
-	assert.Equal(t, l.srv.URL, s.Hosts()[0].URL)
-	// A machine offline for long can come back with a new launcher.
+	assert.Error(t, s.HostEvent(host.EventHostStarted, data))
+	pinned()
+
+	// Nor once the machine is offline, stopped or silent.
+	real, _ := json.Marshal(l.event("claude"))
+	require.NoError(t, s.HostEvent(host.EventHostStopped, real))
+	assert.Error(t, s.HostEvent(host.EventHostHeartbeat, data))
 	*now = now.Add(10 * time.Minute)
-	assert.NoError(t, s.HostEvent(host.EventHostHeartbeat, data))
+	assert.Error(t, s.HostEvent(host.EventHostStarted, data))
+	pinned()
+
+	// An event without a token doesn't count.
+	forged.Token = ""
+	data, _ = json.Marshal(forged)
+	assert.Error(t, s.HostEvent(host.EventHostHeartbeat, data))
+	pinned()
+
+	// The real launcher comes back.
+	require.NoError(t, s.HostEvent(host.EventHostStarted, real))
+	assert.True(t, s.Hosts()[0].Online)
 }
 
 // A switch that fails after the old agent stopped leaves the job failed,
