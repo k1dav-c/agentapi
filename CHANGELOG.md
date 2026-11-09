@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Changes
+
+- The state database no longer keeps the stored settings, limit stop and retry wait under their
+  old keys (`settings`, `limit_stop`, `retry_wait`) next to `conversation_state`: the first open
+  moves them into it, or drops the copies 3.7.3 to 3.15 wrote, and deletes them. AgentAPI 3.7.2
+  or earlier opened on the file afterwards starts without those settings, limit stop and retry
+  wait; the conversation is kept.
+
 ## v3.15.1
 
 ### Fixes

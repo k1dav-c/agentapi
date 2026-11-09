@@ -71,7 +71,7 @@ protocols (the native transport).
 - `lib/agentlog/` - The agents' session-log formats, one package per agent (`claudelog`, `codexlog`, `pilog`), shared by the native adapters and `lib/sessions`
 - `lib/sessions/` - Earlier sessions, subagents and their costs, read incrementally from the logs
 - `lib/pricing/` - Model prices per million tokens (built-in `prices.json`, `--prices` file) and per-call cost calculation; `scripts/prices.mjs` compares `prices.json` with Pi's model registry
-- `lib/statedb/` - SQLite persistence of conversations (`--state-db`; a deprecated `--state-file` is imported into it); the stored state is one versioned meta value, `conversation_state` (`state.go`)
+- `lib/statedb/` - SQLite persistence of conversations (`--state-db`; a deprecated `--state-file` is imported into it); the stored state is one versioned meta value, `conversation_state` (`state.go`); the first open moves the old per-part keys into it and deletes them
 - `lib/instanceapi/` - The contract with clients that watch many AgentAPIs: who an instance is (with its `AgentType`), its summary, the webhook envelope and signature, and the state a hub shows; it imports only `lib/agentstate` and `lib/util`
 - `lib/hub/` - `agentapi hub serve`: a server that watches many AgentAPIs, built on `lib/instanceapi` and `lib/httpmw` rather than `lib/httpapi` (signed webhooks, summary streams, a proxy that opens any of them in the chat, the addresses machines join it by, the favorite prompts among the settings its page keeps, and `hub-schema.json`, the generated schema of its wire types)
 - `lib/sse/` - Server-sent events as the HTML standard defines them (`Reader`, `Write`), for the hub's streams

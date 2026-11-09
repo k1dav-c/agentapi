@@ -662,13 +662,13 @@ The queue is persisted with the conversation, on every change (`storeQueue`, fro
   a reset keeps it. A field added to it keeps the version, which an older
   AgentAPI reads as far as it knows; one that would mislead it raises the
   version, and an AgentAPI that finds a higher one leaves the object alone
-  and reads the old keys. Up to 3.7.2 the three had a key each (`settings`,
-  `limit_stop`, `retry_wait`). The first open of such a file moves them into
-  `conversation_state`. For one release the old keys are written too, in the
-  same write, so an older AgentAPI opened on the file still finds the
-  limit stop, retry wait and settings; what it changes there wins when a
-  newer one opens the file again (the keys differ from the object). A later
-  release stops writing them.
+  and starts without stored state. Up to 3.7.2 the three had a key each
+  (`settings`, `limit_stop`, `retry_wait`). The first open of such a file
+  moves them into `conversation_state` and deletes them, in one
+  transaction. 3.7.3 to 3.15 wrote the old keys next to the object; the
+  object wins and the open deletes them. AgentAPI 3.7.2 or earlier opened
+  on a newer file starts without the stored settings, limit stop and retry
+  wait (the conversation is kept), and what it stores there is ignored.
 - What an older AgentAPI doesn't know, its resets and truncations don't
   clear. A restored task whose message is gone or is another one now is
   dropped, as is one whose message row couldn't be read.
