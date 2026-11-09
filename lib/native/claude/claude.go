@@ -354,7 +354,7 @@ func (a *Adapter) issueControl(ctx context.Context, subtype string, fields map[s
 		request[k] = v
 	}
 	if err := a.write(ctx, map[string]any{"type": "control_request", "request_id": id, "request": request}); err != nil {
-		a.calls.Drop(id)
+		a.calls.WriteFailed(id, err)
 		return "", nil, err
 	}
 	return id, call, nil

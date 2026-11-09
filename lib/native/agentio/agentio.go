@@ -261,6 +261,23 @@ func (c *Calls[K, R]) Detach(id K, value R, err error) bool {
 	return call.Deliver(value, err)
 }
 
+// WriteFailed handles request id whose write failed with err: it is
+// dropped, unless the write may yet reach the agent (native.ErrUnconfirmed)
+// and it has an onResult, which its response then runs.
+func (c *Calls[K, R]) WriteFailed(id K, err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	call := c.calls[id]
+	if call == nil {
+		return
+	}
+	if call.onResult != nil && errors.Is(err, native.ErrUnconfirmed) {
+		call.waiting.Store(false)
+		return
+	}
+	delete(c.calls, id)
+}
+
 // Drop forgets request id, whose caller stopped waiting.
 func (c *Calls[K, R]) Drop(id K) {
 	c.mu.Lock()

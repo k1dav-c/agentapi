@@ -219,6 +219,18 @@ func TestCallsAwait(t *testing.T) {
 	assert.Equal(t, []int{9}, late)
 	assert.False(t, calls.Resolve("d", 10, nil))
 
+	// So does one whose write may yet reach the agent; one that surely
+	// didn't is dropped.
+	_, err = calls.Add("e", func(v int, _ error) { late = append(late, v) })
+	require.NoError(t, err)
+	calls.WriteFailed("e", native.Unconfirmed(context.Canceled))
+	assert.True(t, calls.Resolve("e", 11, nil))
+	assert.Equal(t, []int{9, 11}, late)
+	_, err = calls.Add("f", func(v int, _ error) { late = append(late, v) })
+	require.NoError(t, err)
+	calls.WriteFailed("f", context.Canceled)
+	assert.False(t, calls.Resolve("f", 12, nil))
+
 	exited := errors.New("the agent exited")
 	waiting, err := calls.Add("c", nil)
 	require.NoError(t, err)

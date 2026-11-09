@@ -573,7 +573,7 @@ func (a *Adapter) call(ctx context.Context, method string, params any, onResult 
 		return nil, err
 	}
 	if err := a.write(ctx, rpcRequest{JSONRPC: "2.0", ID: &id, Method: method, Params: params}); err != nil {
-		a.calls.Drop(id)
+		a.calls.WriteFailed(id, err)
 		return nil, err
 	}
 	res, err := a.calls.Await(ctx, id, c)
