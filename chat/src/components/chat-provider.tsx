@@ -113,7 +113,7 @@ const API_CALLS = [
 
 // What components do: the chat's actions, and the API calls they make as
 // they are. The value never changes (see useChatActions).
-export interface ChatActions extends Pick<ChatAPI, (typeof API_CALLS)[number]> {
+interface ChatActions extends Pick<ChatAPI, (typeof API_CALLS)[number]> {
   // PUT /settings: changes the settings set in change.
   updateSettings: (change: AgentSettings) => ReturnType<ChatAPI["updateSettings"]>;
   // Opens one of the agent's sessions (or a copy of it) in place of this
@@ -235,7 +235,7 @@ export interface ChatState {
 const ChatActionsContext = createContext<ChatActions | undefined>(undefined);
 const ChatStoreContext = createContext<Store<ChatState> | undefined>(undefined);
 
-export const useAgentAPIUrl = (): string => {
+const useAgentAPIUrl = (): string => {
   const searchParams = useSearchParams();
   const url = resolveAgentAPIUrl(searchParams.get("url"));
   if (!url) {

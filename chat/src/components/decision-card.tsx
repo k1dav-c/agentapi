@@ -146,7 +146,7 @@ export function DecisionCardShell({
 }
 
 // Text from (or for) a terminal, in the terminal's colors.
-export function TerminalBlock({ children, className }: { children: ReactNode; className?: string }) {
+function TerminalBlock({ children, className }: { children: ReactNode; className?: string }) {
   return (
     <pre
       className={cn(

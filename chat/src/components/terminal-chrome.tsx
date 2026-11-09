@@ -7,11 +7,9 @@ import {terminalShortcuts, type StickyModifier, type TerminalShortcut} from "@/l
 import {useMediaQuery} from "@/lib/use-media-query";
 
 // The look both terminals share.
-export const TERMINAL_FONT_SIZE = 13;
-export const TERMINAL_LINE_HEIGHT = 1.2;
 export const TERMINAL_OPTIONS = {
-  fontSize: TERMINAL_FONT_SIZE,
-  lineHeight: TERMINAL_LINE_HEIGHT,
+  fontSize: 13,
+  lineHeight: 1.2,
   fontFamily: 'Menlo, "DejaVu Sans Mono", Consolas, "Courier New", monospace',
   theme: {background: "#0b0d10", foreground: "#e6e6e6"},
 };
