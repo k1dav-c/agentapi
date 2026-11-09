@@ -266,8 +266,9 @@ export function IssuesView({
   return (
     <div className="flex h-full min-h-0" onKeyDown={onKeyDown} data-issues-view>
       <div className="min-w-0 flex-1 overflow-y-auto" ref={board}>
-        <header className="sticky top-0 z-20 border-b border-transparent bg-[color-mix(in_oklch,var(--muted)_45%,var(--background))]/85 px-5 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur-md md:px-10">
-          <div className="mx-auto flex max-w-3xl items-center gap-2">
+        <header className="sticky top-0 z-20 border-b border-transparent bg-[color-mix(in_oklch,var(--muted)_45%,var(--background))]/85 px-5 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur-md md:px-0">
+          {/* As wide as the overview it replaces (max-w-6xl px-10). */}
+          <div className="mx-auto flex max-w-6xl items-center gap-2 md:px-10">
             <Button variant="ghost" size="icon" className="-ml-2 size-9 shrink-0 rounded-full md:hidden" onClick={onClose} aria-label="Back to the list">
               <ArrowLeft className="size-4" />
             </Button>
@@ -284,7 +285,7 @@ export function IssuesView({
           </div>
         </header>
 
-        <div className="mx-auto max-w-3xl px-5 pt-5 pb-20 md:px-10 md:pt-8">
+        <div className="mx-auto max-w-6xl px-5 pt-5 pb-20 md:px-10 md:pt-12">
           <p className="text-sm text-muted-foreground">
             Issues
             {status?.connected && status.slug && (
