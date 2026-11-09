@@ -716,11 +716,14 @@ AgentAPI 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
 `HubListContext`；邏輯在 `lib/hub.ts`，也就是實例、它的狀態和串流的事件，旁邊還有 `lib/hub-groups.ts`、
 `hub-machines.ts`、`hub-filter.ts`、`hub-format.ts`、`hub-spend.ts`、`hub-work.ts`、`hub-version.ts`
 和 `hub-order.ts`；所做的變更經由 `lib/hub-api.ts`；瀏覽器保存的設定經由 `lib/hub-settings.ts`），由
-`agentapi hub serve` 以同一份建置提供。它的 Issues 頁（`components/hub/issues/`：頁面、卡片、含 run
-時間軸的詳細資料、交辦選單；`use-dispatch.ts` 讀 GitHub 並執行動作）建立在 `lib/hub-issues.ts` 的看板
-模型上（依區塊排列的卡片、建議的 agent 與主機、時間軸），派工的呼叫在 `lib/hub-dispatch.ts`。主機和 job
-隨串流的 `dispatch` 事件送來，Issues 按鈕上的數字和清單上處理 issue 的 agent 的標籤
-（`HubListContext.jobs`）也用它；hub 沒有這個事件時，頁面每 10 秒自己讀一次。hub 的 API 不是用 huma 寫的，它的傳輸型別是產生出來的：
+`agentapi hub serve` 以同一份建置提供。頁面目前的位置（開著的 agent，以及它下面是否開著 Issues）各是
+瀏覽器歷史紀錄中的一頁（`lib/hub-route.ts`、`useHubRoute`）。它的 Issues 頁（`components/hub/issues/`：
+頁面、卡片、含狀態和 run 時間軸的詳細資料、交辦選單；`use-dispatch.ts` 讀 issue 並執行動作）建立在
+`lib/hub-issues.ts` 的看板模型上（依區塊排列的卡片、建議的 agent 與主機、時間軸），派工的呼叫在
+`lib/hub-dispatch.ts`，每個回應進來時都會檢查。hub 的 GitHub App 由 Issues 和設定的 GitHub 分頁共用一份
+（`lib/hub-github-store.ts`、`useHubGitHub`），頁面重新顯示時會再讀一次。主機和 job 隨串流的 `dispatch`
+事件送來，Issues 按鈕上的數字和清單上處理 issue 的 agent 的標籤（`HubListContext.jobs`）也用它；操作的
+回應會先顯示在看板上，直到串流裡的 job 一樣新為止。hub 的 API 不是用 huma 寫的，它的傳輸型別是產生出來的：
 `make gen` 從 Go 型別（`hub.Schema`）寫出 `lib/hub/hub-schema.json`，`bun run gen:api` 再從它寫出
 `lib/hub-schema.ts`，連同頁面要檢查的上限 `hubLimits`；`/api/events` 的每個事件都由 `parseHubEvent`
 讀取。框架之間的訊息逐欄檢查：聊天介面用 `parseToFrame`，hub 用 `parseFromFrame`。
@@ -766,7 +769,9 @@ AgentAPI 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
   驗證。`use-session-cost.ts` 會在回合結束時和回合執行中讀取 `GET /cost`；第一次讀取之後會帶上
   `from` 和 `digest`，只取得之後新增的呼叫。用到 chat 狀態或只屬於某個元件的 hook，放在
   `components/` 裡、靠近使用它的地方；和 chat 無關的 hook（`use-loaded.ts`、`use-copy.ts`、
-  `use-persisted.ts`）放在 `lib/`。測試共用的 fixture 和假物件放在 `src/test/`。
+  `use-persisted.ts`）放在 `lib/`。測試共用的 fixture 和假物件放在 `src/test/`；需要執行 effect 的測試檔
+  （react-dom/client、hook）會呼叫 `withDOM`（`src/test/dom.ts`）取得 happy-dom 的 document，其他測試檔
+  在伺服器端算繪。
 
 ## 測試
 

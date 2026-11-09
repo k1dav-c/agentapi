@@ -61,7 +61,7 @@ function OptionLine({option, suggested}: {option: Option; suggested: boolean}) {
 // assigns. The suggestion is marked; the machines that can't take it are
 // there, greyed, with why (offline, full, without the agent or the
 // repository), so none goes missing without a word.
-export function AssignMenuItems({hosts, repo, suggested, onPick}: {hosts: DispatchHost[]; repo: string; suggested?: Option; onPick: (agent: string, host: string) => void}) {
+function AssignMenuItems({hosts, repo, suggested, onPick}: {hosts: DispatchHost[]; repo: string; suggested?: Option; onPick: (agent: string, host: string) => void}) {
   const groups = assignOptions(hosts, repo);
   if (groups.length === 0) return <p className="px-3 py-4 text-sm text-muted-foreground">No machine online runs an agent.</p>;
   return groups.map(({agent, options, unavailable}, i) => (

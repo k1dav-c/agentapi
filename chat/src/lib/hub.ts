@@ -151,7 +151,7 @@ export const hubEventNames = ["instances", "instance", "removed", "favorites", "
 // instances, also has the hub's own version (hubVersion), which the page
 // compares the instances' with; favorites has all of them, on every change
 // (a hub before 3.5 sends none); dispatch, the issue dispatch's machines
-// and jobs, whole, on every change (a hub before 3.12 sends none).
+// and jobs, whole, on every change.
 export type HubEvent =
   | {type: "instances"; instances: HubInstance[]; hubVersion: string}
   | {type: "instance"; instance: HubInstance}
@@ -164,7 +164,7 @@ export type DispatchBoard = {jobs: HubWire["DispatchJob"][]; hosts: HubWire["Dis
 
 // objectsWith are the items of value that are objects with a string field
 // key that isn't empty.
-function objectsWith<T>(value: unknown, key: string): T[] {
+export function objectsWith<T>(value: unknown, key: string): T[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item) => !!item && typeof item === "object" && typeof item[key] === "string" && item[key] !== "") as T[];
 }

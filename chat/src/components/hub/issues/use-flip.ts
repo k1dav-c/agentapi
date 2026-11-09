@@ -1,8 +1,7 @@
 "use client";
 
 import {useLayoutEffect, useRef, type RefObject} from "react";
-
-const reduced = () => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+import {prefersReducedMotion} from "@/lib/reduced-motion";
 
 // useFlip moves the cards of container (each [data-flip] with its key) to
 // their new places instead of jumping there: a card whose stage changed
@@ -22,7 +21,7 @@ export function useFlip(container: RefObject<HTMLElement | null>, signature: str
     const before = last.current;
     last.current = next;
     // The first layout has nothing to move from.
-    if (before.size === 0 || reduced()) return;
+    if (before.size === 0 || prefersReducedMotion()) return;
     for (const card of cards) {
       const from = before.get(card.dataset.flip!);
       const to = next.get(card.dataset.flip!)!;

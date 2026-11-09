@@ -6,7 +6,7 @@ import {AgentMark} from "@/components/agent-mark";
 import type {HubInstance} from "@/lib/hub";
 import {agentLabel, jobCost, prNumber, type DispatchHost} from "@/lib/hub-dispatch";
 import {activity, formatAgo, formatElapsed} from "@/lib/hub-format";
-import {repoName, type Card, type Option} from "@/lib/hub-issues";
+import {failureText, repoName, type Card, type Option} from "@/lib/hub-issues";
 import {cn} from "@/lib/utils";
 import {useHubTime} from "../clock";
 import {AssignButton} from "./assign-menu";
@@ -33,21 +33,13 @@ function Age({card}: {card: Card}) {
   return <span className={cn("shrink-0 tabular-nums", running && "font-mono text-state-working")}>{running ? text : text === "now" ? "just now" : `${text} ago`}</span>;
 }
 
-// failure is a failed job's error as a card says it: its first letter up,
-// without the log's path, which the detail has.
-export function failure(error: string | undefined): string {
-  const text = (error ?? "").replace(/;?\s*see \S+$/, "").trim();
-  if (!text) return "The job failed";
-  return text[0].toUpperCase() + text.slice(1);
-}
-
 // Live is what the job's agent does now, from the hub's stream: what it
 // asks you, or the task it works on, with the scan that runs while it does.
 function Live({card, instance}: {card: Card; instance?: HubInstance}) {
   const job = card.job;
   if (!job) return null;
   if (job.state === "failed") {
-    return <p className="mt-1.5 line-clamp-2 text-[13px] leading-snug text-state-fault [overflow-wrap:anywhere]">{failure(job.error)}</p>;
+    return <p className="mt-1.5 line-clamp-2 text-[13px] leading-snug text-state-fault [overflow-wrap:anywhere]">{failureText(job.error)}</p>;
   }
   if (job.state === "starting") {
     return (

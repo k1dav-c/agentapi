@@ -8,9 +8,7 @@ import {agentLabel, parseIssueRef, type DispatchHost, type GitHubStatus} from "@
 import {connectURL} from "@/lib/hub-github";
 import {suggest} from "@/lib/hub-issues";
 import {cn} from "@/lib/utils";
-
-const field =
-  "h-10 w-full min-w-0 rounded-xl border bg-background px-3.5 text-sm outline-none transition-[border-color,box-shadow] placeholder:text-muted-foreground/70 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30 dark:bg-input/30";
+import {cardFieldClass} from "../styles";
 
 // The way from no GitHub to an issue at work, as the connect card draws it.
 const steps = [
@@ -62,7 +60,7 @@ export function ConnectGitHub({root, compact = false}: {root: string; compact?: 
           </a>
         </Button>
         {forOrg ? (
-          <input autoFocus className={cn(field, "w-56 max-w-full flex-none")} placeholder="Organization" aria-label="Organization" value={org} onChange={(e) => setOrg(e.target.value)} />
+          <input autoFocus className={cn(cardFieldClass, "w-56 max-w-full flex-none")} placeholder="Organization" aria-label="Organization" value={org} onChange={(e) => setOrg(e.target.value)} />
         ) : (
           <button type="button" onClick={() => setForOrg(true)} className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
             For an organization?
@@ -133,7 +131,7 @@ export function StartByRef({hosts, busy, onStart}: {hosts: DispatchHost[]; busy:
       </label>
       <p className="mt-0.5 text-[13px] text-muted-foreground">Without GitHub connected, the machine works with its own GitHub login.</p>
       <div className="mt-3 flex gap-2">
-        <input id="issue-ref" className={field} placeholder="owner/repo#12, or the issue's URL" value={ref} onChange={(e) => setRef(e.target.value)} aria-invalid={ref.trim() !== "" && !parsed} />
+        <input id="issue-ref" className={cardFieldClass} placeholder="owner/repo#12, or the issue's URL" value={ref} onChange={(e) => setRef(e.target.value)} aria-invalid={ref.trim() !== "" && !parsed} />
         <Button type="submit" className="h-10 shrink-0 rounded-xl" disabled={busy || !parsed}>
           <Play className="size-3.5" /> Start
         </Button>

@@ -89,3 +89,16 @@ export function formatElapsed(since: string | undefined, now: number): string {
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
   return `${Math.floor(seconds / 3600)}h ${String(Math.floor((seconds % 3600) / 60)).padStart(2, "0")}m`;
 }
+
+// formatTimeAndDay is when something happened, as the Issues page's
+// timeline says it: the time of day in the viewer's locale, with the day
+// when it isn't today ("10:20 AM", "Nov 8 10:20 AM"); "" for a time that
+// doesn't parse. The chat's formatTimeOfDay (lib/clock.ts) is a 24-hour
+// clock's, without the day.
+export function formatTimeAndDay(at: string | undefined, now: number): string {
+  if (!at) return "";
+  const date = new Date(at);
+  if (Number.isNaN(date.getTime())) return "";
+  const time = date.toLocaleTimeString(undefined, {hour: "2-digit", minute: "2-digit"});
+  return new Date(now).toDateString() === date.toDateString() ? time : `${date.toLocaleDateString(undefined, {month: "short", day: "numeric"})} ${time}`;
+}

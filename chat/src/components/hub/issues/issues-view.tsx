@@ -7,9 +7,12 @@ import {Button} from "@/components/ui/button";
 import type {DispatchBoard, HubInstance} from "@/lib/hub";
 import {jobCost, type DispatchHost} from "@/lib/hub-dispatch";
 import {boardCards, bySection, headline, sections, stageCounts, suggest, whyNoOption, type Card, type Option, type SectionID} from "@/lib/hub-issues";
+import {prefersReducedMotion} from "@/lib/reduced-motion";
 import {useMediaQuery} from "@/lib/use-media-query";
 import {cn} from "@/lib/utils";
 import {Constellation} from "../brand";
+import {ReadError} from "../read-error";
+import {sectionClass} from "../styles";
 import {IssueCard, type CardActions} from "./issue-card";
 import {IssueDetail, type DetailActions} from "./issue-detail";
 import {lookOf, type Look} from "./job-glyph";
@@ -25,10 +28,6 @@ import {useFlip} from "./use-flip";
 // How many done issues show before Show all.
 const doneShown = 3;
 const flashFor = 1600;
-
-const heading = "flex items-center gap-2 text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase";
-
-const reducedMotion = () => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 // useFlashes are the cards whose look changed since the last read, for a
 // moment: the ring they flash in their new state's color says what moved.
@@ -79,27 +78,23 @@ export function IssuesView({
   onSelect,
   onClose,
   onOpenChat,
-  githubChanges = 0,
   onGitHubSettings,
 }: {
   root: string;
   instances: ReadonlyMap<string, HubInstance>;
-  // live is the machines and jobs from the hub's stream; undefined from a
-  // hub before 3.12, which the view reads them from itself.
+  // live is the machines and jobs from the hub's stream; undefined until
+  // its first dispatch event.
   live?: DispatchBoard;
   // The issue open in the detail (owner/repo#n), which a list row's chip
   // opens too.
   selectedKey: string | null;
-  onSelect: (key: string | null) => void;
+  onSelect: React.Dispatch<React.SetStateAction<string | null>>;
   onClose: () => void;
   onOpenChat: (instanceID: string) => void;
-  // Counts the changes to the hub's GitHub App in the settings: each reads
-  // it again.
-  githubChanges?: number;
   // Opens the hub settings at GitHub.
   onGitHubSettings?: () => void;
 }) {
-  const d = useDispatch(root, live, githubChanges);
+  const d = useDispatch(root, live);
   const hosts: DispatchHost[] = useMemo(() => (d.hosts.state === "ready" ? d.hosts.value : []), [d.hosts]);
   const status = d.github.state === "ready" ? d.github.value : undefined;
   const connected = !!status?.connected;
@@ -122,21 +117,27 @@ export function IssuesView({
 
   // The board's order, which the cards glide to when it changes.
   useFlip(board, cards.map((card) => `${card.key}:${card.stage}:${card.waiting}`).join(" ") + (selectedKey ? "|open" : ""));
-  // The keys work from the moment it opens.
-  useEffect(() => title.current?.focus({preventScroll: true}), []);
+  // The keys work from the moment it opens: the focus on the title, unless
+  // the issue it opened at has it already (its detail focuses its own).
+  useEffect(() => {
+    if (!document.activeElement?.closest("[data-issue-detail]")) title.current?.focus({preventScroll: true});
+  }, []);
   // An issue opened from a list row's chip comes into sight.
   useEffect(() => {
     if (!selectedKey) return;
     const card = board.current?.querySelector<HTMLElement>(`[data-flip="${CSS.escape(selectedKey)}"]`);
-    card?.scrollIntoView({block: "nearest", behavior: reducedMotion() ? "auto" : "smooth"});
+    card?.scrollIntoView({block: "nearest", behavior: prefersReducedMotion() ? "auto" : "smooth"});
   }, [selectedKey]);
 
   // Who a tap on Assign gives an issue of each repository to.
+  // The same while the repositories, the machines and the agent preferred
+  // are, whatever the cards do.
+  const cardRepos = [...new Set(cards.map((card) => card.repo))].join("\n");
   const suggestions = useMemo(() => {
     const out = new Map<string, Option | undefined>();
-    for (const card of cards) if (!out.has(card.repo)) out.set(card.repo, suggest(hosts, card.repo, d.preferred));
+    for (const repo of cardRepos ? cardRepos.split("\n") : []) out.set(repo, suggest(hosts, repo, d.preferred));
     return out;
-  }, [cards, hosts, d.preferred]);
+  }, [cardRepos, hosts, d.preferred]);
 
   const {actions: dispatch, setPreferred} = d;
   const assignCard = useCallback(
@@ -146,24 +147,22 @@ export function IssuesView({
     },
     [dispatch, setPreferred],
   );
-  const selectedRef = useRef(selectedKey);
-  selectedRef.current = selectedKey;
-  const latestDispatch = useRef(dispatch);
-  latestDispatch.current = dispatch;
+  // The same while what they call is, so the cards don't render again.
   const cardActions = useMemo<CardActions>(
     () => ({
-      select: (key) => setSelectedKey(key === selectedRef.current ? null : key),
+      // The card open already closes.
+      select: (key) => setSelectedKey((open) => (open === key ? null : key)),
       assign: assignCard,
-      retry: (card) => card.job && void latestDispatch.current.retry(card.job),
+      retry: (card) => card.job && void dispatch.retry(card.job),
       openChat: onOpenChat,
     }),
-    [assignCard, onOpenChat, setSelectedKey],
+    [assignCard, dispatch, onOpenChat, setSelectedKey],
   );
-  const detailActions: DetailActions = {...dispatch, openChat: onOpenChat, assignCard};
+  const detailActions = useMemo<DetailActions>(() => ({...dispatch, openChat: onOpenChat, assignCard}), [dispatch, onOpenChat, assignCard]);
 
   const jump = (section: SectionID) => {
     if (section === "done") setAllDone(true);
-    document.getElementById(`issues-${section}`)?.scrollIntoView({behavior: reducedMotion() ? "auto" : "smooth", block: "start"});
+    document.getElementById(`issues-${section}`)?.scrollIntoView({behavior: prefersReducedMotion() ? "auto" : "smooth", block: "start"});
   };
 
   const closeDetail = () => {
@@ -256,8 +255,11 @@ export function IssuesView({
     />
   );
 
+  // Keyed by the issue: a confirmation or a message half written is for
+  // the issue it was started on, not the next one opened.
   const detail = selected && (
     <IssueDetail
+      key={selected.key}
       card={selected}
       hosts={hosts}
       instance={selected.job ? instances.get(selected.job.instance_id) : undefined}
@@ -343,24 +345,8 @@ export function IssuesView({
             )}
           </p>
 
-          {d.pollError && (
-            <p role="status" className="mt-5 flex items-center gap-2 rounded-xl border border-state-fault/25 bg-state-fault/[0.06] px-3.5 py-2.5 text-sm">
-              <TriangleAlert className="size-4 shrink-0 text-state-fault" aria-hidden="true" />
-              <span className="min-w-0 flex-1">
-                Can&apos;t read the machines and jobs <span className="text-muted-foreground">· showing the last read · retrying</span>
-              </span>
-            </p>
-          )}
           {d.github.state === "failed" && (
-            <div role="alert" className="mt-5 flex flex-wrap items-center gap-3 rounded-xl border border-state-fault/25 bg-state-fault/[0.06] px-3.5 py-2.5 text-sm">
-              <TriangleAlert className="size-4 shrink-0 text-state-fault" aria-hidden="true" />
-              <span className="min-w-0 flex-1">
-                Couldn&apos;t read the hub&apos;s GitHub setup <span className="text-muted-foreground">· {d.github.error}</span>
-              </span>
-              <Button size="sm" variant="outline" onClick={() => void d.retryGitHub()}>
-                Try again
-              </Button>
-            </div>
+            <ReadError what="Couldn't read the hub's GitHub setup" error={d.github.error} onRetry={() => void d.retryGitHub()} className="mt-5 py-2.5" />
           )}
 
           {loading ? (
@@ -408,19 +394,20 @@ export function IssuesView({
                 sections.map(({id, title: sectionTitle}) => {
                   const list = grouped[id];
                   const reading = id === "todo" && d.reading && list.length === 0;
-                  if (list.length === 0 && !reading && !(id === "todo" && d.issuesError)) return null;
+                  const failed = id === "todo" ? d.issuesFailed : [];
+                  if (list.length === 0 && !reading && failed.length === 0) return null;
                   const shown = id === "done" && !allDone ? list.slice(0, doneShown) : list;
                   return (
                     <section key={id} id={`issues-${id}`} aria-labelledby={`issues-${id}-title`} className="mt-10 scroll-mt-20">
-                      <h3 id={`issues-${id}-title`} data-flip={`section ${id}`} className={cn(heading, id === "attention" && "text-state-needs")}>
+                      <h3 id={`issues-${id}-title`} data-flip={`section ${id}`} className={cn("flex items-center gap-2", sectionClass, id === "attention" && "text-state-needs")}>
                         {sectionTitle}
                         <span className="tabular-nums opacity-60">{list.length}</span>
                       </h3>
-                      {id === "todo" && d.issuesError && (
+                      {failed.length > 0 && (
                         <p role="alert" className="mt-3 flex items-center gap-2 text-sm text-state-fault">
                           <TriangleAlert className="size-4 shrink-0" aria-hidden="true" />
-                          <span className="min-w-0 flex-1 truncate" title={d.issuesError}>
-                            Couldn&apos;t read the issues of {d.issuesError.split("\n").map((line) => line.split(":")[0]).join(", ")}
+                          <span className="min-w-0 flex-1 truncate" title={failed.map(({repo, error}) => `${repo}: ${error}`).join("\n")}>
+                            Couldn&apos;t read the issues of {failed.map(({repo}) => repo).join(", ")}
                           </span>
                           <button type="button" className="shrink-0 font-medium underline underline-offset-4" onClick={dispatch.refresh}>
                             Try again
@@ -475,6 +462,10 @@ export function IssuesView({
             <DialogPrimitive.Overlay className="fixed inset-0 z-40 hidden bg-black/30 backdrop-blur-[2px] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0 md:block" />
             <DialogPrimitive.Content
               aria-describedby={undefined}
+              // Esc on a confirmation in the sheet answers it, not the sheet.
+              onEscapeKeyDown={(event) => {
+                if ((event.target as Element | null)?.closest?.("[role=alertdialog]")) event.preventDefault();
+              }}
               className="app-frame z-50 bg-background shadow-2xl duration-300 data-[state=closed]:animate-out data-[state=closed]:slide-out-to-right data-[state=open]:animate-in data-[state=open]:slide-in-from-right md:left-auto md:w-[480px] md:border-l"
             >
               <DialogPrimitive.Title className="sr-only">{selected ? `#${selected.number} ${selected.title}` : "Issue"}</DialogPrimitive.Title>
@@ -492,7 +483,7 @@ export function IssuesView({
           initialRepo={d.scope}
           hosts={hosts}
           preferred={d.preferred}
-          busy={[...d.busy].some((key) => key.startsWith("new "))}
+          busy={d.creating}
           onCreate={async (request) => (await dispatch.createIssue(request)) !== undefined}
         />
       )}

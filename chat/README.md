@@ -109,7 +109,9 @@ Steering appends to the reply, and Stop ends the turn as interrupted. The adapte
 - Hooks: one that reads the chat's state, or serves one component, sits beside what uses it in
   `src/components/`; one that knows nothing of the chat (`use-loaded.ts`, `use-copy.ts`,
   `use-persisted.ts`) in `src/lib/`.
-- `src/test/`: fixtures and fakes the tests share.
+- `src/test/`: fixtures and fakes the tests share. A test file that renders with effects
+  (react-dom/client, a hook) calls `withDOM` (`dom.ts`) for happy-dom's document and mounts with
+  `render.tsx`; the others render on the server.
 
 Run `bun run typecheck`, `bun lint` and `bun test` before a change goes in.
 

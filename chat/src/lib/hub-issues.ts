@@ -160,7 +160,7 @@ export interface Option {
 const agentOn = (host: DispatchHost, agent: string) => agent || host.default_agent;
 
 // Unavailable is a machine that can't take an issue, and why.
-export interface Unavailable {
+interface Unavailable {
   host: DispatchHost;
   reason: string;
 }
@@ -232,9 +232,10 @@ export function runSeconds(run: Pick<DispatchRun, "started_at" | "ended_at">, no
   return Math.max(0, ((run.ended_at ? time(run.ended_at) : now) - start) / 1000);
 }
 
-// formatDuration is a duration in its two largest units: "45s", "12m",
-// "1h 05m", "2d 3h".
-export function formatDuration(seconds: number): string {
+// formatRunDuration is how long a run (or a job's agents) worked, in its
+// two largest units: "45s", "12m", "1h 05m", "2d 3h". The chat's clock
+// (lib/clock.ts) has formatDuration, a stopwatch's "1:05".
+export function formatRunDuration(seconds: number): string {
   const s = Math.round(seconds);
   if (s < 60) return `${s}s`;
   if (s < 3600) return `${Math.floor(s / 60)}m`;
@@ -277,6 +278,14 @@ export function endReason(run: Pick<DispatchRun, "end_reason" | "ended_at" | "mi
     default:
       return run.end_reason[0].toUpperCase() + run.end_reason.slice(1);
   }
+}
+
+// failureText is a failed job's error as the page says it: its first
+// letter up, without the log's path (logPath), which the detail has apart.
+export function failureText(error: string | undefined): string {
+  const text = (error ?? "").replace(/;?\s*see \S+$/, "").trim();
+  if (!text) return "The job failed";
+  return text[0].toUpperCase() + text.slice(1);
 }
 
 // logPath is the log file a failure's message points at.
