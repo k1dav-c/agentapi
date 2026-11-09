@@ -21,7 +21,10 @@ export interface HubListHeaderProps {
   onToggleNotify: () => void;
   onSettings: () => void;
   onAdd: () => void;
-  // onIssues opens the issue dispatch.
+  // onIssues opens the issue dispatch, or closes it when issuesOpen.
+  issuesOpen: boolean;
+  // issuesNeedYou counts the issues that need you, for the button's badge.
+  issuesNeedYou: number;
   onIssues: () => void;
   search: React.RefObject<HTMLInputElement | null>;
   filters: ListFilters;
@@ -32,7 +35,7 @@ export interface HubListHeaderProps {
 // live, what the agents spent today, notifications, the theme, the
 // settings and Add; the search, the list's order and By machine; and the
 // state and agent chips.
-export function HubListHeader({status, unreachable, spend, notify, onToggleNotify, onSettings, onAdd, onIssues, search, filters, view}: HubListHeaderProps) {
+export function HubListHeader({status, unreachable, spend, notify, onToggleNotify, onSettings, onAdd, issuesOpen, issuesNeedYou, onIssues, search, filters, view}: HubListHeaderProps) {
   const connected = status === "connected";
   const {counts, query, setQuery} = filters;
   return (
@@ -72,8 +75,25 @@ export function HubListHeader({status, unreachable, spend, notify, onToggleNotif
           {notify ? <Bell className="size-4 text-foreground" /> : <BellOff className="size-4" />}
         </Button>
         <ModeToggle />
-        <Button variant="ghost" size="icon" className="size-9 rounded-full text-muted-foreground" aria-label="Issues" title="Issues: hand GitHub issues to agents" onClick={onIssues}>
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn("relative size-9 rounded-full text-muted-foreground", issuesOpen && "bg-accent text-foreground")}
+          aria-label={issuesNeedYou > 0 ? `Issues, ${issuesNeedYou} ${issuesNeedYou === 1 ? "needs" : "need"} you` : "Issues"}
+          aria-pressed={issuesOpen}
+          title="Issues: hand GitHub issues to agents (i)"
+          onClick={onIssues}
+        >
           <CircleDot className="size-4" />
+          {/* As a group's header counts what needs you. */}
+          {issuesNeedYou > 0 && (
+            <span
+              aria-hidden="true"
+              className="absolute -top-0.5 -right-0.5 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-state-needs px-1 text-[10px] font-semibold text-background tabular-nums ring-2 ring-background"
+            >
+              {issuesNeedYou}
+            </span>
+          )}
         </Button>
         <Button variant="ghost" size="icon" className="size-9 rounded-full text-muted-foreground" aria-label="Hub settings" title="Hub settings" onClick={onSettings}>
           <Settings className="size-4" />

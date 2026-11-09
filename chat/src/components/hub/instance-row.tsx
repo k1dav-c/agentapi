@@ -29,6 +29,7 @@ import {UpdateDialog, UpdateMenuItems, cancelFromHub} from "./update";
 import {UpdateChip} from "./update-chip";
 import {useHubTime} from "./clock";
 import {useHubList, type PinPlace} from "./list-context";
+import {JobChip} from "./issues/job-chip";
 import {VersionTag} from "./version-tag";
 
 // activityTone is the color of the line that says what a row's instance does.
@@ -98,7 +99,7 @@ export const InstanceRow = memo(function InstanceRow({instance, order, selected,
     <li className="group/row relative px-2">
       <div
         className={cn(
-          "flex items-stretch rounded-xl transition-colors",
+          "flex flex-wrap items-stretch rounded-xl transition-colors",
           selected ? "bg-accent ring-1 ring-border" : "hover:bg-accent/60",
         )}
       >
@@ -173,6 +174,8 @@ export const InstanceRow = memo(function InstanceRow({instance, order, selected,
           </span>
         </button>
         <RowMenu instance={instance} pinned={pinned} />
+        {/* Below the row's button: a button of its own. */}
+        <JobChip instanceID={id} name={displayName(instance)} className="-mt-1.5 pr-3 pb-2.5 pl-[46px]" />
       </div>
     </li>
   );

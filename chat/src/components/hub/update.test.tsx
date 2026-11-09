@@ -130,7 +130,7 @@ describe("UpdateDialogBody", () => {
 describe("InstanceRow", () => {
   const row = (target: HubInstance) =>
     renderToStaticMarkup(
-      <HubListContext.Provider value={{hubVersion: "2.1.0", root: "", groups: [], prefix: "", actions: {select() {}, forget() {}, group() {}, newGroup() {}, mute() {}, pin() {}, move() {}}}}>
+      <HubListContext.Provider value={{hubVersion: "2.1.0", root: "", groups: [], prefix: "", jobs: new Map(), actions: {select() {}, forget() {}, group() {}, newGroup() {}, mute() {}, pin() {}, move() {}, openIssue() {}}}}>
         <InstanceRow instance={target} order="groups" selected={false} />
       </HubListContext.Provider>,
     );

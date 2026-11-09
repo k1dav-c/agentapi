@@ -12,6 +12,7 @@ import type {Fetcher} from "./hub-update";
 export type DispatchHost = HubWire["DispatchHost"];
 export type DispatchJob = HubWire["DispatchJob"];
 export type DispatchRun = HubWire["DispatchRun"];
+export type DispatchMessage = HubWire["DispatchMessage"];
 export type DispatchRequest = HubWire["DispatchRequest"];
 export type DispatchResponse = HubWire["DispatchResponse"];
 export type GitHubStatus = HubWire["DispatchGitHubStatus"];

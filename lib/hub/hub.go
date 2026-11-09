@@ -559,12 +559,16 @@ type hubEvents struct {
 	Removed   removedEvent   `json:"removed"`
 	Favorites favoritesBody  `json:"favorites"`
 	Heartbeat heartbeatEvent `json:"heartbeat"`
+	// Dispatch is the issue dispatch's machines and jobs, whole, at first
+	// and after each change; a hub without the dispatch sends none.
+	Dispatch dispatch.Board `json:"dispatch"`
 }
 
 // streamEvents sends the browser the instances and the hub's version
 // (instances) and the settings (favorites), and then each change:
 // instance, with the instance, removed, with its ID, or favorites, with
-// all of them.
+// all of them; with the dispatch, its machines and jobs (dispatch) at
+// first and after each change.
 func (h *Hub) streamEvents(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -594,6 +598,17 @@ func (h *Hub) streamEvents(w http.ResponseWriter, r *http.Request) {
 	if !send("favorites", favoritesBody{Favorites: settings.Favorites}) {
 		return
 	}
+	// The dispatch's changes; nil, a channel that never says anything. A
+	// page before 3.12 doesn't listen for them.
+	var board <-chan struct{}
+	if d := h.config.Dispatch; d != nil {
+		var cancel func()
+		board, cancel = d.Subscribe()
+		defer cancel()
+		if !send("dispatch", d.Board()) {
+			return
+		}
+	}
 	heartbeat := h.clock.NewTicker(hubHeartbeat, "hub", "browser heartbeat")
 	defer heartbeat.Stop()
 	for {
@@ -607,6 +622,14 @@ func (h *Hub) streamEvents(w http.ResponseWriter, r *http.Request) {
 			// The work times that moved come as changes, to every
 			// subscriber; the store tells each instance once.
 			h.store.refreshWork()
+			// So do the machines that went offline without a word.
+			if d := h.config.Dispatch; d != nil {
+				d.CheckOnline()
+			}
+		case <-board:
+			if !send("dispatch", h.config.Dispatch.Board()) {
+				return
+			}
 		case event, ok := <-ch:
 			if !ok {
 				return

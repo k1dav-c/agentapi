@@ -70,6 +70,11 @@ type Service struct {
 	// tokenRequests are the launchers' token requests taken, by delivery
 	// ID, so a copy isn't answered.
 	tokenRequests map[string]time.Time
+	// subs are the subscribers to the machines and jobs (Subscribe), and
+	// onlineSeen whether each machine was online as they last read it
+	// (CheckOnline).
+	subs       map[chan struct{}]struct{}
+	onlineSeen map[string]bool
 	// jobLocks serialize the dispatches of a job, by the key's hash: a
 	// fixed set, so they don't grow with the jobs.
 	jobLocks [64]sync.Mutex
@@ -134,6 +139,7 @@ func New(config Config) (*Service, error) {
 		config: config, logger: config.Logger, gh: config.GitHub,
 		hosts: map[string]*Host{}, jobs: map[string]*Job{}, deliveries: map[string]time.Time{},
 		states: map[string]time.Time{}, tokenRequests: map[string]time.Time{},
+		subs: map[chan struct{}]struct{}{}, onlineSeen: map[string]bool{},
 		nudge: make(chan struct{}, 1), done: make(chan struct{}), stopped: make(chan struct{}),
 	}
 	if config.StatePath != "" {
@@ -200,6 +206,7 @@ func LoadApp(path string) (*github.App, error) {
 // saveLocked has dispatch.json written with the state now, in the
 // background. s.mu is held.
 func (s *Service) saveLocked() {
+	s.notifyLocked()
 	if s.config.StatePath == "" {
 		return
 	}
@@ -306,6 +313,10 @@ func (s *Service) online(h *Host) bool {
 func (s *Service) Hosts() []Host {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.hostsLocked()
+}
+
+func (s *Service) hostsLocked() []Host {
 	out := make([]Host, 0, len(s.hosts))
 	for _, h := range s.hosts {
 		c := *h
@@ -321,12 +332,79 @@ func (s *Service) Hosts() []Host {
 func (s *Service) Jobs() []Job {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.jobsLocked()
+}
+
+func (s *Service) jobsLocked() []Job {
 	out := make([]Job, 0, len(s.jobs))
 	for _, j := range s.jobs {
 		out = append(out, j.clone())
 	}
 	slices.SortFunc(out, func(a, b Job) int { return b.UpdatedAt.Compare(a.UpdatedAt) })
 	return out
+}
+
+// Board is the machines and the jobs at once, as the hub's stream sends
+// them.
+type Board struct {
+	Jobs  []Job  `json:"jobs"`
+	Hosts []Host `json:"hosts"`
+}
+
+// Board returns the machines and the jobs now.
+func (s *Service) Board() Board {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.markOnlineLocked()
+	return Board{Jobs: s.jobsLocked(), Hosts: s.hostsLocked()}
+}
+
+// Subscribe returns a channel that gets a value after the machines or the
+// jobs change (read Board then), and cancel, which ends the subscription.
+// Changes close together come as one: the channel holds one value.
+func (s *Service) Subscribe() (<-chan struct{}, func()) {
+	ch := make(chan struct{}, 1)
+	s.mu.Lock()
+	s.subs[ch] = struct{}{}
+	s.mu.Unlock()
+	return ch, func() {
+		s.mu.Lock()
+		delete(s.subs, ch)
+		s.mu.Unlock()
+	}
+}
+
+// notifyLocked tells the subscribers of a change. s.mu is held.
+func (s *Service) notifyLocked() {
+	for ch := range s.subs {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	}
+}
+
+// CheckOnline tells the subscribers when a machine went offline (or came
+// back) without an event: its heartbeats stopped. The hub calls it on its
+// own heartbeat.
+func (s *Service) CheckOnline() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for name, h := range s.hosts {
+		if s.online(h) != s.onlineSeen[name] {
+			s.notifyLocked()
+			return
+		}
+	}
+}
+
+// markOnlineLocked keeps whether each machine is online, as a Board said
+// it. s.mu is held.
+func (s *Service) markOnlineLocked() {
+	clear(s.onlineSeen)
+	for name, h := range s.hosts {
+		s.onlineSeen[name] = s.online(h)
+	}
 }
 
 // HostEvent takes a launcher's host.* event, signed with the hub's
@@ -842,12 +920,39 @@ func (s *Service) send(ctx context.Context, key host.Key, req Request) (Response
 	if err := s.callLauncher(ctx, h, http.MethodPost, "/jobs/"+key.Slug()+"/message", host.MessageRequest{Content: content, DispatchMode: req.DispatchMode}, &answer); err != nil {
 		return Response{}, err
 	}
+	source := sourceOf(ctx, req)
 	updated := s.update(key.String(), func(j *Job) {
 		if j.State == JobReview {
 			j.State = JobWorking
 		}
+		m := Message{At: s.config.Now(), Source: source, Agent: j.Agent, Text: strings.TrimSpace(req.Message), ReviewState: req.ReviewState, Comments: len(req.Comments)}
+		if source != SourceHub {
+			m.Author = req.Author
+		}
+		j.addMessage(m)
 	})
 	return Response{Job: updated}, nil
+}
+
+// fromHubKey marks a dispatch's context as a signed-in browser's.
+type fromHubKey struct{}
+
+// FromHub is ctx for a dispatch someone signed in to the hub sent.
+func FromHub(ctx context.Context) context.Context {
+	return context.WithValue(ctx, fromHubKey{}, true)
+}
+
+// sourceOf is where a send came from: the hub's page, else a review (it
+// has a state) or an /agent comment, through the workflow.
+func sourceOf(ctx context.Context, req Request) MessageSource {
+	switch {
+	case ctx.Value(fromHubKey{}) != nil:
+		return SourceHub
+	case req.ReviewState != "":
+		return SourceReview
+	default:
+		return SourceComment
+	}
 }
 
 func (s *Service) linkPR(key host.Key, req Request) (Response, error) {

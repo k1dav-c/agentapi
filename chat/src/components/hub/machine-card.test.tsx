@@ -34,14 +34,14 @@ const claude = agent(3284, "claude", {
 });
 const codex = agent(3285, "codex", {summary: summary({spend: {day_usd: 1, week_usd: 2, scope: "s2", updated_at: "2026-11-01T09:50:00Z"}})});
 
-const actions = {select() {}, forget() {}, group() {}, newGroup() {}, mute() {}, pin() {}, move() {}};
+const actions = {select() {}, forget() {}, group() {}, newGroup() {}, mute() {}, pin() {}, move() {}, openIssue() {}};
 
 const card = (instances: HubInstance[], selected?: string, hostname = "dev-1", order: ListOrder = "groups", prefix = "") => {
   const machine: HubMachine = {key: `host ${hostname}`, hostname, instances};
   const section = order === "recent" ? " recent" : "Group";
   return renderToStaticMarkup(
     <FixedHubClock now={Date.parse("2026-11-01T10:00:00Z")}>
-      <HubListContext.Provider value={{hubVersion: "3.1.0", root: "", groups: [], prefix, actions}}>
+      <HubListContext.Provider value={{hubVersion: "3.1.0", root: "", groups: [], prefix, jobs: new Map(), actions}}>
         <MachineCard card={`${section}\nhost ${hostname}`} machine={machine} order={order} selected={selected} />
       </HubListContext.Provider>
     </FixedHubClock>,

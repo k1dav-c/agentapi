@@ -11,18 +11,20 @@ export function useHubKeys({
   query,
   onClearSearch,
   onOverview,
+  onIssues,
   onPin,
 }: {
   search: RefObject<HTMLInputElement | null>;
   query: string;
   onClearSearch: () => void;
   onOverview: () => void;
+  onIssues: () => void;
   // Pins or unpins the row's instance.
   onPin: (id: string) => void;
 }) {
-  const latest = useRef({query, onClearSearch, onOverview, onPin});
+  const latest = useRef({query, onClearSearch, onOverview, onIssues, onPin});
   useEffect(() => {
-    latest.current = {query, onClearSearch, onOverview, onPin};
+    latest.current = {query, onClearSearch, onOverview, onIssues, onPin};
   });
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -54,6 +56,10 @@ export function useHubKeys({
           return;
         case "overview":
           latest.current.onOverview();
+          return;
+        case "issues":
+          event.preventDefault();
+          latest.current.onIssues();
           return;
         case "pin":
           event.preventDefault();

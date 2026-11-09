@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- The hub's Issues dialog is a page now, in the overview's place (◎ in the header, or `i`). Its
+  board puts the issues by stage, with what needs you first: a failed job, an agent that waits on
+  you, a pull request to review; then the agents at work, the issues to do and those done. A bar
+  counts the stages, and the machines show their room and agents. **Assign** hands an issue to the
+  agent and machine the button shows, one tap; its arrow lists the others, with why a machine
+  can't take it. An issue opens into its detail: its state and actions, **Switch agent** and
+  **Stop** (both ask first), its spend, and a timeline of its runs and the messages its agents were
+  sent. It works on a phone. See [Issues](docs/hub.md#issues).
+- The hub keeps the last 50 messages sent to each job's agents, from its page or from a review or
+  `/agent` comment on GitHub, with where each came from (`messages` on `GET /api/jobs`, kept in
+  `dispatch.json`; older files read as before).
+- The hub's stream (`GET /api/events`) sends the dispatch's machines and jobs at first and after
+  each change (`dispatch`), so the page no longer reads them every 10 seconds; with a hub before
+  this one, it still does. ◎ counts the issues that need you, and the list's row of an agent that
+  works on an issue shows the issue and its pull request, which open it in Issues.
+- The board shows the issues of the 20 repositories pushed to or changed last
+  (`GET /api/github/repos` lists them so, with `pushed_at` and `updated_at`); its menu finds any
+  other.
+
 ## v3.10.1
 
 ### Fixes

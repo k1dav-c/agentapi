@@ -592,23 +592,118 @@ and typing in the list types in it. **Manage favorites…** opens the hub's sett
 favorites. The menu shows even before the first favorite, with that link. A chat opened on its own,
 in a new tab or at its AgentAPI's URL, has no ☆.
 
+### Issues
+
+![Issues: the board by stage, what needs you first](screenshots/dispatch-issues.png)
+
+**Issues** hands GitHub issues to agents on your machines, through the hub's
+[issue dispatch](specs/issue-dispatch.zh-TW.md) (in Traditional Chinese; the
+[flow](specs/issue-dispatch-flow.zh-TW.md) has the pictures). ◎ in the header, or `i`, opens it in
+place of the overview; the badge on ◎ counts the issues that need you: a failed job, a pull
+request in review, an agent that waits on you. ◎ again, `Esc` or the back arrow on a phone closes
+it.
+
+The page puts the issues of the repositories it shows on one board. The headline says what needs
+you, and the line under it counts the stages. The bar under them shows how many issues are at
+each stage, To do, In progress, In review and Done, in proportion; In progress also says how many
+of its issues wait on you and how many failed. Below are the machines whose launchers report:
+online or not, their jobs against their room (●●●○), and the agents each runs. Then the issues,
+by section:
+
+- **Needs you**: a failed job, then an agent that waits on you (an approval, a question), then a
+  pull request to review.
+- **Working**: the agents at work, the longest first, each with what it does now.
+- **To do**: the open issues no agent has.
+- **Done**: those done or stopped, the latest first; **Show all** past three.
+
+A card shows the issue's number, state and title, the agent and machine on it, its pull request,
+what its runs cost and how many there were, and the one thing its state asks for: **Assign**,
+**Answer**, **Review #21**, **Retry**. When a card changes state, it moves to its new section. The
+page gets the machines and jobs from the hub's stream as they change; a hub before 3.12 doesn't
+send them, and the page reads them every 10 seconds instead.
+
+The repository menu at the top picks the board's scope. **Recent repositories** shows the open
+issues of the 20 that the hub's GitHub App can see that were pushed to or changed last, and the
+jobs of all of them. Pick one repository to see only its issues; past eight, a search box finds
+one. The page keeps the choice.
+
+#### Assigning an issue
+
+![The agents and machines an issue can go to](screenshots/dispatch-assign.png)
+
+**Assign** gives the issue to the agent and machine the button shows. That is the machine the hub
+would pick (one that has the repository, then the least busy one) with its default agent, or the
+agent you picked by hand last, on a machine that runs it. The arrow beside it lists every agent with
+the machines that can take the issue, and greys out the others with the reason: offline, full,
+doesn't run that agent, or doesn't have the repository and doesn't clone. A machine you pick there
+gets the issue. `a` assigns the issue whose card has the focus. Without a machine that can take it,
+the button says why.
+
+#### An issue's detail
+
+| An issue in review | A failed job |
+| --- | --- |
+| ![The detail of an issue in review, with the messages it was sent](screenshots/dispatch-review.png) | ![A failed job: why, its log, and Retry](screenshots/dispatch-failed.png) |
+
+A card opens the issue's detail, beside the board on a wide screen and over it on a narrow one. Its
+top box says the issue's state in a sentence, with what its agent does or asks now, and the actions:
+**Retry with …**, **Answer in the chat**, **Review #…**, **Open chat**; then **Switch agent**,
+which keeps the branch, the worktree and the pull request, and **Stop**, which deletes the branch.
+Both ask first:
+
+| Switch agent | Stop |
+| --- | --- |
+| ![Switch asks first](screenshots/dispatch-confirm-switch.png) | ![Stop asks first](screenshots/dispatch-confirm-stop.png) |
+
+Below that are the job's spend, runs, agent time and tokens, and its timeline, the latest first:
+each run (the agent and machine, when it ran, what it cost, how it ended), and each message its
+agents were sent, from this page or from a review or `/agent` comment on GitHub. The hub keeps the
+last 50 messages of each job. **On the machine** has the branch and the worktree to copy. While
+the agent works, the box at the bottom sends it a message (⌘/Ctrl+Enter).
+
+#### The list's rows
+
+![The agents of issues in the list, each with its issue](screenshots/dispatch-list.png)
+
+The row of an agent that works on an issue has a chip under it: the issue's stage and its pull
+request, or the issue itself where the row isn't named after it. The chip opens the issue in
+Issues.
+
+#### New issue, and a hub without GitHub
+
+**New issue** (or `n`) opens an issue on GitHub as the hub's app, in the repository picked, and with
+**Assign to** on, hands it to an agent at once (⌘/Ctrl+Enter).
+
+![Issues before GitHub is connected](screenshots/dispatch-no-github.png)
+
+Before the hub has a GitHub App, Issues shows **Connect GitHub**, which registers one from a
+manifest, for your account or an organization. An issue can still be started by its reference
+(`owner/repo#12`, or its URL); the machine then works with its own GitHub login. Without a launcher
+on any machine, the page shows the command that installs one.
+
+| The board on a phone | An issue on a phone |
+| --- | --- |
+| ![Issues on a phone](screenshots/dispatch-phone.png) | ![An issue's detail on a phone](screenshots/dispatch-phone-detail.png) |
+
 ### Keys and notifications
 
 | Key | Does |
 | --- | --- |
 | `/` | Search |
+| `i` | Open [Issues](#issues) |
 | `j`, `k` (or the arrows) | Move between the rows ([By machine](#by-machine): the cards) |
 | ←, → | [By machine](#by-machine): show a card's other agents |
 | `Enter` | Open the row |
 | `p` | Pin or unpin the row ([Pinning](#pinning)) |
-| `Esc` | Clear the search, or go back to the overview |
+| `Esc` | Clear the search, or go back: from an agent opened from Issues to Issues, then to the overview |
 
 On a desktop, drag the list's edge, or focus it and press ← or →, to change the list's width; each
 browser remembers it, and a double-click on the edge resets it.
 
-`/` and `Esc` work anywhere on the hub's page; `j`, `k`, the arrows and `p` work with the focus in
-the list or on nothing, so elsewhere the arrows scroll the overview as usual. Inside an open chat,
-keys go to the chat. The bell asks the browser to notify you when an agent starts needing you while
+`/`, `i` and `Esc` work anywhere on the hub's page but in a field; `j`, `k`, the arrows and `p` work with the focus in
+the list or on nothing, so elsewhere the arrows scroll the overview as usual. In Issues, `j` and `k` move between the
+cards, `Enter` opens one, `a` assigns it, `c` opens its chat, `n` opens a new issue and `r` reads
+the issues again. Inside an open chat, keys go to the chat. The bell asks the browser to notify you when an agent starts needing you while
 the hub's tab is in the background, and a screen reader hears the same as it happens.
 
 ### On a phone
@@ -856,7 +951,13 @@ running AgentAPIs, which then no longer follow their conversation for the webhoo
 | `PUT /api/pins` | `{"ids": […]}` orders the pinned instances, from the top. It lists each pinned instance once and no other; 409, with the pinned ones in their order (`ids`), when it doesn't, such as after one was pinned, unpinned or forgotten; 404 for an instance the hub doesn't have |
 | `GET /api/favorites` | The [favorites](#favorites), in their order: `{"favorites": [{"id", "title", "text"}, …]}`; a favorite without a title has none |
 | `PUT /api/favorites` | `{"favorites": […]}` replaces them, in that order. At most 100; a title has at most 100 characters, on one line; a text isn't blank and has at most 20,000; an ID has 1 to 64 letters, digits, `-` or `_`, once. A favorite sent without an ID gets one; the answer is the list as the hub keeps it. 400, changing nothing, for a list it refuses |
-| `GET /api/events` | Server-sent events: `instances` (all of them and `hub_version`, as `GET /api/instances` has them) and `favorites` (as `GET /api/favorites` has them), then `instance` (one changed what the page shows, or its work time moved by a minute; when it was last heard of counts only while it is offline), `removed` (`{"id"}`), `favorites` (all of them, after a change) and a `heartbeat` every 15 s |
+| `GET /api/events` | Server-sent events: `instances` (all of them and `hub_version`, as `GET /api/instances` has them) and `favorites` (as `GET /api/favorites` has them), then `instance` (one changed what the page shows, or its work time moved by a minute; when it was last heard of counts only while it is offline), `removed` (`{"id"}`), `favorites` (all of them, after a change), `dispatch` (the [issue dispatch's](#issues) machines and jobs, as `GET /api/hosts` and `GET /api/jobs` have them, at first and after each change) and a `heartbeat` every 15 s |
+| `GET /api/hosts` | The machines whose launchers report: their agents, repositories, jobs and room, and whether each is `online` |
+| `GET /api/jobs` | The jobs, each an issue's work: its state, agent and machine, pull request, runs with their cost, and the last 50 messages its agents were sent (`messages`: `at`, `source` `hub`, `review` or `comment`, `author`, `agent`, `text`, up to 2,000 characters) |
+| `GET /api/github` | The hub's GitHub App, if any, and where it is installed |
+| `GET /api/github/repos` | The repositories the app can see, the latest pushed to or changed first (`pushed_at`, `updated_at`) |
+| `GET /api/github/issues?repo=` | A repository's open issues; `POST` opens one, and with `assign`, starts work on it |
+| `POST /api/dispatch` | Starts, messages, links and stops the work on an issue (`action`: `start`, `send`, `link_pr`, `stop`); also takes `--dispatch-token` |
 | `GET /api/join` | Where machines join the hub: `urls`, each a webhook URL (`url`) with the interface of its address (`interface`; none for `--bind`'s), in the order the startup log has them; and the secret (`secret`, with `secret_shown: true`) only on a hub with a token |
 | `/i/{id}/…` | The instance's own API and chat, through the hub; the page updates an instance with `POST /i/{id}/update` and cancels with `DELETE` |
 
@@ -872,6 +973,8 @@ Every endpoint but `/hooks` and `/api/session` needs the session cookie or
 | `~/.agentapi/hub/instances.json` | `agentapi hub serve` | The instances the hub knows, their groups and pins, when each last changed, when each worked in the last 7 days, the URL where the hub last read each one's summary, and tokens of the ones added by hand; and the [favorites](#favorites) |
 | `~/.agentapi/hub/instances.json.bak` | `agentapi hub serve` | The file of instances as the hub found it when it last started |
 | `~/.agentapi/hub/instances.deliveries.json` | `agentapi hub serve` | The delivery IDs of the events the hub took whose signature still holds, to refuse copies |
+| `~/.agentapi/hub/dispatch.json` | `agentapi hub serve` | The [issue dispatch's](#issues) machines with their launchers' tokens, and the jobs: their runs, costs and last 50 messages |
+| `~/.agentapi/hub/github-app.json` | `agentapi hub serve` | The hub's GitHub App and its private key |
 
 `instances.json` is `{"version": 1, "instances": [...]}`. Hubs of 2.2 and earlier wrote, and read,
 only the array: the hub reads that too, but such a hub sets the newer file aside as damaged and

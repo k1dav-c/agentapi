@@ -18,6 +18,7 @@ import {activityTone, agentName, RowMenu, RowWork, UsageBar} from "./instance-ro
 import {useHubList} from "./list-context";
 import {AgentTabMark, shortAgent} from "./machine-tabs";
 import {stateTone} from "./status-glyph";
+import {JobChip} from "./issues/job-chip";
 import {UpdateChip} from "./update-chip";
 import {VersionTag} from "./version-tag";
 
@@ -245,7 +246,7 @@ const AgentPanel = memo(function AgentPanel({instance, named, versioned, selecte
   const id = instance.id;
   return (
     <div className="group/row relative">
-      <div className={cn("flex items-stretch rounded-lg transition-colors", selected ? "bg-accent ring-1 ring-border" : "hover:bg-accent/60")}>
+      <div className={cn("flex flex-wrap items-stretch rounded-lg transition-colors", selected ? "bg-accent ring-1 ring-border" : "hover:bg-accent/60")}>
         {selected && <span aria-hidden="true" className="absolute inset-y-2.5 left-0 w-[3px] rounded-r-full bg-state-working" />}
         <button
           type="button"
@@ -309,6 +310,7 @@ const AgentPanel = memo(function AgentPanel({instance, named, versioned, selecte
           )}
         </button>
         <RowMenu instance={instance} className="size-8" />
+        <JobChip instanceID={id} name={displayName(instance)} className="-mt-0.5 pr-2 pb-2 pl-2.5" />
       </div>
     </div>
   );

@@ -296,6 +296,16 @@
 @keyframes hub-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
 @keyframes hub-flow { to { stroke-dashoffset: -20; } }
 @keyframes hub-shake { 20%, 60% { transform: translateX(-6px); } 40%, 80% { transform: translateX(6px); } }
+/* Issues: a card that changed flashes a ring in its new state's color
+   (--flash); the detail panel slides in beside the board. */
+.issue-flash { animation: issue-flash 1.6s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.issue-panel { animation: issue-panel 0.34s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@keyframes issue-flash {
+  0% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--flash) 60%, transparent); border-color: var(--flash); }
+  35% { box-shadow: 0 0 0 6px color-mix(in oklch, var(--flash) 18%, transparent); border-color: color-mix(in oklch, var(--flash) 60%, transparent); }
+  100% { box-shadow: 0 0 0 10px transparent; }
+}
+@keyframes issue-panel { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
 @keyframes hub-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 
 @media (prefers-reduced-motion: reduce) {

@@ -121,6 +121,54 @@ type Job struct {
 	// was done); each round has its pull request and cost comment.
 	Round         int   `json:"round"`
 	CostCommentID int64 `json:"cost_comment_id,omitempty"`
+	// Messages are the last messages the job's agents were sent (send),
+	// the oldest first: at most maxMessages, each cut to maxMessageText.
+	Messages []Message `json:"messages,omitempty"`
+}
+
+// MessageSource is where a message to a job's agent came from.
+type MessageSource string
+
+const (
+	// SourceHub: someone signed in to the hub, from its Issues page.
+	SourceHub MessageSource = "hub"
+	// SourceReview: a pull request review, through the workflow.
+	SourceReview MessageSource = "review"
+	// SourceComment: an /agent comment, through the workflow.
+	SourceComment MessageSource = "comment"
+)
+
+// Message is a message a job's agent was sent.
+type Message struct {
+	At     time.Time     `json:"at"`
+	Source MessageSource `json:"source" enum:"hub,review,comment"`
+	// Author is the GitHub login of a review or comment.
+	Author string `json:"author,omitempty"`
+	// Agent is the agent it went to.
+	Agent string `json:"agent"`
+	Text  string `json:"text"`
+	// ReviewState is a review's (changes_requested, commented).
+	ReviewState string `json:"review_state,omitempty"`
+	// Comments counts a review's comments on lines.
+	Comments int `json:"comments,omitempty"`
+}
+
+// The bounds of the messages a job keeps.
+const (
+	maxMessages    = 50
+	maxMessageText = 2000
+)
+
+// addMessage keeps m on the job, the oldest dropped past maxMessages and
+// its text cut to maxMessageText characters.
+func (j *Job) addMessage(m Message) {
+	if r := []rune(m.Text); len(r) > maxMessageText {
+		m.Text = string(r[:maxMessageText-1]) + "…"
+	}
+	j.Messages = append(j.Messages, m)
+	if over := len(j.Messages) - maxMessages; over > 0 {
+		j.Messages = slices.Delete(j.Messages, 0, over)
+	}
 }
 
 // working reports whether the job's work goes on: it holds a place on its
@@ -131,6 +179,7 @@ func (j *Job) working() bool { return !j.State.ended() && j.State != JobFailed }
 func (j *Job) clone() Job {
 	c := *j
 	c.Runs = slices.Clone(j.Runs)
+	c.Messages = slices.Clone(j.Messages)
 	return c
 }
 

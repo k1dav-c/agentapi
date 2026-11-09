@@ -37,6 +37,21 @@ func TestHubDispatch(t *testing.T) {
 	d, err := dispatch.New(dispatch.Config{StatePath: filepath.Join(dir, "dispatch.json"), AppPath: filepath.Join(dir, "github-app.json"), Secret: hubSecret, DispatchToken: "dispatch-token"})
 	require.NoError(t, err)
 	srv := startHubWith(t, hub.Config{Dispatch: d}, false)
+	// The page's stream has the machines and jobs, and each change.
+	events := openEvents(t, srv.URL+"/api/events")
+	assert.Equal(t, "instances", next(t, events).event)
+	assert.Equal(t, "favorites", next(t, events).event)
+	first := next(t, events)
+	assert.Equal(t, "dispatch", first.event)
+	assert.JSONEq(t, `{"jobs": [], "hosts": []}`, first.data)
+	board := func() dispatch.Board {
+		t.Helper()
+		e := next(t, events)
+		require.Equal(t, "dispatch", e.event)
+		var b dispatch.Board
+		require.NoError(t, json.Unmarshal([]byte(e.data), &b))
+		return b
+	}
 
 	event := map[string]any{
 		"id": "host-1", "type": host.EventHostStarted, "created_at": time.Now(),
@@ -48,6 +63,9 @@ func TestHubDispatch(t *testing.T) {
 	}
 	assert.Equal(t, http.StatusUnauthorized, postEvent(t, srv.URL, event, "wrong", time.Now()))
 	assert.Equal(t, http.StatusNoContent, postEvent(t, srv.URL, event, hubSecret, time.Now()))
+	joined := board()
+	require.Len(t, joined.Hosts, 1)
+	assert.Equal(t, "pve", joined.Hosts[0].Hostname)
 
 	var hosts struct {
 		Hosts []dispatch.Host `json:"hosts"`
@@ -64,6 +82,8 @@ func TestHubDispatch(t *testing.T) {
 	require.Equal(t, http.StatusCreated, request(t, http.MethodPost, srv.URL+"/api/dispatch", "dispatch-token", start, &resp))
 	assert.Equal(t, "pve", resp.Job.Host)
 	assert.Equal(t, int32(1), starts.Load())
+	for b := board(); len(b.Jobs) == 0; b = board() {
+	}
 	// A signed-in browser dispatches too.
 	require.Equal(t, http.StatusOK, request(t, http.MethodPost, srv.URL+"/api/dispatch", hubToken, start, &resp))
 	assert.Equal(t, http.StatusUnauthorized, request(t, http.MethodGet, srv.URL+"/api/instances", "dispatch-token", nil, nil))

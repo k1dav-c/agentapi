@@ -25,12 +25,12 @@ const finished: HubInstance = hubInstance("dev-1:3284", {
   }),
 });
 
-const actions = {select() {}, forget() {}, group() {}, newGroup() {}, mute() {}, pin() {}, move() {}};
+const actions = {select() {}, forget() {}, group() {}, newGroup() {}, mute() {}, pin() {}, move() {}, openIssue() {}};
 
 const row = (order: ListOrder, target: HubInstance = finished, pinned?: {first: boolean; last: boolean}) =>
   renderToStaticMarkup(
     <FixedHubClock now={Date.parse("2026-11-01T10:00:00Z")}>
-      <HubListContext.Provider value={{hubVersion: "2.1.0", root: "", groups: ["Client work"], prefix: "", actions}}>
+      <HubListContext.Provider value={{hubVersion: "2.1.0", root: "", groups: ["Client work"], prefix: "", jobs: new Map(), actions}}>
         <InstanceRow instance={target} order={order} selected={false} pinned={pinned && pinPlace(pinned.first, pinned.last)} />
       </HubListContext.Provider>
     </FixedHubClock>,

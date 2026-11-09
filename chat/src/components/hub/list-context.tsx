@@ -1,6 +1,7 @@
 "use client";
 
 import {createContext, useContext} from "react";
+import type {DispatchJob} from "@/lib/hub-dispatch";
 
 // RowActions are what a row does to its instance; the hub keeps the same
 // object from render to render.
@@ -15,13 +16,16 @@ export interface RowActions {
   pin: (id: string, pinned: boolean) => void;
   // Moves it up (-1) or down (1) among the pinned ones.
   move: (id: string, step: -1 | 1) => void;
+  // Opens an issue (owner/repo#n) in Issues.
+  openIssue: (key: string) => void;
 }
 
 // HubListContext is what every row and card of the hub's list shares: the
 // hub's own version, which marks the older instances; its address, whose
 // proxy takes an instance's update; the groups in use, for a row's menu;
 // the start most machines' names share (hostPrefix), which the cards dim;
-// and what the rows do. The hub keeps it the same object while none of
+// the dispatch's jobs, which the rows of their agents name; and what the
+// rows do. The hub keeps it the same object while none of
 // them changes, so a row renders again only when its own props change
 // (the rows and cards are memoized).
 export interface HubList {
@@ -29,6 +33,9 @@ export interface HubList {
   root: string;
   groups: readonly string[];
   prefix: string;
+  // jobs are the issue dispatch's jobs by their AgentAPI's ID: the rows of
+  // those agents name their issue.
+  jobs: ReadonlyMap<string, DispatchJob>;
   actions: RowActions;
 }
 
@@ -39,7 +46,8 @@ export const HubListContext = createContext<HubList>({
   root: "",
   groups: [],
   prefix: "",
-  actions: {select: noAction, forget: noAction, group: noAction, newGroup: noAction, mute: noAction, pin: noAction, move: noAction},
+  jobs: new Map(),
+  actions: {select: noAction, forget: noAction, group: noAction, newGroup: noAction, mute: noAction, pin: noAction, move: noAction, openIssue: noAction},
 });
 
 export function useHubList(): HubList {

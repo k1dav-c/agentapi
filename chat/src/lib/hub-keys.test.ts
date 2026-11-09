@@ -23,6 +23,14 @@ describe("hubKey", () => {
     expect(hubKey(key("ArrowDown", {altKey: true}), onRow, "")).toBeUndefined();
   });
 
+  test("i opens Issues from anywhere but a field, a menu or a dialog", () => {
+    expect(hubKey(key("i"), elsewhere, "")).toEqual({type: "issues"});
+    expect(hubKey(key("i"), onRow, "")).toEqual({type: "issues"});
+    expect(hubKey(key("i"), {...elsewhere, typing: true}, "")).toBeUndefined();
+    expect(hubKey(key("i"), {...elsewhere, menuOrDialogOpen: true}, "")).toBeUndefined();
+    expect(hubKey(key("i", {metaKey: true}), elsewhere, "")).toBeUndefined();
+  });
+
   test("/ searches and Esc goes back from anywhere but a field", () => {
     expect(hubKey(key("/"), elsewhere, "")).toEqual({type: "search"});
     expect(hubKey(key("/"), {...elsewhere, typing: true}, "")).toBeUndefined();

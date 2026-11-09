@@ -31,10 +31,14 @@ uncommitted changes):
   By machine views, the overview's cards and the switch of a machine's agents show these names.
   Screenshots taken before 3.2.0 show `dev-1` and so on in turn, row by row.
 
-The `dispatch-*.png` views of the issue dispatch came from a development build of the
+The `dispatch-*.png` views of the hub's Issues page came from a build of the hub with fixed data:
+the page's calls to the dispatch (`/api/hosts`, `/api/jobs`, `/api/github*`, `/api/dispatch`)
+and its stream answered from fixtures of three machines (one offline), Claude Code, Codex and Pi,
+and the issues and jobs of `acme/web`, `acme/api` and `acme/infra`, at a fixed time.
+`dispatch-chat.png` and `dispatch-github-connect.png` came from a development build of the
 `feat/issue-dispatch` branch: a real hub and launcher, `native-demo` posing as Claude Code and
-Codex, a local bare repository in place of github.com, and a fake GitHub API that serves the
-issues and the app's tokens. They aren't part of `capture-docs.mjs`.
+Codex, a local bare repository in place of github.com, and a fake GitHub API. None of them are
+part of `capture-docs.mjs`.
 
 ## Gallery
 
@@ -116,13 +120,20 @@ small.
 | [demo-terminal.gif](demo-terminal.gif) | The shell terminal: a command, a link above it, and a held Ctrl |
 | [demo-phone.gif](demo-phone.gif) | The terminal on a phone, typed with the key bar |
 | [demo-hub.gif](demo-hub.gif) | On a phone: opening the instance that needs you, allowing its command, and back to the list where it no longer does |
-| [dispatch-issues.png](dispatch-issues.png) | The hub's Issues dialog: a machine, the GitHub App, and the issues of `acme/widget`, one in review with its PR, one failed, two to assign |
+| [dispatch-issues.png](dispatch-issues.png) | The hub's Issues page: the stages, the machines, and the issues by section, what needs you first |
+| [dispatch-assign.png](dispatch-assign.png) | Assign's menu: each agent's machines that can take the issue, and those that can't, with why |
+| [dispatch-repos.png](dispatch-repos.png) | The repository menu: the 20 most recent, or any one, found by its name |
+| [dispatch-detail.png](dispatch-detail.png) | An issue's detail beside the board: an agent switch under way, its runs and a comment from GitHub |
+| [dispatch-review.png](dispatch-review.png) | The detail of an issue in review: a review and a message from the hub in its timeline |
+| [dispatch-failed.png](dispatch-failed.png) | A job whose AgentAPI exited 5 times: why, its log, and Retry |
 | [dispatch-confirm-stop.png](dispatch-confirm-stop.png) | Stop asks first: the worktree and the branch are deleted |
 | [dispatch-confirm-switch.png](dispatch-confirm-switch.png) | Switch asks first: Codex takes over on the same branch |
-| [dispatch-failed.png](dispatch-failed.png) | A job whose AgentAPI exited 5 times, with Retry |
 | [dispatch-new-issue.png](dispatch-new-issue.png) | New issue: open an issue and assign it to an agent |
+| [dispatch-list.png](dispatch-list.png) | The list: the agents of issues, each with its issue's stage and pull request; the badge on ◎ |
+| [dispatch-phone.png](dispatch-phone.png) | Issues on a phone |
+| [dispatch-phone-detail.png](dispatch-phone-detail.png) | An issue's detail on a phone |
 | [dispatch-chat.png](dispatch-chat.png) | Open chat on an issue's job: the review that came in from GitHub, fenced as the user's content |
-| [dispatch-no-github.png](dispatch-no-github.png) | The Issues dialog before GitHub is connected: Connect GitHub, and start an issue by its URL |
+| [dispatch-no-github.png](dispatch-no-github.png) | Issues before GitHub is connected: Connect GitHub, and start an issue by its reference |
 | [dispatch-github-connect.png](dispatch-github-connect.png) | `/github/connect`, the hub's page that creates its GitHub App |
 
 The login card names the host and user to log in as; the script shows `dev-machine` and `dev` in
