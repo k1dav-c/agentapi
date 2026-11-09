@@ -3,7 +3,7 @@
 import {useMemo, useRef, useState} from "react";
 import {Button} from "@/components/ui/button";
 import {chatURL, displayName, hubRoot, type HubInstance} from "@/lib/hub";
-import type {DispatchJob} from "@/lib/hub-dispatch";
+import {active, type DispatchJob} from "@/lib/hub-dispatch";
 import {stoppedOf} from "@/lib/hub-filter";
 import {needsYou} from "@/lib/hub-issues";
 import {groupNames, groupOf} from "@/lib/hub-groups";
@@ -64,6 +64,11 @@ export function HubView() {
   const issuesNeedYou = useMemo(() => (dispatch ? needsYou(dispatch.jobs, instances) : 0), [dispatch, instances]);
   const [naming, setNaming] = useState<Naming | null>(null);
   const [settings, setSettings] = useState<SettingsSection | null>(null);
+  // Counts the changes to the hub's GitHub App made in the settings, for
+  // Issues to read it again.
+  const [githubChanges, setGitHubChanges] = useState(0);
+  // The jobs at work, which push with the app's tokens.
+  const activeJobs = useMemo(() => (dispatch?.jobs ?? []).filter((job) => active(job) && job.credentials).length, [dispatch]);
   // The stopped agents the dialog asks to forget.
   const [forgetting, setForgetting] = useState<HubInstance[] | null>(null);
   const search = useRef<HTMLInputElement>(null);
@@ -302,6 +307,8 @@ export function HubView() {
                 onSelect={setIssueKey}
                 onClose={() => issues.show(false)}
                 onOpenChat={select}
+                githubChanges={githubChanges}
+                onGitHubSettings={() => setSettings("github")}
               />
             </div>
           )}
@@ -312,7 +319,15 @@ export function HubView() {
           {announcement}
         </div>
         <AddInstance root={root} open={adding} onOpenChange={setAdding} onAdded={(id) => select(id)} />
-        <HubSettings root={root} section={settings} onClose={() => setSettings(null)} favorites={favorites} onFavoritesSaved={setFavorites} />
+        <HubSettings
+          root={root}
+          section={settings}
+          onClose={() => setSettings(null)}
+          favorites={favorites}
+          onFavoritesSaved={setFavorites}
+          activeJobs={activeJobs}
+          onGitHubChanged={() => setGitHubChanges((n) => n + 1)}
+        />
         <ForgetStopped instances={forgetting} onClose={() => setForgetting(null)} onForget={forgetStopped} />
         <GroupName
           naming={naming}
