@@ -15,7 +15,6 @@ import {ReadError} from "../read-error";
 import {sectionClass} from "../styles";
 import {IssueCard, type CardActions} from "./issue-card";
 import {IssueDetail, type DetailActions} from "./issue-detail";
-import {lookOf, type Look} from "./job-glyph";
 import {MachinesStrip} from "./machines-strip";
 import {Money} from "./money";
 import {NewIssueDialog} from "./new-issue-dialog";
@@ -23,30 +22,11 @@ import {PipelineRail} from "./pipeline-rail";
 import {ScopeMenu} from "./scope-menu";
 import {ConnectGitHub, InstallApp, NoLaunchers, StartByRef} from "./setup";
 import {recentRepos, useDispatch} from "./use-dispatch";
+import {useFlashes} from "./use-flashes";
 import {useFlip} from "./use-flip";
 
 // How many done issues show before Show all.
 const doneShown = 3;
-const flashFor = 1600;
-
-// useFlashes are the cards whose look changed since the last read, for a
-// moment: the ring they flash in their new state's color says what moved.
-function useFlashes(cards: Card[]): ReadonlySet<string> {
-  const looks = useRef<Map<string, Look> | null>(null);
-  const [flashing, setFlashing] = useState<ReadonlySet<string>>(new Set());
-  useEffect(() => {
-    const next = new Map(cards.map((card) => [card.key, lookOf(card)]));
-    const before = looks.current;
-    looks.current = next;
-    if (!before) return;
-    const changed = [...next].filter(([key, look]) => before.has(key) && before.get(key) !== look).map(([key]) => key);
-    if (changed.length === 0) return;
-    setFlashing((keys) => new Set([...keys, ...changed]));
-    const timer = setTimeout(() => setFlashing((keys) => new Set([...keys].filter((key) => !changed.includes(key)))), flashFor);
-    return () => clearTimeout(timer);
-  }, [cards]);
-  return flashing;
-}
 
 function Skeleton({rows = 3}: {rows?: number}) {
   return (
