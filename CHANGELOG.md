@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- The machines in Issues have **×** on an offline one, which forgets it after a dialog, as
+  `DELETE /api/hosts/{name}` does: a launcher set up again, with a new token, can then join under
+  its name. It is off, with the reason, while one of the machine's jobs still works.
+
 ## v3.15.2
 
 ### Changes

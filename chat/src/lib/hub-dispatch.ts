@@ -41,6 +41,16 @@ export function active(job: Pick<DispatchJob, "state">): boolean {
   return job.state !== "done" && job.state !== "stopped";
 }
 
+// forgetBlocker says why the hub won't forget a machine yet, as it would
+// refuse: it is online, or jobs on it still work (any but done, stopped or
+// failed). Undefined when it may.
+export function forgetBlocker(host: Pick<DispatchHost, "hostname" | "online">, jobs: Pick<DispatchJob, "host" | "state">[]): string | undefined {
+  if (host.online) return "It is online: stop its launcher first";
+  const working = jobs.filter((job) => job.host === host.hostname && active(job) && job.state !== "failed").length;
+  if (working > 0) return `Stop its ${working === 1 ? "job" : `${working} jobs`} first`;
+  return undefined;
+}
+
 const stateLabels: Record<JobState, string> = {
   starting: "Starting",
   working: "Working",
@@ -171,5 +181,8 @@ export function createDispatchAPI(root: string, fetcher: Fetcher = (url, init) =
     createIssue: (request: CreateIssueRequest) => call("/api/github/issues", read.createIssue, post(request)),
     // The hub forgets its GitHub App.
     disconnect: async () => void (await fetchHub("/api/github", {method: "DELETE"})),
+    // The hub forgets a machine and the launcher token it pinned its name
+    // to, so a launcher set up again can join under the name.
+    forgetHost: async (name: string) => void (await fetchHub(`/api/hosts/${encodeURIComponent(name)}`, {method: "DELETE"})),
   };
 }

@@ -1,14 +1,18 @@
 "use client";
 
 import {useCallback, useEffect, useRef, useState} from "react";
+import {X} from "lucide-react";
 import {AgentMark} from "@/components/agent-mark";
-import {agentLabel, type DispatchHost} from "@/lib/hub-dispatch";
+import {agentLabel, forgetBlocker, type DispatchHost, type DispatchJob} from "@/lib/hub-dispatch";
 import {formatAgo} from "@/lib/hub-format";
 import {cn} from "@/lib/utils";
 import {useHubTime} from "../clock";
 import {Capacity} from "./assign-menu";
+import {ForgetMachineDialog} from "./forget-machine-dialog";
 
-function Machine({host}: {host: DispatchHost}) {
+// Machine is one machine in the strip; one offline has a button that
+// forgets it (onForget), off with the reason while its jobs still work.
+function Machine({host, blocker, onForget}: {host: DispatchHost; blocker: string | undefined; onForget: (hostname: string) => void}) {
   const seen = useHubTime((now) => formatAgo(host.last_seen, now));
   const agents = host.agents ?? [];
   const status = !host.online ? `offline${seen ? ` ${seen}` : ""}` : host.active >= host.max_jobs ? "full" : `${host.max_jobs - host.active} free`;
@@ -26,6 +30,18 @@ function Machine({host}: {host: DispatchHost}) {
         ))}
       </span>
       <span className={cn("tabular-nums", host.online ? "text-muted-foreground" : "text-muted-foreground/80")}>{status}</span>
+      {!host.online && (
+        <button
+          type="button"
+          onClick={() => onForget(host.hostname)}
+          disabled={!!blocker}
+          aria-label={blocker ? `Can't forget ${host.hostname}: ${blocker}` : `Forget ${host.hostname}…`}
+          title={blocker ?? "Forget this machine…"}
+          className="-mr-1.5 flex size-5 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-auto disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+        >
+          <X className="size-3.5" aria-hidden="true" />
+        </button>
+      )}
     </li>
   );
 }
@@ -39,10 +55,12 @@ const fades: Record<string, string> = {
 };
 
 // MachinesStrip is the machines whose launchers report: online or not,
-// their jobs against their room, and the agents each runs. On a phone it
-// is one row that scrolls sideways, by touch or, focused, by the arrow
+// their jobs against their room, and the agents each runs; one offline
+// can be forgotten (ForgetMachineDialog) once its jobs ended. On a phone
+// it is one row that scrolls sideways, by touch or, focused, by the arrow
 // keys, faded at the edge there is more past; wider, it wraps.
-export function MachinesStrip({hosts}: {hosts: DispatchHost[]}) {
+export function MachinesStrip({hosts, jobs, onForget}: {hosts: DispatchHost[]; jobs: DispatchJob[]; onForget: (hostname: string) => Promise<void>}) {
+  const [forgetting, setForgetting] = useState("");
   const sorted = [...hosts].sort((a, b) => Number(b.online) - Number(a.online) || a.hostname.localeCompare(b.hostname));
   const strip = useRef<HTMLElement>(null);
   const [more, setMore] = useState<keyof typeof fades>("none");
@@ -76,9 +94,10 @@ export function MachinesStrip({hosts}: {hosts: DispatchHost[]}) {
     >
       <ul className="flex w-max gap-2 sm:w-auto sm:flex-wrap">
         {sorted.map((host) => (
-          <Machine key={host.hostname} host={host} />
+          <Machine key={host.hostname} host={host} blocker={forgetBlocker(host, jobs)} onForget={setForgetting} />
         ))}
       </ul>
+      <ForgetMachineDialog hostname={forgetting} open={forgetting !== ""} onClose={() => setForgetting("")} onForget={onForget} />
     </section>
   );
 }

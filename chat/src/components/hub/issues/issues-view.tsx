@@ -357,13 +357,15 @@ export function IssuesView({
           ) : firstRun ? (
             <div className="mt-8 space-y-4">
               <ConnectGitHub root={root} />
+              {/* The machines, so one offline can be forgotten before GitHub is set up. */}
+              {hosts.length > 0 && <MachinesStrip hosts={hosts} jobs={d.jobs} onForget={d.actions.forgetHost} />}
               {noMachines ? <NoLaunchers /> : <StartByRef hosts={hosts} busy={d.busy.size > 0} onStart={(repo, issue, agent) => dispatch.assign({repo, number: issue}, agent, "")} />}
             </div>
           ) : (
             <>
               <div className="mt-7 space-y-3">
                 <PipelineRail counts={counts} onJump={jump} />
-                {hosts.length > 0 && <MachinesStrip hosts={hosts} />}
+                {hosts.length > 0 && <MachinesStrip hosts={hosts} jobs={d.jobs} onForget={d.actions.forgetHost} />}
               </div>
               {status?.connected && (status.installations ?? []).length === 0 && (
                 <div className="mt-5">

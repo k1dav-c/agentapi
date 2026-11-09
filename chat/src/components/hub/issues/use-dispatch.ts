@@ -49,6 +49,9 @@ export interface DispatchActions {
   send: (job: DispatchJob, message: string) => Promise<boolean>;
   createIssue: (request: CreateIssueRequest) => Promise<GitHubIssue | undefined>;
   refresh: () => void;
+  // forgetHost has the hub forget an offline machine with no working jobs;
+  // it throws the hub's refusal for its dialog to show.
+  forgetHost: (hostname: string) => Promise<void>;
 }
 
 // What a refused dispatch's status means to a person; the hub's message
@@ -209,6 +212,8 @@ export function useDispatch(root: string, live?: DispatchBoard) {
         return response.issue;
       },
       refresh: () => void readIssues(),
+      // The stream drops the machine once the hub forgot it.
+      forgetHost: (hostname: string) => api.forgetHost(hostname),
     }),
     [api, run, merge, setPreferred, readIssues],
   );
