@@ -1,6 +1,7 @@
 package selfupdate_test
 
 import (
+	"errors"
 	"context"
 	"os"
 	"path/filepath"
@@ -218,6 +219,40 @@ func TestInstallKeepsANewerProgram(t *testing.T) {
 	_, err = tampered.Source().Install(context.Background(), latest, program, false)
 	require.ErrorContains(t, err, "checksum mismatch")
 	assert.Equal(t, "2.3.0", installed(t, program.Real), "the program stays")
+}
+
+// A download that Check refuses doesn't take the program's place, nor
+// stays behind; one it accepts does.
+func TestInstallChecksBeforeReplacing(t *testing.T) {
+	skipWithoutShell(t)
+	t.Parallel()
+	release := selfupdatetest.NewRelease(t, "2.2.0", selfupdatetest.Script("2.2.0"))
+	latest, err := release.Source().Latest(context.Background())
+	require.NoError(t, err)
+	program, err := selfupdate.Locate(selfupdatetest.WriteProgram(t, filepath.Join(t.TempDir(), "agentapi"), "2.1.0"))
+	require.NoError(t, err)
+
+	source := release.Source()
+	var checked string
+	source.Check = func(ctx context.Context, path string) error {
+		checked = path
+		version, err := selfupdate.ProgramVersion(ctx, path)
+		require.NoError(t, err)
+		assert.Equal(t, "2.2.0", version.String(), "the download, not the program")
+		return errors.New("the new version wouldn't start: unknown flag: --transport")
+	}
+	_, err = source.Install(context.Background(), latest, program, false)
+	require.EqualError(t, err, "the new version wouldn't start: unknown flag: --transport")
+	assert.NotEqual(t, program.Real, checked)
+	assert.Equal(t, "2.1.0", installed(t, program.Real), "the program stays")
+	_, err = os.Lstat(checked)
+	assert.True(t, os.IsNotExist(err), "no download left behind")
+
+	source.Check = func(context.Context, string) error { return nil }
+	ok, err := source.Install(context.Background(), latest, program, false)
+	require.NoError(t, err)
+	assert.True(t, ok)
+	assert.Equal(t, "2.2.0", installed(t, program.Real))
 }
 
 // A program whose directory the user can't write to is blocked, with the

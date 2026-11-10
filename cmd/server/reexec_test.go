@@ -195,6 +195,29 @@ esac`)
 	assert.ErrorContains(t, err, "--validate answered")
 }
 
+// An update's download is checked as the restart would run it, with the
+// server's settings, before it takes the program's place.
+func TestSelfExecCheckDownload(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no restart in place on Windows")
+	}
+	t.Parallel()
+	dir := t.TempDir()
+	// The program that runs, and a download that knows no --transport.
+	running := program(t, dir, "agentapi", `echo "agentapi version 3.16.2"`)
+	download := program(t, dir, ".agentapi-new", `
+if [ "$1" = --version ]; then echo "agentapi version 4.3.0"; exit 0; fi
+for arg in "$@"; do [ "$arg" = --transport ] && { echo "unknown flag: --transport" >&2; exit 1; }; done
+echo "ok state-db-schema=7"`)
+	argv := []string{"agentapi", "server", "--transport", "native", "--", "claude"}
+	self := &selfExec{path: running, argv: argv, env: []string{"PATH=/usr/bin:/bin"}}
+	err := self.checkDownload(context.Background(), download)
+	assert.EqualError(t, err, "the new version wouldn't start: unknown flag: --transport")
+
+	self.argv = []string{"agentapi", "server", "--", "claude"}
+	assert.NoError(t, self.checkDownload(context.Background(), download))
+}
+
 func TestValidateArgs(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, []string{"server", "--validate", "--", "claude", "--"}, validateArgs([]string{"agentapi", "server", "--", "claude", "--"}))

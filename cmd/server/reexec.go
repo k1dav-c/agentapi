@@ -146,43 +146,58 @@ func (s *selfExec) check(ctx context.Context) (checked, error) {
 	if s.path == "" {
 		return checked{}, errors.New("AgentAPI didn't find its program at startup")
 	}
-	out, _, err := s.run(ctx, "--version")
+	return s.checkAt(ctx, s.path, s.path)
+}
+
+// checkAt is check of the program at path, which name says in errors: the
+// server's own, or an update's download before it takes the program's
+// place (checkDownload).
+func (s *selfExec) checkAt(ctx context.Context, path, name string) (checked, error) {
+	out, _, err := s.run(ctx, path, "--version")
 	if err != nil {
-		return checked{}, fmt.Errorf("%s --version: %w", s.path, err)
+		return checked{}, fmt.Errorf("%s --version: %w", name, err)
 	}
 	result := checked{version: strings.TrimSpace(string(out))}
-	out, stderr, err := s.run(ctx, validateArgs(s.argv)...)
+	out, stderr, err := s.run(ctx, path, validateArgs(s.argv)...)
 	if err != nil {
 		if strings.Contains(string(stderr), "unknown flag: --"+FlagValidate) {
 			// AgentAPI 2.3.0 and earlier.
 			return result, nil
 		}
-		return checked{}, fmt.Errorf("%s wouldn't start: %s", s.path, reason(stderr, err))
+		return checked{}, fmt.Errorf("%s wouldn't start: %s", name, reason(stderr, err))
 	}
 	result.validated = true
 	if s.stateDB != nil {
 		schema, ok := strings.CutPrefix(strings.TrimSpace(string(out)), validateOK)
 		knows, convErr := strconv.Atoi(schema)
 		if !ok || convErr != nil {
-			return checked{}, fmt.Errorf("%s --validate answered %q", s.path, strings.TrimSpace(string(out)))
+			return checked{}, fmt.Errorf("%s --validate answered %q", name, strings.TrimSpace(string(out)))
 		}
 		program, _ := strings.CutPrefix(result.version, "agentapi version ")
 		if err := s.stateDB.CheckWriter(knows, program); err != nil {
-			return checked{}, fmt.Errorf("%s wouldn't start: the state database %w", s.path, err)
+			return checked{}, fmt.Errorf("%s wouldn't start: the state database %w", name, err)
 		}
 	}
 	return result, nil
 }
 
-// run runs the program with args and the environment it runs again with,
-// for at most checkTimeout, and returns its output.
-func (s *selfExec) run(ctx context.Context, args ...string) (stdout, stderr []byte, err error) {
+// checkDownload checks an update's download at path as check does the
+// program, before it takes the program's place: one that wouldn't start
+// with these settings leaves the program as it was.
+func (s *selfExec) checkDownload(ctx context.Context, path string) error {
+	_, err := s.checkAt(ctx, path, "the new version")
+	return err
+}
+
+// run runs the program at path with args and the environment it runs
+// again with, for at most checkTimeout, and returns its output.
+func (s *selfExec) run(ctx context.Context, path string, args ...string) (stdout, stderr []byte, err error) {
 	ctx, cancel := context.WithTimeout(ctx, checkTimeout)
 	defer cancel()
 	var errBuf bytes.Buffer
 	// The program may have just been written (by an update).
 	err = selfupdate.RetryTextBusy(ctx, func() error {
-		cmd := exec.CommandContext(ctx, s.path, args...)
+		cmd := exec.CommandContext(ctx, path, args...)
 		cmd.Env = s.env
 		errBuf.Reset()
 		cmd.Stderr = &errBuf
