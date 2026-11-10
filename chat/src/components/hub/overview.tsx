@@ -7,13 +7,15 @@ import type {HubFilter} from "@/lib/hub-filter";
 import {formatAge} from "@/lib/format";
 import {activity, formatElapsed} from "@/lib/hub-format";
 import {instanceVersion} from "@/lib/hub-version";
+import {useHubSetting} from "@/lib/hub-settings";
 import {cn} from "@/lib/utils";
+import {ActivityCard} from "./activity-card";
 import {useHubTime} from "./clock";
 import {Constellation} from "./brand";
 import {StatusGlyph} from "./status-glyph";
 import {agentName} from "./instance-row";
 import {JoinMachine} from "./join-machine";
-import {SpendCard, TokensCard, VersionsCard, WorkCard} from "./overview-cards";
+import {SpendCard, TokensCard, VersionsCard, WorkCard, type Fold} from "./overview-cards";
 import {VersionTag} from "./version-tag";
 
 // What a waiting instance asks for: its icon and the word for it.
@@ -192,6 +194,17 @@ export function Overview({
   onAdd: () => void;
   onForgetStopped: () => void;
 }) {
+  // The cards folded, by key; the browser keeps them.
+  const [folded, setFolded] = useHubSetting("overviewFolded");
+  const fold = (key: string): Fold => ({
+    folded: folded.has(key),
+    onToggle: () =>
+      setFolded((previous) => {
+        const next = new Set(previous);
+        if (!next.delete(key)) next.add(key);
+        return next;
+      }),
+  });
   const by = (state: string) => instances.filter((instance) => instanceState(instance) === state);
   const needs = by("needs-you");
   const working = by("working").sort((a, b) => (a.summary?.task?.started_at ?? "").localeCompare(b.summary?.task?.started_at ?? ""));
@@ -266,9 +279,10 @@ export function Overview({
           ))}
         </div>
 
-        <SpendCard instances={instances} onOpen={onOpen} />
-        <TokensCard instances={instances} onOpen={onOpen} />
-        <WorkCard instances={instances} onOpen={onOpen} />
+        <SpendCard instances={instances} onOpen={onOpen} fold={fold("spend")} />
+        <TokensCard instances={instances} onOpen={onOpen} fold={fold("tokens")} />
+        <WorkCard instances={instances} onOpen={onOpen} fold={fold("work")} />
+        <ActivityCard root={root} fold={fold("activity")} />
 
         {needs.length > 0 && (
           <Section title="Needs you" count={needs.length}>
