@@ -13,7 +13,8 @@ const FLOATING_BUTTONS_MIN_HEIGHT = 140;
 // read further up, and moves between the tasks' prompts. content is a new
 // object whenever what the transcript shows changes (the timeline: its
 // objects stay while nothing changes); layout changes with what changes its
-// size.
+// size; start names the first task shown, which changes when earlier tasks
+// are put above (not news, nor a reason to scroll).
 export function useTranscriptScroll(
   scrollArea: HTMLDivElement | null,
   {
@@ -21,11 +22,13 @@ export function useTranscriptScroll(
     content,
     serverStatus,
     layout,
+    start = "",
   }: {
     messages: readonly {role: string}[];
     content: unknown;
     serverStatus: ServerStatus;
     layout: string;
+    start?: string;
   },
 ) {
   const userMessageCount = messages.filter((message) => message.role === "user").length;
@@ -38,6 +41,7 @@ export function useTranscriptScroll(
   const [canScrollToNextUser, setCanScrollToNextUser] = useState(false);
   const isAtBottomRef = useRef(true);
   const lastScrollHeightRef = useRef(0);
+  const lastStartRef = useRef(start);
   // What was last rendered. Scrolling to the bottom and the scroll events
   // come with every streamed update, and setting a state to the value it
   // has can still render the transcript once more: they set what changed.
@@ -121,13 +125,17 @@ export function useTranscriptScroll(
     const hasNewContent = currentHeight > lastScrollHeightRef.current;
     const isFirstRender = lastScrollHeightRef.current === 0;
     const isNewUserMessage = messages.at(-1)?.role === "user";
-    if (hasNewContent && (isFirstRender || isAtBottomRef.current || isNewUserMessage)) {
+    const grewAbove = start !== lastStartRef.current;
+    lastStartRef.current = start;
+    if (grewAbove && !isFirstRender && !isAtBottomRef.current) {
+      // Earlier tasks, above the reader (useKeepPosition).
+    } else if (hasNewContent && (isFirstRender || isAtBottomRef.current || isNewUserMessage)) {
       scrollToBottom(isFirstRender || serverStatus === "running" ? "auto" : "smooth");
     } else if (hasNewContent) {
       setUnreadCount((count) => count + 1);
     }
     lastScrollHeightRef.current = currentHeight;
-  }, [content, messages, scrollArea, scrollToBottom, serverStatus]);
+  }, [content, messages, scrollArea, scrollToBottom, serverStatus, start]);
 
   return {
     showScrollButton: roomForButtons && showScrollButton,

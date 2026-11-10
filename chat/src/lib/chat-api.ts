@@ -3,6 +3,8 @@ import type {DispatchMode} from "./dispatch";
 import type {QueuedMessage} from "./queue";
 import {normalizeRequest, type NativeRequest, type RequestPayload, type RequestResponse} from "./native-requests";
 import {normalizeRichMessage, type RichMessage} from "./conversation";
+import type {HistoryPage} from "./history";
+import {normalizeTask} from "./server-tasks";
 import {parseLoginRequired, type LoginRetryOutcome} from "./login";
 import {ApiError} from "./error-utils";
 import type {components, paths} from "./api-schema";
@@ -480,13 +482,41 @@ export function createChatAPI(baseURL: string) {
       return `${baseURL}/files/image?path=${encodeURIComponent(path)}${version ? `&v=${version}` : ""}`;
     },
 
-    async getTimelineEvents(): Promise<unknown[]> {
-      // With the subagents' events, after the agent's own.
+    // The whole timeline as JSON Lines, the subagents' events after the
+    // agent's own: GET /timeline/export streams it from the state database.
+    // A server that predates it has it all in GET /timeline.
+    async exportTimeline(): Promise<string> {
+      const {path} = route("GET", "/timeline/export", undefined, {subagents: true});
+      const response = await authFetch(baseURL, `${baseURL}${path}`);
+      if (response.ok) return response.text();
+      if (response.status !== 404 && response.status !== 405) {
+        throw new ApiError(await errorDetail(response, "Failed to export the current session"), response.status);
+      }
       const data = await jsonRequest<{events?: unknown[]} | undefined>(route("GET", "/timeline", undefined, {subagents: true}), {fallback: "Failed to export the current session"});
       if (!Array.isArray(data?.events)) {
         throw new Error("The server returned an invalid timeline response");
       }
-      return data.events;
+      return data.events.map((event) => `${JSON.stringify(event)}\n`).join("");
+    },
+
+    // A page of the conversation's history: the limit tasks that started
+    // before the task before, with their messages and rich messages (see
+    // lib/history.ts).
+    async getHistoryPage(before: number, limit: number): Promise<HistoryPage> {
+      const query = {before, limit};
+      const fallback = "Failed to load earlier tasks";
+      const [tasks, messages, rich] = await Promise.all([
+        jsonRequest<Body<Schemas["TasksResponseBody"]>>(route("GET", "/tasks", undefined, query), {fallback}),
+        jsonRequest<Body<Schemas["MessagesResponseBody"]>>(route("GET", "/messages", undefined, query), {fallback}),
+        jsonRequest<Body<Schemas["RichMessagesResponseBody"]>>(route("GET", "/rich-messages", undefined, query), {fallback}),
+      ]);
+      return {
+        before,
+        tasks: (tasks.tasks ?? []).map(normalizeTask),
+        messages: (messages.messages ?? []).map((message) => ({id: message.id, role: message.role, content: message.content, time: message.time})),
+        richMessages: (rich.messages ?? []).map(normalizeRichMessage),
+        hasMore: Boolean(tasks.has_more),
+      };
     },
   };
 }
