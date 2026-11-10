@@ -323,7 +323,7 @@ export interface paths {
         };
         /**
          * Get messages
-         * @description Returns a list of messages representing the conversation history with the agent.
+         * @description Returns the messages of the conversation with the agent, a page of tasks at a time: without `before`, those of the latest tasks (20 by default, `limit` up to 100); with `has_more`, pass `next_before` as `before` for the page before. AgentAPI 4.2 and earlier returned every message.
          */
         get: operations["get-messages"];
         put?: never;
@@ -496,7 +496,7 @@ export interface paths {
         };
         /**
          * Get rich messages
-         * @description Returns a list of rich structured messages. Each message contains structured content blocks (text, thinking, tool_use, tool_result), model information, and token usage data, from the agent's protocol.
+         * @description Returns the rich structured messages of a page of tasks, as GET /messages pages them. Each message contains structured content blocks (text, thinking, tool_use, tool_result), model information, and token usage data, from the agent's protocol. With --state-db, those of earlier tasks are read from the state database.
          */
         get: operations["get-rich-messages"];
         put?: never;
@@ -660,7 +660,7 @@ export interface paths {
         };
         /**
          * Get the conversation's tasks
-         * @description Returns the conversation's tasks: each message of the user's and the agent's turn on it, until the agent is done (stable again, with no request open). Messages the user adds while the agent works on a task belong to it (steered). A task is running, completed, failed (the agent reported an error or exited) or limited (a usage limit stopped it). /events sends task_update when one starts or changes.
+         * @description Returns the conversation's tasks: each message of the user's and the agent's turn on it, until the agent is done (stable again, with no request open). Messages the user adds while the agent works on a task belong to it (steered). A task is running, completed, failed (the agent reported an error or exited) or limited (a usage limit stopped it). /events sends task_update when one starts or changes. The tasks come a page at a time, as GET /messages pages them: without `before`, the latest 20 (`limit` up to 100), and with `has_more`, `next_before` reads the page before. AgentAPI 4.2 and earlier returned them all.
          */
         get: operations["get-tasks"];
         put?: never;
@@ -760,9 +760,29 @@ export interface paths {
         };
         /**
          * Get timeline
-         * @description Returns all normalized events from the current agent session, including text, thinking, tool calls, tool results, and system lifecycle events. With `subagents=true`, the events of the subagents the agent ran in the session follow, read from their own logs (native Claude Code and Codex): each subagent's in turn, starting with a system event, and each event with its `subagent_id` and, for Claude Code, the `parent_tool_use_id` of the Agent tool call that started it.
+         * @description Returns the normalized events of a page of tasks of the current agent session, as GET /messages pages them, including text, thinking, tool calls, tool results, and system lifecycle events; GET /timeline/export streams them all. With `subagents=true`, the page of the latest tasks is followed by the events of the subagents the agent ran in the session, read from their own logs (native Claude Code and Codex): each subagent's in turn, starting with a system event, and each event with its `subagent_id` and, for Claude Code, the `parent_tool_use_id` of the Agent tool call that started it.
          */
         get: operations["get-timeline"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/timeline/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download the whole timeline
+         * @description Streams every normalized event of the agent session as JSON Lines, the earliest first: GET /timeline's events, of all the tasks. With --state-db they are read from the state database a part at a time, so the server doesn't hold them. With `subagents=true`, the events of the subagents follow, as in GET /timeline.
+         */
+        get: operations["get-timeline-export"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1328,8 +1348,15 @@ export interface components {
              * @example https://example.com/schemas/MessagesResponseBody.json
              */
             readonly $schema?: string;
-            /** @description List of messages */
+            /** @description Tasks started before the page's first: read them with before=next_before. */
+            has_more: boolean;
+            /** @description The messages of the page's tasks, the earliest first: without before, those of the latest tasks. */
             messages: components["schemas"]["Message"][];
+            /**
+             * Format: int64
+             * @description With has_more, the ID of the page's first task: pass it as before to read the page before.
+             */
+            next_before?: number;
         };
         Missing: {
             /** @description Why it wasn't inlined, e.g. not found, or not an image. */
@@ -1810,8 +1837,15 @@ export interface components {
              * @example https://example.com/schemas/RichMessagesResponseBody.json
              */
             readonly $schema?: string;
-            /** @description List of rich messages with structured content blocks, model info, and usage */
+            /** @description Tasks started before the page's first: read them with before=next_before. */
+            has_more: boolean;
+            /** @description The rich messages of the page's tasks, with structured content blocks, model info, and usage: without before, those of the latest tasks. */
             messages: components["schemas"]["RichMessage"][];
+            /**
+             * Format: int64
+             * @description With has_more, the ID of the page's first task: pass it as before to read the page before.
+             */
+            next_before?: number;
         };
         SessionCost: {
             /**
@@ -2297,6 +2331,11 @@ export interface components {
             id: number;
             /** @description The usage limit stop of a limited task. */
             limit?: components["schemas"]["LimitStop"];
+            /**
+             * Format: int64
+             * @description The task's place in the conversation, from 1: the chat's Task N. Set in GET /tasks and task_update; missing in older AgentAPIs.
+             */
+            number?: number;
             /** @description The start of the user's message (up to 1 KiB); GET /messages has all of it. */
             prompt: string;
             /**
@@ -2335,6 +2374,11 @@ export interface components {
             id: number;
             /** @description The usage limit stop of a limited task. */
             limit?: components["schemas"]["LimitStop"];
+            /**
+             * Format: int64
+             * @description The task's place in the conversation, from 1: the chat's Task N. Set in GET /tasks and task_update; missing in older AgentAPIs.
+             */
+            number?: number;
             /** @description The start of the user's message (up to 1 KiB); GET /messages has all of it. */
             prompt: string;
             /**
@@ -2364,7 +2408,14 @@ export interface components {
              * @example https://example.com/schemas/TasksResponseBody.json
              */
             readonly $schema?: string;
-            /** @description The conversation's tasks, the earliest first. */
+            /** @description Tasks started before the page's first: read them with before=next_before. */
+            has_more: boolean;
+            /**
+             * Format: int64
+             * @description With has_more, the ID of the page's first task: pass it as before to read the page before.
+             */
+            next_before?: number;
+            /** @description The page's tasks, the earliest first, each with its number: without before, the latest ones. */
             tasks: components["schemas"]["Task"][];
         };
         TerminalExitBody: {
@@ -2410,8 +2461,15 @@ export interface components {
              * @example https://example.com/schemas/TimelineResponseBody.json
              */
             readonly $schema?: string;
-            /** @description Timeline events including text, thinking, tool calls, tool results, and system lifecycle events. */
+            /** @description Timeline events of the page's tasks including text, thinking, tool calls, tool results, and system lifecycle events: without before, those of the latest tasks. */
             events: components["schemas"]["SessionEvent"][];
+            /** @description Tasks started before the page's first: read them with before=next_before. */
+            has_more: boolean;
+            /**
+             * Format: int64
+             * @description With has_more, the ID of the page's first task: pass it as before to read the page before.
+             */
+            next_before?: number;
         };
         TitleResponseBody: {
             /**
@@ -3631,7 +3689,12 @@ export interface operations {
     };
     "get-messages": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description How many tasks the page holds; 0 or missing: 20, the tasks a full /events replay holds. */
+                limit?: number;
+                /** @description Return the tasks that started before the task with this ID (next_before of the page after), and what belongs to them. Missing or 0: the latest tasks. */
+                before?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4159,7 +4222,12 @@ export interface operations {
     };
     "get-rich-messages": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description How many tasks the page holds; 0 or missing: 20, the tasks a full /events replay holds. */
+                limit?: number;
+                /** @description Return the tasks that started before the task with this ID (next_before of the page after), and what belongs to them. Missing or 0: the latest tasks. */
+                before?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4560,7 +4628,12 @@ export interface operations {
     };
     "get-tasks": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description How many tasks the page holds; 0 or missing: 20, the tasks a full /events replay holds. */
+                limit?: number;
+                /** @description Return the tasks that started before the task with this ID (next_before of the page after), and what belongs to them. Missing or 0: the latest tasks. */
+                before?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4790,8 +4863,12 @@ export interface operations {
     "get-timeline": {
         parameters: {
             query?: {
-                /** @description Also return the events of the subagents the agent ran in the session (native Claude Code and Codex). */
+                /** @description Also return the events of the subagents the agent ran in the session (native Claude Code and Codex), on the page of the latest tasks. */
                 subagents?: boolean;
+                /** @description How many tasks the page holds; 0 or missing: 20, the tasks a full /events replay holds. */
+                limit?: number;
+                /** @description Return the tasks that started before the task with this ID (next_before of the page after), and what belongs to them. Missing or 0: the latest tasks. */
+                before?: number;
             };
             header?: never;
             path?: never;
@@ -4806,6 +4883,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TimelineResponseBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-timeline-export": {
+        parameters: {
+            query?: {
+                /** @description Also stream the events of the subagents the agent ran in the session (native Claude Code and Codex), after the agent's own. */
+                subagents?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The events, one JSON object a line. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/x-ndjson": unknown;
                 };
             };
             /** @description Error */

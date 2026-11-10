@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 	"os"
 	"strings"
@@ -82,10 +83,15 @@ func coderWorkspaceURL() string {
 	return base + "/@" + url.PathEscape(owner) + "/" + url.PathEscape(name)
 }
 
-// getMessages handles GET /messages, without s.mu (see getTitle).
-func (s *Server) getMessages(ctx context.Context, input *struct{}) (*MessagesResponse, error) {
+// getMessages handles GET /messages, without s.mu (see getTitle): the
+// messages of a page of tasks (history.go).
+func (s *Server) getMessages(ctx context.Context, input *PageInput) (*MessagesResponse, error) {
+	if input == nil {
+		input = &PageInput{}
+	}
+	r := s.emitter.Page(input.Before, input.Limit)
+	msgs := s.emitter.MessagesIn(r)
 	resp := &MessagesResponse{}
-	msgs := s.native.Messages()
 	resp.Body.Messages = make([]Message, len(msgs))
 	for i, msg := range msgs {
 		resp.Body.Messages[i] = Message{
@@ -95,45 +101,53 @@ func (s *Server) getMessages(ctx context.Context, input *struct{}) (*MessagesRes
 			Time:    msg.Time,
 		}
 	}
-
+	resp.Body.Page = pageOf(r)
 	return resp, nil
 }
 
-// getRichMessages handles GET /rich-messages
-func (s *Server) getRichMessages(ctx context.Context, input *struct{}) (*RichMessagesResponse, error) {
+// getRichMessages handles GET /rich-messages: those of a page of tasks,
+// from the state database when the server let go of them.
+func (s *Server) getRichMessages(ctx context.Context, input *PageInput) (*RichMessagesResponse, error) {
+	r := s.emitter.Page(input.Before, input.Limit)
+	msgs, err := s.richMessagesIn(r)
+	if err != nil {
+		return nil, huma.Error500InternalServerError(fmt.Sprintf("failed to read the rich messages: %v", err))
+	}
 	resp := &RichMessagesResponse{}
-	resp.Body.Messages = s.emitter.RichMessages()
+	resp.Body.Messages = msgs
 	if resp.Body.Messages == nil {
 		resp.Body.Messages = []transcript.RichMessage{}
 	}
+	resp.Body.Page = pageOf(r)
 	return resp, nil
 }
 
 func (s *Server) getTimeline(ctx context.Context, input *TimelineRequest) (*TimelineResponse, error) {
-	events := s.emitter.SessionEvents()
+	r := s.emitter.Page(input.Before, input.Limit)
+	events, err := s.sessionEventsIn(r)
+	if err != nil {
+		return nil, huma.Error500InternalServerError(fmt.Sprintf("failed to read the timeline: %v", err))
+	}
 	if events == nil {
 		events = []transcript.SessionEvent{}
 	}
-	if input.Subagents && s.sessions != nil {
-		events = append(events, s.subagentEvents(events)...)
+	if input.Subagents && s.sessions != nil && r.Before == 0 {
+		events = append(events, s.subagentEvents(s.emitter.NextEventID())...)
 	}
 	resp := &TimelineResponse{}
 	resp.Body.Events = events
+	resp.Body.Page = pageOf(r)
 	return resp, nil
 }
 
 // subagentEvents returns the events of the subagents the native agent ran in
-// its session, numbered after events. A log that can't be read leaves them
+// its session, numbered from next. A log that can't be read leaves them
 // out rather than failing the timeline.
-func (s *Server) subagentEvents(events []transcript.SessionEvent) []transcript.SessionEvent {
+func (s *Server) subagentEvents(next int) []transcript.SessionEvent {
 	sub, err := s.sessions.SubagentEvents(s.native.SessionRef())
 	if err != nil {
 		s.logger.Warn("Failed to read the subagents' logs", "error", err)
 		return nil
-	}
-	next := 1
-	for _, e := range events {
-		next = max(next, e.EventID+1)
 	}
 	spawns := s.subagentCalls().spawns
 	for i := range sub {
@@ -198,18 +212,28 @@ func (s *Server) registerConversationRoutes() {
 
 	// GET /messages endpoint
 	huma.Get(s.api, "/messages", s.getMessages, func(o *huma.Operation) {
-		o.Description = "Returns a list of messages representing the conversation history with the agent."
+		o.Description = "Returns the messages of the conversation with the agent, a page of tasks at a time: without `before`, those of the latest tasks (20 by default, `limit` up to 100); " +
+			"with `has_more`, pass `next_before` as `before` for the page before. AgentAPI 4.2 and earlier returned every message."
 	})
 
 	// GET /rich-messages endpoint
 	huma.Get(s.api, "/rich-messages", s.getRichMessages, func(o *huma.Operation) {
-		o.Description = "Returns a list of rich structured messages. " +
+		o.Description = "Returns the rich structured messages of a page of tasks, as GET /messages pages them. " +
 			"Each message contains structured content blocks (text, thinking, tool_use, tool_result), " +
-			"model information, and token usage data, from the agent's protocol."
+			"model information, and token usage data, from the agent's protocol. With --state-db, those of earlier tasks are read from the state database."
 	})
 
 	huma.Get(s.api, "/timeline", s.getTimeline, func(o *huma.Operation) {
-		o.Description = "Returns all normalized events from the current agent session, including text, thinking, tool calls, tool results, and system lifecycle events. With `subagents=true`, the events of the subagents the agent ran in the session follow, read from their own logs (native Claude Code and Codex): each subagent's in turn, starting with a system event, and each event with its `subagent_id` and, for Claude Code, the `parent_tool_use_id` of the Agent tool call that started it."
+		o.Description = "Returns the normalized events of a page of tasks of the current agent session, as GET /messages pages them, including text, thinking, tool calls, tool results, and system lifecycle events; GET /timeline/export streams them all. With `subagents=true`, the page of the latest tasks is followed by the events of the subagents the agent ran in the session, read from their own logs (native Claude Code and Codex): each subagent's in turn, starting with a system event, and each event with its `subagent_id` and, for Claude Code, the `parent_tool_use_id` of the Agent tool call that started it."
+	})
+
+	huma.Get(s.api, "/timeline/export", s.exportTimeline, func(o *huma.Operation) {
+		o.Summary = "Download the whole timeline"
+		o.Description = "Streams every normalized event of the agent session as JSON Lines, the earliest first: GET /timeline's events, of all the tasks. With --state-db they are read from the state database a part at a time, so the server doesn't hold them. With `subagents=true`, the events of the subagents follow, as in GET /timeline."
+		o.Responses = map[string]*huma.Response{"200": {
+			Description: "The events, one JSON object a line.",
+			Content:     map[string]*huma.MediaType{"application/x-ndjson": {}},
+		}}
 	})
 
 	huma.Delete(s.api, "/messages", s.deleteMessages, func(o *huma.Operation) {

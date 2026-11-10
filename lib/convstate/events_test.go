@@ -137,7 +137,7 @@ func TestEventEmitter(t *testing.T) {
 			Payload: MessageUpdateBody{Id: 1, Message: "Hello, world!", Role: conv.RoleUser, Time: now, Seq: 1},
 		}, newEvent)
 		// The user's message starts a task.
-		task := instanceapi.Task{ID: 1, Status: instanceapi.TaskStatusRunning, Prompt: "Hello, world!", StartedAt: now}
+		task := instanceapi.Task{ID: 1, Number: 1, Status: instanceapi.TaskStatusRunning, Prompt: "Hello, world!", StartedAt: now}
 		assert.Equal(t, Event{Type: EventTypeTaskUpdate, Payload: TaskUpdateBody{Task: task, Seq: 2}}, <-ch)
 
 		emitter.EmitMessages([]conv.Message{

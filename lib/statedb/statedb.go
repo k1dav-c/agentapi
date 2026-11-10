@@ -161,6 +161,10 @@ type Snapshot struct {
 	// Tasks are stored as the server encoded them, in the order of their
 	// IDs.
 	Tasks []Task
+	// RichBase is the stored position of RichMessages[0]. Window says what
+	// LoadRecent left in the database.
+	RichBase int
+	Window   Window
 	// Clean is set when the AgentAPI that wrote the file closed it. After a
 	// crash it is not, and the last changes before the crash may be
 	// missing.
@@ -448,6 +452,11 @@ func minWriterOf(version int) int {
 // Load reads everything stored. Call it before any writes. From then on
 // the file doesn't count as closed cleanly until Close.
 func (d *DB) Load() (Snapshot, error) {
+	return d.load(0)
+}
+
+// load is LoadRecent.
+func (d *DB) load(hot int) (Snapshot, error) {
 	snap := Snapshot{Meta: map[string]string{}}
 	if err := d.loadMeta(&snap); err != nil {
 		return snap, err
@@ -457,26 +466,41 @@ func (d *DB) Load() (Snapshot, error) {
 	}); err != nil {
 		return snap, fmt.Errorf("read messages: %w", err)
 	}
-	if err := scanRows(d, "rich_messages", "SELECT seq, data FROM rich_messages ORDER BY pos", func(m transcript.RichMessage, seq uint64) {
-		snap.RichMessages = append(snap.RichMessages, RichMessage{Message: m, Seq: seq})
+	if err := d.scanJSON("tasks", "SELECT seq, data FROM tasks ORDER BY id", func(seq uint64, data []byte) error {
+		snap.Tasks = append(snap.Tasks, Task{Data: append(json.RawMessage(nil), data...), Seq: seq})
+		return nil
 	}); err != nil {
+		return snap, fmt.Errorf("read tasks: %w", err)
+	}
+	w, err := d.windowOf(snap.Tasks, hot)
+	if err != nil {
+		return snap, fmt.Errorf("find the latest tasks: %w", err)
+	}
+	snap.Window = w
+	// The rich messages are stored by their place in the conversation: the
+	// first one read is at RichBase, the next at RichBase+1 and so on.
+	var base sql.NullInt64
+	if err := d.db.QueryRow("SELECT MIN(pos) FROM rich_messages WHERE pos >= ?", w.RichPos).Scan(&base); err != nil {
 		return snap, fmt.Errorf("read rich messages: %w", err)
 	}
-	if err := scanRows(d, "session_events", "SELECT 0, data FROM session_events ORDER BY id", func(e transcript.SessionEvent, _ uint64) {
+	snap.RichBase = w.RichPos
+	if base.Valid {
+		snap.RichBase = int(base.Int64)
+	}
+	if err := scanRows(d, "rich_messages", "SELECT seq, data FROM rich_messages WHERE pos >= ? ORDER BY pos", func(m transcript.RichMessage, seq uint64) {
+		snap.RichMessages = append(snap.RichMessages, RichMessage{Message: m, Seq: seq})
+	}, w.RichPos); err != nil {
+		return snap, fmt.Errorf("read rich messages: %w", err)
+	}
+	if err := scanRows(d, "session_events", "SELECT 0, data FROM session_events WHERE id >= ? ORDER BY id", func(e transcript.SessionEvent, _ uint64) {
 		snap.Events = append(snap.Events, e)
-	}); err != nil {
+	}, w.EventID); err != nil {
 		return snap, fmt.Errorf("read timeline: %w", err)
 	}
 	if err := scanRows(d, "requests", "SELECT seq, data FROM requests ORDER BY pos", func(r agentstate.RequestState, seq uint64) {
 		snap.Requests = append(snap.Requests, Request{State: r, Seq: seq})
 	}); err != nil {
 		return snap, fmt.Errorf("read requests: %w", err)
-	}
-	if err := d.scanJSON("tasks", "SELECT seq, data FROM tasks ORDER BY id", func(seq uint64, data []byte) error {
-		snap.Tasks = append(snap.Tasks, Task{Data: append(json.RawMessage(nil), data...), Seq: seq})
-		return nil
-	}); err != nil {
-		return snap, fmt.Errorf("read tasks: %w", err)
 	}
 	if err := scanRows(d, "queue", "SELECT 0, data FROM queue ORDER BY pos", func(q QueuedMessage, _ uint64) {
 		snap.Queue = append(snap.Queue, q)
@@ -517,7 +541,7 @@ func (d *DB) loadMeta(snap *Snapshot) error {
 
 // scanRows is scanJSON for rows whose data is a T in JSON, which it passes
 // to add with the row's seq.
-func scanRows[T any](d *DB, table, query string, add func(v T, seq uint64)) error {
+func scanRows[T any](d *DB, table, query string, add func(v T, seq uint64), args ...any) error {
 	return d.scanJSON(table, query, func(seq uint64, data []byte) error {
 		var v T
 		if err := json.Unmarshal(data, &v); err != nil {
@@ -525,15 +549,15 @@ func scanRows[T any](d *DB, table, query string, add func(v T, seq uint64)) erro
 		}
 		add(v, seq)
 		return nil
-	})
+	}, args...)
 }
 
 // scanJSON calls decode with every row query returns from table. A row
 // decode fails on is skipped with a warning: the rest of the conversation
 // is worth more than one broken row, and a server that doesn't start
 // shows none of it.
-func (d *DB) scanJSON(table, query string, decode func(seq uint64, data []byte) error) error {
-	rows, err := d.db.Query(query)
+func (d *DB) scanJSON(table, query string, decode func(seq uint64, data []byte) error, args ...any) error {
+	rows, err := d.db.Query(query, args...)
 	if err != nil {
 		return err
 	}

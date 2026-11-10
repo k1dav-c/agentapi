@@ -46,6 +46,13 @@ func persistentServer(t *testing.T, path, cwd string) (*nativeServer, *httpapi.S
 // new adapter.
 func persistentServerWith(t *testing.T, path, cwd string, configure func(*nativetest.Adapter)) (*nativeServer, *httpapi.Server, *statedb.DB, error) {
 	t.Helper()
+	return persistentServerConfig(t, path, cwd, configure, nil)
+}
+
+// persistentServerConfig is persistentServerWith with change adjusting the
+// server's config.
+func persistentServerConfig(t *testing.T, path, cwd string, configure func(*nativetest.Adapter), change func(*httpapi.ServerConfig)) (*nativeServer, *httpapi.Server, *statedb.DB, error) {
+	t.Helper()
 	db, err := statedb.Open(path, nil)
 	require.NoError(t, err)
 	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -59,7 +66,7 @@ func persistentServerWith(t *testing.T, path, cwd string, configure func(*native
 			configure(a)
 		}
 	}}
-	srv, err := httpapi.NewServer(ctx, httpapi.ServerConfig{
+	config := httpapi.ServerConfig{
 		AgentType:      instanceapi.AgentTypeClaude,
 		Native:         httpapi.NativeConfig{Factory: factory.New},
 		StateDB:        db,
@@ -68,7 +75,11 @@ func persistentServerWith(t *testing.T, path, cwd string, configure func(*native
 		AllowedOrigins: []string{"*"},
 		CWD:            cwd,
 		UploadDir:      path + ".uploads",
-	})
+	}
+	if change != nil {
+		change(&config)
+	}
+	srv, err := httpapi.NewServer(ctx, config)
 	if err != nil {
 		_ = db.Close()
 		return nil, nil, nil, err

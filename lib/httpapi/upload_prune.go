@@ -227,18 +227,42 @@ func (s *Server) pruneUploads(now time.Time) {
 }
 
 // scanUploadRefs notes the uploads the conversation refers to, and reports
-// false if it couldn't read all of it. It holds s.mu, under which a
-// conversation is replaced (a restart, a switch of sessions) in one step.
+// false if it couldn't read all of it. What the server holds it reads
+// under s.mu, under which a conversation is replaced (a restart, a switch
+// of sessions) in one step; the earlier rich messages and timeline events
+// it let go of, which don't change, it reads from the state database after.
 func (s *Server) scanUploadRefs(refs *uploadRefs) bool {
+	ok, richPos, eventID := s.scanHeldUploadRefs(refs)
+	if s.stateDB == nil || !ok {
+		return ok
+	}
+	if err := s.stateDB.EachEarlier(richPos, eventID, func(data []byte) error {
+		refs.scan(string(data))
+		return nil
+	}); err != nil {
+		s.logger.Warn("Failed to read the earlier conversation from the state database", "error", err)
+		return false
+	}
+	return true
+}
+
+// scanHeldUploadRefs notes the uploads what the server holds of the
+// conversation refers to, and returns where in the state database the
+// rich messages and timeline events it holds start.
+func (s *Server) scanHeldUploadRefs(refs *uploadRefs) (ok bool, richPos, eventID int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// The queue before the messages: a message that leaves the queue in
 	// between is in the messages then.
-	ok := refs.scanJSON(s.queue.Messages())
+	ok = refs.scanJSON(s.queue.Messages())
 	for _, msg := range s.native.Messages() {
 		refs.scan(msg.Message)
 	}
 	ok = refs.scanJSON(s.emitter.RichMessages()) && ok
 	ok = refs.scanJSON(s.emitter.SessionEvents()) && ok
-	return refs.scanJSON(s.emitter.Requests()) && ok
+	ok = refs.scanJSON(s.emitter.Requests()) && ok
+	// After the reads: what the emitter let go of in between is before
+	// where it starts now.
+	richPos, eventID = s.emitter.Held()
+	return ok, richPos, eventID
 }

@@ -105,6 +105,13 @@ type ServerConfig struct {
 	Native NativeConfig
 	// StateDB, if set, stores the conversation and restores it on start.
 	StateDB *statedb.DB
+	// HotTasks is how many of the latest tasks' rich messages and timeline
+	// events the server holds with a StateDB, which keeps the others
+	// (convstate.DefaultHotTasks for 0). RecentTasks is how many tasks a
+	// full replay and a list read without a cursor hold
+	// (convstate.DefaultRecentTasks for 0).
+	HotTasks    int
+	RecentTasks int
 	// ResumeSession, if set and there is no StateDB, is the agent's session
 	// the server resumes on start: the one it had open before a restart in
 	// place. The conversation is read from the session's log, as POST
@@ -332,6 +339,16 @@ func newServerID() (string, error) {
 	return hex.EncodeToString(serverBytes[:]), nil
 }
 
+// hotTasks is how many of the latest tasks' rich messages and timeline
+// events the server holds with a state database; without one it holds
+// them all.
+func (config ServerConfig) hotTasks() int {
+	if config.HotTasks > 0 {
+		return config.HotTasks
+	}
+	return convstate.DefaultHotTasks
+}
+
 // newEventEmitter returns the emitter of the conversation's events, which
 // tells dispatcher of status changes, keeps the conversation in the state
 // database if there is one and, with withTerminal, says a terminal is
@@ -344,8 +361,9 @@ func newEventEmitter(config ServerConfig, serverID string, dispatcher *webhook.D
 		convstate.WithStatusChangeHandler(dispatcher.StatusChanged),
 		convstate.WithInstance(dispatcher.Instance),
 	}
+	options = append(options, convstate.WithRecentTasks(config.RecentTasks))
 	if config.StateDB != nil {
-		options = append(options, convstate.WithPersister(config.StateDB))
+		options = append(options, convstate.WithPersister(config.StateDB), convstate.WithHotTasks(config.hotTasks()))
 	}
 	if withTerminal {
 		options = append(options, convstate.WithTerminal())

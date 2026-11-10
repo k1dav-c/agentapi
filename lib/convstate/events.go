@@ -155,8 +155,14 @@ type EventEmitter struct {
 	richSeq      []uint64
 	richMessages []transcript.RichMessage
 	richIndex    map[richKey]int // a rich message's position, by its key
-	requests     []agentstate.RequestState
-	requestSeq   []uint64
+	// hotTasks is how many of the latest tasks' rich messages and timeline
+	// events are held (0: all), recentTasks how many tasks a full replay
+	// holds; win is what was let go of (window.go).
+	hotTasks    int
+	recentTasks int
+	win         window
+	requests    []agentstate.RequestState
+	requestSeq  []uint64
 	// agent is the conversation's state as lib/native last reported it
 	// (SetState), stored what of it was stored last. The status updates
 	// show the parts below, each nil until the agent reported it.
@@ -255,11 +261,20 @@ type EmitterState struct {
 	RichMessages  []transcript.RichMessage
 	RichSeqs      []uint64
 	SessionEvents []transcript.SessionEvent
-	Requests      []agentstate.RequestState
-	RequestSeqs   []uint64
-	Tasks         []instanceapi.Task
-	TaskSeqs      []uint64
-	SessionName   string
+	// RichBase is the stored position of RichMessages[0]. Cold is set when
+	// the rich messages and timeline events of the tasks before HotTask,
+	// which started at HotTime, stayed in the state database; ColdSeq is
+	// the latest change of those rich messages.
+	RichBase    int
+	Cold        bool
+	HotTask     int
+	HotTime     time.Time
+	ColdSeq     uint64
+	Requests    []agentstate.RequestState
+	RequestSeqs []uint64
+	Tasks       []instanceapi.Task
+	TaskSeqs    []uint64
+	SessionName string
 	// SessionRef is what resumes the agent's session, shown as its
 	// session ID until the agent reports one.
 	SessionRef string
@@ -337,6 +352,8 @@ func (e *EventEmitter) Restore(state EmitterState) {
 		e.richMessages[i].Content = nonNilContent(e.richMessages[i].Content)
 	}
 	e.richSeq = slices.Clone(state.RichSeqs)
+	e.win = window{richBase: state.RichBase, cold: state.Cold, hotTask: state.HotTask, hotTime: state.HotTime, coldSeq: state.ColdSeq}
+	e.seq = max(e.seq, state.ColdSeq)
 	e.richIndex = make(map[richKey]int, len(e.richMessages))
 	for i, msg := range e.richMessages {
 		e.richIndex[richKey{msg.MessageID, msg.Role}] = i
@@ -376,6 +393,7 @@ func (e *EventEmitter) Restore(state EmitterState) {
 	if n := len(e.messages); n > 0 && !e.messages[n-1].Time.Before(e.tasks.since) {
 		e.tasks.since = e.messages[n-1].Time.Add(time.Nanosecond)
 	}
+	e.trimLocked()
 }
 
 // Epoch identifies the current conversation state; see SessionSyncBody.
@@ -402,9 +420,13 @@ func NewEventEmitter(opts ...EventEmitterOption) *EventEmitter {
 		chans:               make(map[int]subscriber),
 		subscriptionBufSize: defaultSubscriptionBufSize,
 		epoch:               NewEpoch(),
+		recentTasks:         DefaultRecentTasks,
 	}
 	for _, opt := range opts {
 		opt(e)
+	}
+	if e.hotTasks > 0 {
+		e.hotTasks = max(e.hotTasks, e.recentTasks)
 	}
 	if e.clock == nil {
 		e.clock = quartz.NewReal()
@@ -472,6 +494,7 @@ func (e *EventEmitter) Reset() {
 	e.richMessages = nil
 	e.richSeq = nil
 	e.richIndex = nil
+	e.win = window{}
 	e.requests = nil
 	e.requestSeq = nil
 	e.tasks.reset(e.clock.Now())
@@ -492,13 +515,17 @@ func (e *EventEmitter) Reset() {
 // currentStateAsEvents returns the events wants accepts that rebuild the
 // current state for a new subscriber. With a matching epoch, only messages,
 // rich messages and requests changed after since are included; otherwise
-// everything is. Caller holds e.mu.
+// the full state is, of the recent tasks only (see DefaultRecentTasks):
+// the earlier ones are read a page at a time. Caller holds e.mu.
 func (e *EventEmitter) currentStateAsEvents(since uint64, epoch string, wants func(EventType) bool) []Event {
 	// since 0 asks for everything: the client must replace its state rather
-	// than merge into what it holds.
-	full := epoch != e.epoch || since == 0 || since > e.seq
+	// than merge into what it holds. So does a client that resumes from
+	// before a change the emitter let go of (trimLocked).
+	full := epoch != e.epoch || since == 0 || since > e.seq || since < e.win.coldSeq
+	var recent PageRange
 	if full {
 		since = 0
+		recent = e.recentLocked()
 	}
 	var events []Event
 	// The session sync goes first; its Seq is filled in below with the
@@ -512,7 +539,7 @@ func (e *EventEmitter) currentStateAsEvents(since uint64, epoch string, wants fu
 	if wants(EventTypeMessageUpdate) {
 		events = slices.Grow(events, len(e.messages)+3)
 		for i, msg := range e.messages {
-			if e.messageSeq[i] <= since {
+			if e.messageSeq[i] <= since || full && !recent.holdsMessage(msg.Id) {
 				continue
 			}
 			replaySeq = max(replaySeq, e.messageSeq[i])
@@ -542,7 +569,7 @@ func (e *EventEmitter) currentStateAsEvents(since uint64, epoch string, wants fu
 	// Include rich message events for late subscriber replay
 	if wants(EventTypeRichMessageUpdate) {
 		for i, msg := range e.richMessages {
-			if e.richSeq[i] <= since {
+			if e.richSeq[i] <= since || full && !recent.HoldsRich(msg.TaskID) {
 				continue
 			}
 			replaySeq = max(replaySeq, e.richSeq[i])
@@ -574,15 +601,15 @@ func (e *EventEmitter) currentStateAsEvents(since uint64, epoch string, wants fu
 		})
 	}
 	if wants(EventTypeTaskUpdate) {
-		for _, task := range e.tasks.tasks {
+		for i, task := range e.tasks.tasks {
 			seq := e.taskSeq[task.ID]
-			if seq <= since {
+			if seq <= since || full && !recent.holdsMessage(task.ID) {
 				continue
 			}
 			replaySeq = max(replaySeq, seq)
 			events = append(events, Event{
 				Type:    EventTypeTaskUpdate,
-				Payload: TaskUpdateBody{Task: task.Clone(), Seq: seq},
+				Payload: TaskUpdateBody{Task: numbered(task, i), Seq: seq},
 			})
 		}
 	}
@@ -591,6 +618,11 @@ func (e *EventEmitter) currentStateAsEvents(since uint64, epoch string, wants fu
 		events = append(events, Event{Type: EventTypeSummaryUpdate, Payload: SummaryUpdateBody{SummaryBody: e.summaryLocked()}})
 	}
 
+	if full && recent.More {
+		// The client holds the state as of now, but the earlier tasks it
+		// reads a page at a time.
+		replaySeq = e.seq
+	}
 	if sync {
 		events[0].Payload = SessionSyncBody{Epoch: e.epoch, Full: full, Seq: replaySeq}
 	}

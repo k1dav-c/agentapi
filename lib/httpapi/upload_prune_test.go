@@ -1,14 +1,24 @@
 package httpapi
 
 import (
+	"context"
+	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/coder/quartz"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/instanceapi"
+	"github.com/coder/agentapi/lib/logctx"
+	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/native/nativetest"
+	"github.com/coder/agentapi/lib/statedb"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -128,4 +138,50 @@ func TestUploadRefsScan(t *testing.T) {
 	refs.scan(`deadbeefaaaaaaaaaaaaaaaab`)
 	refs.scan(`111111111111111`) // One digit short.
 	assert.Equal(t, map[string]bool{"0123456789abcdef": true, "aaaaaaaaaaaaaaaa": true}, refs.found)
+}
+
+// An upload only a rich message the server let go of refers to (an
+// earlier task's, which the state database keeps) is kept.
+func TestPruneUploadsKeepsThoseOfEarlierTasks(t *testing.T) {
+	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	path := filepath.Join(t.TempDir(), "state.db")
+	db, err := statedb.Open(path, nil)
+	require.NoError(t, err)
+	factory := &nativetest.Factory{}
+	srv, err := NewServer(ctx, ServerConfig{
+		AgentType:      instanceapi.AgentTypeClaude,
+		Native:         NativeConfig{Factory: factory.New},
+		AllowedHosts:   []string{"*"},
+		AllowedOrigins: []string{"*"},
+		Clock:          quartz.NewMock(t),
+		StateDB:        db,
+		UploadDir:      path + ".uploads",
+		HotTasks:       1,
+		RecentTasks:    1,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = srv.Stop(context.Background())
+		_ = db.Close()
+	})
+	require.Eventually(t, srv.native.Idle, 5*time.Second, 5*time.Millisecond)
+	a := factory.Last()
+	file := saveOld(t, srv.uploads, "early.txt", "read in the first task")
+	for i := range 3 {
+		sendUserMessage(t, srv, fmt.Sprintf("task %d", i))
+		require.Eventually(t, func() bool { return len(srv.emitter.Tasks()) == i+1 }, 5*time.Second, 5*time.Millisecond)
+		if i == 0 {
+			a.Sink().RichMessage(transcript.RichMessage{MessageID: "a1", Role: "assistant", Content: []transcript.RichContentBlock{
+				{Type: "tool_use", ToolUseID: "t1", ToolName: "Read", ToolInput: []byte(`{"file_path":"` + file + `"}`)},
+			}})
+		}
+		a.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonEndTurn})
+		require.Eventually(t, srv.native.Idle, 5*time.Second, 5*time.Millisecond)
+	}
+	for _, msg := range srv.emitter.RichMessages() {
+		require.NotEqual(t, "a1", msg.MessageID, "the server let go of it")
+	}
+
+	srv.pruneUploads(time.Now())
+	assert.FileExists(t, file)
 }

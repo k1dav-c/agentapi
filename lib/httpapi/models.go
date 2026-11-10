@@ -90,7 +90,8 @@ type WorkspaceResponse struct {
 // MessagesResponse represents the list of messages
 type MessagesResponse struct {
 	Body struct {
-		Messages []Message `json:"messages" nullable:"false" doc:"List of messages"`
+		Messages []Message `json:"messages" nullable:"false" doc:"The messages of the page's tasks, the earliest first: without before, those of the latest tasks."`
+		Page
 	}
 }
 
@@ -194,19 +195,35 @@ type QueueMutationResponse struct {
 // RichMessagesResponse represents the list of rich structured messages
 type RichMessagesResponse struct {
 	Body struct {
-		Messages []transcript.RichMessage `json:"messages" nullable:"false" doc:"List of rich messages with structured content blocks, model info, and usage"`
+		Messages []transcript.RichMessage `json:"messages" nullable:"false" doc:"The rich messages of the page's tasks, with structured content blocks, model info, and usage: without before, those of the latest tasks."`
+		Page
 	}
 }
 
 // TimelineRequest is GET /timeline's query.
 type TimelineRequest struct {
-	Subagents bool `query:"subagents" doc:"Also return the events of the subagents the agent ran in the session (native Claude Code and Codex)."`
+	PageInput
+	Subagents bool `query:"subagents" doc:"Also return the events of the subagents the agent ran in the session (native Claude Code and Codex), on the page of the latest tasks."`
 }
 
 type TimelineResponse struct {
 	Body struct {
-		Events []transcript.SessionEvent `json:"events" nullable:"false" doc:"Timeline events including text, thinking, tool calls, tool results, and system lifecycle events."`
+		Events []transcript.SessionEvent `json:"events" nullable:"false" doc:"Timeline events of the page's tasks including text, thinking, tool calls, tool results, and system lifecycle events: without before, those of the latest tasks."`
+		Page
 	}
+}
+
+// PageInput picks a page of the conversation's history: the lists hold
+// the latest tasks without it.
+type PageInput struct {
+	Before int `query:"before" minimum:"0" doc:"Return the tasks that started before the task with this ID (next_before of the page after), and what belongs to them. Missing or 0: the latest tasks."`
+	Limit  int `query:"limit" minimum:"0" maximum:"100" doc:"How many tasks the page holds; 0 or missing: 20, the tasks a full /events replay holds."`
+}
+
+// Page says where a page of the conversation's history is.
+type Page struct {
+	HasMore    bool `json:"has_more" doc:"Tasks started before the page's first: read them with before=next_before."`
+	NextBefore int  `json:"next_before,omitempty" doc:"With has_more, the ID of the page's first task: pass it as before to read the page before."`
 }
 
 type UploadResponse struct {

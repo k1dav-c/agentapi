@@ -71,7 +71,11 @@ func (s TaskStatus) Schema(r huma.Registry) *huma.Schema {
 // agent is done: stable again, with no request open.
 // Messages the user adds while it runs (steering) belong to it.
 type Task struct {
-	ID        int        `json:"id" doc:"The ID of the user's message that started the task, as in GET /messages."`
+	ID int `json:"id" doc:"The ID of the user's message that started the task, as in GET /messages."`
+	// Number is the task's place in the conversation, from 1. The
+	// emitter sets it on the tasks it hands out; the state database
+	// doesn't keep it.
+	Number    int        `json:"number,omitempty" doc:"The task's place in the conversation, from 1: the chat's Task N. Set in GET /tasks and task_update; missing in older AgentAPIs."`
 	Status    TaskStatus `json:"status" doc:"running, completed, failed (the agent reported an error or exited) or limited (a usage limit stopped it)."`
 	Prompt    string     `json:"prompt" doc:"The start of the user's message (up to 1 KiB); GET /messages has all of it."`
 	StartedAt time.Time  `json:"started_at" doc:"When the user's message was sent."`
