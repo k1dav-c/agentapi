@@ -2523,6 +2523,31 @@
         ],
         "type": "object"
       },
+      "SummaryHour": {
+        "additionalProperties": false,
+        "properties": {
+          "hour": {
+            "description": "The start of the hour, in UTC.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "tokens": {
+            "$ref": "#/components/schemas/SummaryTokens",
+            "description": "The tokens of the hour's calls, models without a known price included."
+          },
+          "usd": {
+            "description": "API-equivalent cost in USD of the hour's calls, at list prices.",
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "hour",
+          "tokens",
+          "usd"
+        ],
+        "type": "object"
+      },
       "SummaryRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2563,6 +2588,14 @@
             "description": "API-equivalent cost in USD of the agent's sessions in this directory, subagents included, over the last 24 hours (the hours that end within them): the tokens at the model providers' list prices, which a subscription doesn't charge.",
             "format": "double",
             "type": "number"
+          },
+          "hours": {
+            "description": "What was spent in each hour with calls of the last 25 (UTC, the earliest first), the hour under way included: the hours day_usd adds up and the one before them. An hour's figures grow while it goes on. Sent with the amounts: when they don't change, an hour that left the 25 may stay. Missing from earlier releases.",
+            "items": {
+              "$ref": "#/components/schemas/SummaryHour"
+            },
+            "nullable": true,
+            "type": "array"
           },
           "scope": {
             "description": "Identifies the sessions the amounts add up: those of one agent in one directory, as the session logs of one machine hold them (a hash of the machine's host name and ID, the agent, the directory's real path and where the agent keeps its logs). AgentAPIs that report the same scope report the same sessions; a client that adds up many counts each scope once.",

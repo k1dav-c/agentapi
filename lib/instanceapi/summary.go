@@ -216,18 +216,32 @@ type SummarySpend struct {
 	Scope string `json:"scope" doc:"Identifies the sessions the amounts add up: those of one agent in one directory, as the session logs of one machine hold them (a hash of the machine's host name and ID, the agent, the directory's real path and where the agent keeps its logs). AgentAPIs that report the same scope report the same sessions; a client that adds up many counts each scope once."`
 	// UpdatedAt is when the amounts last changed.
 	UpdatedAt time.Time `json:"updated_at" doc:"When the amounts or tokens last changed: of AgentAPIs with one scope, the latest is the most recent."`
+	// Hours are the hours behind the amounts, for a client that keeps a
+	// longer record (the hub's activity); nil from earlier releases.
+	Hours []SummaryHour `json:"hours,omitempty" doc:"What was spent in each hour with calls of the last 25 (UTC, the earliest first), the hour under way included: the hours day_usd adds up and the one before them. An hour's figures grow while it goes on. Sent with the amounts: when they don't change, an hour that left the 25 may stay. Missing from earlier releases."`
 }
 
-// Clone returns a copy of s that shares none of its tokens.
+// SummaryHour is what the agent's sessions in a directory spent in one
+// hour.
+type SummaryHour struct {
+	Hour   time.Time     `json:"hour" doc:"The start of the hour, in UTC."`
+	USD    float64       `json:"usd" doc:"API-equivalent cost in USD of the hour's calls, at list prices."`
+	Tokens SummaryTokens `json:"tokens" doc:"The tokens of the hour's calls, models without a known price included."`
+}
+
+// Clone returns a copy of s that shares none of its tokens or hours.
 func (s SummarySpend) Clone() SummarySpend {
 	s.DayTokens, s.WeekTokens = cloneTokens(s.DayTokens), cloneTokens(s.WeekTokens)
+	s.Hours = slices.Clone(s.Hours)
 	return s
 }
 
 // Equal reports whether s and o say the same.
 func (s SummarySpend) Equal(o SummarySpend) bool {
 	return s.DayUSD == o.DayUSD && s.WeekUSD == o.WeekUSD && s.Scope == o.Scope && s.UpdatedAt.Equal(o.UpdatedAt) &&
-		s.SameTokens(o)
+		s.SameTokens(o) && slices.EqualFunc(s.Hours, o.Hours, func(a, b SummaryHour) bool {
+		return a.Hour.Equal(b.Hour) && a.USD == b.USD && a.Tokens == b.Tokens
+	})
 }
 
 // SameTokens reports whether s and o count the same tokens.
