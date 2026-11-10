@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v4.3.1
 
 ### Fixes
 
