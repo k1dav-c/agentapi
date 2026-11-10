@@ -13,7 +13,7 @@ func (s *store) flush() error {
 	if s.persist == nil {
 		return nil
 	}
-	return s.persist.flush()
+	return errors.Join(s.persist.flush(), s.activity.flush())
 }
 
 func (d *deliveries) flush() error {

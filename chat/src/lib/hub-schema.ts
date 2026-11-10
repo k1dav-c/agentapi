@@ -7,6 +7,29 @@ export type paths = Record<string, never>;
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        ActivityBody: {
+            days: components["schemas"]["ActivityDay"][];
+            /** @description The first day the hub kept its activity, as YYYY-MM-DD in the time zone asked for: the days before it aren't counted. */
+            since: string;
+            /** @description The time zone of the days. */
+            time_zone: string;
+        };
+        ActivityDay: {
+            /** @description The day, as YYYY-MM-DD. */
+            date: string;
+            /** @description The tokens of the calls usd adds up. */
+            tokens: components["schemas"]["SummaryTokens"];
+            /**
+             * Format: double
+             * @description What the agents' sessions spent that day, API-equivalent at list prices; each scope once. AgentAPIs before 4.2 don't count.
+             */
+            usd: number;
+            /**
+             * Format: int64
+             * @description How long the agents worked that day, as the hub saw it, each one's time added up.
+             */
+            work_seconds: number;
+        };
         AddInstanceBody: {
             token?: string;
             url: string;
@@ -400,6 +423,33 @@ export interface components {
          * @enum {string}
          */
         State: "needs-you" | "working" | "unread" | "idle" | "muted" | "connecting" | "unreachable" | "stopped";
+        SummaryTokens: {
+            /**
+             * Format: int64
+             * @description Input tokens read from the prompt cache.
+             */
+            cache_read: number;
+            /**
+             * Format: int64
+             * @description Input tokens written to the prompt cache, the five-minute and one-hour caches together.
+             */
+            cache_write: number;
+            /**
+             * Format: int64
+             * @description Uncached input tokens.
+             */
+            input: number;
+            /**
+             * Format: int64
+             * @description Output tokens, thinking included.
+             */
+            output: number;
+            /**
+             * Format: int64
+             * @description The sum of input, output, cache_write and cache_read.
+             */
+            total: number;
+        };
         /**
          * Transport
          * @example native

@@ -234,6 +234,7 @@ func (h *Hub) routes(r chi.Router) {
 		r.Put("/api/favorites", h.setFavorites)
 		r.Get("/api/events", h.streamEvents)
 		r.Get("/api/join", h.getJoin)
+		r.Get("/api/activity", h.getActivity)
 		r.Handle("/i/{id}", http.HandlerFunc(h.proxy))
 		r.Handle("/i/{id}/*", http.HandlerFunc(h.proxy))
 	})
