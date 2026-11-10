@@ -5,6 +5,7 @@
 // useReducer (conversationReducer); the rules of each change are here, pure.
 
 import {isDraftMessage, richMessageKey, withoutSeq, type DraftMessage, type Message, type RichMessage} from "./conversation";
+import {prependPage, type HistoryPage} from "./history";
 import {mergeListedRequests, mergeRequests, type NativeRequest} from "./native-requests";
 import type {EventBatch, SyncPoint} from "./pending-events";
 import {mergeTasks, type ServerTask} from "./server-tasks";
@@ -56,7 +57,11 @@ export type ConversationAction =
   | {type: "draftAdded"; draft: DraftMessage}
   | {type: "draftRemoved"; clientId: string}
   | {type: "draftFailed"; clientId: string; error: string}
-  | {type: "draftsRestored"; drafts: DraftMessage[]};
+  | {type: "draftsRestored"; drafts: DraftMessage[]}
+  // A page of earlier tasks the chat read (lib/history.ts): it goes before
+  // what the state holds. The point stays: the server's changes to those
+  // tasks came before it.
+  | {type: "earlierLoaded"; page: HistoryPage};
 
 // conversationReducer returns the state once action is applied. A list
 // that doesn't change keeps its object, and so does the state when nothing
@@ -106,6 +111,8 @@ export function conversationReducer(state: ConversationState, action: Conversati
         ),
       };
     }
+    case "earlierLoaded":
+      return prependPage(state, action.page);
     case "draftsRestored": {
       const existing = new Set(state.messages.filter(isDraftMessage).map((message) => message.clientId));
       const restored = action.drafts.filter((draft) => !existing.has(draft.clientId));

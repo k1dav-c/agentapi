@@ -54,6 +54,7 @@ import {conversationReducer, initialConversation} from "@/lib/conversation-state
 import type {Timeline, ToolCall} from "@/lib/task-timeline";
 import type {QueuedMessage} from "@/lib/queue";
 import {steeredMessages, tasksByMessage, type ServerTask} from "@/lib/server-tasks";
+import {earlierTasks, HISTORY_PAGE_TASKS} from "@/lib/history";
 import {useDrafts} from "./use-drafts";
 import {useEventStream} from "./use-event-stream";
 import {useQueue} from "./use-queue";
@@ -138,6 +139,9 @@ interface ChatActions extends Pick<ChatAPI, (typeof API_CALLS)[number]> {
   reconnectNow: () => void;
   downloadSession: () => Promise<void>;
   deleteMessages: () => Promise<void>;
+  // Reads the page of tasks before the earliest the chat holds, or all of
+  // them with all (lib/history.ts); a failure is reported and resolves.
+  loadEarlier: (all?: boolean) => Promise<void>;
 }
 
 // The chat's state. Components read the parts they need with
@@ -211,6 +215,10 @@ export interface ChatState {
   // (tasksByMessage).
   serverTasks: ServerTask[];
   taskByMessage: ReadonlyMap<number, ServerTask>;
+  // How many of the server's tasks came before those the chat holds
+  // (lib/history.ts), and whether it is reading them.
+  earlierTasks: number;
+  loadingEarlier: boolean;
   // Whether stop can stop what the agent is doing now.
   canStop: boolean;
   reconnectAttempt: number;
@@ -401,12 +409,41 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
     }
   };
 
+  // The earlier tasks: a page at a time, the one before the earliest the
+  // chat holds; with all, until there are none. A page that doesn't end
+  // where the chat's tasks start (a full replay replaced them meanwhile)
+  // is dropped (prependPage).
+  const earlier = earlierTasks(serverTasks);
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
+  const loadingEarlierRef = useRef(false);
+  const serverTasksRef = useLatest(serverTasks);
+  const loadEarlier = async (all = false) => {
+    if (loadingEarlierRef.current) return;
+    let before = serverTasksRef.current[0]?.id;
+    if (before === undefined || earlierTasks(serverTasksRef.current) === 0) return;
+    loadingEarlierRef.current = true;
+    setLoadingEarlier(true);
+    try {
+      for (;;) {
+        const page = await api.getHistoryPage(before, HISTORY_PAGE_TASKS);
+        dispatchConversation({type: "earlierLoaded", page});
+        const first = page.tasks[0]?.id;
+        if (!all || !page.hasMore || first === undefined) break;
+        before = first;
+      }
+    } catch (error) {
+      toast.error("Failed to load earlier tasks", {description: getErrorMessage(error)});
+    } finally {
+      loadingEarlierRef.current = false;
+      setLoadingEarlier(false);
+    }
+  };
+
   const downloadSession = async () => {
     try {
-      const events = await api.getTimelineEvents();
-      const jsonl = events.map((event) => JSON.stringify(event)).join("\n");
+      const jsonl = await api.exportTimeline();
       const timestamp = new Date().toISOString().replaceAll(":", "-");
-      downloadFile(`agentapi-session-${timestamp}.jsonl`, jsonl === "" ? "" : `${jsonl}\n`, "application/x-ndjson");
+      downloadFile(`agentapi-session-${timestamp}.jsonl`, jsonl, "application/x-ndjson");
       toast.success("Session JSONL downloaded");
     } catch (error) {
       toast.error("Session download failed", {
@@ -452,6 +489,7 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
     deleteQueuedMessage: useStableCallback(deleteQueuedMessage),
     reconnectNow: useStableCallback(reconnectByUser),
     downloadSession: useStableCallback(downloadSession),
+    loadEarlier: useStableCallback(loadEarlier),
     deleteMessages: useStableCallback(() => startOver(() => api.deleteMessages())),
     resumeSession: useStableCallback((id: string, fork: boolean) => startOver(() => api.resumeSession(id, fork))),
   };
@@ -482,6 +520,8 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
     requests,
     serverTasks,
     taskByMessage,
+    earlierTasks: earlier,
+    loadingEarlier,
     canStop: stoppable,
     serverStatus,
     connectionStatus,

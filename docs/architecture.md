@@ -238,6 +238,7 @@ The handlers are grouped by file:
 | `server.go`, `routes.go`, `middleware.go` | The server's setup, start and stop, with `lib/httpmw`'s host, cross-origin and compression middleware; the routes, which each feature registers; request logging |
 | `conversation_api.go`, `queue.go`, `turngate.go`, `sse.go` | Messages, status and timeline; the queue, its dispatch (with a continuation that is due first, `beforeQueue`) and `queue_update`; whether a turn may start now (`turnGateLocked`); `GET /events` |
 | `tasks_api.go` | `GET /tasks`: the tasks the emitter derives (`lib/convstate`) |
+| `history.go` | The pages of the lists (`before`, `limit`, `has_more`), read from memory or the state database; `GET /timeline/export` |
 | `summary_api.go`, `spend.go`, `registry.go` | `GET /summary` and `POST /tasks/seen`, the summary the emitter keeps for clients that watch many AgentAPIs; the spend worked out once a minute; the server's registry entry (`instanceRegistry`) |
 | `native.go` | Delivering a message, requests, settings, interrupt, compaction, login retry; the observer (`nativeObserver`) |
 | `limit.go`, `retry.go`, `sessions.go`, `subagents.go` | A turn a usage limit stopped (`/limit`); a failed turn that waits to be tried again (`/retry`); the agent's earlier sessions and what they cost (`/sessions`, `/cost`); its subagents (`/subagents`) |
@@ -513,6 +514,25 @@ usage limit stop, a retry wait, login).
   with the old epoch to receive a full replay with the correct SSE IDs.
   Subscriptions also close if they fall behind their buffer, or if opening
   a session would stream more than a quarter of a buffer of rich messages.
+- The emitter holds a window of the conversation (`window.go`). With a
+  state database (`WithHotTasks`) it holds the rich messages and timeline
+  events of the latest 100 tasks only (`DefaultHotTasks`): when a task
+  starts, `trimLocked` lets go of the earlier ones, which come first in
+  both lists, into new slices so they are freed, and rebuilds the index.
+  The messages and the tasks stay; the tasks are derived from all the
+  messages. `richBase` is the stored position of the first rich message
+  held, so the persister's positions don't change. `Page` turns a cursor
+  into a run of tasks (`PageRange`: the tasks with their numbers, the
+  first and next task's IDs and starts, whether it reaches the start);
+  `MessagesIn`, `RichMessagesIn` and `SessionEventsIn` read a page from
+  memory, the last two reporting when it reaches what the emitter let go
+  of, which `lib/httpapi` then reads from the state database.
+- A full replay holds the latest 20 tasks (`DefaultRecentTasks`, the
+  `recentLocked` page) and has the current seq. A replay since a seq holds
+  every change after it the emitter holds, also of earlier tasks; one from
+  before `coldSeq`, the latest change of a rich message it let go of, is
+  full instead. Tasks carry their `number`, set where the emitter hands
+  them out (`numbered`) and not stored.
 - The emitter keeps the pending requests and the 50 that closed last
   (`native.MaxClosedRequests`). It drops an older closed request without an
   event, so a client that resumes with `since=` keeps the same bound: of the
@@ -644,6 +664,17 @@ The queue is persisted with the conversation, on every change (`storeQueue`, fro
 - Writes are queued and flushed every 200 ms in a transaction, so streaming
   never waits for the disk. A clean shutdown marks the file clean; after a
   crash the conversation gets a new epoch and clients load it again in full.
+- `LoadRecent` loads the messages and tasks, and the rich messages and
+  timeline events of the latest tasks only (`Snapshot.Window`, with
+  `RichBase`). The rich messages are in the order of their tasks by
+  position and the events in the order of their times by ID, so
+  `history.go` finds a task's first ones by a binary search that reads one
+  row's `task_id` or `time` at a time (`json_extract`), without a schema
+  change. `RichMessagesOf` and `SessionEventsOf` read a page, and
+  `EachSessionEvent` and `EachEarlier` go through the rows 500 at a time,
+  so the writes, which wait for the database's one connection, go on in
+  between: the timeline export, and the upload pruning, which reads the
+  earlier rich messages and events outside the server's lock.
 - The file is opened in exclusive locking mode with WAL, so no second
   AgentAPI can use it, and is created with mode 0600.
 - On startup the server restores the conversation, the queue and the session
@@ -1024,6 +1055,17 @@ chat and `parseFromFrame` in the hub.
   and the least recently used go beyond 100 servers or 50,000 records in
   all; a hub opens each instance as a server of its own
   (`lib/session-cache.ts`).
+- The chat holds the tasks from the first it loaded to the latest. The full
+  replay brings the latest 20; `earlierTasks` (`lib/history.ts`) counts
+  the server's tasks before them from the first one's `number`, and
+  `loadEarlier` reads the page before it (`getHistoryPage`: `GET /tasks`,
+  `/messages` and `/rich-messages` with the same `before`), which
+  `prependPage` puts in front unless the chat's first task changed
+  meanwhile. `message-list.tsx` reads a page when the reader scrolls near the
+  top or clicks Show earlier tasks, and `use-keep-position.ts` keeps the
+  first task shown where it was while the page renders. Search goes
+  through the loaded tasks; its bar loads the rest. The session download
+  reads `GET /timeline/export`.
 - `TimelineBuilder` in `lib/task-timeline.ts` groups messages into tasks.
   It rebuilds from the first change and preserves unchanged objects, so
   memoized tasks and tool calls don't render again. A section is one of

@@ -1,6 +1,6 @@
 "use client";
 
-import React, {useCallback, useEffect, useMemo, useState} from "react";
+import React, {useCallback, useEffect, useLayoutEffect, useMemo, useState} from "react";
 import {Search} from "lucide-react";
 import {createPortal} from "react-dom";
 import {Button} from "./ui/button";
@@ -10,12 +10,13 @@ import {formatUSD} from "@/lib/format";
 import {filterTasks} from "@/lib/task-filter";
 import {taskStatusDetail} from "@/lib/server-tasks";
 import {HEADER_ACTIONS_ID} from "@/app/header";
-import {useChatSelector} from "./chat-provider";
+import {useChatActions, useChatSelector} from "./chat-provider";
 import {TaskGroup} from "./message-list/task-group";
 import {EmptyState, StartupScreen} from "./message-list/empty-state";
 import {JumpButtons} from "./message-list/jump-buttons";
 import {TaskSearchBar} from "./message-list/task-search-bar";
 import {useProgressiveTasks} from "./message-list/use-progressive-tasks";
+import {useKeepPosition} from "./message-list/use-keep-position";
 import {useTaskSearch} from "./message-list/use-task-search";
 import {useTranscriptScroll} from "./message-list/use-transcript-scroll";
 
@@ -24,6 +25,9 @@ import {useTranscriptScroll} from "./message-list/use-transcript-scroll";
 // long sessions. Full virtualization (e.g. react-virtuoso) would be the
 // proper fix for very long conversations.
 const VISIBLE_TASKS_DEFAULT = 5;
+// Scrolling this close to the top, with every task the chat holds shown,
+// reads the page of tasks before them from the server (lib/history.ts).
+const LOAD_EARLIER_PX = 400;
 
 interface MessageListProps {
   onRetryMessage: (clientId: string) => Promise<boolean>;
@@ -56,6 +60,11 @@ export default function MessageList({
   // The server's tasks, for each task's status (none from servers that
   // don't derive them).
   const taskByMessage = useChatSelector((chat) => chat.taskByMessage);
+  // The server's tasks before those the chat holds, which it reads a page
+  // at a time; the numbers of the tasks shown count them.
+  const earlierTasks = useChatSelector((chat) => chat.earlierTasks);
+  const loadingEarlier = useChatSelector((chat) => chat.loadingEarlier);
+  const {loadEarlier} = useChatActions();
   // The page's actions render into the header's slot (one top bar); the
   // embed page has no header, so they get their own row there.
   const [headerSlot, setHeaderSlot] = useState<HTMLElement | null>(null);
@@ -86,12 +95,37 @@ export default function MessageList({
   const visibleTasks = hiddenTaskCount > 0 ? filteredTasks.slice(hiddenTaskCount) : filteredTasks;
   const renderedTaskKeys = useProgressiveTasks(visibleTasks.slice(0, -1).map(({task}) => task.key), filtersActive);
   const isEmpty = timeline.tasks.length === 0;
+  const layout = `${isEmpty}:${searchOpen}:${filtersActive}`;
+  const firstShown = visibleTasks[0]?.task.key ?? "";
   const scroll = useTranscriptScroll(scrollArea, {
     messages,
     content: timeline,
     serverStatus,
-    layout: `${isEmpty}:${searchOpen}:${filtersActive}`,
+    layout,
+    start: firstShown,
   });
+  // Tasks put above the reader (shown, or read from the server) keep what
+  // they see in place.
+  const {hold, restore} = useKeepPosition(scrollArea, layout);
+  useLayoutEffect(() => restore(), [firstShown, restore]);
+  const showEarlier = useCallback(() => {
+    hold();
+    if (hiddenTaskCount > 0) setShowAllTasks(true);
+    else void loadEarlier();
+  }, [hiddenTaskCount, hold, loadEarlier]);
+  // Scrolling to the top reads the page before.
+  const canLoadEarlier = hiddenTaskCount === 0 && earlierTasks > 0 && !filtersActive;
+  useEffect(() => {
+    if (!scrollArea || !canLoadEarlier) return;
+    const onScroll = () => {
+      if (scrollArea.scrollTop < LOAD_EARLIER_PX && scrollArea.scrollHeight > scrollArea.clientHeight) {
+        hold();
+        void loadEarlier();
+      }
+    };
+    scrollArea.addEventListener("scroll", onScroll, {passive: true});
+    return () => scrollArea.removeEventListener("scroll", onScroll);
+  }, [canLoadEarlier, hold, loadEarlier, scrollArea]);
 
   const navigateSearchResults = useCallback(
     (direction: -1 | 1) => {
@@ -142,6 +176,9 @@ export default function MessageList({
             total={timeline.tasks.length}
             matches={totalMatchCount}
             onNavigate={navigateSearchResults}
+            earlier={earlierTasks}
+            loadingEarlier={loadingEarlier}
+            onLoadEarlier={() => void loadEarlier(true)}
           />
         )}
         {timeline.tasks.length === 0 ? (
@@ -157,10 +194,14 @@ export default function MessageList({
             {/* One reading column, centered: 46rem of text inside the padding.
                 The time rail and thinking notes sit in the margins beside it. */}
             {timeline.prelude.length > 0 && <StartupScreen messages={timeline.prelude} />}
-            {hiddenTaskCount > 0 && (
+            {(hiddenTaskCount > 0 || canLoadEarlier) && (
               <div className="py-4">
-                <Button type="button" variant="outline" size="sm" onClick={() => setShowAllTasks(true)} className="h-8 rounded-full text-xs">
-                  Show {hiddenTaskCount} older {hiddenTaskCount === 1 ? "task" : "tasks"}
+                <Button type="button" variant="outline" size="sm" onClick={showEarlier} disabled={hiddenTaskCount === 0 && loadingEarlier} className="h-8 rounded-full text-xs">
+                  {hiddenTaskCount > 0
+                    ? `Show ${hiddenTaskCount} older ${hiddenTaskCount === 1 ? "task" : "tasks"}`
+                    : loadingEarlier
+                      ? "Loading earlier tasks…"
+                      : `Show earlier tasks (${earlierTasks} more)`}
                 </Button>
               </div>
             )}
@@ -193,7 +234,7 @@ export default function MessageList({
               <TaskGroup
                 task={task}
                 agentType={agentType}
-                number={index + 1}
+                number={earlierTasks + index + 1}
                 cost={costs[index]?.label}
                 costDetails={costs[index]?.details}
                 status={status}

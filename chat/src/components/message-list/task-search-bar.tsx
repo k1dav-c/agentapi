@@ -17,12 +17,20 @@ export function TaskSearchBar({
   total,
   matches,
   onNavigate,
+  earlier = 0,
+  loadingEarlier = false,
+  onLoadEarlier,
 }: {
   search: ReturnType<typeof useTaskSearch>;
   shown: number;
   total: number;
   matches: number;
   onNavigate: (direction: -1 | 1) => void;
+  // The search goes through the tasks the chat holds: earlier ones the
+  // server keeps (lib/history.ts) are searched once loaded.
+  earlier?: number;
+  loadingEarlier?: boolean;
+  onLoadEarlier?: () => void;
 }) {
   const {taskQuery, setTaskQuery, taskFilter, setTaskFilter, searchInputRef} = search;
   return (
@@ -76,6 +84,11 @@ export function TaskSearchBar({
               <span className="sr-only">Next matching task</span>
             </Button>
           </div>
+        )}
+        {earlier > 0 && onLoadEarlier && (
+          <Button type="button" size="sm" variant="ghost" className="h-8 px-2 text-xs" onClick={onLoadEarlier} disabled={loadingEarlier} title="Load the earlier tasks to search them too">
+            {loadingEarlier ? "Loading…" : `+${earlier} earlier`}
+          </Button>
         )}
         <Button type="button" size="icon" variant="ghost" className="size-8" onClick={search.close} title="Close search">
           <X />

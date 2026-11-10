@@ -35,7 +35,7 @@ func restoreState(config ServerConfig, db *statedb.DB, emitter *convstate.EventE
 	if db == nil {
 		return restoredState{}, nil
 	}
-	snap, err := db.Load()
+	snap, err := db.LoadRecent(config.hotTasks())
 	if err != nil {
 		return restoredState{}, fmt.Errorf("load state database: %w", err)
 	}
@@ -120,6 +120,11 @@ func emitterStateFromSnapshot(snap statedb.Snapshot, logger *slog.Logger) convst
 		SessionEvents: snap.Events,
 		SessionName:   snap.Meta[statedb.MetaSessionName],
 		SessionRef:    snap.Meta[statedb.MetaSessionRef],
+		RichBase:      snap.RichBase,
+		Cold:          snap.Window.Cold,
+		HotTask:       snap.Window.Task,
+		HotTime:       snap.Window.Start,
+		ColdSeq:       snap.Window.ColdSeq,
 	}
 	stored, err := snap.StoredState()
 	if err != nil {

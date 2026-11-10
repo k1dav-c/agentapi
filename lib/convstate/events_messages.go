@@ -165,6 +165,7 @@ func (e *EventEmitter) LoadRichMessages(msgs []transcript.RichMessage) {
 	if !stream {
 		e.endConversationSubscriptionsLocked()
 	}
+	e.trimLocked()
 }
 
 // nonNilContent is content, or an empty list for none: clients rely on the
@@ -218,7 +219,7 @@ func (e *EventEmitter) upsertRichLocked(msg transcript.RichMessage, replace bool
 	e.seq++
 	e.richSeq[idx] = e.seq
 	if e.persister != nil {
-		e.persister.PutRichMessage(idx, msg, e.seq)
+		e.persister.PutRichMessage(e.win.richBase+idx, msg, e.seq)
 	}
 	return msg
 }
@@ -248,7 +249,8 @@ func richContentBlockKey(block transcript.RichContentBlock) string {
 	return string(encoded)
 }
 
-// RichMessages returns a snapshot of all rich messages received so far.
+// RichMessages returns a snapshot of the rich messages the emitter holds:
+// all of them, or those of the hot window (window.go).
 // The emitter is the single store for rich messages: the agent's
 // conversation emits them, the emitter deduplicates, replays, and serves
 // reads.
@@ -274,6 +276,8 @@ func (e *EventEmitter) EmitSessionEvents(events []transcript.SessionEvent) {
 	}
 }
 
+// SessionEvents returns the timeline events the emitter holds: all of
+// them, or those of the hot window (window.go).
 func (e *EventEmitter) SessionEvents() []transcript.SessionEvent {
 	e.mu.Lock()
 	defer e.unlock()

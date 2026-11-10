@@ -67,6 +67,8 @@ AgentAPI 可以用來：
   或因用量限制而停止。
 - 透過 [server-sent events](#事件與增量同步) 即時追蹤一切，有 heartbeat，重新連線後只重播
   有變動的部分。
+- 跑了好幾個月的對話也不會越來越重：用戶端先拿到最近的任務，較早的再一頁一頁讀；有
+  `--state-db` 時，伺服器只把最近的任務放在記憶體（[長對話](#長對話)）。
 
 **Agent**
 
@@ -703,6 +705,8 @@ state-db: ~/.agentapi/state/{port}.db
   `{port}` 的 `state-db` 會略過並記下警告，否則其他伺服器都無法啟動。`--state-db` 和
   `AGENTAPI_STATE_DB` 仍然有效。
 - AgentAPI 停止時尚未回覆的請求會標示為已過期：提出請求的 agent 已經不在了。
+- 伺服器只把最近 100 個任務的工具呼叫和時間軸放在記憶體，用戶端要讀較早的內容時才從檔案讀取，
+  所以跑了好幾個月的對話，啟動速度和記憶體用量都和新對話差不多（[長對話](#長對話)）。
 - 上傳的檔案會保存在資料庫旁（`<檔案>.uploads`），因為訊息是用路徑引用它們。對話（和佇列）
   都沒有引用的檔案超過 7 天後會刪除，讓草稿的附件有時間送出；啟動時、每小時和重新啟動後會檢查。
 - 一個檔案只屬於一種 agent 類型和工作目錄；遇到屬於其他組合的檔案，AgentAPI 會拒絕啟動。
@@ -982,7 +986,8 @@ AgentAPI 會以 RPC 模式執行 Pi（`pi --mode rpc`，經由 stdin 與 stdout 
   AgentAPI 已偵測到 agent 開始處理，或是在 agent 忙碌時把它排入佇列（`queued`）；
   `dispatch_mode` 決定 agent 忙碌時怎麼處理（見 [Steer、interrupt 與佇列](#steerinterrupt-與佇列)）。
 - `GET /messages` 回傳對話；`GET /rich-messages` 和 `GET /timeline` 回傳結構化的形式（見
-  [結構化活動](#結構化活動)）。
+  [結構化活動](#結構化活動)）。`GET /messages` 沒指定分頁時回傳所有訊息；另外兩個和 `GET /tasks`
+  回傳最近 20 個任務；都可以用 `before` 往前翻頁（見[長對話](#長對話)）。
 - 已經送出、但沒有得到確認的訊息（呼叫逾時，或 AgentAPI 正在停止）可能已經送到 agent：它不會
   再送一次，而是以錯誤離開佇列。
 - `DELETE /messages` 清除對話（訊息、結構化訊息、請求、任務、時間軸、錯誤和佇列），並重新
@@ -1014,6 +1019,8 @@ AgentAPI 會以 RPC 模式執行 Pi（`pi --mode rpc`，經由 stdin 與 stdout 
   接在後面，從各自的紀錄讀出：一個 sub agent 接一個，各自以一筆 system 事件開頭，每筆事件都帶有
   `subagent_id`，Claude Code 另有 `parent_tool_use_id`，指向啟動它的 Agent 工具呼叫。agent 自己的
   事件裡只有交給 sub agent 的任務和它最後的回答。
+- `GET /timeline/export` 以 JSON Lines 串流整條時間軸，加上 `?subagents=true` 時 sub agent 的
+  事件接在 agent 自己的後面：聊天介面下載對話用的就是它。
 
 ### 任務
 
@@ -1025,6 +1032,7 @@ AgentAPI 把對話分成一個個任務：一個任務是你的一則訊息，�
 `GET /tasks` 由舊到新列出任務，每個都有：
 
 - `id`：開始這個任務的訊息 ID，同 `GET /messages`；
+- `number`：它在對話中的順序，從 1 起算（聊天介面的「Task *n*」）；
 - `status`：`running`、`completed`、`failed`（agent 回報錯誤或結束；`errors` 說明原因；AgentAPI
   會再試的[暫時性錯誤](#暫時性的-api-錯誤)也是）或
   `limited`（[用量限制](#達到用量限制時)讓它停下；`limit` 是那次停止）；
@@ -1064,6 +1072,28 @@ agent 忙碌時收到的訊息不會被拒絕，而是依先進先出（FIFO）�
 接續；請把 `GET /status` 回傳的 `epoch` 放進網址。有訊息被收回時（agent 拒絕開始的回合），
 對話會換成新的 epoch，伺服器會結束事件串流：用戶端重新連線，用舊的 epoch
 就會再拿到完整的狀態。開啟超過 256 則結構化訊息的工作階段時，也會結束串流，而不是逐則送出。
+
+完整重播（新的用戶端、不同的 epoch）只包含最近 20 個任務，不是整段對話；較早的任務要一頁一頁讀
+（見下節）。用戶端接續的位置早於伺服器已經不在記憶體裡的變更時，也會拿到完整重播。
+
+### 長對話
+
+agent 在同一段對話裡工作好幾個月，每個任務大約會累積 100 KB（工具呼叫、它們的輸出、時間軸）。
+AgentAPI 會把這些控制在一定範圍內：
+
+- `GET /rich-messages`、`GET /timeline` 和 `GET /tasks` 回傳一頁任務和屬於它們的內容：不帶參數時是
+  最近 20 個，和 `/events` 的完整重播一樣。`GET /messages` 帶 `before` 或 `limit` 時也一樣分頁；兩個都
+  不帶時照舊回傳所有訊息，因為伺服器會保留訊息（它們很小），上游的用戶端也是這樣讀取。`has_more` 表示還有更早的任務；
+  把 `next_before`（這一頁第一個任務的 ID）當成 `before` 傳入，就能讀前一頁，`limit`（最多 100）
+  決定一頁的大小。讀到最前面的那一頁，也會包含第一個任務之前的內容。
+- 有 `--state-db` 時，伺服器只把最近 100 個任務的結構化訊息和時間軸放在記憶體，較早的頁面從
+  檔案讀取；重新啟動時也只載入這些。訊息和任務每個任務只有幾 KB，會留在記憶體。資料不會被
+  刪除：`GET /timeline/export` 會從檔案分段讀出整條時間軸並串流回傳。
+- 沒有 `--state-db` 時，伺服器和以前一樣把整段對話放在記憶體，清單一樣分頁回傳。
+- 聊天介面先載入最近的任務，往上捲動時再讀較早的；見[聊天介面指南](docs/chat-ui.zh-TW.md#長對話)。
+
+AgentAPI 4.2 以前，這些清單會回傳所有訊息、結構化訊息、事件和任務。需要全部內容的用戶端，
+就一頁一頁讀到 `has_more` 為 false。
 
 ## 整合
 
@@ -1539,6 +1569,18 @@ codex-cli 0.163.0 和 Pi 1.3.0，在 Linux、4 核心的 Intel Xeon Silver 4210�
 - 沒有計入：agent 啟動的 MCP 伺服器、它執行的指令、shell 終端機（開啟時有一個 shell）以及
   瀏覽器分頁。
 
+長對話在狀態資料庫裡每個任務大約增加 100 KB。2026-11-10 在同一台機器上，用 `native-demo` 從
+`--state-db` 還原每個任務 100 KB 的對話：AgentAPI 4.2.0 會把整段對話放在記憶體，下一版只放最近
+100 個任務（[長對話](#長對話)）：
+
+| 任務數 | 狀態資料庫 | 記憶體，4.2.0 | 記憶體，之後 | 第一次 `/events?sync=1` 重播，4.2.0 | 之後 |
+| --- | --- | --- | --- | --- | --- |
+| 0 | | 38 MiB | 34 MiB | 0.6 KB | 0.6 KB |
+| 250 | 26 MB | 71–86 MiB | 49–52 MiB | 11 MB | 0.9 MB |
+| 1,000 | 105 MB | 193–245 MiB | 55 MiB | 44 MB | 0.9 MB |
+
+剩下會增加的記憶體來自訊息和任務，每個任務幾 KB。
+
 規劃主機時，每個工作階段請預留約 30 MiB 給 AgentAPI，再加上 agent 本身（Claude Code 或 Codex
 約 350 MiB，Pi 約 150 MiB），以及它的 MCP 伺服器和指令所需的資源。
 
@@ -1783,16 +1825,17 @@ host:
 
 | 端點 | 說明 |
 | --- | --- |
-| `GET /messages` | 對話中的所有訊息 |
+| `GET /messages` | 對話的所有訊息；帶 `before` 或 `limit` 時是一頁任務的訊息（[長對話](#長對話)） |
 | `POST /message` | 傳送訊息，agent 忙碌時排入佇列；`dispatch_mode` 為 `queue`（預設）、`steer` 或 `interrupt` |
 | `DELETE /messages` | 清除對話和佇列，並重新啟動 agent，開始新的工作階段 |
-| `GET /rich-messages` | 結構化的對話：思考內容、工具呼叫與結果、用量 |
-| `GET /timeline` | 正規化的工作階段事件，可用於匯出或其他介面；`?subagents=true` 會加上 sub agent 的事件 |
+| `GET /rich-messages` | 結構化的對話：思考內容、工具呼叫與結果、用量；分頁方式同 `GET /messages` |
+| `GET /timeline` | 正規化的工作階段事件，可用於匯出或其他介面，分頁方式同 `GET /messages`；`?subagents=true` 會加上 sub agent 的事件 |
+| `GET /timeline/export` | 以 JSON Lines 串流整條時間軸；`?subagents=true` 會加上 sub agent 的事件 |
 | `GET /status` | 狀態、生命週期、server ID、回合數、epoch、工作階段名稱、版本、agent 的工作階段 ID、能力、待處理請求、設定、用量、用量限制停止、等待重試、終端機、登入 |
 | `GET /title` | 工作階段的可讀標題 |
 | `GET /events` | Server-sent events；`?sync=1` 會在重新連線時增量重播，並送出任務與佇列的更新；`?only=summary` 只送摘要 |
 | `GET /summary` | 監看多個 AgentAPI 的用戶端要顯示的內容：instance、狀態、attention、標題、最新任務、請求、佇列、用量；見[監看多個實例](#監看多個實例) |
-| `GET /tasks` | 對話的[任務](#任務)：你的每則訊息和 agent 處理它的回合 |
+| `GET /tasks` | 對話的[任務](#任務)，預設是最近 20 個：你的每則訊息和 agent 處理它的回合 |
 | `POST /tasks/seen` | 替所有用戶端把任務標為已讀：摘要的 `unread` 會是 false，直到下一個任務結束 |
 | `GET /workspace` | AgentAPI 在 Coder workspace 中執行時，該 workspace 的網址 |
 

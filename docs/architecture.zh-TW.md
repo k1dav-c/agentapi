@@ -195,6 +195,7 @@ flowchart TB
 | `server.go`、`routes.go`、`middleware.go` | 伺服器的設定、啟動與停止，以及 `lib/httpmw` 的主機、跨來源與壓縮中介層；各功能自行註冊的路由；請求記錄 |
 | `conversation_api.go`、`queue.go`、`turngate.go`、`sse.go` | 訊息、狀態與時間軸；佇列、派送（先送出到期的繼續，`beforeQueue`）與 `queue_update`；現在能不能開始回合（`turnGateLocked`）；`GET /events` |
 | `tasks_api.go` | `GET /tasks`：emitter 推導出的任務（`lib/convstate`） |
+| `history.go` | 清單的分頁（`before`、`limit`、`has_more`），從記憶體或狀態資料庫讀取；`GET /timeline/export` |
 | `summary_api.go`、`spend.go`、`registry.go` | `GET /summary` 與 `POST /tasks/seen`，也就是 emitter 為監看多個 AgentAPI 的用戶端保存的摘要；每分鐘計算的花費；伺服器的登記檔（`instanceRegistry`） |
 | `native.go` | 送出訊息、請求、設定、中斷、壓縮、重試登入；observer（`nativeObserver`） |
 | `limit.go`、`retry.go`、`sessions.go`、`subagents.go` | 因用量限制停下的回合（`/limit`）；等待重試的失敗回合（`/retry`）；agent 先前的工作階段和它們的花費（`/sessions`、`/cost`）；它的 sub agent（`/subagents`） |
@@ -400,6 +401,18 @@ type Factory func(resume Resume) (Adapter, error)
 - 收回訊息等無法用更新表達的變更，會產生新的 epoch 並結束對話訂閱。用戶端以舊 epoch
   重新連線後，會收到 SSE id 正確的完整重播。訂閱落後超過緩衝，或開啟工作階段需串流超過
   緩衝四分之一的結構化訊息時，也會結束訂閱。
+- emitter 只保留對話的一個視窗（`window.go`）。有狀態資料庫時（`WithHotTasks`），它只保留最近
+  100 個任務（`DefaultHotTasks`）的結構化訊息和時間軸事件：每有任務開始，`trimLocked` 就放掉
+  更早的部分（兩份清單中它們都排在前面），換成新的 slice 讓記憶體得以釋放，並重建索引。訊息和
+  任務會留著，因為任務是從所有訊息推導出來的。`richBase` 是保留的第一則結構化訊息在資料庫中的
+  位置，persister 的位置因此不會變。`Page` 把游標轉成一串任務（`PageRange`：帶編號的任務、第一個
+  和下一個任務的 ID 與開始時間、是否到達最前面）；`MessagesIn`、`RichMessagesIn` 和
+  `SessionEventsIn` 從記憶體讀出一頁，後兩者會在這頁涵蓋到已放掉的部分時回報，由 `lib/httpapi`
+  改從狀態資料庫讀取。
+- 完整重播只包含最近 20 個任務（`DefaultRecentTasks`，即 `recentLocked` 這一頁），並帶有目前的
+  seq。從某個 seq 開始的重播，包含 emitter 保留的、該 seq 之後的所有變更，也包括較早的任務；早於
+  `coldSeq`（已放掉的結構化訊息最後一次變更）的重播則改為完整重播。任務帶有 `number`，在 emitter
+  交出任務時設定（`numbered`），不會存入資料庫。
 - emitter 保留待處理的請求，以及最後關閉的 50 個（`native.MaxClosedRequests`）。更早關閉的請求
   被丟掉時不會送出事件，所以以 `since=` 接續的用戶端也要套用同樣的上限：手上已關閉的請求只留
   `closed_at` 最晚的 50 個，也就是完整重播會給的那些。聊天介面在 `mergeRequests` 裡這樣做。
@@ -490,6 +503,12 @@ context 結束，避免不再讀取的 agent 佔住 `s.mu`。
   （`seen_at`），以及哪些 AgentAPI 可以寫入這個檔案、最後由哪個寫入（見下文）。
 - 寫入會先排隊，每 200 毫秒在一個交易中寫入，所以串流不必等待磁碟。正常關閉時會將檔案標示為
   已正常關閉；當機之後，對話會換成新的 epoch，用戶端會重新載入完整的對話。
+- `LoadRecent` 載入訊息和任務，但結構化訊息和時間軸事件只載入最近的任務（`Snapshot.Window`，
+  加上 `RichBase`）。結構化訊息依任務順序以位置排列，事件依時間順序以 ID 排列，所以 `history.go`
+  用二分搜尋找出一個任務的第一筆，每次只讀一列的 `task_id` 或 `time`（`json_extract`），不必改
+  schema。`RichMessagesOf` 和 `SessionEventsOf` 讀一頁，`EachSessionEvent` 和 `EachEarlier` 則
+  每次讀 500 列，讓等待資料庫唯一連線的寫入可以在中間進行：時間軸匯出，以及在伺服器的鎖之外讀取
+  較早結構化訊息和事件的上傳檔清理，都用這兩個。
 - 檔案以獨占鎖定模式搭配 WAL 開啟，所以第二個 AgentAPI 無法使用它；新建立的檔案權限為 0600。
 - 啟動時伺服器會還原對話、佇列和工作階段參照；對話會把參照交給 factory，讓 agent
   接續它自己的工作階段。AgentAPI 2 以 PTY transport 為同一個 agent 保存的檔案也能開啟：它沒有
@@ -762,6 +781,13 @@ AgentAPI 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
   建置開啟各版本的實例），也在這裡換成認得的值。IndexedDB 為每個伺服器保存對話供下次開啟時載入：
   每則訊息一筆紀錄，只寫入改變的部分，並記下所存內容的序號；超過 14 天沒用的伺服器快取會刪除，超過 100 個伺服器或
   總計 50,000 筆紀錄時，刪除最久沒用的；hub 的每個實例各算一個伺服器（`lib/session-cache.ts`）。
+- chat 保留從它載入的第一個任務到最新任務的內容。完整重播帶來最近 20 個任務；`earlierTasks`
+  （`lib/history.ts`）從第一個任務的 `number` 算出伺服器在它之前還有幾個任務，`loadEarlier` 讀取
+  它前面那一頁（`getHistoryPage`：用同一個 `before` 讀 `GET /tasks`、`/messages` 和
+  `/rich-messages`），再由 `prependPage` 放到前面；若 chat 的第一個任務在這期間變了，就不放。
+  讀者捲到接近頂端或按 Show earlier tasks 時，`message-list.tsx` 會讀一頁，`use-keep-position.ts`
+  則在這頁 render 期間讓原本顯示的第一個任務留在原位。搜尋只涵蓋已載入的任務，搜尋列可以載入
+  其餘的。下載工作階段時讀取 `GET /timeline/export`。
 - `lib/task-timeline.ts` 的 `TimelineBuilder` 將訊息分組為任務，從第一個變更處重建並保留未變的
   物件，讓經過 memo 的任務與工具呼叫不必重新 render。每一段就是伺服器的一個任務（`task_update`，
   和請求一樣保存與快取）：steer 進去的訊息（`steered`）留在其中，依時間排在它的步驟之間；伺服器

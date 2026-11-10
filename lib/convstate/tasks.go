@@ -452,11 +452,13 @@ func (e *EventEmitter) tasksChangedLocked(changed []int) {
 func (e *EventEmitter) tasksStoredLocked(changed []int) []TaskUpdateBody {
 	updates := make([]TaskUpdateBody, 0, len(changed))
 	for _, i := range changed {
-		task := e.tasks.tasks[i].Clone()
+		task := numbered(e.tasks.tasks[i], i)
 		e.seq++
 		e.taskSeq[task.ID] = e.seq
 		if e.persister != nil {
-			if data, err := json.Marshal(task); err == nil {
+			stored := task
+			stored.Number = 0 // its place can change; it isn't stored
+			if data, err := json.Marshal(stored); err == nil {
 				e.persister.PutTask(task.ID, data, e.seq)
 			}
 		}
@@ -465,16 +467,20 @@ func (e *EventEmitter) tasksStoredLocked(changed []int) []TaskUpdateBody {
 	if len(changed) > 0 && e.persister != nil {
 		e.persister.SetSeq(e.epoch, e.seq)
 	}
+	if len(changed) > 0 {
+		e.trimLocked()
+	}
 	return updates
 }
 
-// Tasks returns the conversation's tasks, the earliest first.
+// Tasks returns the conversation's tasks, the earliest first, with their
+// numbers.
 func (e *EventEmitter) Tasks() []instanceapi.Task {
 	e.mu.Lock()
 	defer e.unlock()
 	tasks := make([]instanceapi.Task, len(e.tasks.tasks))
 	for i, task := range e.tasks.tasks {
-		tasks[i] = task.Clone()
+		tasks[i] = numbered(task, i)
 	}
 	return tasks
 }
