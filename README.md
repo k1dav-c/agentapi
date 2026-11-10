@@ -1475,8 +1475,10 @@ curl -X POST localhost:3284/update -H 'Content-Type: application/json' -d '{"whe
   architecture, then restarts AgentAPI in place into it, as [`agentapi restart`](#agentapi-restart)
   does: the same PID, a new `server_id` and version. The download must match the release's
   `checksums.txt` and run as that version. The request can't choose a version or a URL. A release
-  that wouldn't start with this AgentAPI's settings or state database fails the update before the
-  restart, and AgentAPI goes on serving.
+  that wouldn't start with this AgentAPI's settings or state database fails the update before it
+  replaces the program, which stays as it was, and AgentAPI goes on serving. (Before 4.3.1 the
+  update replaced the program first: such an AgentAPI keeps serving, but its next start runs the
+  release that refuses the setting; drop the setting before it restarts.)
 - `"when": "idle"`, the default, installs at once and restarts once the agent is idle: no turn
   runs and no request (approval, question or plan) is open. An agent that exited and isn't started
   again counts as idle. Queued messages stay queued and go out after the restart, and so does a

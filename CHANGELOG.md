@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- An update through the API (`POST /update`, or from the hub) checks that the new version would
+  start with this AgentAPI's settings and state database before it replaces the program, where it
+  replaced it first: a release that refuses a setting left the program on disk that the next start
+  of AgentAPI then failed with. AgentAPI before 4.3.1 still updates the old way: if its update
+  fails naming a setting, drop the setting before that AgentAPI restarts.
+
 ## v4.3.0
 
 ### Features

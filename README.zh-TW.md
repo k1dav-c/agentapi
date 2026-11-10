@@ -1231,7 +1231,9 @@ curl -X POST localhost:3284/update -H 'Content-Type: application/json' -d '{"whe
 - `POST /update` 安裝 k1dav-c/agentapi 符合這台主機作業系統與架構的最新正式發行版，再像
   [`agentapi restart`](#agentapi-restart) 一樣原地重新啟動成新版本：PID 不變，`server_id` 和版本
   換新。下載的檔案必須符合發行版的 `checksums.txt`，執行起來也必須是那個版本。請求無法指定版本或網址。
-  新發行版若無法以這個 AgentAPI 的設定或狀態資料庫啟動，更新會在重新啟動前失敗，AgentAPI 繼續提供服務。
+  新發行版若無法以這個 AgentAPI 的設定或狀態資料庫啟動，更新會在替換程式之前失敗，磁碟上的程式維持原樣，
+  AgentAPI 繼續提供服務。（4.3.1 以前會先替換程式：這樣的 AgentAPI 雖然繼續服務，下次啟動時卻會執行那個不接受
+  該設定的版本；請在它重新啟動前拿掉那個設定。）
 - 預設的 `"when": "idle"` 會立刻安裝，等 agent 閒置再重新啟動，也就是沒有進行中的回合，也沒有待回覆的
   請求（核准、提問或計畫）。已經結束、不會再被啟動的 agent 也算閒置。佇列中的訊息會留在佇列，重新
   啟動後再送出；這段期間到期的用量限制後繼續或失敗回合的重試也一樣。`"now"` 會立刻

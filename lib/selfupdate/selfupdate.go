@@ -41,6 +41,12 @@ type Source struct {
 	// BaseURL is GitHub's API, empty for api.github.com; tests point it at
 	// a fake.
 	BaseURL string
+	// Check, if set, is asked of a downloaded binary before Install puts
+	// it in place of the program: an error leaves the program as it was.
+	// A server checks that the binary would start with its settings, so
+	// that an update that can't restart it doesn't leave a program on disk
+	// that a later start fails with.
+	Check func(ctx context.Context, path string) error
 }
 
 // Asset is a file of a release.

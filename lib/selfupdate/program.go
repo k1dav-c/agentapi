@@ -141,8 +141,8 @@ func ProgramVersion(ctx context.Context, path string) (*semver.Version, error) {
 
 // Install puts the release's binary for this platform in place of the
 // program, holding the lock: it downloads it into the program's directory,
-// checks it against the release's checksums.txt and that it runs and is
-// the release's version, and renames it over the program. Unless force,
+// checks it against the release's checksums.txt, that it runs and is the
+// release's version, and s.Check if set, and renames it over the program. Unless force,
 // a program that is the release's version or newer by the time Install
 // holds the lock stays, as another AgentAPI installed it meanwhile, and
 // Install reports false.
@@ -177,6 +177,11 @@ func (s Source) Install(ctx context.Context, r *Release, p Program, force bool) 
 	}
 	if !got.Equal(want) {
 		return false, fmt.Errorf("the downloaded binary says it is %s, not %s", got, want)
+	}
+	if s.Check != nil {
+		if err := s.Check(ctx, tmp); err != nil {
+			return false, err
+		}
 	}
 	if err := Replace(tmp, p.Real); err != nil {
 		return false, fmt.Errorf("replace binary: %w", err)

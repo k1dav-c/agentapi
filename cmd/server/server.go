@@ -299,6 +299,9 @@ func serverConfig(opts serverOptions, agent *runningAgent, stateDB *statedb.DB, 
 		config.Update.Program = self.path
 		if config.RestartsInPlace {
 			config.Update.Restart = func(ctx context.Context) error { return self.restart(ctx, "update") }
+			// The download has to start with these settings before it
+			// replaces the program, which a later start would run.
+			config.Update.Releases.Check = self.checkDownload
 		}
 	}
 	if !opts.printOpenAPI {
