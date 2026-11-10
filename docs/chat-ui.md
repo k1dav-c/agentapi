@@ -83,8 +83,10 @@ input a click away. Tool results that are images (Claude Code reading a screensh
 
 ### Thinking
 
-On wide screens, thinking appears in the right margin beside the relevant step. Tall notes reserve
-space beside that step so later notes stay aligned. Long notes show six lines; click to expand.
+On wide screens, thinking appears in the right margin beside the relevant step. The notes beside a
+step take no more height than the step: what doesn't fit fades out above **Show all**, which shows
+every note and makes room for them, so long thinking doesn't open a gap in the transcript. Long
+notes show six lines; click to expand.
 On narrow screens, thinking collapses into a "Thinking · *title*" line within the task.
 
 ### Messages and long tasks

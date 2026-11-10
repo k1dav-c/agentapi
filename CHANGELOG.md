@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Fixes
+
+- On a wide screen, the thinking notes beside a step are no taller than the step: long thinking
+  beside a short step opened a gap in the transcript, the step's row as tall as the notes. What
+  doesn't fit fades out above **Show all**, which shows every note.
+
 ### Internal
 
 - The chat builds with Next.js 15.5.29 (from 15.4.10) and the latest React 19, Radix, Tailwind and

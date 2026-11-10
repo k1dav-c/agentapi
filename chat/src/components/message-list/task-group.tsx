@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { formatDuration, formatTimeOfDay, secondsBetween } from "@/lib/clock";
 import { useNow } from "@/lib/use-elapsed";
 import { ChevronRight, Clipboard, Download, Eye, MoreHorizontal } from "lucide-react";
@@ -243,15 +243,17 @@ export const TaskGroup = React.memo(function TaskGroup({
               // On a wide screen thinking sits beside the steps it explains, in a
               // second column reaching into the right margin: a long note makes
               // room there instead of pushing the notes after it down, and the
-              // steps keep their width. Narrower screens show it inline.
+              // steps keep their width; beside steps, the notes take no more
+              // height than they do (MarginNotes). Narrower screens show it
+              // inline.
               <div
                 key={part[0].item.key}
                 className="space-y-4 min-[84rem]:-mr-[17rem] min-[84rem]:grid min-[84rem]:grid-cols-[minmax(0,1fr)_15rem] min-[84rem]:gap-x-8 min-[84rem]:space-y-0"
               >
                 {notes.length > 0 && (
-                  <div className="space-y-3 min-[84rem]:col-start-2 min-[84rem]:row-start-1">
+                  <MarginNotes besideSteps={steps.length > 0}>
                     {notes.map(({item}) => item.type === "thinking" && <ThinkingNote key={item.key} content={item.content} />)}
-                  </div>
+                  </MarginNotes>
                 )}
                 {steps.length > 0 && (
                   <div className="min-w-0 space-y-4 min-[84rem]:col-start-1 min-[84rem]:row-start-1">
@@ -309,6 +311,57 @@ export const TaskGroup = React.memo(function TaskGroup({
     </section>
   );
 });
+
+// MarginNotes is the column of thinking notes beside a part's steps on a wide
+// screen. Beside steps it is as tall as they are, not taller, so that long
+// thinking beside one short step doesn't open a gap in the transcript: what
+// doesn't fit fades out above Show all, which lets the column grow. Notes
+// with no steps beside them, and narrower screens, show in full.
+function MarginNotes({besideSteps, children}: {besideSteps: boolean; children: React.ReactNode}) {
+  const wide = useMediaQuery("(min-width: 84rem)");
+  const [open, setOpen] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  const clamped = wide && besideSteps && !open;
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!clamped || !el) {
+      setOverflows(false);
+      return;
+    }
+    const measure = () => setOverflows(el.scrollHeight > el.clientHeight + 1);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    if (el.firstElementChild) observer.observe(el.firstElementChild);
+    return () => observer.disconnect();
+  }, [clamped]);
+  return (
+    <div
+      className={`relative min-[84rem]:col-start-2 min-[84rem]:row-start-1 ${
+        // Out of the row's sizing (no height of its own), then as tall as the
+        // row, and tall enough for a note's title beside one short step.
+        clamped ? "min-[84rem]:h-0 min-[84rem]:min-h-[max(100%,5rem)]" : ""
+      }`}
+    >
+      <div ref={box} className={clamped ? "h-full overflow-hidden" : undefined}>
+        <div className="space-y-3">{children}</div>
+      </div>
+      {wide && besideSteps && (overflows || open) && (
+        <div className={clamped ? "absolute inset-x-0 bottom-0 bg-gradient-to-t from-background from-40% to-transparent pt-8" : "mt-1"}>
+          <button
+            type="button"
+            onClick={() => setOpen((value) => !value)}
+            aria-expanded={open}
+            className="ml-3.5 text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+          >
+            {open ? "Less" : "Show all"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // Thinking as a sidenote: on wide screens it sits in the right margin next to
 // the step it explains; narrower screens show a one-line row that expands.
