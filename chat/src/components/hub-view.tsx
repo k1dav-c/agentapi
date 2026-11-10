@@ -37,6 +37,7 @@ import {useHubStream} from "./hub/use-hub-stream";
 import {useListFilters} from "./hub/use-list-filters";
 import {useNeedsYou} from "./hub/use-needs-you";
 import {useNotify} from "./hub/use-notify";
+import {useSound, useSoundUnlock} from "@/lib/alert-sound";
 
 // HubView is the hub's page: sign in, the instances in a sidebar (what
 // needs you first), and on the right either the overview or the chat of
@@ -67,6 +68,8 @@ export function HubView() {
   const listWidth = useListWidth();
   const view = useListView();
   const {notify, toggleNotify} = useNotify();
+  const {sound, toggleSound} = useSound();
+  useSoundUnlock();
   const collapsed = useCollapsedGroups();
 
   const all = useMemo(() => [...instances.values()], [instances]);
@@ -205,6 +208,8 @@ export function HubView() {
             spend={spend}
             notify={notify}
             onToggleNotify={() => void toggleNotify()}
+            sound={sound}
+            onToggleSound={toggleSound}
             onSettings={() => setSettings("favorites")}
             onAdd={() => setAdding(true)}
             issuesOpen={route.issues}

@@ -747,8 +747,11 @@ browser remembers it, and a double-click on the edge resets it.
 `/`, `i` and `Esc` work anywhere on the hub's page but in a field; `j`, `k`, the arrows and `p` work with the focus in
 the list or on nothing, so elsewhere the arrows scroll the overview as usual. In Issues, `j` and `k` move between the
 cards, `Enter` opens one, `a` assigns it, `c` opens its chat, `n` opens a new issue and `r` reads
-the issues again. Inside an open chat, keys go to the chat. The bell asks the browser to notify you when an agent starts needing you while
-the hub's tab is in the background, and a screen reader hears the same as it happens.
+the issues again. Inside an open chat, keys go to the chat. The bell's menu turns on what tells you an agent
+started needing you: **Notifications**, which the browser shows while the hub's tab is in the
+background (on an https page only), and **Sound**, a short chime while you look away from the
+page (its tab in the background, or another window in front), which works over plain http too. The
+browser keeps both choices. A screen reader hears the same as it happens.
 
 ### On a phone
 

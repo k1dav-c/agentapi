@@ -444,14 +444,17 @@ one tap. Start AgentAPI with `--terminal=false` to turn the terminal off.
 Clicking the status in the header opens the session details: the status, agent, session name,
 the agent's session ID (its first characters, with a copy button), AgentAPI version, what
 the agent is doing, the queue and the tokens in and out. Its menu downloads the conversation as
-JSONL (as the Explorer's Session tab does), turns on browser notifications, shows the keyboard
+JSONL (as the Explorer's Session tab does), turns on browser notifications and a sound, shows the keyboard
 shortcuts, and shows how to add this AgentAPI to a [hub](hub.md). (How full the context is and
 the usage limits are in the composer's toolbar; see
 [Context and usage limits](#context-and-usage-limits).)
 
 While the tab is in the background, its icon shows an amber dot when the agent needs you, a blue dot
 while it works and a green dot when a task finishes. With notifications on, the browser also shows
-"*Agent* needs you" or "*Agent* finished".
+"*Agent* needs you" or "*Agent* finished" (on an https page only). With the sound on (**Play a
+sound**), a chime plays while you look away from the page, rising when the agent needs you and
+falling when it finishes; it works over plain http too. In a chat the hub opens, the hub chimes for
+an agent that needs you, and the chat only when it finishes.
 
 **Add to an AgentAPI hub…** has the steps to copy: run a hub, join this machine to it, open it.
 The hub's address, typed in, goes into the commands. When this AgentAPI already reports to a hub,
