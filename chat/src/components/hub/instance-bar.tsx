@@ -64,6 +64,7 @@ export function InstanceBar({
   hubVersion,
   root,
   onBack,
+  onHome,
   onOpen,
 }: {
   instance: HubInstance;
@@ -71,6 +72,8 @@ export function InstanceBar({
   hubVersion: string;
   root: string;
   onBack: () => void;
+  // onHome is the ×: the overview, past Issues too.
+  onHome: () => void;
   onOpen: (id: string) => void;
 }) {
   const state = instanceState(instance);
@@ -82,7 +85,7 @@ export function InstanceBar({
       <Button variant="ghost" size="icon" className="size-10 shrink-0 rounded-full md:hidden" onClick={onBack} aria-label="Back to Agents">
         <ArrowLeft className="size-5" />
       </Button>
-      <Button variant="ghost" size="icon" className="hidden size-9 rounded-full md:inline-flex" onClick={onBack} aria-label="Back to the overview" title="Back to the overview (esc)">
+      <Button variant="ghost" size="icon" className="hidden size-9 rounded-full md:inline-flex" onClick={onHome} aria-label="Back to the overview" title="Back to the overview">
         <X className="size-4" />
       </Button>
       <StatusGlyph state={state} className="ml-1 hidden sm:block" />

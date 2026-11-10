@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- **×** above an open agent goes back to the hub's overview, past Issues too when the agent was
+  opened from there, where it went back to Issues; **Esc** still steps back one level. The hub's
+  mark at the top of the list goes back to the overview from anywhere.
+- The first row of the hub's list no longer runs its name into the buttons when the list is
+  narrowed: below its default width it keeps the mark and leaves out the name, and the search box
+  drops its `/` hint.
+
 ## v4.1.0
 
 ### Features

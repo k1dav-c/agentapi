@@ -28,6 +28,9 @@ export interface HubListHeaderProps {
   sound: boolean;
   onToggleSound: () => void;
   onSettings: () => void;
+  // onHome is the hub's mark: the list and its overview, past an agent open
+  // and Issues.
+  onHome: () => void;
   onAdd: () => void;
   // onIssues opens the issue dispatch, or closes it when issuesOpen.
   issuesOpen: boolean;
@@ -49,17 +52,31 @@ export function hubLabel(version: string): string {
 // live, what the agents spent today, notifications, the theme, the
 // settings and Add; the search, the list's order and By machine; and the
 // state and agent chips.
-export function HubListHeader({status, unreachable, hubVersion, spend, notify, onToggleNotify, sound, onToggleSound, onSettings, onAdd, issuesOpen, issuesNeedYou, onIssues, search, filters, view}: HubListHeaderProps) {
+export function HubListHeader({status, unreachable, hubVersion, spend, notify, onToggleNotify, sound, onToggleSound, onSettings, onHome, onAdd, issuesOpen, issuesNeedYou, onIssues, search, filters, view}: HubListHeaderProps) {
   const connected = status === "connected";
   const {counts, query, setQuery} = filters;
   return (
-    <header className="space-y-3 border-b px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-3">
+    // A container: the list's width, which a person can narrow, decides what
+    // its first row has room for.
+    <header className="@container space-y-3 border-b px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-3">
       {/* The status line has a row of its own: beside the buttons, the
           name keeps too little room for it in the list's width. */}
       <div className="space-y-0.5">
-        <div className="flex items-center gap-2.5">
-          <HubMark className="size-8" />
-          <h1 className="min-w-0 flex-1 text-[15px] leading-tight font-semibold tracking-tight">AgentAPI Hub</h1>
+        {/* Narrower than 20rem, the name gives its room to the buttons; the
+            mark stays, and takes you home. */}
+        <div className="flex items-center gap-1 @[20rem]:gap-2.5">
+          <button
+            type="button"
+            onClick={onHome}
+            aria-label="Overview"
+            title="Overview"
+            className="shrink-0 rounded-lg outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          >
+            <HubMark className="size-8" />
+          </button>
+          <h1 className="min-w-0 flex-1 text-[15px] leading-tight font-semibold tracking-tight">
+            <span className="sr-only @[20rem]:not-sr-only">AgentAPI Hub</span>
+          </h1>
           {/* How the hub tells you an agent needs you while you look away. */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -111,7 +128,7 @@ export function HubListHeader({status, unreachable, hubVersion, spend, notify, o
             <Plus className="size-4" />
           </Button>
         </div>
-        <p className="flex min-w-0 items-center gap-1.5 pl-[42px] text-xs text-muted-foreground">
+        <p className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground @[20rem]:pl-[42px]">
           <span aria-hidden="true" className={cn("size-1.5 shrink-0 rounded-full", connected ? "bg-state-ready" : "animate-pulse bg-state-needs")} />
           <span aria-live="polite" className="shrink-0">
             {connected
@@ -158,7 +175,7 @@ export function HubListHeader({status, unreachable, hubVersion, spend, notify, o
               <X className="size-4" />
             </button>
           ) : (
-            <kbd className="pointer-events-none absolute top-1/2 right-2.5 hidden -translate-y-1/2 rounded border bg-background px-1.5 font-mono text-[11px] text-muted-foreground md:block">/</kbd>
+            <kbd className="pointer-events-none absolute top-1/2 right-2.5 hidden -translate-y-1/2 rounded border bg-background px-1.5 font-mono text-[11px] text-muted-foreground @[20rem]:md:block">/</kbd>
           )}
         </div>
         <ListOrderSwitch order={view.order} onChange={view.setOrder} />

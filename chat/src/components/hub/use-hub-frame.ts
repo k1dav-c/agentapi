@@ -9,23 +9,26 @@ import {useLatest} from "@/lib/use-stable-callback";
 // (FrameBar), with its own actions in it; until then the hub's bar shows.
 // A chat that loads again in the frame says it is ready again, and is told
 // the instance again (Framed.ready). The frame's element carries the
-// instance in data-instance. The bar's switch asks to open another agent of
-// the machine (onOpen), and the composer's menu of favorites to manage them
-// (onManageFavorites).
+// instance in data-instance. The bar's back arrow (a phone's) asks to go
+// back (onBack), and its × for the overview (onHome). The bar's switch asks
+// to open another agent of the machine (onOpen), and the composer's menu of
+// favorites to manage them (onManageFavorites).
 export function useHubFrame({
   onBack,
+  onHome,
   onCancelUpdate,
   onOpen,
   onManageFavorites,
 }: {
   onBack: () => void;
+  onHome: () => void;
   onCancelUpdate: (id: string) => void;
   onOpen: (id: string) => void;
   onManageFavorites: () => void;
 }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const [framed, setFramed] = useState<Framed>();
-  const latest = useLatest({onBack, onCancelUpdate, onOpen, onManageFavorites});
+  const latest = useLatest({onBack, onHome, onCancelUpdate, onOpen, onManageFavorites});
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       const chat = frame.current;
@@ -38,6 +41,9 @@ export function useHubFrame({
           break;
         case "back":
           latest.current.onBack();
+          break;
+        case "home":
+          latest.current.onHome();
           break;
         case "cancel-update":
           latest.current.onCancelUpdate(instance);

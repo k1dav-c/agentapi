@@ -5,7 +5,8 @@
 // Each agent opened is a page of its own in the history, so Back (a
 // phone's back gesture) returns to the agent before, and from the first to
 // the list or to Issues. Closing an agent returns there at once, past them
-// all. Issues is a page of its own too: Back closes it. The address stays
+// all; home returns to the list and its overview, past Issues too. Issues
+// is a page of its own: Back closes it. The address stays
 // the list's while Issues is open, so the agents' (#id) keep working; a
 // reload keeps what was open.
 
@@ -63,6 +64,9 @@ export interface HubRouter {
   // toggleIssues is the list header's Issues: closes it when it shows,
   // shows it otherwise.
   toggleIssues: () => void;
+  // home returns to the list and its overview: past the agents open and
+  // Issues below them.
+  home: () => void;
   // popped is told of each popstate: Back or Forward, or a go of the
   // router's own.
   popped: () => void;
@@ -127,6 +131,19 @@ export function createHubRouter(win: RouteWindow): HubRouter {
     if (route.issues && !route.agent) win.history.back();
   };
 
+  const home = () => {
+    const depth = agentDepth(win.history.state);
+    if (route.agent && depth === 0) {
+      // Opened at the agent's address: the list replaces it.
+      win.history.replaceState(null, "", here());
+      update();
+      return;
+    }
+    // Issues, shown or below the agents, is one page more.
+    const pages = depth + (route.issues ? 1 : 0);
+    if (pages > 0) pastAgents(pages);
+  };
+
   return {
     get: () => route,
     subscribe: (listener) => {
@@ -137,6 +154,7 @@ export function createHubRouter(win: RouteWindow): HubRouter {
     openIssues,
     closeIssues,
     toggleIssues: () => (route.issues && !route.agent ? closeIssues() : openIssues()),
+    home,
     popped: () => {
       if (closing) {
         closing = false;

@@ -566,9 +566,11 @@ version, with the chat's own search, terminal and Explorer buttons. When the mac
 agents the hub watches, the bar has a button for each of them too, in any list order: their marks
 with the same state dots as the [By machine](#by-machine) tabs, the open one marked. A click opens
 another in its place, so you switch between Claude Code and Codex on one machine without the list.
-**New tab** opens the chat on its own, and **×** (or **Esc**) goes back to the overview. Each agent
-you open is a page in the browser's history, so Back returns to the agent before it, and from the
-first to the list or the overview; **×** returns to the list at once, past them all. The URL keeps the agent (`#<id>`), so a reload or a bookmark
+**New tab** opens the chat on its own, and **×** goes back to the overview, past Issues too when you
+opened the agent from there; **Esc** steps back one level (from an agent opened from Issues, to
+Issues). The hub's mark at the top of the list also goes back to the overview from anywhere. Each
+agent you open is a page in the browser's history, so Back returns to the agent before it, and from
+the first to the list or the overview; **×** returns to the list at once, past them all. The URL keeps the agent (`#<id>`), so a reload or a bookmark
 comes back to it. An AgentAPI update under way shows in the bar too, with **Cancel** while it waits
 for the task ([Updating from the hub](#updating-from-the-hub)).
 
@@ -742,7 +744,8 @@ shows the command that installs one.
 | `Esc` | Clear the search, or go back: from an agent opened from Issues to Issues, then to the overview |
 
 On a desktop, drag the list's edge, or focus it and press ← or →, to change the list's width; each
-browser remembers it, and a double-click on the edge resets it.
+browser remembers it, and a double-click on the edge resets it. Narrower than the default, the
+list's first row keeps the hub's mark and leaves out the name, so its buttons fit.
 
 `/`, `i` and `Esc` work anywhere on the hub's page but in a field; `j`, `k`, the arrows and `p` work with the focus in
 the list or on nothing, so elsewhere the arrows scroll the overview as usual. In Issues, `j` and `k` move between the

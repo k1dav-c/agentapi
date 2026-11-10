@@ -135,6 +135,37 @@ describe("the hub's route", () => {
     expect(router.get()).toEqual({agent: undefined, issues: false});
   });
 
+  test("home from agents opened from Issues: the list, past them and Issues", async () => {
+    const history = new FakeHistory();
+    const router = history.open();
+    router.openIssues();
+    router.select("a");
+    router.select("b");
+    router.home();
+    await popped();
+    expect(router.get()).toEqual({agent: undefined, issues: false});
+    expect(history.at).toBe(0);
+    expect(history.url).toBe("/hub/");
+  });
+
+  test("home from an agent opened from the list, from Issues, and from the list", async () => {
+    const history = new FakeHistory();
+    const router = history.open();
+    router.select("a");
+    router.home();
+    await popped();
+    expect(router.get()).toEqual({agent: undefined, issues: false});
+    expect(history.at).toBe(0);
+    router.openIssues();
+    router.home();
+    await popped();
+    expect(router.get()).toEqual({agent: undefined, issues: false});
+    expect(history.at).toBe(0);
+    // On the list already: nothing to do.
+    router.home();
+    expect(history.at).toBe(0);
+  });
+
   test("i from an agent opened from the list: past the agents, then Issues on top", async () => {
     const history = new FakeHistory();
     const router = history.open();

@@ -20,5 +20,5 @@ export function useHubRoute(): HubRoute & Omit<HubRouter, "get" | "subscribe" | 
     window.addEventListener("popstate", router.popped);
     return () => window.removeEventListener("popstate", router.popped);
   }, [router]);
-  return {...route, select: router.select, openIssues: router.openIssues, closeIssues: router.closeIssues, toggleIssues: router.toggleIssues};
+  return {...route, select: router.select, openIssues: router.openIssues, closeIssues: router.closeIssues, toggleIssues: router.toggleIssues, home: router.home};
 }

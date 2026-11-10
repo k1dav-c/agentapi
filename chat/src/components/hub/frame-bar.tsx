@@ -33,12 +33,13 @@ export function FrameBar() {
     return () => window.removeEventListener("message", onMessage);
   }, []);
   const back = () => window.parent.postMessage(fromFrame("back"), window.location.origin);
+  const home = () => window.parent.postMessage(fromFrame("home"), window.location.origin);
   return (
     <div className="flex h-12 shrink-0 items-center gap-1 border-b bg-background px-1.5 sm:h-14 md:gap-2 md:px-3">
       <Button variant="ghost" size="icon" className="size-10 shrink-0 rounded-full md:hidden" onClick={back} aria-label="Back to Agents">
         <ArrowLeft className="size-5" />
       </Button>
-      <Button variant="ghost" size="icon" className="hidden size-9 shrink-0 rounded-full md:inline-flex" onClick={back} aria-label="Back to the overview" title="Back to the overview">
+      <Button variant="ghost" size="icon" className="hidden size-9 shrink-0 rounded-full md:inline-flex" onClick={home} aria-label="Back to the overview" title="Back to the overview">
         <X className="size-4" />
       </Button>
       {instance && <StatusGlyph state={instance.state} className="ml-1 hidden sm:block" />}
