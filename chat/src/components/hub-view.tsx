@@ -92,6 +92,7 @@ export function HubView() {
   const machine = useMemo(() => (current ? machineAgents(all, current) : []), [all, current]);
   const {frame, framed} = useHubFrame({
     onBack: () => select(undefined),
+    onHome: route.home,
     onCancelUpdate: (id) => void cancelFromHub(root, id),
     // Another agent of the open one's machine, from the bar's switch.
     onOpen: (id) => {
@@ -211,6 +212,7 @@ export function HubView() {
             sound={sound}
             onToggleSound={toggleSound}
             onSettings={() => setSettings("favorites")}
+            onHome={route.home}
             onAdd={() => setAdding(true)}
             issuesOpen={route.issues}
             issuesNeedYou={issuesNeedYou}
@@ -253,7 +255,7 @@ export function HubView() {
                   {favorites && <FrameFavorites frame={frame} ready={framed.ready} favorites={favorites} />}
                 </>
               ) : (
-                <InstanceBar instance={current} machine={machine} hubVersion={hubVersion} root={root} onBack={() => select(undefined)} onOpen={select} />
+                <InstanceBar instance={current} machine={machine} hubVersion={hubVersion} root={root} onBack={() => select(undefined)} onHome={route.home} onOpen={select} />
               )}
               <iframe
                 ref={frame}

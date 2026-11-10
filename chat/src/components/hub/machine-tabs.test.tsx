@@ -79,7 +79,7 @@ describe("MachineSwitch", () => {
 
   test("in the hub's bar above the chat, and not without other agents", () => {
     const bar = (instance: HubInstance) =>
-      renderToStaticMarkup(<InstanceBar instance={instance} machine={machineAgents(all, instance)} hubVersion="3.1.0" root="" onBack={() => {}} onOpen={() => {}} />);
+      renderToStaticMarkup(<InstanceBar instance={instance} machine={machineAgents(all, instance)} hubVersion="3.1.0" root="" onBack={() => {}} onHome={() => {}} onOpen={() => {}} />);
     expect(bar(all[1])).toContain("data-machine-switch");
     expect(bar(all[3])).not.toContain("data-machine-switch");
   });

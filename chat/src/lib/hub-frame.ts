@@ -54,7 +54,7 @@ export type MachineAgent = {
 type InstanceToFrame = {source: "agentapi.hub"; type: "instance"; instance: FrameInstance};
 type FavoritesToFrame = {source: "agentapi.hub"; type: "favorites"; favorites: Favorite[]};
 export type ToFrame = InstanceToFrame | FavoritesToFrame;
-export type FrameAsk = "ready" | "back" | "cancel-update" | "manage-favorites";
+export type FrameAsk = "ready" | "back" | "home" | "cancel-update" | "manage-favorites";
 export type FromFrame = {source: "agentapi.hub"; type: FrameAsk} | {source: "agentapi.hub"; type: "open"; id: string};
 
 const SOURCE = "agentapi.hub";
@@ -195,7 +195,7 @@ export function parseToFrame(data: unknown): ToFrame | undefined {
   }
 }
 
-const asks: readonly FrameAsk[] = ["ready", "back", "cancel-update", "manage-favorites"];
+const asks: readonly FrameAsk[] = ["ready", "back", "home", "cancel-update", "manage-favorites"];
 
 // parseFromFrame reads a message the chat in the frame posted to the hub.
 export function parseFromFrame(data: unknown): FromFrame | undefined {
