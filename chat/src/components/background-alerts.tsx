@@ -5,11 +5,14 @@ import {useChatSelector} from "./chat-provider";
 import {agentDisplayName} from "@/lib/agents";
 import { loginTitle } from "@/lib/login";
 import { alertForTransition, faviconDataUrl, notificationsEnabled, type FaviconBadge } from "@/lib/background-alerts";
+import { awayFromPage, playChime } from "@/lib/alert-sound";
 
 // Lets people who aren't looking at the tab know what the agent is doing:
 // a state dot on the tab icon, and (if they turned it on) a browser
 // notification when the agent needs them or finishes while the tab is in
-// the background.
+// the background, and (with the sound on) a chime while they look away.
+// In the hub's frame the hub chimes for an agent that needs you, so the
+// chat chimes only when it finishes.
 export function BackgroundAlerts() {
   const kind = useChatSelector((chat) => chat.agentState);
   const loginRequired = useChatSelector((chat) => chat.loginRequired);
@@ -33,6 +36,7 @@ export function BackgroundAlerts() {
   useEffect(() => {
     const alert = alertForTransition(previous.current, kind);
     previous.current = kind;
+    if (alert && awayFromPage() && !(alert === "needs-you" && inFrame())) playChime(alert);
     if (!alert || !document.hidden) return;
     if (alert === "finished") setUnseenFinish(true);
     if (!notificationsEnabled() || typeof Notification === "undefined" || Notification.permission !== "granted") return;
@@ -71,4 +75,13 @@ export function BackgroundAlerts() {
   }, [kind, unseenFinish, agentType]);
 
   return null;
+}
+
+// inFrame is whether the chat shows in another page's frame (the hub's).
+function inFrame(): boolean {
+  try {
+    return window.self !== window.top;
+  } catch {
+    return true;
+  }
 }

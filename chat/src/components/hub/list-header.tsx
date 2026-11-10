@@ -1,8 +1,9 @@
 "use client";
 
-import {Bell, BellOff, CircleDot, Plus, Search, Settings, X} from "lucide-react";
+import {Bell, BellOff, CircleDot, Plus, Search, Settings, Volume2, X} from "lucide-react";
 import {ModeToggle} from "@/components/mode-toggle";
 import {Button} from "@/components/ui/button";
+import {DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuTrigger} from "@/components/ui/dropdown-menu";
 import type {ConnectionStatus} from "@/lib/event-source";
 import {formatUSDShort} from "@/lib/format";
 import {spendTitle, type SpendTotals} from "@/lib/hub-spend";
@@ -23,6 +24,9 @@ export interface HubListHeaderProps {
   spend: SpendTotals;
   notify: boolean;
   onToggleNotify: () => void;
+  // sound is whether an agent that needs you chimes (alert-sound).
+  sound: boolean;
+  onToggleSound: () => void;
   onSettings: () => void;
   onAdd: () => void;
   // onIssues opens the issue dispatch, or closes it when issuesOpen.
@@ -45,7 +49,7 @@ export function hubLabel(version: string): string {
 // live, what the agents spent today, notifications, the theme, the
 // settings and Add; the search, the list's order and By machine; and the
 // state and agent chips.
-export function HubListHeader({status, unreachable, hubVersion, spend, notify, onToggleNotify, onSettings, onAdd, issuesOpen, issuesNeedYou, onIssues, search, filters, view}: HubListHeaderProps) {
+export function HubListHeader({status, unreachable, hubVersion, spend, notify, onToggleNotify, sound, onToggleSound, onSettings, onAdd, issuesOpen, issuesNeedYou, onIssues, search, filters, view}: HubListHeaderProps) {
   const connected = status === "connected";
   const {counts, query, setQuery} = filters;
   return (
@@ -56,17 +60,29 @@ export function HubListHeader({status, unreachable, hubVersion, spend, notify, o
         <div className="flex items-center gap-2.5">
           <HubMark className="size-8" />
           <h1 className="min-w-0 flex-1 text-[15px] leading-tight font-semibold tracking-tight">AgentAPI Hub</h1>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-9 rounded-full text-muted-foreground"
-            onClick={onToggleNotify}
-            aria-pressed={notify}
-            aria-label={notify ? "Stop notifying me" : "Notify me when an agent needs me"}
-            title={notify ? "Notifications on" : "Notify me when an agent needs me"}
-          >
-            {notify ? <Bell className="size-4 text-foreground" /> : <BellOff className="size-4" />}
-          </Button>
+          {/* How the hub tells you an agent needs you while you look away. */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-9 rounded-full text-muted-foreground"
+                aria-label={notify || sound ? "Alerts on" : "Alerts off"}
+                title="Alerts when an agent needs you"
+              >
+                {notify || sound ? <Bell className="size-4 text-foreground" /> : <BellOff className="size-4" />}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-60">
+              <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">When an agent needs you</DropdownMenuLabel>
+              <DropdownMenuCheckboxItem checked={notify} onCheckedChange={onToggleNotify} onSelect={(event) => event.preventDefault()}>
+                <Bell /> Notifications
+              </DropdownMenuCheckboxItem>
+              <DropdownMenuCheckboxItem checked={sound} onCheckedChange={onToggleSound} onSelect={(event) => event.preventDefault()}>
+                <Volume2 /> Sound
+              </DropdownMenuCheckboxItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <ModeToggle />
           <Button
             variant="ghost"

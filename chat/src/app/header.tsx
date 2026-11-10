@@ -8,7 +8,8 @@ import {sameValue} from "@/lib/agent-status";
 import {agentDisplayName} from "@/lib/agents";
 import { ModeToggle } from "@/components/mode-toggle";
 import { AgentMark } from "@/components/agent-mark";
-import { Activity, BellOff, BellRing, Bot, MessageSquareText, CircleCheck, Copy, Download, Fingerprint, Hash, Keyboard, LayoutGrid, LoaderCircle, Tag } from "lucide-react";
+import { Activity, BellOff, BellRing, Bot, MessageSquareText, CircleCheck, Copy, Download, Fingerprint, Hash, Keyboard, LayoutGrid, LoaderCircle, Tag, Volume2, VolumeX } from "lucide-react";
+import { useSound, useSoundUnlock } from "@/lib/alert-sound";
 import { copyText } from "@/lib/clipboard";
 import { getErrorMessage } from "@/lib/error-utils";
 import { formatTokens } from "@/lib/format";
@@ -49,6 +50,8 @@ export function Header() {
   const joinHubFromMenu = useDialogFromMenu(() => setJoinHubOpen(true));
   const elapsed = useWorkingElapsed(serverStatus);
   const [notify, setNotify] = useState(false);
+  const {sound, toggleSound} = useSound();
+  useSoundUnlock();
   useEffect(() => {
     const sync = () => setNotify(notificationsEnabled() && typeof Notification !== "undefined" && Notification.permission === "granted");
     sync();
@@ -179,6 +182,10 @@ export function Header() {
             <DropdownMenuItem onSelect={(event) => { event.preventDefault(); void toggleNotifications(); }}>
               {notify ? <BellRing /> : <BellOff />}
               {notify ? "Background notifications on" : "Notify me in the background"}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={(event) => { event.preventDefault(); toggleSound(); }}>
+              {sound ? <Volume2 /> : <VolumeX />}
+              {sound ? "Sound on" : "Play a sound"}
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={shortcutsFromMenu.onSelect}>
               <Keyboard />
