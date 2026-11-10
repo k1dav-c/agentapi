@@ -41,6 +41,9 @@ reproduce the captures, use [scripts/capture-docs.mjs](../scripts/capture-docs.m
   reasoning effort, and how full the context is; then the attachment button, more input options
   and the send button. The line under it lists the keys.
 - The ↑ and ↓ buttons at the bottom right jump to the previous and the next task.
+- At the end of the transcript, the chat follows what arrives. Scrolled up, you stay where you are:
+  the agent's reply and queued messages going out don't move you, and the jump-to-end button counts
+  the updates. A message you send takes you to the end.
 
 ![Sending a task: the agent thinks, runs a tool and replies](screenshots/demo-task.gif)
 

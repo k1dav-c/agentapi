@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- The chat no longer scrolls to the end while you read further up: as the agent answered your
+  message, every update of its reply took you to the end, since your message was the last one.
+  Only a message you send from the page takes you there; the agent's reply and queued messages
+  going out leave you where you are, and the jump-to-end button counts the updates.
+
 ## v4.3.1
 
 ### Fixes
