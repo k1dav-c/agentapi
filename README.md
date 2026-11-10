@@ -363,8 +363,9 @@ working directory. See [Native transport](#native-transport).
 ### Alerts, connection recovery and caching
 
 While the tab is in the background, its icon shows an amber dot when the agent needs you, a blue dot
-while it works, and a green dot when a task finishes. Turn on browser notifications from the status
-menu. The menu also downloads the conversation as JSONL, as does the Explorer's Session tab; for
+while it works, and a green dot when a task finishes. Turn on browser notifications (https pages
+only) or a chime (**Play a sound**, which works over plain http too) from the status menu; the
+hub's bell has the same two. The menu also downloads the conversation as JSONL, as does the Explorer's Session tab; for
 Claude Code or Codex, its subagents' steps follow the agent's own.
 
 ![The session details menu opened from the status in the header](docs/screenshots/session-details.png)

@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- A chime tells you an agent needs you or finished while you look away from the page (its tab in
+  the background, or another window in front): **Play a sound** in the chat's status menu, and
+  **Sound** in the hub's bell menu, which now also has **Notifications**. It plays over plain http,
+  where browsers have no notifications. In a chat the hub opens, the hub chimes for an agent that
+  needs you and the chat only when it finishes. The hub now says why it can't turn on
+  notifications (an http page, or blocked for the site) where it did nothing.
+
 ## v4.0.1
 
 ### Fixes

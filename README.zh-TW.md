@@ -315,7 +315,8 @@ HTML、Markdown 和 SVG 檔案還有第三個分頁 Preview，圖片檔則直接
 ### 提醒、連線復原與快取
 
 分頁在背景時，圖示會以圓點顯示狀態：琥珀色表示 agent 需要你回應，藍色表示工作中，綠色表示
-任務完成。瀏覽器通知可以從狀態選單開啟，這個選單也能把對話下載成 JSONL（Explorer 的 Session
+任務完成。瀏覽器通知（只限 https 頁面）和提示音（**Play a sound**，純 http 也能用）可以從狀態選單開啟，hub 的
+鈴鐺也有同樣的兩個選項；這個選單也能把對話下載成 JSONL（Explorer 的 Session
 分頁也可以）；Claude Code 或 Codex 執行過的 sub agent，其步驟會接在 agent 自己的事件之後。
 
 ![從標頭的狀態開啟的工作階段詳細資訊選單](docs/screenshots/session-details.png)
