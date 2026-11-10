@@ -9,6 +9,7 @@ import type {DispatchMode} from "@/lib/dispatch";
 import {getErrorMessage} from "@/lib/error-utils";
 import {parseFailedMessages} from "@/lib/failed-messages";
 import {usePersisted} from "@/lib/use-persisted";
+import {noteSent} from "./message-list/use-transcript-scroll";
 
 // useDrafts sends the user's messages. A user message shows at once as a
 // draft, "sending" until the server has it (messagesAfter drops it for the
@@ -49,6 +50,7 @@ export function useDrafts({
     if (!content.trim()) return {ok: false, queued: false};
     const clientId = crypto.randomUUID();
     dispatch({type: "draftAdded", draft: {role: "user", content, clientId, deliveryStatus: "sending"}});
+    noteSent();
     setLoading(true);
     try {
       const result = await api.sendMessage(content, mode);
