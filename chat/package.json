@@ -41,6 +41,9 @@
     "typescript": "^5.9.3"
   },
   "name": "chat",
+  "overrides": {
+    "postcss": "^8.5.32"
+  },
   "private": true,
   "scripts": {
     "build": "next build",
@@ -52,8 +55,5 @@
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
-  "version": "0.0.0-dev",
-  "overrides": {
-    "postcss": "^8.5.32"
-  }
+  "version": "0.0.0-dev"
 }
