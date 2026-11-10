@@ -4,6 +4,17 @@ import {useCallback, useEffect, useLayoutEffect, useRef, useState} from "react";
 import type {ServerStatus} from "@/lib/agent-status";
 import {getNextUserMessageTop, getPreviousUserMessageTop} from "@/lib/scroll-anchors";
 
+// SENT_EVENT is dispatched on the window when the reader sends a message
+// from this page (useDrafts): the transcript goes to its end, where the
+// message shows. Anything else that arrives while they read further up,
+// the agent's reply or a queued message going out, leaves them there.
+export const SENT_EVENT = "agentapi-sent";
+
+// noteSent tells the transcript that the reader sent a message.
+export function noteSent() {
+  window.dispatchEvent(new Event(SENT_EVENT));
+}
+
 // Below this height the transcript hides its floating buttons (two rows
 // of them would cover what little of it shows).
 const FLOATING_BUTTONS_MIN_HEIGHT = 140;
@@ -112,6 +123,13 @@ export function useTranscriptScroll(
     return () => observer.disconnect();
   }, [scrollArea, layout]);
 
+  // The reader's own message: to the end, which stays pinned as it shows.
+  useEffect(() => {
+    const onSent = () => scrollToBottom("smooth");
+    window.addEventListener(SENT_EVENT, onSent);
+    return () => window.removeEventListener(SENT_EVENT, onSent);
+  }, [scrollToBottom]);
+
   useEffect(() => {
     if (!scrollArea) return;
     const observer = new ResizeObserver(() => setRoomForButtons(scrollArea.clientHeight >= FLOATING_BUTTONS_MIN_HEIGHT));
@@ -124,12 +142,11 @@ export function useTranscriptScroll(
     const currentHeight = scrollArea.scrollHeight;
     const hasNewContent = currentHeight > lastScrollHeightRef.current;
     const isFirstRender = lastScrollHeightRef.current === 0;
-    const isNewUserMessage = messages.at(-1)?.role === "user";
     const grewAbove = start !== lastStartRef.current;
     lastStartRef.current = start;
     if (grewAbove && !isFirstRender && !isAtBottomRef.current) {
       // Earlier tasks, above the reader (useKeepPosition).
-    } else if (hasNewContent && (isFirstRender || isAtBottomRef.current || isNewUserMessage)) {
+    } else if (hasNewContent && (isFirstRender || isAtBottomRef.current)) {
       scrollToBottom(isFirstRender || serverStatus === "running" ? "auto" : "smooth");
     } else if (hasNewContent) {
       setUnreadCount((count) => count + 1);
