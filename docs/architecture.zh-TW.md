@@ -74,7 +74,7 @@ flowchart TB
 | `lib/native/` | Native transport：`Conversation`、`Adapter` 與 `Sink` 的約定、請求、設定、用量、登入、暫停佇列的狀態（`hold.go`：用量限制停下的回合或等待重試的失敗回合）、它的 `Policy`（`policy.go`：繼續、重試與重新啟動的間隔），以及 `ClassifyFailure`（失敗回合的停止原因） |
 | `lib/agentstate/` | Native agent 回報、API 提供的值：功能、登入、設定、用量、請求、用量限制停止與重試等待，以及 `ConversationState`（observer 整份收到的對話狀態），連同重新啟動後保留的 `StoredState`。它是末端套件（只用 huma 和 `lib/util`），提供這些值的套件因此不必依賴 `lib/native` |
 | `lib/native/claude`、`codex`、`pi` | 每種 agent 協定各一個 adapter |
-| `lib/native/agentio` | 這些 adapter 執行 agent 時共用的部分：行程與它的迴圈（`Host`）、寫入 stdin、把回應對應到等待中的請求、agent 請求的回答進行到哪裡（`Answer`）、寬鬆解碼與協定變動警告、快照節流 |
+| `lib/native/agentio` | 這些 adapter 執行 agent 時共用的部分：行程與它的迴圈（`Host`）、寫入 stdin、把回應對應到等待中的請求、agent 請求的回答進度（`Answer`）、寬鬆解碼與協定變動警告、快照節流 |
 | `lib/native/demo` | `native-demo`，開發聊天介面用的模擬 agent |
 | `lib/native/nativetest` | 測試用、可以寫腳本控制的假 adapter |
 | `lib/native/procutil` | 子行程：行程群組（process group）與正常關閉流程 |
@@ -89,7 +89,7 @@ flowchart TB
 | `lib/sse/` | 依 HTML 標準讀寫 server-sent events：讀取端（合併多行 data:、略過註解、行尾可為 CR、LF 或 CRLF）和寫入端，hub 用它讀實例的摘要串流、寫給瀏覽器的串流。`lib/httpapi` 則用 huma 的 `sse` 寫它的串流 |
 | `lib/netaddr/` | 這台主機的 IPv4 位址：其他主機連得到的位址（hub 的加入網址），以及連到某台主機時使用的位址（`Resolver`，供 `--public-url` 的 `{ip}` 使用） |
 | `lib/userconfig/` | 使用者的設定檔 `~/.agentapi/config.yaml`：以旗標名稱設定，`agentapi server` 讀取、`agentapi hub` 寫入 |
-| `lib/registry/` | 一台主機上執行中 AgentAPI 的登記檔（`~/.agentapi/instances`）：以原子方式寫入、列出，並刪除行程已不在、或 PID 已被別的行程拿到（啟動時間不同，限 Linux 和 macOS）的登記檔 |
+| `lib/registry/` | 一台主機上執行中 AgentAPI 的登記檔（`~/.agentapi/instances`）：以原子方式寫入、列出，並刪除行程已不在或 PID 已換成別的行程（啟動時間不同，限 Linux 和 macOS）的登記檔 |
 | `lib/atomicfile/` | 一次取代整個檔案，當機後只會留下舊資料或新資料：先寫暫存檔並同步到磁碟，再改名就位，最後同步目錄（設定檔、登記檔、hub 的實例檔） |
 | `lib/selfupdate/` | 把 k1dav-c/agentapi 的最新 release 安裝到程式的位置（`agentapi update`、`POST /update`）：到 GitHub 查詢、挑出這個平台的執行檔、比對 release 的 `checksums.txt` 並確認執行起來是那個版本，再在程式旁的鎖定檔保護下改名取代，檔案與目錄都會寫入磁碟（`Install`）；判斷使用者能否取代程式，並提供一次性的修正方式（`Program.Blocked`）；`selfupdatetest` 為測試提供假的 release |
 | `lib/shellterm/` | 共用的 shell 終端機 |
@@ -401,7 +401,7 @@ type Factory func(resume Resume) (Adapter, error)
 - 收回訊息等無法用更新表達的變更，會產生新的 epoch 並結束對話訂閱。用戶端以舊 epoch
   重新連線後，會收到 SSE id 正確的完整重播。訂閱落後超過緩衝，或開啟工作階段需串流超過
   緩衝四分之一的結構化訊息時，也會結束訂閱。
-- emitter 只保留對話的一個視窗（`window.go`）。有狀態資料庫時（`WithHotTasks`），它只保留最近
+- emitter 只保留對話的一個視窗（`window.go`）。有狀態資料庫時（`WithHotTasks`），只保留最近
   100 個任務（`DefaultHotTasks`）的結構化訊息和時間軸事件：每有任務開始，`trimLocked` 就放掉
   更早的部分（兩份清單中它們都排在前面），換成新的 slice 讓記憶體得以釋放，並重建索引。訊息和
   任務會留著，因為任務是從所有訊息推導出來的。`richBase` 是保留的第一則結構化訊息在資料庫中的
@@ -507,8 +507,8 @@ context 結束，避免不再讀取的 agent 佔住 `s.mu`。
   加上 `RichBase`）。結構化訊息依任務順序以位置排列，事件依時間順序以 ID 排列，所以 `history.go`
   用二分搜尋找出一個任務的第一筆，每次只讀一列的 `task_id` 或 `time`（`json_extract`），不必改
   schema。`RichMessagesOf` 和 `SessionEventsOf` 讀一頁，`EachSessionEvent` 和 `EachEarlier` 則
-  每次讀 500 列，讓等待資料庫唯一連線的寫入可以在中間進行：時間軸匯出，以及在伺服器的鎖之外讀取
-  較早結構化訊息和事件的上傳檔清理，都用這兩個。
+  每次讀 500 列，讓等待資料庫唯一連線的寫入可以在中間執行。時間軸匯出和上傳檔清理都用這兩個；
+  清理在伺服器的鎖之外讀取較早的結構化訊息和事件。
 - 檔案以獨占鎖定模式搭配 WAL 開啟，所以第二個 AgentAPI 無法使用它；新建立的檔案權限為 0600。
 - 啟動時伺服器會還原對話、佇列和工作階段參照；對話會把參照交給 factory，讓 agent
   接續它自己的工作階段。AgentAPI 2 以 PTY transport 為同一個 agent 保存的檔案也能開啟：它沒有
@@ -527,7 +527,7 @@ context 結束，避免不再讀取的 agent 佔住 `s.mu`。
   重設時保留。新增欄位不改版本，較舊的 AgentAPI 讀它認得的部分；會誤導舊版的改變才提高版本，
   遇到更高版本的 AgentAPI 不動這個物件，啟動時不帶保存的狀態。3.7.2 以前這三項各有一個 key
   （`settings`、`limit_stop`、`retry_wait`），AgentAPI 3.7.3 到 3.16 第一次開啟時會把它們搬進物件；
-  AgentAPI 4 不讀這些 key，所以只被 3.7.2 以前版本開啟過的檔案，啟動時不會帶保存的設定、用量限制
+  AgentAPI 4 不讀這些 key，所以只有 3.7.2 以前版本開啟過的檔案，啟動時不會帶保存的設定、用量限制
   停止和重試等待（對話仍在）。用 3.7.2 以前的 AgentAPI 開啟較新的檔案也一樣讀不到，它存下的這些
   也不會被讀取。
 - 較舊的 AgentAPI 不認得的資料，它重設或移除訊息時也不會清掉。還原時，訊息已不存在或已換成
@@ -555,11 +555,11 @@ webhook 事件的 delivery ID 也以同樣方式寫入 `instances.deliveries.jso
 重新啟動後重送的事件同樣會被拒絕。
 
 活動（`activity.go`）是獨立的檔案，放在 `instances.json` 旁的 `activity.json`，寫法相同，但最多每
-15 秒寫一次：最多一年的小時，每一小時是一個數字陣列，開頭是以 Unix 秒表示的開始時間。工作時間在每個
+15 秒寫一次：最多存一年，每小時一個數字陣列，開頭是以 Unix 秒表示的開始時間。工作時間在每個
 區段結束時加入，依涵蓋的小時拆開；活動記得每個實例算到哪裡（`counted`），所以同一個區段不會加兩次：
-啟動時從實例的區段補上的不會，請求時加上進行中的區段也不會。摘要還可能列出的 48 小時內，每個 scope
-的花費分開保存（`recent`），以設定而非累加的方式寫入；超過 48 小時就併入各小時的合計。無法解析或版本
-不同的檔案會被移到一旁，重新開始記錄：裡面是統計數字，不是 hub 執行時需要的資料。
+啟動時從實例的區段補算，或請求時加上進行中的區段，都不會重複。摘要還可能列出的 48 小時內，每個 scope
+的花費分開保存（`recent`），寫入時取代舊值，不累加；超過 48 小時就併入各小時的合計。無法解析或版本
+不同的檔案會移到一旁，重新開始記錄：裡面是統計數字，不是 hub 執行時需要的資料。
 
 SIGUSR1 會把排隊中的變更寫入狀態資料庫。`--state-file` 是 1.0 之前 PTY transport 的保存機制
 （關閉時寫出 JSON），AgentAPI 3 會把它匯入旁邊的狀態資料庫；AgentAPI 4 已移除。
@@ -655,7 +655,7 @@ Content-Security-Policy。
   瀏覽器呼叫 API。其他來源的網頁送出會造成改動的請求（GET、HEAD、OPTIONS 以外）時，除非那個來源
   列在清單上，否則一律拒絕；`*` 不信任任何來源（`lib/httpmw/crossorigin.go`：net/http 的
   `CrossOriginProtection`，加上清單裡含 `*` 的來源）。
-- server、hub 和 launcher 給用戶端 10 秒送完請求的標頭，閒置 2 分鐘的 keep-alive 連線會被關閉。
+- server、hub 和 launcher 給用戶端 10 秒送完請求的標頭，閒置 2 分鐘的 keep-alive 連線會關閉。
   回應寫多久則不設限，因為事件串流會一直開著。
 - 上傳的檔案存放在私有目錄，只回傳圖片。工作目錄以外的檔案無法開啟。
 - webhook 會把設定要送的內容（包括對話）送到它的網址，而 `PUT /webhook` 可以修改網址；它的
@@ -673,7 +673,7 @@ Content-Security-Policy。
   一律不動；實例搬走後，hub 不再送出它自己的 token。檔案記下 hub 最後一次讀到各實例摘要的網址，hub
   重新啟動後先從那裡追蹤。每台加入的主機都有同一個 secret，所以任何一台仍然可以把新的實例 ID，或位址
   已經不回應的實例 ID，指向自己的位址，拿到 `--instance-token`；每台主機各用一把金鑰才能根除。瀏覽器以 hub token 登入，換取
-  帶有簽發時間、以 token 簽章的 HttpOnly、SameSite=Lax cookie，hub 在 30 天後拒絕它；代理會移除瀏覽器的 cookie 以及 `Authorization`、
+  帶有簽發時間、以 token 簽章的 HttpOnly、SameSite=Lax cookie，30 天後 hub 不再接受；代理會移除瀏覽器的 cookie 以及 `Authorization`、
   `Origin`、`Referer`、`Sec-Fetch-*` 標頭，也會移除實例的 `Set-Cookie`，雙方的憑證都不會傳到另一邊。
   hub 和 AgentAPI 一樣，拒絕其他來源的網頁送出會造成改動的請求；設定 `--allowed-hosts` 時，只回應
   用這些名稱或 IP 位址連來的瀏覽器。代理在每個回應加上 `Content-Security-Policy: sandbox`，實例送來的
@@ -783,9 +783,9 @@ AgentAPI 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
   總計 50,000 筆紀錄時，刪除最久沒用的；hub 的每個實例各算一個伺服器（`lib/session-cache.ts`）。
 - chat 保留從它載入的第一個任務到最新任務的內容。完整重播帶來最近 20 個任務；`earlierTasks`
   （`lib/history.ts`）從第一個任務的 `number` 算出伺服器在它之前還有幾個任務，`loadEarlier` 讀取
-  它前面那一頁（`getHistoryPage`：用同一個 `before` 讀 `GET /tasks`、`/messages` 和
+  前一頁（`getHistoryPage`：用同一個 `before` 讀 `GET /tasks`、`/messages` 和
   `/rich-messages`），再由 `prependPage` 放到前面；若 chat 的第一個任務在這期間變了，就不放。
-  讀者捲到接近頂端或按 Show earlier tasks 時，`message-list.tsx` 會讀一頁，`use-keep-position.ts`
+  使用者捲到接近頂端或按 Show earlier tasks 時，`message-list.tsx` 會讀一頁，`use-keep-position.ts`
   則在這頁 render 期間讓原本顯示的第一個任務留在原位。搜尋只涵蓋已載入的任務，搜尋列可以載入
   其餘的。下載工作階段時讀取 `GET /timeline/export`。
 - `lib/task-timeline.ts` 的 `TimelineBuilder` 將訊息分組為任務，從第一個變更處重建並保留未變的

@@ -401,8 +401,8 @@ and queue, and require a second click.
 asks for a second click. When AgentAPI has given up on an agent that kept exiting, this starts it
 again. Codex and Pi, when AgentAPI starts their CLI directly, update to their latest release first.
 **Download conversation JSONL** saves every message, tool call and result of the session, one event per line, followed by those of the subagents the agent ran; the session
-details menu has it too. The server streams it, the earlier tasks too, which the chat may not
-have loaded.
+details menu has it too. The server streams it, including earlier tasks the chat may not have
+loaded.
 
 ### Webhook
 

@@ -221,8 +221,9 @@ agentapi server --state-db ~/.agentapi/myproject.db -- codex
 agentapi server --type pi -- ./my-pi-wrapper
 ```
 
-Any other agent stops AgentAPI at startup with an error that names v2.5.1. To run Aider, Goose, Gemini CLI, Amp, Cursor CLI, Auggie, Amazon Q, Opencode, Copilot, Kimi
-Code or another terminal program, use AgentAPI v2.5.1, the last release with the PTY transport:
+Any other agent stops AgentAPI at startup with an error that names v2.5.1. To run Aider, Goose,
+Gemini CLI, Amp, Cursor CLI, Auggie, Amazon Q, Opencode, Copilot, Kimi Code or another terminal
+program, use AgentAPI v2.5.1, the last release with the PTY transport:
 download its binary from the [v2.5.1 release](https://github.com/k1dav-c/agentapi/releases/tag/v2.5.1)
 and keep it. `agentapi update` only installs the latest release. An AgentAPI 2 that runs such an
 agent with `--allow-update` checks the new program before it restarts into it, refuses AgentAPI 3
@@ -368,8 +369,8 @@ working directory. See [Native transport](#native-transport).
 While the tab is in the background, its icon shows an amber dot when the agent needs you, a blue dot
 while it works, and a green dot when a task finishes. Turn on browser notifications (https pages
 only) or a chime (**Play a sound**, which works over plain http too) from the status menu; the
-hub's bell has the same two. The menu also downloads the conversation as JSONL, as does the Explorer's Session tab; for
-Claude Code or Codex, its subagents' steps follow the agent's own.
+hub's bell has the same two. The menu also downloads the conversation as JSONL, as does the
+Explorer's Session tab; for Claude Code or Codex, its subagents' steps follow the agent's own.
 
 ![The session details menu opened from the status in the header](docs/screenshots/session-details.png)
 
@@ -766,8 +767,8 @@ press. The Ctrl and Alt buttons hold the modifier for the next key.
   shell exits) and starts the shell if it doesn't run.
 - `POST /terminal/input` (`{"data": "..."}`) types into it, one request at a
   time, and `POST /terminal/resize` (`{"cols": 120, "rows": 40}`) sizes it.
-  Input a busy program doesn't read gets 503 after 10 seconds, perhaps partly
-  typed.
+  Input a busy program doesn't read gets 503 after 10 seconds; part of it may
+  have been typed.
 - It is on by default; `--terminal=false` turns it off. It is as protected as the rest of the API, so use `--api-token` when
   the server is reachable by others.
 
@@ -827,8 +828,8 @@ state-db: ~/.agentapi/state/{port}.db
 - Requests that were open when AgentAPI stopped are marked expired: the agent
   that asked is gone.
 - The server holds the tool calls and timeline of the latest 100 tasks in memory and reads earlier
-  ones from the file when a client asks, so a conversation of months starts as fast and takes as
-  little memory as a new one ([Long conversations](#long-conversations)).
+  ones from the file when a client asks, so a conversation of months starts about as fast as a new
+  one, and its memory stops growing with it ([Long conversations](#long-conversations)).
 - Uploads are kept next to the file (`<file>.uploads`), because messages refer
   to them by path. One that nothing in the conversation (or the queue) refers
   to is removed once it is 7 days old, which leaves time for a draft's
@@ -862,7 +863,7 @@ state-db: ~/.agentapi/state/{port}.db
 - AgentAPI 4 no longer reads `--state-file`, the PTY transport's persistence
   before v1.0.0. AgentAPI 3 imported such a file into a state database next to
   it (the same name with `.db`) the first time it started with it: start with
-  `--state-db` on that database. To import a file that never was, run AgentAPI
+  `--state-db` on that database. To import a file that never was imported, run AgentAPI
   3.16 once with `--state-file`.
 - [`agentapi restart`](#agentapi-restart) (SIGUSR2) and
   `agentapi update --restart` keep the conversation, and the agent's
@@ -1178,7 +1179,7 @@ The [HTTP API reference](#http-api-reference) lists all the endpoints.
 - `GET /messages` returns the conversation; `GET /rich-messages` and
   `GET /timeline` return its structured form (see
   [Structured activity](#structured-activity)). `GET /messages` returns every message unless asked
-  for a page; the other two, and `GET /tasks`, hold the latest 20 tasks; all page back with
+  for a page; the other two, and `GET /tasks`, return the latest 20 tasks; all page back with
   `before` (see [Long conversations](#long-conversations)).
 - A message that went out but wasn't confirmed (the call timed out, or
   AgentAPI was stopping) may have reached the agent: it isn't sent again,
@@ -1297,8 +1298,8 @@ their output, the timeline). AgentAPI keeps that bounded:
 - `GET /rich-messages`, `GET /timeline` and `GET /tasks` return a page of tasks and what belongs to
   them: without parameters the latest 20, as the full `/events` replay holds them. `GET /messages`
   pages the same way with `before` or `limit`; without either it returns every message, as it
-  always did, since the server keeps the messages (they are small) and upstream's clients read
-  them so. `has_more` says earlier tasks exist; pass `next_before` (the ID of the page's first task)
+  always did, since the server keeps the messages (they are small) and upstream's clients expect
+  them all. `has_more` says earlier tasks exist; pass `next_before` (the ID of the page's first task)
   as `before` for the page before, and `limit` (up to 100) for its size. The page that reaches the
   start also holds what came before the first task.
 - With `--state-db`, the server holds the rich messages and the timeline of the latest 100 tasks
@@ -1335,8 +1336,8 @@ instance:
   `week_tokens`: `input`, `output`, `cache_write`, `cache_read` and their `total`), when the amounts
   last changed (`updated_at`), a `scope`, and from 4.2 the hours behind them (`hours`: each of the
   last 25 hours with calls, its start in UTC, `usd` and `tokens`; the hub's
-  [activity](docs/hub.md#activity) keeps them for a year). AgentAPIs of one agent in one directory of a machine
-  report the same sessions, with the same `scope`: a client that adds up many counts each scope
+  [activity](docs/hub.md#activity) keeps them for a year). AgentAPIs of one agent in one directory
+  of a machine report the same sessions, with the same `scope`: a client that adds up many counts each scope
   once. Its `update` says whether a client can [update the AgentAPI](#updating-through-the-api), and
   how far an update is.
 - `attention` identifies why the agent needs you, in priority order: `login`, `request` (approval,
@@ -1358,8 +1359,8 @@ entry in `~/.agentapi/instances` (`--registry-dir`; `--registry=false` turns it 
 `auth_required` (never the token) and `restarts_in_place` (it restarts in place on SIGUSR2, see
 [`agentapi restart`](#agentapi-restart)) and, on Linux and macOS, `process_start` (when its process
 started, as the system counts it). It removes the entry when it stops; an entry whose process is
-gone (after a crash) is removed when the registry is listed, also when another process got its PID
-since (it started at another time). Check that `GET /summary` returns the
+gone (after a crash) is removed when the registry is listed, also when another process has since
+taken its PID (it started at another time). Check that `GET /summary` returns the
 entry's `server_id` before using one: another AgentAPI may have taken the port.
 [`agentapi list`](#agentapi-list) shows the registered instances with their summaries.
 
@@ -1859,7 +1860,7 @@ seconds for a whole turn.
 
 A long conversation grows by about 100 KB a task in its state database. On 2026-11-10, with a
 conversation of 100 KB tasks restored from `--state-db` (`native-demo`, the same machine), AgentAPI
-4.2.0 held all of it, and the next release holds the latest 100 tasks
+4.2.0 held all of it, and 4.3.0 holds the latest 100 tasks
 ([Long conversations](#long-conversations)):
 
 | Tasks | State database | Memory, 4.2.0 | Memory, after | First `/events?sync=1` replay, 4.2.0 | After |
@@ -2238,7 +2239,7 @@ run with `CGO_ENABLED=0`. Commit `openapi.json` with every API change, and regen
 with `make gen` (see [AGENTS.md](AGENTS.md)). The chat UI lives in [chat/](chat/README.md):
 `bun run dev` serves it against a running AgentAPI, and
 `agentapi server -- native-demo` runs a simulated agent for working on it
-without a real one. [MAINTAINERS.md](MAINTAINERS.md) has how CI tests and releases a commit.
+without a real one. [MAINTAINERS.md](MAINTAINERS.md) describes how CI tests and releases a commit.
 
 ## Runtime reliability
 

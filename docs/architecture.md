@@ -465,11 +465,11 @@ type Factory func(resume Resume) (Adapter, error)
   functions posted to it and one timer: for the snapshots the throttle held
   back (`agentio.Throttle`, 100 ms) and the 10-second wait for an
   interrupted turn to end (`agentio.InterruptDeadline`), which starts when
-  the agent accepts the interrupt, also after `Interrupt` stopped waiting for
-  that answer. That goroutine
-  calls the Sink. The agent has exited, for `Wait`, once the process is gone
-  and the loop has handled its output, or 2 seconds after the process is
-  gone: a process the agent started can keep the output open. Stopping it
+  the agent accepts the interrupt, even after `Interrupt` stopped waiting for
+  that answer. That goroutine calls the Sink. The agent has exited, for
+  `Wait`, once the process is gone and the loop has handled its output, or
+  2 seconds after the process is gone: a process the agent started can keep
+  the output open. Stopping it
   closes its input, then sends the group SIGTERM after 3 seconds and SIGKILL
   2 seconds later. Before that, the adapters interrupt a running turn and
   wait up to 3 seconds for it to end, so the agent's session log doesn't end
@@ -518,7 +518,8 @@ usage limit stop, a retry wait, login).
   state database (`WithHotTasks`) it holds the rich messages and timeline
   events of the latest 100 tasks only (`DefaultHotTasks`): when a task
   starts, `trimLocked` lets go of the earlier ones, which come first in
-  both lists, into new slices so they are freed, and rebuilds the index.
+  both lists: it moves the rest into new slices, so the old ones are freed,
+  and rebuilds the index.
   The messages and the tasks stay; the tasks are derived from all the
   messages. `richBase` is the stored position of the first rich message
   held, so the persister's positions don't change. `Page` turns a cursor
@@ -529,7 +530,7 @@ usage limit stop, a retry wait, login).
   of, which `lib/httpapi` then reads from the state database.
 - A full replay holds the latest 20 tasks (`DefaultRecentTasks`, the
   `recentLocked` page) and has the current seq. A replay since a seq holds
-  every change after it the emitter holds, also of earlier tasks; one from
+  every later change the emitter has, of earlier tasks too; one from
   before `coldSeq`, the latest change of a rich message it let go of, is
   full instead. Tasks carry their `number`, set where the emitter hands
   them out (`numbered`) and not stored.
@@ -673,8 +674,8 @@ The queue is persisted with the conversation, on every change (`storeQueue`, fro
   change. `RichMessagesOf` and `SessionEventsOf` read a page, and
   `EachSessionEvent` and `EachEarlier` go through the rows 500 at a time,
   so the writes, which wait for the database's one connection, go on in
-  between: the timeline export, and the upload pruning, which reads the
-  earlier rich messages and events outside the server's lock.
+  between. They serve the timeline export and the upload pruning, which
+  reads the earlier rich messages and events outside the server's lock.
 - The file is opened in exclusive locking mode with WAL, so no second
   AgentAPI can use it, and is created with mode 0600.
 - On startup the server restores the conversation, the queue and the session
@@ -704,10 +705,10 @@ The queue is persisted with the conversation, on every change (`storeQueue`, fro
   and starts without stored state. Up to 3.7.2 the three had a key each
   (`settings`, `limit_stop`, `retry_wait`), which AgentAPI 3.7.3 to 3.16
   moved into the object on the first open; AgentAPI 4 doesn't read them, so
-  a file only 3.7.2 or earlier opened starts without the stored settings,
-  limit stop and retry wait (the conversation is kept). AgentAPI 3.7.2 or
-  earlier opened on a newer file starts without them too, and what it
-  stores there is ignored.
+  on a file only 3.7.2 or earlier opened it starts without the stored
+  settings, limit stop and retry wait (the conversation is kept). AgentAPI
+  3.7.2 or earlier opened on a newer file starts without them too, and what
+  it stores there is ignored.
 - What an older AgentAPI doesn't know, its resets and truncations don't
   clear. A restored task whose message is gone or is another one now is
   dropped, as is one whose message row couldn't be read.
@@ -748,7 +749,7 @@ seconds and its figures as an array of numbers. Work goes in as each span ends, 
 hours it covers, and the activity keeps where it counted each instance up to (`counted`), so a span
 is never added twice: not by the backfill from the instances' spans at startup, nor by a request
 that adds the spans going on. A scope's spend stays apart (`recent`) while summaries may still list
-its hours, 48 hours, and is set rather than added; past that, it folds into the hours' totals. A
+its hours (48 hours), and is set rather than added; past that, it folds into the hours' totals. A
 file that doesn't parse, or of another version, is moved aside and a new one starts: it holds
 statistics, not what the hub needs to run.
 
@@ -833,9 +834,9 @@ client subscribes and keeps running after all clients disconnect. Its output goe
 scrollback, trimmed at a line start, and to each watcher's buffer. The scrollback is a ring, so adding
 output takes time in proportion to the output, not to the scrollback. A watcher that falls 512 chunks
 behind is dropped and reconnects for the scrollback. `GET /terminal` streams base64-encoded `output`
-and `exit` events. `POST /terminal/input` sends input, one request at a time; a program that
-doesn't read it, once the terminal's buffers are full, gets it for 10 seconds, after which the
-request gives up with 503 (also when the client leaves). `/terminal/resize` changes the
+and `exit` events. `POST /terminal/input` sends input, one request at a time; when a program
+doesn't read it and the terminal's buffers are full, the request waits 10 seconds, then gives up
+with 503 (also when the client leaves). `/terminal/resize` changes the
 dimensions; the most recent resize applies. Closing hangs up the terminal and kills the shell's
 process group after 2 seconds.
 
@@ -856,8 +857,9 @@ HTML file with the stylesheets, scripts, images, fonts and media it references b
 embedded as data URLs: only files whose extension matches their resource type (a stylesheet must be
 `.css`, a script `.js`), none in a hidden directory or above the working directory, up to 4 MiB
 each and 16 MiB in all. Each file is read once, however often stylesheets import it; once the
-16 MiB are spent nothing more is read, and a request that ends stops the work. The chat shows the page in an iframe sandboxed with `allow-scripts` but
-without `allow-same-origin`: the page has no origin, so its scripts can't read the chat, send its
+16 MiB are spent nothing more is read, and a request that ends stops the work. The chat shows the
+page in an iframe sandboxed with `allow-scripts` but without `allow-same-origin`: the page has no
+origin, so its scripts can't read the chat, send its
 session cookie or call the API with it, and nothing it refers to is loaded from AgentAPI (which a
 proxy's cookie wouldn't reach either). `GET /files/image` serves raster images judged by content, as
 `GET /uploads` does, and SVG judged by extension, which `GET /uploads` never serves; both send
@@ -1124,9 +1126,10 @@ chat and `parseFromFrame` in the hub.
   race detector, on the repository's self-hosted Linux runner for tests;
   nothing tests macOS or Windows. The Release workflow first asks
   `release-version.sh` whether the commit releases anything; only then does
-  it run these tests (`go-test.yml`, called as a reusable workflow) on it,
-  and it releases only once they pass, for a push to `main`, a manual run
-  and a published release alike, on a runner of its own (MAINTAINERS.md).
+  it run these tests (`go-test.yml`, called as a reusable workflow) on it.
+  It releases only once they pass, for a push to `main`, a manual run and
+  a published release alike, and runs on a runner of its own
+  (MAINTAINERS.md).
   Pull requests run every job on their own, except those from forks, whose
   code would run on the runners' machine. The Release workflow checks that
   each binary is built for its platform, and a push that a later push's
