@@ -29,10 +29,17 @@ import (
 // spendInterval is how often the spend is worked out again.
 const spendInterval = time.Minute
 
+// spendHours is how many hours the summary's spend lists, the hour under
+// way included: one more than the day adds up, so a client that reads the
+// summary less than hourly misses no hour's final figure.
+const spendHours = 25
+
 // spendOf adds up the hours of hourly that end within the last day and
-// week before now: the cost to the cent, and the tokens.
+// week before now: the cost to the cent, and the tokens. It lists the last
+// spendHours hours with calls too.
 func spendOf(hourly []sessions.HourCost, now time.Time) instanceapi.SummarySpend {
 	day, week := now.Add(-24*time.Hour), now.Add(-7*24*time.Hour)
+	listed := now.UTC().Truncate(time.Hour).Add(-(spendHours - 1) * time.Hour)
 	var spend instanceapi.SummarySpend
 	var dayTokens, weekTokens pricing.Tokens
 	for _, h := range hourly {
@@ -44,6 +51,11 @@ func spendOf(hourly []sessions.HourCost, now time.Time) instanceapi.SummarySpend
 		if end.After(day) {
 			spend.DayUSD += h.USD
 			dayTokens = dayTokens.Add(h.Tokens)
+		}
+		if !h.Hour.Before(listed) {
+			// To a millionth of a dollar: enough for any sum of them.
+			usd := math.Round(h.USD*1e6) / 1e6
+			spend.Hours = append(spend.Hours, instanceapi.SummaryHour{Hour: h.Hour.UTC(), USD: usd, Tokens: *summaryTokens(h.Tokens)})
 		}
 	}
 	spend.DayUSD = math.Round(spend.DayUSD*100) / 100
@@ -76,14 +88,16 @@ func spendScope(store *sessions.Store) string {
 }
 
 // nextSpend is spend of scope, worked out at now after last: it keeps
-// last's time while the amounts and tokens stay, so the summary changes with them
-// only.
+// last's time and hours while the amounts and tokens stay, so the summary
+// changes with them only. An hour that left the list meanwhile stays until
+// then: its figures are final.
 func nextSpend(last, spend instanceapi.SummarySpend, scope string, now time.Time) instanceapi.SummarySpend {
 	spend.Scope = scope
 	if last.UpdatedAt.IsZero() || spend.DayUSD != last.DayUSD || spend.WeekUSD != last.WeekUSD || spend.Scope != last.Scope || !spend.SameTokens(last) {
 		spend.UpdatedAt = now.UTC().Truncate(time.Second)
 	} else {
 		spend.UpdatedAt = last.UpdatedAt
+		spend.Hours = last.Hours
 	}
 	return spend
 }

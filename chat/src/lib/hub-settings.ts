@@ -1,5 +1,6 @@
 // What the hub page keeps in the browser, one key each: which sections are
-// folded, whether to notify, the agents the list is filtered by, the tab
+// folded, which overview cards are folded, the Activity card's measure,
+// whether to notify, the agents the list is filtered by, the tab
 // picked on each machine's card, the list's order, By machine, and the
 // list's width. Each setting reads what the page stored before it (a value
 // it can't read is its default) and writes in the same format, so a page
@@ -8,6 +9,7 @@
 
 import {useCallback, useState} from "react";
 import {parseAgents, type HubAgent} from "./hub-filter";
+import {parseActivityMetric, type ActivityMetric} from "./hub-activity";
 import {parseListWidth} from "./hub-list-width";
 import {parseListOrder, type ListOrder} from "./hub-order";
 
@@ -61,6 +63,8 @@ function serializeTabPicks(picks: ReadonlyMap<string, TabPick>): string {
 // HubSettings are the settings by name, with their values.
 export type HubSettings = {
   collapsed: ReadonlySet<string>;
+  overviewFolded: ReadonlySet<string>;
+  activityMetric: ActivityMetric;
   notify: boolean;
   agents: ReadonlySet<HubAgent>;
   tabPicks: ReadonlyMap<string, TabPick>;
@@ -75,6 +79,11 @@ export type HubSettingName = keyof HubSettings;
 export const hubSettings: {readonly [N in HubSettingName]: Setting<HubSettings[N]>} = {
   // The keys of the folded sections (ListSection.key), as JSON.
   collapsed: {key: "agentapi.hub.collapsed", parse: fromJSON(stringSet), serialize: (value) => JSON.stringify([...value])},
+  // The keys of the overview's folded cards (spend, tokens, work,
+  // activity), as JSON.
+  overviewFolded: {key: "agentapi.hub.overview-folded", parse: fromJSON(stringSet), serialize: (value) => JSON.stringify([...value])},
+  // What the Activity card's heatmap shows, as its name.
+  activityMetric: {key: "agentapi.hub.activity-metric", parse: parseActivityMetric, serialize: (value) => value},
   // Whether to notify, as JSON.
   notify: {key: "agentapi.hub.notify", parse: fromJSON((value) => value === true), serialize: (value) => JSON.stringify(value)},
   // The agents picked, as JSON; none is every agent.

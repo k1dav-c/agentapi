@@ -1,6 +1,61 @@
 {
   "components": {
     "schemas": {
+      "ActivityBody": {
+        "additionalProperties": false,
+        "properties": {
+          "days": {
+            "items": {
+              "$ref": "#/components/schemas/ActivityDay"
+            },
+            "type": "array"
+          },
+          "since": {
+            "description": "The first day the hub kept its activity, as YYYY-MM-DD in the time zone asked for: the days before it aren't counted.",
+            "type": "string"
+          },
+          "time_zone": {
+            "description": "The time zone of the days.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "days",
+          "since",
+          "time_zone"
+        ],
+        "type": "object"
+      },
+      "ActivityDay": {
+        "additionalProperties": false,
+        "properties": {
+          "date": {
+            "description": "The day, as YYYY-MM-DD.",
+            "type": "string"
+          },
+          "tokens": {
+            "$ref": "#/components/schemas/SummaryTokens",
+            "description": "The tokens of the calls usd adds up."
+          },
+          "usd": {
+            "description": "What the agents' sessions spent that day, API-equivalent at list prices; each scope once. AgentAPIs before 4.2 don't count.",
+            "format": "double",
+            "type": "number"
+          },
+          "work_seconds": {
+            "description": "How long the agents worked that day, as the hub saw it, each one's time added up.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "date",
+          "work_seconds",
+          "usd",
+          "tokens"
+        ],
+        "type": "object"
+      },
       "AddInstanceBody": {
         "additionalProperties": false,
         "properties": {
@@ -1333,6 +1388,44 @@
         ],
         "title": "State",
         "type": "string"
+      },
+      "SummaryTokens": {
+        "additionalProperties": false,
+        "properties": {
+          "cache_read": {
+            "description": "Input tokens read from the prompt cache.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "cache_write": {
+            "description": "Input tokens written to the prompt cache, the five-minute and one-hour caches together.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "input": {
+            "description": "Uncached input tokens.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "output": {
+            "description": "Output tokens, thinking included.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "total": {
+            "description": "The sum of input, output, cache_write and cache_read.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "input",
+          "output",
+          "cache_write",
+          "cache_read",
+          "total"
+        ],
+        "type": "object"
       },
       "Transport": {
         "enum": [

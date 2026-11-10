@@ -4,6 +4,8 @@ import {hubSettings, readHubSetting, writeHubSetting, type HubSettingName, type 
 // What a page of an earlier release stored, by key, as it wrote it.
 const stored: Record<string, string> = {
   "agentapi.hub.collapsed": JSON.stringify([" pinned", "Client work"]),
+  "agentapi.hub.overview-folded": JSON.stringify(["spend", "activity"]),
+  "agentapi.hub.activity-metric": "tokens",
   "agentapi.hub.notify": JSON.stringify(true),
   "agentapi.hub.agents": JSON.stringify(["codex", "claude"]),
   "agentapi.hub.machine-tabs": JSON.stringify([
@@ -19,6 +21,8 @@ const stored: Record<string, string> = {
 
 const read: HubSettings = {
   collapsed: new Set([" pinned", "Client work"]),
+  overviewFolded: new Set(["spend", "activity"]),
+  activityMetric: "tokens",
   notify: true,
   agents: new Set(["claude", "codex"]),
   tabPicks: new Map([
@@ -34,6 +38,8 @@ const read: HubSettings = {
 
 const defaults: HubSettings = {
   collapsed: new Set(),
+  overviewFolded: new Set(),
+  activityMetric: "work",
   notify: false,
   agents: new Set(),
   tabPicks: new Map(),

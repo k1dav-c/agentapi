@@ -199,8 +199,9 @@ hub 沒有回應時（它停了，或它前面的 proxy 回了錯誤頁），頁
 已完成未讀、離線），點一下就會依該狀態篩選清單，已選的 agent 不變（見[下方](#清單)）。下方每個需要你的 agent 各有一張卡片，寫出它在等什麼（核准
 的指令、提問、登入、用量限制）和等了多久，並有 **Answer** 或 **Open** 按鈕。工作中的 agent 會顯示
 提示和已經跑了多久；你還沒看過的已完成 agent 會顯示標題。狀態格和這些卡片之間是[花費](#花費)、
-[Token 用量](#token-用量)和[工作時間](#工作時間)卡片；最下方的[版本](#版本)卡片統計各 agent 執行的
-AgentAPI 版本。
+[Token 用量](#token-用量)、[工作時間](#工作時間)和[活動](#活動)卡片；最下方的[版本](#版本)卡片
+統計各 agent 執行的 AgentAPI 版本。點卡片標題前的箭頭可以把卡片收合成一行，只留 7 天的數字（活動卡片
+留一年的）；瀏覽器會記得你收合了哪些卡片。
 
 ![深色主題的總覽](screenshots/hub-desktop-dark.png)
 
@@ -260,6 +261,25 @@ agent 那一列顯示工作中（`working`）時，hub 就替它計時：從開�
 這是 hub 自己對每個實例的紀錄。
 
 hub 把最近 7 天的工作區段存在檔案裡，送出的是它們的合計（`work`）；正在進行的那一段由頁面自己加上。
+
+### 活動
+
+![最近一年每一天依工作時間上色，某一天的提示顯示它的工作時間、token 和花費](screenshots/hub-activity.png)
+
+總覽在 Work time 下方有一張 **Activity** 卡片，像 GitHub 的貢獻圖一樣畫出最近一年：一週一欄，
+星期日在最上面，今天在最後一欄，月份名稱標在該月第一週的上方。每天一格，依卡片上方選的
+**Work time**、**Tokens** 或 **Spend** 上色（瀏覽器會記得你選的）：共五種深淺，沒有任何數字的一天
+最淡，其餘的天數依數字大小每四分之一一種顏色，所以單獨一天特別忙，不會讓其他天都變得看不出差別。
+滑鼠移到格子上，或把焦點移進格子後用方向鍵移動，就會看到那一天的三個數字。日期依瀏覽器的時區劃分；
+頁面每 10 分鐘、以及你回到頁面時，會重新讀取。
+
+hub 從執行有這項功能的版本那天開始逐小時記錄，在實例檔案旁的 `activity.json` 保留一年（366 天）。
+在那之前的日子是空白的，卡片會寫出從哪天開始記錄。工作時間把每個 agent 的區段加起來，算法和 Work
+time 卡片相同；第一次啟動時，hub 會補上實例檔案裡已有的 7 天。花費和 token 來自 agent 的摘要：
+從 4.2 起，AgentAPI 的 `spend` 會列出它的 scope 最近 25 小時每小時的花費（`hours`），hub 把每個
+scope 的這些小時設成最新的數字，所以同一個 scope 不論有幾個 AgentAPI 回報都只算一次，還在進行中的
+那一小時也會跟著增加。較舊的 AgentAPI 的花費要更新後才會計入。超過 48 小時的小時就不再變動：不會再有
+摘要列出它，hub 把它併進那一天的合計。
 
 ### 版本
 
@@ -897,6 +917,7 @@ launcher token（`~/.agentapi/host.token`）：重灌過、或 token 檔被刪�
 | `GET /api/github/repos` | App 看得到的 repo，最近有 push 或變動的在前（`pushed_at`、`updated_at`） |
 | `GET /api/github/issues?repo=` | repo 的 open issue；`POST` 開新 issue，帶 `assign` 時直接開工 |
 | `POST /api/dispatch` | 開工、傳訊息、連結 PR、停止（`action`：`start`、`send`、`link_pr`、`stop`）；也接受 `--dispatch-token`。`start` 在 job 於主機上進入 `starting` 時就回應，之後的狀態由串流和 `GET /api/jobs` 得知 |
+| `GET /api/activity?tz=&days=` | 最近 `days` 天（1 到 371，預設 371，即 53 週）每天的[活動](#活動)，由舊到新，依 `tz` 指定的時區（IANA 名稱，例如 `Asia/Taipei`；預設 UTC）劃分：`{"days": [{"date": "2026-11-10", "work_seconds", "usd", "tokens": {"input", "output", "cache_write", "cache_read", "total"}}, …], "since", "time_zone"}`。`since` 是 hub 開始記錄的那一天（同一時區）；每一小時算在它開始的那一天。不接受的時區或天數回 400 |
 | `GET /api/join` | 主機加入 hub 用的資訊：`urls` 的每一項是一個 webhook 網址（`url`）和這個位址所在的網路介面（`interface`；`--bind` 的位址沒有），順序和啟動時的 log 相同；只有設了 token 的 hub 才會附上 secret（`secret`，並帶 `secret_shown: true`） |
 | `/i/{id}/…` | 透過 hub 存取實例自己的 API 和聊天介面；頁面用 `POST /i/{id}/update` 更新實例，用 `DELETE` 取消 |
 
@@ -913,6 +934,7 @@ case 的 HTTP 狀態（例如 `not_found`）；`error` 和 `message` 相同，�
 | `~/.agentapi/instances/` | `agentapi server` | 這台主機上執行中的 AgentAPI，供 `join` 和 `agentapi list` 使用 |
 | `~/.agentapi/hub/instances.json` | `agentapi hub serve` | hub 記得的實例、它們的群組和釘選、各自最近一次變動的時間、最近 7 天各自工作的區段、hub 最後一次讀到各自摘要的網址，以及手動加入的實例的 token；還有[我的最愛](#我的最愛) |
 | `~/.agentapi/hub/instances.json.bak` | `agentapi hub serve` | hub 上次啟動時看到的實例檔案 |
+| `~/.agentapi/hub/activity.json` | `agentapi hub serve` | 最近 366 天逐小時（UTC）的[活動](#活動)：工作時間，以及每個 scope 的花費和 token；最多每 15 秒寫入一次。`activity.json.bak` 是 hub 上次啟動時看到的檔案；無法解析的檔案會被移到一旁（`.corrupt-<時間>`），hub 重新開始記錄 |
 | `~/.agentapi/hub/instances.deliveries.json` | `agentapi hub serve` | hub 處理過、簽章仍有效的事件的 delivery ID，用來拒絕重送的事件 |
 | `~/.agentapi/hub/dispatch.json` | `agentapi hub serve` | [issue 派工](#issues)的主機（含 launcher 的 token）和 job：各次 run、花費與最近 50 則訊息 |
 | `~/.agentapi/hub/github-app.json` | `agentapi hub serve` | hub 的 GitHub App 與它的私鑰 |
@@ -940,6 +962,8 @@ cd ~/.agentapi/hub && jq .instances instances.json > instances.json.new && mv in
 - 所有人共用一個 hub token：沒有個別帳號或權限，登入的人也共用同一份[我的最愛](#我的最愛)。
 - [工作時間](#工作時間)只有 hub 看到的部分：hub 還沒有這項功能之前、hub 停機或連不到 agent 的期間都
   不算。一個 hub 也不知道另一個 hub 算了多少。
+- [活動](#活動)從 hub 執行有這項功能的版本那天開始，花費和 token 只計入 AgentAPI 4.2 以後的版本。
+  hub 沒聽到的小時（hub 停機或連不到 agent 超過一天）的花費不會計入。
 - hub 監看和開啟 AgentAPI，也能更新主機允許更新的 AgentAPI，但不會啟動或停止它們。
 - 關掉 hub 的頁面後，手機就收不到任何通知：hub 還不會送推播。每個 AgentAPI 只有一個 webhook，而
   hub 已經用掉了。

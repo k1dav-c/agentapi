@@ -2149,6 +2149,20 @@ export interface components {
             /** @description The context window and the account's usage limits, as in GET /status. */
             usage?: components["schemas"]["AgentUsage"];
         };
+        SummaryHour: {
+            /**
+             * Format: date-time
+             * @description The start of the hour, in UTC.
+             */
+            hour: string;
+            /** @description The tokens of the hour's calls, models without a known price included. */
+            tokens: components["schemas"]["SummaryTokens"];
+            /**
+             * Format: double
+             * @description API-equivalent cost in USD of the hour's calls, at list prices.
+             */
+            usd: number;
+        };
         SummaryRequest: {
             /**
              * Format: date-time
@@ -2170,6 +2184,8 @@ export interface components {
              * @description API-equivalent cost in USD of the agent's sessions in this directory, subagents included, over the last 24 hours (the hours that end within them): the tokens at the model providers' list prices, which a subscription doesn't charge.
              */
             day_usd: number;
+            /** @description What was spent in each hour with calls of the last 25 (UTC, the earliest first), the hour under way included: the hours day_usd adds up and the one before them. An hour's figures grow while it goes on. Sent with the amounts: when they don't change, an hour that left the 25 may stay. Missing from earlier releases. */
+            hours?: components["schemas"]["SummaryHour"][] | null;
             /** @description Identifies the sessions the amounts add up: those of one agent in one directory, as the session logs of one machine hold them (a hash of the machine's host name and ID, the agent, the directory's real path and where the agent keeps its logs). AgentAPIs that report the same scope report the same sessions; a client that adds up many counts each scope once. */
             scope: string;
             /**

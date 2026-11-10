@@ -230,6 +230,9 @@ type store struct {
 	// persist writes the file of instances; nil keeps none.
 	persist *persister
 	clock   quartz.Clock
+	// activity is what the instances did each hour, kept in a file of its
+	// own; never nil.
+	activity *activity
 
 	mu        sync.Mutex
 	instances map[string]*Instance
@@ -309,6 +312,7 @@ func (i Instance) kept() storedInstance {
 func newStore(path string, logger *slog.Logger, clock quartz.Clock) (*store, error) {
 	s := &store{clock: clock, instances: map[string]*Instance{}, settings: hubSettings{}.clone(), subs: map[chan storeEvent]struct{}{}}
 	if path == "" {
+		s.activity = newActivity("", logger, clock.Now())
 		return s, nil
 	}
 	file, err := readState(path, logger)
@@ -342,6 +346,14 @@ func newStore(path string, logger *slog.Logger, clock quartz.Clock) (*store, err
 	// A file edited by hand may have gaps or twins.
 	s.numberPinsLocked()
 	s.persist = newPersister(path, "instances", logger, s.snapshot)
+	// The work the instances' logs have that the activity doesn't: all of
+	// it the first time, the spans a hub that was killed didn't add.
+	s.activity = newActivity(activityPath(path), logger, now)
+	for _, i := range s.instances {
+		for _, span := range i.work.spans {
+			s.activity.addWork(i.ID, span.start, span.end, now)
+		}
+	}
 	return s, nil
 }
 
@@ -372,16 +384,18 @@ func (s *store) close() error {
 	s.mu.Lock()
 	now := s.clock.Now()
 	for _, i := range s.instances {
-		if !i.work.since.IsZero() {
+		if since := i.work.since; !since.IsZero() {
 			i.work.end(now, now)
+			s.activity.addWork(i.ID, since, now, now)
 			s.changedLocked()
 		}
 	}
 	s.mu.Unlock()
+	err := s.activity.close()
 	if s.persist == nil {
-		return nil
+		return err
 	}
-	return s.persist.close()
+	return errors.Join(err, s.persist.close())
 }
 
 func (s *store) sortedLocked() []*Instance {
@@ -443,7 +457,8 @@ func (s *store) update(id string, create bool, change func(*Instance)) (Instance
 		i.ID = id
 		s.instances[id] = i
 	}
-	before, seen, pin := i.kept(), i.seen(), i.Pin
+	before, seen, pin, summary := i.kept(), i.seen(), i.Pin, i.Summary
+	since := i.work.since
 	change(i)
 	var renumbered []*Instance
 	if i.Pin != pin {
@@ -463,6 +478,14 @@ func (s *store) update(id string, create bool, change func(*Instance)) (Instance
 	}
 	worked := i.work.track(i.working(), now, i.heard)
 	i.heard = time.Time{}
+	if worked && !since.IsZero() && i.work.since.IsZero() && len(i.work.spans) > 0 {
+		// The span that ended: the last, unless it was empty.
+		span := i.work.spans[len(i.work.spans)-1]
+		s.activity.addWork(i.ID, span.start, span.end, now)
+	}
+	if spend := spendHours(i.Summary); spend != nil && (summary == nil || summary.Spend == nil || !summary.Spend.Equal(*spend)) {
+		s.activity.setSpend(spend.Scope, spend.Hours, now)
+	}
 	if !ok || worked || i.kept() != before {
 		s.changedLocked()
 	}
@@ -488,6 +511,10 @@ func (s *store) remove(id string) bool {
 		return false
 	}
 	delete(s.instances, id)
+	if since := i.work.since; !since.IsZero() {
+		now := s.clock.Now()
+		s.activity.addWork(id, since, now, now)
+	}
 	var renumbered []*Instance
 	if i.Pin > 0 {
 		renumbered = s.numberPinsLocked()
@@ -686,4 +713,13 @@ func (s *store) notifyLocked(event storeEvent) {
 			close(ch)
 		}
 	}
+}
+
+// spendHours is the spend of summary when it lists its hours; nil
+// otherwise: an AgentAPI before 4.2's, or one whose spend isn't worked out.
+func spendHours(summary *instanceapi.SummaryBody) *instanceapi.SummarySpend {
+	if summary == nil || summary.Spend == nil || len(summary.Spend.Hours) == 0 {
+		return nil
+	}
+	return summary.Spend
 }

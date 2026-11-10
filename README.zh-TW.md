@@ -1082,7 +1082,9 @@ AgentAPI，用[人工回覆 API](#人工回覆-api)讓機器人代為回覆 agen
   Claude Code、Codex 和 Pi 才有的 `spend`：agent 在工作目錄裡所有工作階段最近 24 小時（`day_usd`）
   和 7 天（`week_usd`）換算成 API 價格的金額，每分鐘從紀錄檔重新計算一次，並附上同一批呼叫的 token
   （`day_tokens` 和 `week_tokens`：`input`、`output`、`cache_write`、`cache_read` 和合計 `total`）、
-  金額最後變動的時間（`updated_at`）和 `scope`。同一台主機上，同一個 agent 在同一個目錄的 AgentAPI 回報的是同一批
+  金額最後變動的時間（`updated_at`）、`scope`，以及從 4.2 起這些金額背後的每小時數字（`hours`：最近
+  25 小時中有呼叫的每一小時，含 UTC 的開始時間、`usd` 和 `tokens`；hub 的[活動](docs/hub.zh-TW.md#活動)
+  會保留一年）。同一台主機上，同一個 agent 在同一個目錄的 AgentAPI 回報的是同一批
   工作階段，`scope` 也相同：加總多個 AgentAPI 的用戶端每個 scope 只算一次。`update` 則說明用戶端
   能不能[更新這個 AgentAPI](#透過-api-更新)，以及更新進行到哪裡。
 - `attention` 依優先順序標示需要使用者處理的原因：`login`、`request`（核准、提問或計畫）、
@@ -1150,8 +1152,10 @@ agentapi hub serve --token "$HUB_TOKEN" --secret "$HUB_SECRET" --instance-token 
   它們的網址；事件能做什麼，見 [hub 指南](docs/hub.zh-TW.md#token-與安全性)。
 - hub 連不到、又錯過三次 heartbeat（預設 3 分鐘）的實例，例如 workspace 被強制關掉的，視為已停止；
   它下一次送 heartbeat 時就會回來。
+- 總覽加總所有 agent 最近 24 小時和 7 天的花費、token 和工作時間；[活動](docs/hub.zh-TW.md#活動)卡片
+  像 GitHub 的貢獻圖一樣，依工作時間、token 或花費替最近一年的每一天上色。每張卡片都能收合成一行。
 - 實例和我的最愛會保存在 `~/.agentapi/hub/instances.json`（`--state`，只有擁有者能讀取），重新啟動後
-  仍記得。
+  仍記得；最近一年的活動保存在同一個目錄的 `activity.json`。
 - `--port`（預設 3290）和 `--bind`（例如 VPN 位址）設定監聽位置。請用 HTTPS 提供，或只開在私有
   網路上：登入時會送出 token。登入的有效期限是 30 天。若 VPN 用戶端以 userspace 模式執行，
   把 `ALL_PROXY` 設成它的 SOCKS5 proxy，hub 才連得到實例。

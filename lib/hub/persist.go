@@ -20,14 +20,16 @@ import (
 const persistInterval = time.Second
 
 // persister writes a file in the background: a change marks it, and it
-// writes what snapshot returns at most once per persistInterval, and once
-// more on close. A write that fails is logged, and tried again with the
+// writes what snapshot returns at most once per interval (persistInterval
+// unless set), and once more on close. A write that fails is logged, and tried again with the
 // next change.
 type persister struct {
 	path     string
 	what     string // what the file keeps, for the log
 	snapshot func() ([]byte, error)
 	logger   *slog.Logger
+	// interval is how long it gathers changes; persistInterval by default.
+	interval time.Duration
 
 	// writeMu serializes the writes: the background one and flush.
 	writeMu sync.Mutex
@@ -42,15 +44,21 @@ type persister struct {
 }
 
 func newPersister(path, what string, logger *slog.Logger, snapshot func() ([]byte, error)) *persister {
+	return newPersisterEvery(path, what, persistInterval, logger, snapshot)
+}
+
+// newPersisterEvery is newPersister that gathers changes for interval: for
+// a large file that changes often.
+func newPersisterEvery(path, what string, interval time.Duration, logger *slog.Logger, snapshot func() ([]byte, error)) *persister {
 	p := &persister{
-		path: path, what: what, snapshot: snapshot, logger: logger,
+		path: path, what: what, snapshot: snapshot, logger: logger, interval: interval,
 		nudge: make(chan struct{}, 1), done: make(chan struct{}), stopped: make(chan struct{}),
 	}
 	go p.run()
 	return p
 }
 
-// mark says the file is behind; it is written within persistInterval.
+// mark says the file is behind; it is written within the interval.
 func (p *persister) mark() {
 	p.mu.Lock()
 	p.pending = true
@@ -69,7 +77,7 @@ func (p *persister) run() {
 		case <-p.done:
 			return
 		}
-		timer := time.NewTimer(persistInterval)
+		timer := time.NewTimer(p.interval)
 		select {
 		case <-timer.C:
 		case <-p.done:

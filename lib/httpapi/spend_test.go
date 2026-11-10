@@ -32,6 +32,13 @@ func TestSpendOf(t *testing.T) {
 		DayUSD: 1.75, WeekUSD: 26.75,
 		DayTokens:  &instanceapi.SummaryTokens{Input: 7, Output: 43, CacheWrite: 500, CacheRead: 1000, Total: 1550},
 		WeekTokens: &instanceapi.SummaryTokens{Input: 107, Output: 93, CacheWrite: 500, CacheRead: 10000, Total: 10700},
+		// The last 25 hours with calls, the hour under way included: not
+		// the one that began 25 hours ago.
+		Hours: []instanceapi.SummaryHour{
+			{Hour: time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC), USD: 1.5, Tokens: instanceapi.SummaryTokens{CacheWrite: 500, Total: 500}},
+			{Hour: time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC), USD: 0.25, Tokens: instanceapi.SummaryTokens{Input: 7, Output: 3, CacheRead: 1000, Total: 1010}},
+			{Hour: time.Date(2026, 10, 27, 11, 0, 0, 0, time.UTC), Tokens: instanceapi.SummaryTokens{Output: 40, Total: 40}},
+		},
 	}, spend)
 	zero := &instanceapi.SummaryTokens{}
 	assert.Equal(t, instanceapi.SummarySpend{DayTokens: zero, WeekTokens: zero}, spendOf(nil, now), "none: zero, not missing")
@@ -60,6 +67,7 @@ func TestSpendJSON(t *testing.T) {
 	old, err := json.Marshal(instanceapi.SummarySpend{DayUSD: 1})
 	require.NoError(t, err)
 	assert.NotContains(t, string(old), "tokens")
+	assert.NotContains(t, string(old), "hours")
 }
 
 // The summary carries the latest spend; the same spend again changes
@@ -121,4 +129,16 @@ func TestNextSpend(t *testing.T) {
 	e.SetSpend(first)
 	e.SetSpend(same)
 	assert.Equal(t, first, *e.Summary().Spend)
+
+	// The hours go with the amounts: an hour that left the list alone
+	// changes nothing.
+	hour := instanceapi.SummaryHour{Hour: at.Truncate(time.Hour), USD: 1.5, Tokens: instanceapi.SummaryTokens{Output: 40, Total: 40}}
+	withHours := nextSpend(again, instanceapi.SummarySpend{DayUSD: 2, WeekUSD: 2, Hours: []instanceapi.SummaryHour{hour}}, "s1", at.Add(5*time.Minute))
+	assert.Equal(t, []instanceapi.SummaryHour{hour}, withHours.Hours)
+	left := nextSpend(withHours, instanceapi.SummarySpend{DayUSD: 2, WeekUSD: 2}, "s1", at.Add(26*time.Hour))
+	assert.True(t, left.Equal(withHours), "kept with the amounts")
+	assert.False(t, left.Equal(instanceapi.SummarySpend{DayUSD: 2, WeekUSD: 2, Scope: "s1", UpdatedAt: withHours.UpdatedAt}), "hours differ")
+	clone := withHours.Clone()
+	clone.Hours[0].USD = 9
+	assert.Equal(t, 1.5, withHours.Hours[0].USD, "a copy")
 }

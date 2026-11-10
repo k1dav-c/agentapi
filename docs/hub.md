@@ -225,8 +225,10 @@ keeping the agents picked ([below](#the-list)). Below, a card per
 agent that needs you names what it waits for (the approval's command, the question, the login, the
 usage limit) and since when, with **Answer** or **Open**. Running agents show their prompt and how
 long they've run; finished ones you haven't seen show their title. Between the tiles and these cards
-are the [Spend](#spend), [Tokens](#token-usage) and [Work time](#work-time) cards; at the bottom, the
-[Versions](#versions) card counts the AgentAPI versions the agents run.
+are the [Spend](#spend), [Tokens](#token-usage), [Work time](#work-time) and [Activity](#activity)
+cards; at the bottom, the [Versions](#versions) card counts the AgentAPI versions the agents run.
+The chevron before a card's title folds it to that line, with its 7 days' figure (Activity's: the
+year's); the browser remembers which cards you folded.
 
 ![The overview in the dark theme](screenshots/hub-desktop-dark.png)
 
@@ -296,6 +298,28 @@ the hub's own record, per instance.
 
 The hub keeps the spans of the last 7 days in its file and sends what they add up to (`work`); the
 page adds the span going on.
+
+### Activity
+
+![Each day of the last year shaded by work time, a day's tooltip with its work time, tokens and spend](screenshots/hub-activity.png)
+
+Below Work time, the overview's **Activity** card is a heatmap of the last year, as GitHub draws
+contributions: a column per week, Sunday on top, today in the last column, a month's name above the
+week it starts in. Each day's square is shaded by **Work time**, **Tokens** or **Spend**, whichever
+you pick above the card (the browser remembers it): five shades, none for a day without any, then
+a quarter of the days with any each, so one busy day doesn't wash out the rest. Hover a square, or
+focus the grid and move with the arrow keys, for that day's three figures. The days are those of
+your browser's time zone; the page reads them again every 10 minutes and when you come back to it.
+
+The hub records the activity from the day it runs a release with it, hour by hour, and keeps a year
+(366 days) in `activity.json` next to its file of instances. Days before that are blank, and the
+card says since when it keeps them. Work time adds up each agent's spans, as the Work time card
+counts them; at the first start, the hub adds the 7 days its file of instances has. Spend and
+tokens come from the agents' summaries: from 4.2 on, an AgentAPI's `spend` lists what its scope
+spent in each of the last 25 hours (`hours`), and the hub sets each scope's hours to the latest
+figures, so a scope counts once however many AgentAPIs report it, and an hour still under way grows
+with it. An older AgentAPI's spend doesn't count until you update it. An hour more than 48 hours
+old is final: no summary lists it any more, and the hub adds it into the day's totals.
 
 ### Versions
 
@@ -1036,6 +1060,7 @@ running AgentAPIs, which then no longer follow their conversation for the webhoo
 | `GET /api/github/repos` | The repositories the app can see, the latest pushed to or changed first (`pushed_at`, `updated_at`) |
 | `GET /api/github/issues?repo=` | A repository's open issues; `POST` opens one, and with `assign`, starts work on it |
 | `POST /api/dispatch` | Starts, messages, links and stops the work on an issue (`action`: `start`, `send`, `link_pr`, `stop`); also takes `--dispatch-token`. A start answers once its job is `starting` on a machine; the job's state then follows on the stream and in `GET /api/jobs` |
+| `GET /api/activity?tz=&days=` | The [activity](#activity) of each of the last `days` days (1 to 371, 371 by default: 53 weeks), the earliest first, in the time zone `tz` names (an IANA name such as `Asia/Taipei`; UTC by default): `{"days": [{"date": "2026-11-10", "work_seconds", "usd", "tokens": {"input", "output", "cache_write", "cache_read", "total"}}, …], "since", "time_zone"}`. `since` is the first day the hub kept, in that zone; an hour counts in the day it starts in there. 400 for a time zone or a count it doesn't take |
 | `GET /api/join` | Where machines join the hub: `urls`, each a webhook URL (`url`) with the interface of its address (`interface`; none for `--bind`'s), in the order the startup log has them; and the secret (`secret`, with `secret_shown: true`) only on a hub with a token |
 | `/i/{id}/…` | The instance's own API and chat, through the hub; the page updates an instance with `POST /i/{id}/update` and cancels with `DELETE` |
 
@@ -1053,6 +1078,7 @@ failed request answers `{"code": …, "message": …, "error": …}`: `code` is 
 | `~/.agentapi/instances/` | `agentapi server` | The AgentAPIs running on this machine, for `join` and `agentapi list` |
 | `~/.agentapi/hub/instances.json` | `agentapi hub serve` | The instances the hub knows, their groups and pins, when each last changed, when each worked in the last 7 days, the URL where the hub last read each one's summary, and tokens of the ones added by hand; and the [favorites](#favorites) |
 | `~/.agentapi/hub/instances.json.bak` | `agentapi hub serve` | The file of instances as the hub found it when it last started |
+| `~/.agentapi/hub/activity.json` | `agentapi hub serve` | The [activity](#activity) of the last 366 days, hour by hour (UTC): the work time, and each scope's spend and tokens; written at most every 15 seconds. `activity.json.bak` is the file as the hub found it when it last started; one that doesn't parse is moved aside (`.corrupt-<time>`) and the hub starts a new one |
 | `~/.agentapi/hub/instances.deliveries.json` | `agentapi hub serve` | The delivery IDs of the events the hub took whose signature still holds, to refuse copies |
 | `~/.agentapi/hub/dispatch.json` | `agentapi hub serve` | The [issue dispatch's](#issues) machines with their launchers' tokens, and the jobs: their runs, costs and last 50 messages |
 | `~/.agentapi/hub/github-app.json` | `agentapi hub serve` | The hub's GitHub App and its private key |
@@ -1084,6 +1110,9 @@ on its file starts without favorites; the `.bak` it makes as it starts keeps the
   in shares the [favorites](#favorites).
 - [Work time](#work-time) is what the hub saw: not before it had the feature, nor while it was down
   or couldn't reach an agent. One hub doesn't know what another counted.
+- The [Activity](#activity) card starts on the day the hub runs a release with it, and its spend
+  and tokens count only AgentAPI 4.2 and later. An agent's spend in hours the hub didn't hear of
+  (it was down, or couldn't reach the agent, for more than a day) is missing.
 - The hub watches and opens AgentAPIs, and updates those whose machine allows it; it doesn't start
   or stop them.
 - Nothing reaches your phone while the hub's page is closed: the hub doesn't send push

@@ -3,6 +3,7 @@
 // The overview's cards of the agents in all: what they spent, the tokens
 // they used, how long they worked, and the AgentAPI versions they run.
 
+import {ChevronRight} from "lucide-react";
 import {Fragment} from "react";
 import {AgentMark} from "@/components/agent-mark";
 import {displayName, type HubInstance} from "@/lib/hub";
@@ -28,6 +29,60 @@ function CardHeading({id, title, children}: {id: string; title: string; children
   );
 }
 
+// Fold is whether a card is folded, and what folds or unfolds it; the
+// overview keeps it in the browser (overviewFolded).
+export interface Fold {
+  folded: boolean;
+  onToggle: () => void;
+}
+
+// FoldHeading is the title of a card that folds: a button that folds it,
+// the note, and while it is folded, its headline figure.
+export function FoldHeading({
+  id,
+  title,
+  note,
+  fold,
+  headline,
+  children,
+}: {
+  id: string;
+  title: string;
+  note: string;
+  fold?: Fold;
+  headline: string;
+  children?: React.ReactNode;
+}) {
+  if (!fold) {
+    return (
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <CardHeading id={id} title={title}>
+          {note}
+        </CardHeading>
+        {children}
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+      <h3 id={id} className="flex min-w-0 items-center gap-2 text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+        <button
+          type="button"
+          onClick={fold.onToggle}
+          aria-expanded={!fold.folded}
+          aria-controls={`${id}-body`}
+          className="-ml-1 flex items-center gap-1 rounded px-1 py-0.5 uppercase outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        >
+          <ChevronRight aria-hidden="true" className={cn("size-3.5 shrink-0 transition-transform", !fold.folded && "rotate-90")} />
+          {title}
+        </button>
+        <span className="hidden truncate font-normal tracking-normal normal-case text-muted-foreground/70 sm:inline">{note}</span>
+      </h3>
+      {fold.folded ? <span className="ml-auto text-sm font-semibold tabular-nums">{headline}</span> : children}
+    </div>
+  );
+}
+
 // Figure is a card's total, large; title says it in full.
 function Figure({label, value, title}: {label: string; value: string; title?: string}) {
   return (
@@ -40,13 +95,16 @@ function Figure({label, value, title}: {label: string; value: string; title?: st
 
 // PeriodCard is a card of figures of the last 24 hours and 7 days: the
 // totals and who counts on the left, its tables on the right.
+// Folded, it shows only its title and headline, the 7 days' figure.
 function PeriodCard({
   id,
   title,
   note,
   day,
   week,
+  headline,
   counted,
+  fold,
   children,
 }: {
   id: string;
@@ -54,15 +112,16 @@ function PeriodCard({
   note: string;
   day: React.ReactNode;
   week: React.ReactNode;
+  headline: string;
   counted: React.ReactNode;
+  fold?: Fold;
   children: React.ReactNode;
 }) {
   return (
     <section className="mt-10" aria-labelledby={id}>
-      <CardHeading id={id} title={title}>
-        {note}
-      </CardHeading>
-      <div className="mt-3 grid gap-6 rounded-2xl border bg-card p-5 shadow-xs md:grid-cols-[auto_minmax(0,1fr)]">
+      <FoldHeading id={id} title={title} note={note} fold={fold} headline={`${headline} in 7 days`} />
+      {!fold?.folded && (
+      <div id={`${id}-body`} className="mt-3 grid gap-6 rounded-2xl border bg-card p-5 shadow-xs md:grid-cols-[auto_minmax(0,1fr)]">
         <div className="flex flex-wrap items-end gap-x-8 gap-y-3 md:flex-col md:items-start md:border-r md:pr-8">
           <dl className="flex gap-8 md:flex-col md:gap-4">
             {day}
@@ -72,6 +131,7 @@ function PeriodCard({
         </div>
         {children}
       </div>
+      )}
     </section>
   );
 }
@@ -193,7 +253,7 @@ function MachineTable({machines}: {machines: MachineRow[]}) {
 
 // SpendCard is what the instances spent in the last 24 hours and 7 days,
 // all of them, the ones that spent the most this week, and each machine.
-export function SpendCard({instances, onOpen}: {instances: HubInstance[]; onOpen: (id: string) => void}) {
+export function SpendCard({instances, onOpen, fold}: {instances: HubInstance[]; onOpen: (id: string) => void; fold?: Fold}) {
   const totals = spendTotals(instances);
   if (totals.week <= 0) return null;
   // Each scope once, as the totals count them; a scope is of one machine.
@@ -210,6 +270,8 @@ export function SpendCard({instances, onOpen}: {instances: HubInstance[]; onOpen
       note="API-equivalent, at list prices; a subscription doesn't charge it"
       day={<Figure label="Last 24 hours" value={formatUSDShort(totals.day)} />}
       week={<Figure label="Last 7 days" value={formatUSDShort(totals.week)} />}
+      headline={formatUSDShort(totals.week)}
+      fold={fold}
       counted={
         <>
           {totals.counted} of {instances.length} agents report it
@@ -237,7 +299,7 @@ export function SpendCard({instances, onOpen}: {instances: HubInstance[]; onOpen
 // TokensCard is the tokens the instances used in the last 24 hours and 7
 // days, the calls their spend adds up: all of them by kind, the ones that
 // used the most this week, each group and each machine.
-export function TokensCard({instances, onOpen}: {instances: HubInstance[]; onOpen: (id: string) => void}) {
+export function TokensCard({instances, onOpen, fold}: {instances: HubInstance[]; onOpen: (id: string) => void; fold?: Fold}) {
   const totals = tokenTotals(instances);
   if (totals.week.total <= 0) return null;
   // Each scope once, as the totals count them.
@@ -256,6 +318,8 @@ export function TokensCard({instances, onOpen}: {instances: HubInstance[]; onOpe
       note="The calls the spend adds up, models without a price included"
       day={<Figure label="Last 24 hours" value={formatTokens(totals.day.total)} title={`${totals.day.total.toLocaleString()} tokens`} />}
       week={<Figure label="Last 7 days" value={formatTokens(totals.week.total)} title={`${totals.week.total.toLocaleString()} tokens`} />}
+      headline={`${formatTokens(totals.week.total)} tokens`}
+      fold={fold}
       counted={
         <>
           {totals.counted} of {instances.length} agents report it
@@ -328,7 +392,7 @@ const sameView = (a: WorkView | undefined, b: WorkView | undefined) => JSON.stri
 // as the hub saw it: all of them, the ones that worked the most this week,
 // each group and each machine. It reads the hub's clock for the spans going
 // on.
-export function WorkCard({instances, onOpen}: {instances: HubInstance[]; onOpen: (id: string) => void}) {
+export function WorkCard({instances, onOpen, fold}: {instances: HubInstance[]; onOpen: (id: string) => void; fold?: Fold}) {
   const view = useHubTime((now) => workView(instances, now), sameView);
   if (!view) return null;
   const byID = new Map(instances.map((instance) => [instance.id, instance]));
@@ -339,6 +403,8 @@ export function WorkCard({instances, onOpen}: {instances: HubInstance[]; onOpen:
       note="How long the agents worked, as the hub saw it"
       day={<Figure label="Last 24 hours" value={view.day} />}
       week={<Figure label="Last 7 days" value={view.week} />}
+      headline={view.week}
+      fold={fold}
       counted={
         <>
           {view.counted} of {instances.length} agents worked this week
