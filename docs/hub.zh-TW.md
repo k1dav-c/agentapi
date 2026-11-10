@@ -269,17 +269,17 @@ hub 把最近 7 天的工作區段存在檔案裡，送出的是它們的合計�
 總覽在 Work time 下方有一張 **Activity** 卡片，像 GitHub 的貢獻圖一樣畫出最近一年：一週一欄，
 星期日在最上面，今天在最後一欄，月份名稱標在該月第一週的上方。每天一格，依卡片上方選的
 **Work time**、**Tokens** 或 **Spend** 上色（瀏覽器會記得你選的）：共五種深淺，沒有任何數字的一天
-最淡，其餘的天數依數字大小每四分之一一種顏色，所以單獨一天特別忙，不會讓其他天都變得看不出差別。
+最淡，其餘的日子依數字大小分成四等份，各一種顏色，所以某一天特別忙也不會讓其他天看不出差別。
 滑鼠移到格子上，或把焦點移進格子後用方向鍵移動，就會看到那一天的三個數字。日期依瀏覽器的時區劃分；
-頁面每 10 分鐘、以及你回到頁面時，會重新讀取。
+頁面每 10 分鐘和你回到頁面時都會重新讀取。
 
 hub 從執行有這項功能的版本那天開始逐小時記錄，在實例檔案旁的 `activity.json` 保留一年（366 天）。
 在那之前的日子是空白的，卡片會寫出從哪天開始記錄。工作時間把每個 agent 的區段加起來，算法和 Work
 time 卡片相同；第一次啟動時，hub 會補上實例檔案裡已有的 7 天。花費和 token 來自 agent 的摘要：
-從 4.2 起，AgentAPI 的 `spend` 會列出它的 scope 最近 25 小時每小時的花費（`hours`），hub 把每個
+從 4.2 起，AgentAPI 的 `spend` 會列出所屬 scope 最近 25 小時每小時的花費（`hours`）。hub 把每個
 scope 的這些小時設成最新的數字，所以同一個 scope 不論有幾個 AgentAPI 回報都只算一次，還在進行中的
-那一小時也會跟著增加。較舊的 AgentAPI 的花費要更新後才會計入。超過 48 小時的小時就不再變動：不會再有
-摘要列出它，hub 把它併進那一天的合計。
+那一小時也會跟著增加。較舊的 AgentAPI 要更新後，花費才會計入。過了 48 小時的那一小時就不再變動：
+摘要不會再列出，hub 把它併進那一天的合計。
 
 ### 版本
 
@@ -511,7 +511,7 @@ Explorer 按鈕。這台主機上還有 hub 監看的其他 agent 時，不論�
 放一個按鈕：圖示和[依主機](#依主機)的分頁一樣帶著狀態圓點，開啟中的那個會標出來。點另一個就在原處開啟它，
 不必回到清單，就能在同一台主機的 Claude Code 和 Codex 之間切換。**New tab** 會單獨開啟聊天介面，**×** 會回到總覽，從 Issues 開啟的 agent 也會越過 Issues 直接回到總覽；
 **Esc** 則是往回一層（從 Issues 開啟的 agent 會先回到 Issues）。清單最上方的 hub 標誌在任何地方都能回到總覽。每開啟一個 agent 都會在
-瀏覽紀錄新增一頁，所以「上一頁」會回到前一個 agent，從第一個再往前才回到清單或總覽；**×** 則會越過這些頁面，直接回到清單。網址會記住目前的 agent（`#<id>`），重新整理或從書籤開啟都會回到同一個。
+瀏覽紀錄新增一頁，所以「上一頁」會回到前一個 agent，從第一個再往前才回到清單或總覽；**×** 則會越過這些頁面，直接回到總覽。網址會記住目前的 agent（`#<id>`），重新整理或從書籤開啟都會回到同一個。
 AgentAPI 正在更新時，上方那一列也會顯示進度，還在等任務結束時附有 **Cancel**（見[從 hub 更新](#從-hub-更新)）。
 
 ### 我的最愛
@@ -660,7 +660,7 @@ hub 還沒有 GitHub App 時，Issues 會顯示 **Connect GitHub**，從 manifes
 
 `/`、`i` 和 `Esc` 在 hub 頁面上輸入框以外的任何地方都有效；`j`、`k`、方向鍵和 `p` 只在焦點位於清單或沒有焦點時有效，
 所以在其他地方，方向鍵照常捲動總覽。在 Issues 裡，`j`、`k` 在卡片之間移動，`Enter` 開啟，`a` 交辦，
-`c` 開啟它的聊天介面，`n` 開新 issue，`r` 重新讀取 issue。在開啟的聊天介面裡，按鍵會交給聊天介面。鈴鐺的選單設定有 agent 開始需要你時怎麼提醒你：
+`c` 開啟它的聊天介面，`n` 開新 issue，`r` 重新讀取 issue。在開啟的聊天介面裡，按鍵會交給聊天介面。鈴鐺的選單決定有 agent 開始需要你時怎麼提醒你：
 **Notifications** 在 hub 分頁位於背景時由瀏覽器顯示通知（只限 https 頁面）；**Sound** 在你沒在看這個頁面時
 （分頁在背景，或前面是別的視窗）發出短短的提示音，純 http 也能用。兩個選擇都由瀏覽器記住。螢幕閱讀器也會即時讀出
 同樣的訊息。
@@ -812,7 +812,7 @@ AgentAPI 1.1 以上。在這裡輸入的 token 會為這個實例保存，取代
 | `the hub doesn't answer to <name>; add it to --allowed-hosts` | hub 設了 `--allowed-hosts`，而你用了別的名稱開啟 | 把這個名稱加進 `--allowed-hosts` |
 | **Update AgentAPI…** 說更新已關閉 | 這台主機不接受 hub 的更新 | 在那台主機的 `~/.agentapi/config.yaml` 加上 `allow-update: true`，再執行 `agentapi restart --all` |
 | **Update AgentAPI…** 要求一次性設定 | AgentAPI 無法寫入 binary 所在的目錄，例如 root 擁有的 `/usr/local/bin` | 在那台主機上執行一次畫面上的指令 |
-| 那一列顯示 **Update failed** | 檢查或下載新版時出錯，或新版無法以這個 AgentAPI 的設定啟動，例如執行 PTY agent 的 AgentAPI 2 | 滑鼠移上去，或開啟 **Update AgentAPI…** 查看錯誤，再試一次。AgentAPI 4.3.1 以後，磁碟上的程式會維持原樣；更舊的版本則已經把新版放到磁碟上：如果錯誤指出某個設定（例如 AgentAPI 4 移除的 `unknown flag: --transport`），請在那個 AgentAPI 重新啟動前，從它的啟動方式拿掉那個設定，否則它會起不來。AgentAPI 2 要保留原本的 agent 時，在它的主機上把 v2.5.1 裝回去（見[從 hub 更新](#從-hub-更新)） |
+| 那一列顯示 **Update failed** | 檢查或下載新版時出錯，或新版無法以這個 AgentAPI 的設定啟動，例如執行 PTY agent 的 AgentAPI 2 | 滑鼠移上去，或開啟 **Update AgentAPI…** 查看錯誤，再試一次。AgentAPI 4.3.1 以後，磁碟上的程式會維持原樣；更舊的版本則已經把新版放到磁碟上：如果錯誤指出某個設定（例如 AgentAPI 4 移除的 `unknown flag: --transport`），請在那個 AgentAPI 重新啟動前，從啟動方式拿掉那個設定，否則它會起不來。AgentAPI 2 要保留原本的 agent 時，在它的主機上把 v2.5.1 裝回去（見[從 hub 更新](#從-hub-更新)） |
 | 已連線的 agent，**⋯** 選單裡沒有任何更新項目 | 它的 AgentAPI 太舊，還不支援從 hub 更新 | 手動更新（見[手動更新](#手動更新)） |
 | hub 的 log 有「The hub's file of instances doesn't parse」 | 檔案損壞，例如手動改壞了；或是 2.2 以前的 hub 讀到較新 hub 寫的檔案 | hub 已把它改名放到一旁（`instances.json.corrupt-<時間>`），從空的清單開始。用 webhook 加入的實例會在下一次 heartbeat 回來。其餘的要找回來，先停掉 hub，再用 `instances.json.bak`（hub 上次啟動時看到的檔案）覆蓋 `instances.json`；2.2 以前的 hub 請見[檔案](#檔案) |
 | hub 無法啟動：`instances.json is of a newer hub` | 檔案是較新的 hub 寫的 | 改用較新的 hub，或從 `instances.json.bak` 開始 |
@@ -909,7 +909,7 @@ launcher token（`~/.agentapi/host.token`）：重灌過、或 token 檔被刪�
 | `PUT /api/pins` | `{"ids": […]}` 由上而下排定釘選實例的順序。必須列出每個釘選的實例各一次，不能有其他實例；不符合時回 409，並在 `ids` 附上目前釘選實例的順序，例如這段期間有人釘選、取消釘選或移除了實例；hub 沒有的實例回 404 |
 | `GET /api/favorites` | [我的最愛](#我的最愛)，依排列順序：`{"favorites": [{"id", "title", "text"}, …]}`；沒有標題的項目沒有 `title` |
 | `PUT /api/favorites` | `{"favorites": […]}` 依這個順序整份取代。最多 100 項；標題最多 100 字、只能一行；內容不能空白，最多 20,000 字；ID 為 1 到 64 個英文字母、數字、`-` 或 `_`，不能重複。沒有 ID 的項目由 hub 指定一個；回應是 hub 保存後的清單。hub 不接受的清單回 400，什麼都不改 |
-| `GET /api/events` | Server-sent events：先送 `instances`（全部實例和 `hub_version`，格式同 `GET /api/instances`）和 `favorites`（格式同 `GET /api/favorites`），再送 `instance`（某個實例有頁面看得到的變動，或工作時間變動滿一分鐘；最後聯絡時間只在它離線時才算）、`removed`（`{"id"}`）、`favorites`（有變動時送出全部）、`dispatch`（[issue 派工](#issues)的主機和 job，格式同 `GET /api/hosts` 和 `GET /api/jobs`，一開始和每次變動時送出），以及每 15 秒一次的 `heartbeat`。瀏覽器 30 秒內沒收下一個事件，串流就會結束 |
+| `GET /api/events` | Server-sent events：先送 `instances`（全部實例和 `hub_version`，格式同 `GET /api/instances`）和 `favorites`（格式同 `GET /api/favorites`），再送 `instance`（某個實例有頁面看得到的變動，或工作時間變動滿一分鐘；最後聯絡時間只在它離線時才算）、`removed`（`{"id"}`）、`favorites`（有變動時送出全部）、`dispatch`（[issue 派工](#issues)的主機和 job，格式同 `GET /api/hosts` 和 `GET /api/jobs`，一開始和每次變動時送出），以及每 15 秒一次的 `heartbeat`。瀏覽器 30 秒都沒收下事件，就會失去串流 |
 | `GET /api/hosts` | 有 launcher 回報的主機：能跑的 agent、有的 repo、job 與上限，以及是否在線（`online`） |
 | `DELETE /api/hosts/{name}` | 移除主機，以及 hub 為這個主機名稱記下的 launcher token，讓換了 token 的 launcher 能以同一個名稱重新加入。主機在線（`host_online`）或還有進行中的 job（`host_busy`）時回 409，請先停掉它的 job；hub 沒有這台主機時回 404 |
 | `GET /api/jobs` | 各 job（一個 issue 的工作）：狀態、agent 與主機、PR、各次 run 與花費，以及最近 50 則送給 agent 的訊息（`messages`：`at`；`source` 為 `hub`、`review` 或 `comment`；`author`、`agent`；`text`，最多 2,000 字） |
@@ -934,7 +934,7 @@ case 的 HTTP 狀態（例如 `not_found`）；`error` 和 `message` 相同，�
 | `~/.agentapi/instances/` | `agentapi server` | 這台主機上執行中的 AgentAPI，供 `join` 和 `agentapi list` 使用 |
 | `~/.agentapi/hub/instances.json` | `agentapi hub serve` | hub 記得的實例、它們的群組和釘選、各自最近一次變動的時間、最近 7 天各自工作的區段、hub 最後一次讀到各自摘要的網址，以及手動加入的實例的 token；還有[我的最愛](#我的最愛) |
 | `~/.agentapi/hub/instances.json.bak` | `agentapi hub serve` | hub 上次啟動時看到的實例檔案 |
-| `~/.agentapi/hub/activity.json` | `agentapi hub serve` | 最近 366 天逐小時（UTC）的[活動](#活動)：工作時間，以及每個 scope 的花費和 token；最多每 15 秒寫入一次。`activity.json.bak` 是 hub 上次啟動時看到的檔案；無法解析的檔案會被移到一旁（`.corrupt-<時間>`），hub 重新開始記錄 |
+| `~/.agentapi/hub/activity.json` | `agentapi hub serve` | 最近 366 天逐小時（UTC）的[活動](#活動)：工作時間，以及每個 scope 的花費和 token；最多每 15 秒寫入一次。`activity.json.bak` 是 hub 上次啟動時看到的檔案；hub 會把無法解析的檔案移到一旁（`.corrupt-<時間>`），重新開始記錄 |
 | `~/.agentapi/hub/instances.deliveries.json` | `agentapi hub serve` | hub 處理過、簽章仍有效的事件的 delivery ID，用來拒絕重送的事件 |
 | `~/.agentapi/hub/dispatch.json` | `agentapi hub serve` | [issue 派工](#issues)的主機（含 launcher 的 token）和 job：各次 run、花費與最近 50 則訊息 |
 | `~/.agentapi/hub/github-app.json` | `agentapi hub serve` | hub 的 GitHub App 與它的私鑰 |

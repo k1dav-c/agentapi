@@ -203,9 +203,9 @@ Open `http://hub.vpn:3290/` on a desktop or a phone that is on the VPN, and sign
 ![The hub's sign-in](screenshots/hub-sign-in.png)
 
 The token goes to the hub once and comes back as an HttpOnly cookie signed with it; the page never
-stores the token. The cookie lasts 30 days from the sign-in, which the hub checks itself. Changing
-`--token` signs every browser out. A wrong token is refused on the spot,
-and the eye button shows what you pasted.
+stores the token. The hub accepts the cookie for 30 days from the sign-in. Changing `--token`
+signs every browser out. A wrong token is refused on the spot, and the eye button shows what you
+pasted.
 
 A hub behind a sign-in of its own, such as a Coder workspace app or a private VPN, can run
 without a token: `--no-token` (instead of `--token`) skips this page, and everyone who reaches
@@ -227,8 +227,8 @@ usage limit) and since when, with **Answer** or **Open**. Running agents show th
 long they've run; finished ones you haven't seen show their title. Between the tiles and these cards
 are the [Spend](#spend), [Tokens](#token-usage), [Work time](#work-time) and [Activity](#activity)
 cards; at the bottom, the [Versions](#versions) card counts the AgentAPI versions the agents run.
-The chevron before a card's title folds it to that line, with its 7 days' figure (Activity's: the
-year's); the browser remembers which cards you folded.
+The chevron before a card's title folds the card to its title and its 7 days' figure (Activity's:
+the year's); the browser remembers which cards you folded.
 
 ![The overview in the dark theme](screenshots/hub-desktop-dark.png)
 
@@ -307,7 +307,7 @@ Below Work time, the overview's **Activity** card is a heatmap of the last year,
 contributions: a column per week, Sunday on top, today in the last column, a month's name above the
 week it starts in. Each day's square is shaded by **Work time**, **Tokens** or **Spend**, whichever
 you pick above the card (the browser remembers it): five shades, none for a day without any, then
-a quarter of the days with any each, so one busy day doesn't wash out the rest. Hover a square, or
+four that each take a quarter of the days with any, so one busy day doesn't wash out the rest. Hover a square, or
 focus the grid and move with the arrow keys, for that day's three figures. The days are those of
 your browser's time zone; the page reads them again every 10 minutes and when you come back to it.
 
@@ -316,9 +316,9 @@ The hub records the activity from the day it runs a release with it, hour by hou
 card says since when it keeps them. Work time adds up each agent's spans, as the Work time card
 counts them; at the first start, the hub adds the 7 days its file of instances has. Spend and
 tokens come from the agents' summaries: from 4.2 on, an AgentAPI's `spend` lists what its scope
-spent in each of the last 25 hours (`hours`), and the hub sets each scope's hours to the latest
-figures, so a scope counts once however many AgentAPIs report it, and an hour still under way grows
-with it. An older AgentAPI's spend doesn't count until you update it. An hour more than 48 hours
+spent in each of the last 25 hours (`hours`). The hub sets each scope's hours to the latest
+figures, so a scope counts once however many AgentAPIs report it, and an hour still under way keeps
+growing. An older AgentAPI's spend doesn't count until you update it. An hour more than 48 hours
 old is final: no summary lists it any more, and the hub adds it into the day's totals.
 
 ### Versions
@@ -594,7 +594,7 @@ another in its place, so you switch between Claude Code and Codex on one machine
 opened the agent from there; **Esc** steps back one level (from an agent opened from Issues, to
 Issues). The hub's mark at the top of the list also goes back to the overview from anywhere. Each
 agent you open is a page in the browser's history, so Back returns to the agent before it, and from
-the first to the list or the overview; **×** returns to the list at once, past them all. The URL keeps the agent (`#<id>`), so a reload or a bookmark
+the first to the list or the overview; **×** returns to the overview at once, past them all. The URL keeps the agent (`#<id>`), so a reload or a bookmark
 comes back to it. An AgentAPI update under way shows in the bar too, with **Cancel** while it waits
 for the task ([Updating from the hub](#updating-from-the-hub)).
 
@@ -768,14 +768,14 @@ shows the command that installs one.
 | `Esc` | Clear the search, or go back: from an agent opened from Issues to Issues, then to the overview |
 
 On a desktop, drag the list's edge, or focus it and press ← or →, to change the list's width; each
-browser remembers it, and a double-click on the edge resets it. Narrower than the default, the
-list's first row keeps the hub's mark and leaves out the name, so its buttons fit.
+browser remembers it, and a double-click on the edge resets it. When the list is narrower than
+the default, its first row keeps the hub's mark and leaves out the name, so its buttons fit.
 
 `/`, `i` and `Esc` work anywhere on the hub's page but in a field; `j`, `k`, the arrows and `p` work with the focus in
 the list or on nothing, so elsewhere the arrows scroll the overview as usual. In Issues, `j` and `k` move between the
 cards, `Enter` opens one, `a` assigns it, `c` opens its chat, `n` opens a new issue and `r` reads
-the issues again. Inside an open chat, keys go to the chat. The bell's menu turns on what tells you an agent
-started needing you: **Notifications**, which the browser shows while the hub's tab is in the
+the issues again. Inside an open chat, keys go to the chat. The bell's menu turns on the alerts for an agent
+that starts needing you: **Notifications**, which the browser shows while the hub's tab is in the
 background (on an https page only), and **Sound**, a short chime while you look away from the
 page (its tab in the background, or another window in front), which works over plain http too. The
 browser keeps both choices. A screen reader hears the same as it happens.
@@ -948,7 +948,7 @@ right is forgotten, it closes.
 | `the hub doesn't answer to <name>; add it to --allowed-hosts` | The hub runs with `--allowed-hosts` and you opened it by another name | Add the name to `--allowed-hosts` |
 | **Update AgentAPI…** says updates are off | The machine doesn't allow updates from the hub | Add `allow-update: true` to `~/.agentapi/config.yaml` there, then run `agentapi restart --all` |
 | **Update AgentAPI…** asks for a one-time setup | The AgentAPI can't write its binary's directory, such as a root-owned `/usr/local/bin` | Run the command it shows on that machine, once |
-| A row says **Update failed** | Checking or downloading the release failed, or the new version wouldn't start with this AgentAPI's settings, such as an AgentAPI 2 that runs a PTY agent | Hover it, or open **Update AgentAPI…**, for the error; then try again. An AgentAPI 4.3.1 or later keeps its program then. One older already has the new version on disk: if the error names a setting (`unknown flag: --transport`, say, which AgentAPI 4 removed), drop it from how that AgentAPI starts before it restarts, or it won't start. For an AgentAPI 2 that must keep its agent, put v2.5.1 back on its machine ([Updating from the hub](#updating-from-the-hub)) |
+| A row says **Update failed** | Checking or downloading the release failed, or the new version wouldn't start with this AgentAPI's settings, such as an AgentAPI 2 that runs a PTY agent | Hover it, or open **Update AgentAPI…**, for the error; then try again. An AgentAPI 4.3.1 or later then keeps its program. An older one already has the new version on disk: if the error names a setting (`unknown flag: --transport`, say, which AgentAPI 4 removed), drop it from how that AgentAPI starts before it restarts, or it won't start. For an AgentAPI 2 that must keep its agent, put v2.5.1 back on its machine ([Updating from the hub](#updating-from-the-hub)) |
 | A connected agent's **⋯** menu has nothing about updating it | Its AgentAPI is too old to update from the hub | Update it by hand ([Updating by hand](#updating-by-hand)) |
 | The hub logs "The hub's file of instances doesn't parse" | The file was damaged, such as by an edit by hand, or a hub of 2.2 or earlier started on a newer hub's file | The hub moved it aside (`instances.json.corrupt-<time>`) and started empty. Joined instances come back with their next heartbeat. To get the rest back, stop the hub and copy `instances.json.bak` (the file as the hub's previous start found it) over `instances.json`; for a hub of 2.2 or earlier, see [Files](#files) |
 | The hub doesn't start: `instances.json is of a newer hub` | A newer hub wrote the file | Run the newer hub, or start from `instances.json.bak` |
