@@ -6,9 +6,9 @@
 
 - An update through the API (`POST /update`, or from the hub) checks that the new version would
   start with this AgentAPI's settings and state database before it replaces the program, where it
-  replaced it first: a release that refuses a setting left the program on disk that the next start
-  of AgentAPI then failed with. AgentAPI before 4.3.1 still updates the old way: if its update
-  fails naming a setting, drop the setting before that AgentAPI restarts.
+  replaced it first: the next start of AgentAPI then failed on a release that refuses a setting.
+  AgentAPI before 4.3.1 still updates the old way: if its update fails naming a setting, drop the
+  setting before that AgentAPI restarts.
 
 ## v4.3.0
 
@@ -36,10 +36,10 @@
 - `GET /rich-messages`, `GET /timeline` and `GET /tasks` without parameters return the latest 20
   tasks and what belongs to them, where they returned the whole conversation; read the pages until
   `has_more` is false for all of it. `GET /messages` still returns every message without
-  parameters, as upstream's clients read it, and pages with `before` or `limit`. The full `/events` replay (a new client,
-  another epoch) holds the latest 20 tasks too, and a client that resumes from before a change the
-  server no longer holds gets the full replay. `GET /timeline?subagents=true` adds the subagents'
-  events to the page of the latest tasks only.
+  parameters, as upstream's clients read it, and pages with `before` or `limit`. The full
+  `/events` replay (a new client, another epoch) holds the latest 20 tasks too, and a client that
+  resumes from before a change the server no longer holds gets the full replay.
+  `GET /timeline?subagents=true` adds the subagents' events to the page of the latest tasks only.
 
 ## v4.2.0
 
@@ -91,8 +91,8 @@
 
 - The chat builds with Next.js 15.5.29 (from 15.4.10) and the latest React 19, Radix, Tailwind and
   eslint within their ranges, and overrides PostCSS to 8.5.32: `bun audit` went from 79 advisories
-  (3 critical) to one moderate, in a build tool. None reached the binary, which embeds the chat
-  as static files with no Next.js server, only `bun run dev` and the build.
+  (3 critical) to one moderate, in a build tool. None reached the binary, only `bun run dev` and
+  the build: the binary embeds the chat as static files with no Next.js server.
 - CI runs actions/checkout v7.0.1 and actions/setup-go v7.0.0 (Node 24), pinned to their commits,
   where v4 and v5 targeted the deprecated Node 20.
 
@@ -110,8 +110,8 @@
   - `--webhook-instance-id`: use `--instance-id`.
   - `--state-file`/`-s`, `--load-state` and `--save-state`: AgentAPI 3 imported the state file
     into a state database next to it (the same name with `.db`) the first time it started with
-    it; start with `--state-db` on that database. A state file never imported can be, by running
-    AgentAPI 3.16 once with it.
+    it; start with `--state-db` on that database. Run AgentAPI 3.16 once with a state file never
+    imported to import it.
 - A state database only AgentAPI 3.7.2 or earlier opened starts without its stored settings,
   usage limit stop and retry wait, which AgentAPI 3.7.3 to 3.16 moved into `conversation_state`
   on the first open; the conversation is kept. Open such a database with AgentAPI 3.16 once first
@@ -131,9 +131,9 @@
   connection after 2 idle minutes, where a client that sent nothing held its connection open
   forever; the hub and the launcher close idle connections after 2 minutes too.
 - `POST /terminal/input` no longer waits forever when the terminal's program doesn't read its
-  input (a paste into a busy full-screen program): it gives up after 10 seconds with 503, part of
-  the input perhaps typed, or when the client leaves. Two inputs no longer interleave.
-- The hub ends a browser's stream (`/api/events`) whose browser takes no event for 30 seconds,
+  input (a paste into a busy full-screen program): it gives up with 503 after 10 seconds, or when
+  the client leaves; part of the input may have been typed. Two inputs no longer interleave.
+- The hub ends a browser's stream (`/api/events`) when the browser takes no event for 30 seconds,
   where one that stopped reading kept its handler and subscriptions for good.
 - The HTML preview (`GET /files/preview`) reads each file once, however often stylesheets
   `@import` it, stops reading once its 16 MiB are spent, and stops when the request ends, where
@@ -147,8 +147,9 @@
   delivery uses the same connection, where each delivery with an answer opened a new one.
 - The pipe of an agent's output is closed when the output ends, where each start of the agent
   again left one open until AgentAPI exited.
-- An interrupt Claude Code or Codex accepts after `POST /interrupt` stopped waiting for the answer
-  still ends the turn within 10 seconds when the agent doesn't, where the turn could stay running.
+- An interrupt that Claude Code or Codex accepts after `POST /interrupt` stopped waiting for the
+  answer still ends the turn within 10 seconds when the agent doesn't, where the turn could stay
+  running.
 
 ### Internal
 
@@ -198,9 +199,9 @@
 - The notifications closed in the chat are remembered for the 50 AgentAPIs one was closed on last,
   and forgotten for the others: the browser kept them for every AgentAPI it ever opened, one per
   issue the hub dispatched.
-- The chat and the hub say token counts, amounts and ages the same way, and round them the same:
-  the chat said 999,600 tokens as "1000k", where the hub said "1M"; an amount just under $1,000 as
-  "$1000.00", and the hub one just under $10 as "$10.00".
+- The chat and the hub show token counts, amounts and ages the same way, and round them the same:
+  the chat showed 999,600 tokens as "1000k", where the hub showed "1M"; an amount just under $1,000
+  as "$1000.00", and the hub one just under $10 as "$10.00".
 - Adding an AgentAPI by its URL on the hub says why the hub refused it, whatever the shape of its
   answer; signing in to the hub says a refusal other than a wrong token as the hub said it, not as
   a hub that didn't answer.
@@ -214,10 +215,11 @@
 
 - CI: a release runs on a self-hosted runner of its own, apart from the one that runs the tests,
   and a push that releases nothing (such as `docs:` commits alone) runs no tests. The release
-  builds its five binaries side by side; the jobs no longer restore setup-go's cache, pin each
-  action to a commit and Bun to a version, install the chat's dependencies from the lockfile, and
-  check that the chat's generated API types match. A new push to a pull request cancels the jobs of
-  its last, and a manual release runs on `main` only. The unused PR preview workflows are gone.
+  builds its five binaries side by side; the jobs no longer restore setup-go's cache, and they pin
+  each action to a commit and Bun to a version, install the chat's dependencies from the lockfile,
+  and check that the chat's generated API types match. A new push to a pull request cancels the
+  jobs of the push before it, and a manual release runs on `main` only. The unused PR preview
+  workflows are gone.
 - One module has the chat's and the hub's formatters (`lib/format.ts`), and one helper keeps a
   hook's latest value in a ref (`useLatest`).
 - Tests for the chat's event stream (the cache against the 400 ms start, a reconnect after a

@@ -3,10 +3,10 @@
 ## Release Process
 
 On every push to `main`, `.github/workflows/release.yml` first asks `release-version.sh` whether
-the push releases anything (job Plan, seconds); a push that doesn't, such as one of `docs:` commits,
-runs nothing more. Otherwise it runs the tests (`.github/workflows/go-test.yml`, as a reusable
-workflow) on that commit, and releases nothing unless its jobs (test, race, lint) pass, because
-AgentAPIs with `--allow-update` install the latest release. The release job asks
+the push releases anything (job Plan, a few seconds); a push that doesn't, such as one of `docs:`
+commits alone, runs nothing more. Otherwise it runs the tests (`.github/workflows/go-test.yml`, as
+a reusable workflow) on that commit, and releases nothing unless its jobs (test, race, lint) pass,
+because AgentAPIs with `--allow-update` install the latest release. The release job asks
 `release-version.sh` again, which runs `next-version.sh` to choose the next version from
 [Conventional Commit](https://www.conventionalcommits.org/) messages since the last `vX.Y.Z` tag.
 The highest applicable bump wins:
@@ -37,7 +37,7 @@ too.
   releases nothing. Neither does a push that a force-push took off `main`.
 - Pull requests run every test through the Go Tests workflow; pushes to `main` run them only in the
   Release workflow, whose checks on the commit are named `Go Tests / …`. A new push to a pull
-  request cancels the jobs of its last.
+  request cancels the jobs of the push before it.
 
 ### The runners
 
@@ -58,9 +58,9 @@ hub. `ghrunner-firewall.service` (`/usr/local/sbin/ghrunner-firewall`) keeps bot
 internet: they can't connect to the machine's services on fixed ports (its AgentAPIs, hub, ssh,
 Coder, Docker), nor to the LAN, Docker's networks, Tailscale or the cloud metadata address; DNS and
 the ports their own tests listen on (20000-60999: the launcher's tests pick theirs below the
-ephemeral ports) stay open. The jobs need `gcc` (the race detector),
-`shellcheck`, `file`, `unzip` (to set up Bun) and `gh` on the machine; the workflows set up Go and
-Bun themselves, Bun at a pinned version, and pin each action to a commit.
+ephemeral ports) stay open. The jobs need `gcc` (the race detector), `shellcheck`, `file`, `unzip`
+(to set up Bun) and `gh` on the machine; the workflows set up Go and Bun themselves, Bun at a pinned
+version, and pin each action to a commit.
 
 The repository is public, so a pull request from a fork runs no job (its code would run on the
 runners' machine), and the repository asks for approval before an outside contributor's workflows
