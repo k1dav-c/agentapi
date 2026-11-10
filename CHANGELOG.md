@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Internal
+
+- The chat builds with Next.js 15.5.29 (from 15.4.10) and the latest React 19, Radix, Tailwind and
+  eslint within their ranges, and overrides PostCSS to 8.5.32: `bun audit` went from 79 advisories
+  (3 critical) to one moderate, in a build tool. None reached the binary, which embeds the chat
+  as static files with no Next.js server, only `bun run dev` and the build.
+- CI runs actions/checkout v7.0.1 and actions/setup-go v7.0.0 (Node 24), pinned to their commits,
+  where v4 and v5 targeted the deprecated Node 20.
+
 ## v4.0.0
 
 ### Breaking changes
