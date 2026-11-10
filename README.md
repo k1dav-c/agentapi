@@ -1177,8 +1177,9 @@ The [HTTP API reference](#http-api-reference) lists all the endpoints.
   [Steer, interrupt and the queue](#steer-interrupt-and-the-queue)).
 - `GET /messages` returns the conversation; `GET /rich-messages` and
   `GET /timeline` return its structured form (see
-  [Structured activity](#structured-activity)). All three, and `GET /tasks`, hold the latest 20
-  tasks and page back with `before` (see [Long conversations](#long-conversations)).
+  [Structured activity](#structured-activity)). `GET /messages` returns every message unless asked
+  for a page; the other two, and `GET /tasks`, hold the latest 20 tasks; all page back with
+  `before` (see [Long conversations](#long-conversations)).
 - A message that went out but wasn't confirmed (the call timed out, or
   AgentAPI was stopping) may have reached the agent: it isn't sent again,
   but leaves the queue with an error.
@@ -1293,9 +1294,11 @@ before a change the server no longer holds gets the full replay too.
 An agent that works for months on one conversation builds up about 100 KB a task (its tool calls,
 their output, the timeline). AgentAPI keeps that bounded:
 
-- `GET /messages`, `GET /rich-messages`, `GET /timeline` and `GET /tasks` return a page of tasks
-  and what belongs to them: without parameters the latest 20, as the full `/events` replay holds
-  them. `has_more` says earlier tasks exist; pass `next_before` (the ID of the page's first task)
+- `GET /rich-messages`, `GET /timeline` and `GET /tasks` return a page of tasks and what belongs to
+  them: without parameters the latest 20, as the full `/events` replay holds them. `GET /messages`
+  pages the same way with `before` or `limit`; without either it returns every message, as it
+  always did, since the server keeps the messages (they are small) and upstream's clients read
+  them so. `has_more` says earlier tasks exist; pass `next_before` (the ID of the page's first task)
   as `before` for the page before, and `limit` (up to 100) for its size. The page that reaches the
   start also holds what came before the first task.
 - With `--state-db`, the server holds the rich messages and the timeline of the latest 100 tasks
@@ -2132,7 +2135,7 @@ default.
 
 | Endpoint | Description |
 | --- | --- |
-| `GET /messages` | The messages of the latest 20 tasks; `before` and `limit` page back ([Long conversations](#long-conversations)) |
+| `GET /messages` | Every message of the conversation; with `before` or `limit`, those of a page of tasks ([Long conversations](#long-conversations)) |
 | `POST /message` | Send a message, or queue it while the agent is busy; `dispatch_mode` is `queue` (default), `steer` or `interrupt` |
 | `DELETE /messages` | Clear the conversation and the queue, and restart the agent in a new session |
 | `GET /rich-messages` | The structured conversation: thinking, tool calls with results, usage; paged as `GET /messages` |

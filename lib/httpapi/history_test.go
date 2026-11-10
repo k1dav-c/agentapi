@@ -73,9 +73,15 @@ func TestHistoryPages(t *testing.T) {
 			Messages []httpapi.Message `json:"messages"`
 			pageBody
 		}
+		// Without before and limit, every message, as upstream's clients
+		// read them; with limit, a page like the others.
 		n.do(http.MethodGet, "/messages", nil, &msgs)
+		require.Len(t, msgs.Messages, 24)
+		assert.False(t, msgs.HasMore)
+		n.do(http.MethodGet, "/messages?limit=3", nil, &msgs)
 		require.Len(t, msgs.Messages, 6)
 		assert.Equal(t, "task 10", msgs.Messages[0].Content)
+		assert.True(t, msgs.HasMore)
 
 		// Paging back gets every rich message once, in order: the latest
 		// from memory, the others from the state database.

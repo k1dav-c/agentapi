@@ -4977,7 +4977,7 @@
         "summary": "Delete all messages and restart"
       },
       "get": {
-        "description": "Returns the messages of the conversation with the agent, a page of tasks at a time: without `before`, those of the latest tasks (20 by default, `limit` up to 100); with `has_more`, pass `next_before` as `before` for the page before. AgentAPI 4.2 and earlier returned every message.",
+        "description": "Returns the messages of the conversation with the agent: without `before` and `limit`, every one, as AgentAPI always did; with either, those of a page of tasks (`limit` up to 100, 20 when 0; without `before`, the latest): with `has_more`, pass `next_before` as `before` for the page before.",
         "operationId": "get-messages",
         "parameters": [
           {

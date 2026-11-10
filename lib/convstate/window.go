@@ -195,11 +195,23 @@ func (r PageRange) HoldsEvent(at time.Time) bool {
 // MessagesIn returns the messages of the page r, which the emitter holds
 // all of.
 func (e *EventEmitter) MessagesIn(r PageRange) []conv.Message {
+	return e.messagesWhere(r.holdsMessage)
+}
+
+// Messages returns every message of the conversation: the emitter keeps
+// them however long it runs, since they are small (it lets go of the rich
+// ones).
+func (e *EventEmitter) Messages() []conv.Message {
+	return e.messagesWhere(func(int) bool { return true })
+}
+
+// messagesWhere returns the messages whose IDs keep says to.
+func (e *EventEmitter) messagesWhere(keep func(id int) bool) []conv.Message {
 	e.mu.Lock()
 	defer e.unlock()
 	var msgs []conv.Message
 	for _, msg := range e.messages {
-		if r.holdsMessage(msg.Id) {
+		if keep(msg.Id) {
 			msgs = append(msgs, msg)
 		}
 	}

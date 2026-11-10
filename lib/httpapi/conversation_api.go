@@ -84,13 +84,20 @@ func coderWorkspaceURL() string {
 }
 
 // getMessages handles GET /messages, without s.mu (see getTitle): the
-// messages of a page of tasks (history.go).
+// messages of a page of tasks (history.go), or without before and limit
+// every message, as upstream's clients read it.
 func (s *Server) getMessages(ctx context.Context, input *PageInput) (*MessagesResponse, error) {
 	if input == nil {
 		input = &PageInput{}
 	}
-	r := s.emitter.Page(input.Before, input.Limit)
-	msgs := s.emitter.MessagesIn(r)
+	var msgs []conv.Message
+	var page Page
+	if input.Before == 0 && input.Limit == 0 {
+		msgs = s.emitter.Messages()
+	} else {
+		r := s.emitter.Page(input.Before, input.Limit)
+		msgs, page = s.emitter.MessagesIn(r), pageOf(r)
+	}
 	resp := &MessagesResponse{}
 	resp.Body.Messages = make([]Message, len(msgs))
 	for i, msg := range msgs {
@@ -101,7 +108,7 @@ func (s *Server) getMessages(ctx context.Context, input *PageInput) (*MessagesRe
 			Time:    msg.Time,
 		}
 	}
-	resp.Body.Page = pageOf(r)
+	resp.Body.Page = page
 	return resp, nil
 }
 
@@ -212,8 +219,8 @@ func (s *Server) registerConversationRoutes() {
 
 	// GET /messages endpoint
 	huma.Get(s.api, "/messages", s.getMessages, func(o *huma.Operation) {
-		o.Description = "Returns the messages of the conversation with the agent, a page of tasks at a time: without `before`, those of the latest tasks (20 by default, `limit` up to 100); " +
-			"with `has_more`, pass `next_before` as `before` for the page before. AgentAPI 4.2 and earlier returned every message."
+		o.Description = "Returns the messages of the conversation with the agent: without `before` and `limit`, every one, as AgentAPI always did; " +
+			"with either, those of a page of tasks (`limit` up to 100, 20 when 0; without `before`, the latest): with `has_more`, pass `next_before` as `before` for the page before."
 	})
 
 	// GET /rich-messages endpoint

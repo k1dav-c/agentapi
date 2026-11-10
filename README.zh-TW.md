@@ -986,8 +986,8 @@ AgentAPI 會以 RPC 模式執行 Pi（`pi --mode rpc`，經由 stdin 與 stdout 
   AgentAPI 已偵測到 agent 開始處理，或是在 agent 忙碌時把它排入佇列（`queued`）；
   `dispatch_mode` 決定 agent 忙碌時怎麼處理（見 [Steer、interrupt 與佇列](#steerinterrupt-與佇列)）。
 - `GET /messages` 回傳對話；`GET /rich-messages` 和 `GET /timeline` 回傳結構化的形式（見
-  [結構化活動](#結構化活動)）。這三個和 `GET /tasks` 都回傳最近 20 個任務，用 `before` 往前翻頁
-  （見[長對話](#長對話)）。
+  [結構化活動](#結構化活動)）。`GET /messages` 沒指定分頁時回傳所有訊息；另外兩個和 `GET /tasks`
+  回傳最近 20 個任務；都可以用 `before` 往前翻頁（見[長對話](#長對話)）。
 - 已經送出、但沒有得到確認的訊息（呼叫逾時，或 AgentAPI 正在停止）可能已經送到 agent：它不會
   再送一次，而是以錯誤離開佇列。
 - `DELETE /messages` 清除對話（訊息、結構化訊息、請求、任務、時間軸、錯誤和佇列），並重新
@@ -1081,8 +1081,9 @@ agent 忙碌時收到的訊息不會被拒絕，而是依先進先出（FIFO）�
 agent 在同一段對話裡工作好幾個月，每個任務大約會累積 100 KB（工具呼叫、它們的輸出、時間軸）。
 AgentAPI 會把這些控制在一定範圍內：
 
-- `GET /messages`、`GET /rich-messages`、`GET /timeline` 和 `GET /tasks` 回傳一頁任務和屬於它們
-  的內容：不帶參數時是最近 20 個，和 `/events` 的完整重播一樣。`has_more` 表示還有更早的任務；
+- `GET /rich-messages`、`GET /timeline` 和 `GET /tasks` 回傳一頁任務和屬於它們的內容：不帶參數時是
+  最近 20 個，和 `/events` 的完整重播一樣。`GET /messages` 帶 `before` 或 `limit` 時也一樣分頁；兩個都
+  不帶時照舊回傳所有訊息，因為伺服器會保留訊息（它們很小），上游的用戶端也是這樣讀取。`has_more` 表示還有更早的任務；
   把 `next_before`（這一頁第一個任務的 ID）當成 `before` 傳入，就能讀前一頁，`limit`（最多 100）
   決定一頁的大小。讀到最前面的那一頁，也會包含第一個任務之前的內容。
 - 有 `--state-db` 時，伺服器只把最近 100 個任務的結構化訊息和時間軸放在記憶體，較早的頁面從
@@ -1824,7 +1825,7 @@ host:
 
 | 端點 | 說明 |
 | --- | --- |
-| `GET /messages` | 最近 20 個任務的訊息；用 `before` 和 `limit` 往前翻頁（[長對話](#長對話)） |
+| `GET /messages` | 對話的所有訊息；帶 `before` 或 `limit` 時是一頁任務的訊息（[長對話](#長對話)） |
 | `POST /message` | 傳送訊息，agent 忙碌時排入佇列；`dispatch_mode` 為 `queue`（預設）、`steer` 或 `interrupt` |
 | `DELETE /messages` | 清除對話和佇列，並重新啟動 agent，開始新的工作階段 |
 | `GET /rich-messages` | 結構化的對話：思考內容、工具呼叫與結果、用量；分頁方式同 `GET /messages` |

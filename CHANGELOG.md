@@ -23,9 +23,10 @@
 
 ### Changes
 
-- `GET /messages`, `GET /rich-messages`, `GET /timeline` and `GET /tasks` without parameters
-  return the latest 20 tasks and what belongs to them, where they returned the whole conversation;
-  read the pages until `has_more` is false for all of it. The full `/events` replay (a new client,
+- `GET /rich-messages`, `GET /timeline` and `GET /tasks` without parameters return the latest 20
+  tasks and what belongs to them, where they returned the whole conversation; read the pages until
+  `has_more` is false for all of it. `GET /messages` still returns every message without
+  parameters, as upstream's clients read it, and pages with `before` or `limit`. The full `/events` replay (a new client,
   another epoch) holds the latest 20 tasks too, and a client that resumes from before a change the
   server no longer holds gets the full replay. `GET /timeline?subagents=true` adds the subagents'
   events to the page of the latest tasks only.
