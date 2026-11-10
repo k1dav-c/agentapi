@@ -2,6 +2,9 @@ module github.com/coder/agentapi
 
 go 1.26.10
 
+// The chat's npm packages, some of which ship Go source (flatted).
+ignore ./chat/node_modules
+
 require (
 	github.com/Masterminds/semver/v3 v3.5.0
 	github.com/coder/quartz v0.1.2
