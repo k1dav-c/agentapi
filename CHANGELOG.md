@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- The hub's overview has an **Activity** card: a heatmap of each day of the last year, as GitHub
+  draws contributions, shaded by work time, tokens or spend (a switch above it, which the browser
+  remembers). Hover a day, or move through the grid with the arrow keys, for its three figures, in
+  your browser's time zone. The hub records the days from the first start of this release (and the
+  7 days of work time it already had) and keeps a year in `activity.json` next to its file of
+  instances; `GET /api/activity?tz=&days=` answers each day's totals.
+- The overview's Spend, Tokens, Work time and Activity cards fold to their title and headline
+  figure; the browser remembers which.
+- An AgentAPI's summary lists what its sessions spent in each of the last 25 hours
+  (`spend.hours`: the hour, `usd` and `tokens`), which the hub's activity counts each scope's spend
+  from. An older AgentAPI's spend doesn't count in the activity until it is updated.
+
 ## v4.1.1
 
 ### Fixes

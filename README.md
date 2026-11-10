@@ -1294,7 +1294,9 @@ instance:
   sessions in the working directory over the last 24 hours (`day_usd`) and 7 days (`week_usd`),
   worked out from its logs once a minute, the tokens of the same calls (`day_tokens` and
   `week_tokens`: `input`, `output`, `cache_write`, `cache_read` and their `total`), when the amounts
-  last changed (`updated_at`) and a `scope`. AgentAPIs of one agent in one directory of a machine
+  last changed (`updated_at`), a `scope`, and from 4.2 the hours behind them (`hours`: each of the
+  last 25 hours with calls, its start in UTC, `usd` and `tokens`; the hub's
+  [activity](docs/hub.md#activity) keeps them for a year). AgentAPIs of one agent in one directory of a machine
   report the same sessions, with the same `scope`: a client that adds up many counts each scope
   once. Its `update` says whether a client can [update the AgentAPI](#updating-through-the-api), and
   how far an update is.
@@ -1375,8 +1377,12 @@ one to open it in the chat. On a phone the list and the chat take turns.
   [hub guide](docs/hub.md#tokens-and-security) for what one can do.
 - An instance the hub can't reach that also missed three heartbeats (3 minutes by default), such
   as one whose workspace was killed, counts as stopped; its next heartbeat brings it back.
+- The overview adds up the agents' spend, tokens and work time over the last 24 hours and 7 days,
+  and its [Activity](docs/hub.md#activity) card shades each day of the last year by work time,
+  tokens or spend, as GitHub draws contributions. Each card folds to its headline.
 - It keeps the instances and the favorites in `~/.agentapi/hub/instances.json` (`--state`,
-  readable by its owner only), so it knows them after a restart.
+  readable by its owner only), so it knows them after a restart, and the activity of the last year
+  in `activity.json` next to it.
 - `--port` (default 3290) and `--bind` (such as the VPN address) set where it listens. Serve it
   over HTTPS, or only on the private network: signing in sends the token. A sign-in lasts 30 days.
   To reach the instances through a VPN client running in userspace, set `ALL_PROXY` to its SOCKS5
