@@ -95,6 +95,15 @@ Each agent message has buttons to show it as raw text instead of Markdown (each 
 to search inside it, and to copy it; your prompt has a copy button. A task with many steps shows its
 latest 40; **Show *n* earlier steps** brings back the rest.
 
+### Long conversations
+
+The transcript shows the latest five tasks; **Show *n* older tasks** shows the others the chat
+has. On connecting it gets the latest 20 tasks from the server, not the whole conversation, so a
+conversation of months opens as fast as a new one. Scroll to the top, or click **Show earlier
+tasks**, and the chat reads the 20 before them; what you were reading stays where it was. The task
+numbers are the server's, so they count the tasks not loaded yet. A server older than AgentAPI 4.3
+sends every task at once.
+
 ### The task menu
 
 ![The task menu with Preview Markdown, Copy task and output, and Export Markdown](screenshots/task-menu.png)
@@ -114,7 +123,9 @@ The search button (⌘F / Ctrl+F) opens a search bar above the transcript. It co
 tasks and matches, highlights them and steps through them with the arrows. The menu next to it
 narrows the tasks to those that are running, queued, failed, stopped by a usage limit, completed, or
 had a tool error. While you search, the matching messages show as plain text, every step of a long
-task shows, and tool calls with a match open.
+task shows, and tool calls with a match open. The search goes through the tasks the chat has
+loaded: in a [long conversation](#long-conversations), **+*n* earlier** in the bar loads the
+earlier tasks to search them too.
 
 ## Sending tasks
 
@@ -390,7 +401,8 @@ and queue, and require a second click.
 asks for a second click. When AgentAPI has given up on an agent that kept exiting, this starts it
 again. Codex and Pi, when AgentAPI starts their CLI directly, update to their latest release first.
 **Download conversation JSONL** saves every message, tool call and result of the session, one event per line, followed by those of the subagents the agent ran; the session
-details menu has it too.
+details menu has it too. The server streams it, the earlier tasks too, which the chat may not
+have loaded.
 
 ### Webhook
 
@@ -521,6 +533,6 @@ including an error page from a proxy in front of AgentAPI, is tried again after 
 every 30 s; a bar says when, with **Reconnect now**. The server sends a heartbeat every 15 s, and a
 stream silent for 45 s counts as lost even while the tab is in front (a phone that switched
 networks). Going back online or back to the tab reconnects at once. The status and page title show
-the connection state. On reopening, the chat shows the IndexedDB-cached transcript immediately,
-then fetches changes. The terminal reconnects the same way, and like the chat, a terminal whose
+the connection state. On reopening, the chat shows the IndexedDB-cached transcript immediately
+(the tasks it had loaded), then fetches changes. The terminal reconnects the same way, and like the chat, a terminal whose
 sign-in ended asks for the token again.

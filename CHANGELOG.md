@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- A long conversation opens as fast as a new one: the chat gets the latest 20 tasks, and reads the
+  20 before them when you scroll to the top or click **Show earlier tasks**, keeping what you read
+  in place. Task numbers still count from the first task. The search goes through the tasks
+  loaded, and **+*n* earlier** in its bar loads the rest.
+- `GET /messages`, `GET /rich-messages`, `GET /timeline` and `GET /tasks` take `before` (a task's
+  ID) and `limit` (tasks, up to 100) and answer `has_more` and `next_before`, the cursor of the page
+  before. Each task carries its `number`.
+- `GET /timeline/export` streams the whole timeline as JSON Lines (`?subagents=true` adds the
+  subagents'), which the chat's **Download conversation JSONL** now reads.
+
+### Performance
+
+- With `--state-db`, AgentAPI holds the rich messages and timeline of the latest 100 tasks in
+  memory and reads earlier ones from the file when asked; a restart loads only those. A
+  conversation of 1,000 tasks (105 MB in the file) took 193–245 MiB and a 44 MB first replay; it
+  now takes 55 MiB and 0.9 MB, about what 250 tasks take. Nothing is deleted from the file.
+
+### Changes
+
+- `GET /messages`, `GET /rich-messages`, `GET /timeline` and `GET /tasks` without parameters
+  return the latest 20 tasks and what belongs to them, where they returned the whole conversation;
+  read the pages until `has_more` is false for all of it. The full `/events` replay (a new client,
+  another epoch) holds the latest 20 tasks too, and a client that resumes from before a change the
+  server no longer holds gets the full replay. `GET /timeline?subagents=true` adds the subagents'
+  events to the page of the latest tasks only.
+
 ## v4.2.0
 
 ### Features

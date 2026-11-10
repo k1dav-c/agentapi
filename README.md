@@ -75,6 +75,9 @@ has the complete commit history.
   [task](#tasks): running, completed, failed, or stopped by a usage limit.
 - Follow everything live over [server-sent events](#events-and-incremental-sync),
   with heartbeats and an incremental replay after a reconnect.
+- A conversation that runs for months stays light: clients get the latest tasks and read earlier
+  ones a page at a time, and with `--state-db` the server holds only the latest in memory
+  ([Long conversations](#long-conversations)).
 
 **Agents**
 
@@ -823,6 +826,9 @@ state-db: ~/.agentapi/state/{port}.db
   `AGENTAPI_STATE_DB` still set one.
 - Requests that were open when AgentAPI stopped are marked expired: the agent
   that asked is gone.
+- The server holds the tool calls and timeline of the latest 100 tasks in memory and reads earlier
+  ones from the file when a client asks, so a conversation of months starts as fast and takes as
+  little memory as a new one ([Long conversations](#long-conversations)).
 - Uploads are kept next to the file (`<file>.uploads`), because messages refer
   to them by path. One that nothing in the conversation (or the queue) refers
   to is removed once it is 7 days old, which leaves time for a draft's
@@ -1171,7 +1177,8 @@ The [HTTP API reference](#http-api-reference) lists all the endpoints.
   [Steer, interrupt and the queue](#steer-interrupt-and-the-queue)).
 - `GET /messages` returns the conversation; `GET /rich-messages` and
   `GET /timeline` return its structured form (see
-  [Structured activity](#structured-activity)).
+  [Structured activity](#structured-activity)). All three, and `GET /tasks`, hold the latest 20
+  tasks and page back with `before` (see [Long conversations](#long-conversations)).
 - A message that went out but wasn't confirmed (the call timed out, or
   AgentAPI was stopping) may have reached the agent: it isn't sent again,
   but leaves the queue with an error.
@@ -1215,6 +1222,8 @@ The [HTTP API reference](#http-api-reference) lists all the endpoints.
   event; each event has its `subagent_id` and, for Claude Code, the
   `parent_tool_use_id` of the Agent tool call that started it. The agent's
   own events only have the subagent's prompt and final answer.
+- `GET /timeline/export` streams the whole timeline as JSON Lines, the subagents' events after
+  the agent's own with `?subagents=true`: the chat's conversation download.
 
 ### Tasks
 
@@ -1227,6 +1236,7 @@ seconds before ending the task, since the agent usually continues working.
 `GET /tasks` lists them, the earliest first, each with:
 
 - `id`: the ID of the message that started it, as in `GET /messages`;
+- `number`: its place in the conversation, from 1 (the chat's Task *n*);
 - `status`: `running`, `completed`, `failed` (the agent reported an error or
   exited; `errors` says what, also when AgentAPI tries a
   [transient error](#transient-api-errors) again) or `limited` (a
@@ -1273,6 +1283,32 @@ changes their own), so a plain `EventSource` that reconnects by itself resumes f
 turn the agent refused to start), the conversation gets a new epoch and the server ends the event
 streams: clients reconnect, and with their old epoch get the whole state
 again. Opening a session with more than 256 rich messages ends them too, rather than streaming it.
+
+The full replay (a new client, another epoch) holds the latest 20 tasks, not the whole
+conversation; the earlier ones are read a page at a time (below). A client that resumes from
+before a change the server no longer holds gets the full replay too.
+
+### Long conversations
+
+An agent that works for months on one conversation builds up about 100 KB a task (its tool calls,
+their output, the timeline). AgentAPI keeps that bounded:
+
+- `GET /messages`, `GET /rich-messages`, `GET /timeline` and `GET /tasks` return a page of tasks
+  and what belongs to them: without parameters the latest 20, as the full `/events` replay holds
+  them. `has_more` says earlier tasks exist; pass `next_before` (the ID of the page's first task)
+  as `before` for the page before, and `limit` (up to 100) for its size. The page that reaches the
+  start also holds what came before the first task.
+- With `--state-db`, the server holds the rich messages and the timeline of the latest 100 tasks
+  in memory, and reads earlier pages from the file; a restart loads only those. The messages and
+  tasks, a few KB a task, stay in memory. Nothing is deleted: `GET /timeline/export` streams the
+  whole timeline from the file a part at a time.
+- Without `--state-db` the server holds the whole conversation in memory, as before, and the lists
+  page it the same way.
+- The chat loads the latest tasks and reads earlier ones as you scroll up; see the
+  [chat guide](docs/chat-ui.md#long-conversations).
+
+AgentAPI 4.2 and earlier returned every message, rich message, event and task from these lists.
+A client that wants all of them reads the pages until `has_more` is false.
 
 ## Integrations
 
@@ -1816,6 +1852,19 @@ seconds for a whole turn.
 - Not counted: MCP servers the agent starts, the commands it runs, the shell terminal (one shell
   while it is open) and the browser tab.
 
+A long conversation grows by about 100 KB a task in its state database. On 2026-11-10, with a
+conversation of 100 KB tasks restored from `--state-db` (`native-demo`, the same machine), AgentAPI
+4.2.0 held all of it, and the next release holds the latest 100 tasks
+([Long conversations](#long-conversations)):
+
+| Tasks | State database | Memory, 4.2.0 | Memory, after | First `/events?sync=1` replay, 4.2.0 | After |
+| --- | --- | --- | --- | --- | --- |
+| 0 | | 38 MiB | 34 MiB | 0.6 KB | 0.6 KB |
+| 250 | 26 MB | 71–86 MiB | 49–52 MiB | 11 MB | 0.9 MB |
+| 1,000 | 105 MB | 193–245 MiB | 55 MiB | 44 MB | 0.9 MB |
+
+The memory that remains grows with the messages and tasks, a few KB a task.
+
 To size a machine, plan per session about 30 MiB for AgentAPI plus the agent (about 350 MiB for
 Claude Code or Codex, 150 MiB for Pi) and whatever its MCP servers and commands need.
 
@@ -2083,16 +2132,17 @@ default.
 
 | Endpoint | Description |
 | --- | --- |
-| `GET /messages` | All messages of the conversation |
+| `GET /messages` | The messages of the latest 20 tasks; `before` and `limit` page back ([Long conversations](#long-conversations)) |
 | `POST /message` | Send a message, or queue it while the agent is busy; `dispatch_mode` is `queue` (default), `steer` or `interrupt` |
 | `DELETE /messages` | Clear the conversation and the queue, and restart the agent in a new session |
-| `GET /rich-messages` | The structured conversation: thinking, tool calls with results, usage |
-| `GET /timeline` | Normalized session events, for export or another UI; `?subagents=true` adds the subagents' |
+| `GET /rich-messages` | The structured conversation: thinking, tool calls with results, usage; paged as `GET /messages` |
+| `GET /timeline` | Normalized session events, for export or another UI, paged as `GET /messages`; `?subagents=true` adds the subagents' |
+| `GET /timeline/export` | The whole timeline as JSON Lines, streamed; `?subagents=true` adds the subagents' |
 | `GET /status` | Status, lifecycle, server ID, turn, epoch, session name, version, the agent's session ID, capabilities, pending requests, settings, usage, usage limit stop, retry wait, terminal, login |
 | `GET /title` | The session's human-readable title |
 | `GET /events` | Server-sent events; `?sync=1` for incremental replay on reconnect, and task and queue updates; `?only=summary` for the summary alone |
 | `GET /summary` | What a client that watches many AgentAPIs shows of this one: instance, status, attention, title, latest task, requests, queue, usage; see [Watching many instances](#watching-many-instances) |
-| `GET /tasks` | The conversation's [tasks](#tasks): each message of yours and the agent's turn on it |
+| `GET /tasks` | The conversation's [tasks](#tasks), the latest 20 by default: each message of yours and the agent's turn on it |
 | `POST /tasks/seen` | Mark the tasks seen for every client: the summary's `unread` is false until a task ends again |
 | `GET /workspace` | The Coder workspace URL, when AgentAPI runs in one |
 

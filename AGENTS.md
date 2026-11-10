@@ -59,7 +59,7 @@ protocols (the native transport).
 - `cmd/` - CLI command definitions, including server, list, hub, host (the launcher, and the systemd user service `agentapi host install` writes), restart (registered AgentAPIs restart in place, e.g. into an updated binary), and update
 - `lib/httpapi/` - HTTP server: routes, OpenAPI schema, auth, event streams, instance summaries for monitoring multiple AgentAPIs (`GET /summary`, `/events?only=summary`), the webhook's configuration, and updates through the API (`POST /update`, with `--allow-update`); it wires the three packages below and uses their types under their own names (huma names a schema after the Go type)
 - `lib/httpmw/` - The HTTP pieces the server and the hub share: the Host and cross-origin checks, gzip, the host/origin/bind flag parsing, and the file server of the chat UI embedded from `lib/httpmw/chat/`
-- `lib/convstate/` - The conversation state clients read, without HTTP: the `EventEmitter`, the tasks and summary it derives, the queue it reports, the `Persister` interface
+- `lib/convstate/` - The conversation state clients read, without HTTP: the `EventEmitter`, the tasks and summary it derives, the window it holds (with a state database, the latest 100 tasks' rich messages and timeline) and the pages of the lists, the queue it reports, the `Persister` interface
 - `lib/webhook/` - Webhooks that push events (tasks, requests, messages, heartbeats) to a receiver: delivery, and the observer that reads the emitter
 - `lib/workspacefs/` - The file viewer's reads of the working directory: content, diff through git, HTML preview, images, find
 - `lib/conversation/` - Shared messages, status, and the `Emitter` interface (imported as `conv`)
@@ -71,7 +71,7 @@ protocols (the native transport).
 - `lib/agentlog/` - The agents' session-log formats, one package per agent (`claudelog`, `codexlog`, `pilog`), shared by the native adapters and `lib/sessions`
 - `lib/sessions/` - Earlier sessions, subagents and their costs, read incrementally from the logs
 - `lib/pricing/` - Model prices per million tokens (built-in `prices.json`, `--prices` file) and per-call cost calculation; `scripts/prices.mjs` compares `prices.json` with Pi's model registry
-- `lib/statedb/` - SQLite persistence of conversations (`--state-db`); the stored state is one versioned meta value, `conversation_state` (`state.go`); the per-part keys of 3.7.2 and earlier aren't read
+- `lib/statedb/` - SQLite persistence of conversations (`--state-db`), which loads the latest tasks' rich messages and timeline and reads earlier pages on demand; the stored state is one versioned meta value, `conversation_state` (`state.go`); the per-part keys of 3.7.2 and earlier aren't read
 - `lib/instanceapi/` - The contract with clients that watch many AgentAPIs: who an instance is (with its `AgentType`), its summary, the webhook envelope and signature, and the state a hub shows; it imports only `lib/agentstate` and `lib/util`
 - `lib/hub/` - `agentapi hub serve`: a server that watches many AgentAPIs, built on `lib/instanceapi` and `lib/httpmw` rather than `lib/httpapi` (signed webhooks, summary streams, a proxy that opens any of them in the chat, the addresses machines join it by, the activity of the last year hour by hour (`activity.json`, `GET /api/activity`, the overview's heatmap), the favorite prompts among the settings its page keeps, and `hub-schema.json`, the generated schema of its wire types)
 - `lib/sse/` - Server-sent events as the HTML standard defines them (`Reader`, `Write`), for the hub's streams
@@ -102,7 +102,7 @@ emitter, which streams them to clients. See [the architecture guide](docs/archit
 
 ## Main API endpoints
 
-- GET `/messages` - Get all messages in conversation
+- GET `/messages` - Get the messages of the latest 20 tasks; `before` and `limit` page back (so do `/rich-messages`, `/timeline` and `/tasks`)
 - POST `/message` - Send message to agent (content, type fields)
 - GET `/status` - Get status, lifecycle details, and session metadata
 - GET `/events` - SSE stream of agent events
