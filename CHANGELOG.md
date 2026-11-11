@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Documentation
+
+- `agentapi host` says when a machine needs the launcher (only to take issues: `hub join` alone has
+  its AgentAPIs report) and why the two are separate, and how to run it without systemd, as in a
+  container or a Coder workspace (`nohup agentapi host serve`, or a `coder_script` in the
+  template).
+
 ## v4.3.2
 
 ### Fixes

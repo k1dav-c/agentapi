@@ -638,6 +638,8 @@ hub 還沒有 GitHub App 時，Issues 會顯示 **Connect GitHub**，從 manifes
 [GitHub 設定](#github-設定)可以改 App 的 repo、換一個新的 App，或中斷連接。
 沒有 App 也能用 issue 的代號（`owner/repo#12` 或 issue 網址）開工，這時主機用自己的 GitHub 登入。
 上方會列出主機，離線的同樣有 **×**。沒有任何主機裝了 launcher 時，頁面會顯示安裝指令。
+加入 hub 的主機不裝 launcher，主機上的 AgentAPI 也會出現在清單上；只有要接 issue 才需要 launcher（見
+[`agentapi host`](../README.zh-TW.md#agentapi-host)，也說明沒有 systemd 的主機怎麼辦）。
 
 | 手機上的看板 | 手機上的 issue |
 | --- | --- |
