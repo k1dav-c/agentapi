@@ -749,7 +749,9 @@ manifest, for your account or an organization. [GitHub settings](#github-setting
 app's repositories, connects another app, or disconnects it. An issue can still be started by its reference
 (`owner/repo#12`, or its URL); the machine then works with its own GitHub login. The machines show
 above it, with **×** on an offline one, as on the board. Without a launcher on any machine, the page
-shows the command that installs one.
+shows the command that installs one. A machine that joined the hub needs no launcher for its
+AgentAPIs to show in the list; it needs one only to take issues
+([`agentapi host`](../README.md#agentapi-host), which also covers machines without systemd).
 
 | The board on a phone | An issue on a phone |
 | --- | --- |
