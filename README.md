@@ -2085,6 +2085,13 @@ starts an AgentAPI for each GitHub issue the hub dispatches here, in a git workt
 branch, and stops it again. [examples/issue-dispatch](examples/issue-dispatch/README.md) sets up
 the whole dispatch.
 
+A machine needs the launcher only to take issues. `agentapi hub join` alone has its AgentAPIs report
+to the hub, which lists them and opens them. The launcher reports the machine itself (its agents,
+repositories, room and jobs), which Issues shows among the machines, and lets the hub start
+AgentAPIs there; those report like any other. The launcher needs no hub settings of its own: it
+reads the ones `hub join` wrote. The two are separate because the launcher lets the hub start
+programs on the machine, which joining doesn't.
+
 ```bash
 agentapi hub join http://hub.vpn:3290/hooks --secret "$HUB_SECRET" --public-url 'http://{ip}:{port}'
 echo "$INSTANCE_TOKEN" > ~/.agentapi/instance.token && chmod 600 ~/.agentapi/instance.token
@@ -2102,6 +2109,27 @@ agentapi host status
 The service has `KillMode=process`: restarting or stopping the launcher leaves the jobs' AgentAPIs
 running, and the next launcher takes them over. `install` needs a systemd user instance; when your
 services stop at logout, it says so, and `sudo loginctl enable-linger <user>` keeps them running.
+
+Without systemd, as in a container such as a Coder workspace, `install` stops with
+`no systemd user instance`. Start `agentapi host serve` the way the machine starts its other
+programs instead, as yourself rather than with `sudo` (the launcher reads your
+`~/.agentapi/config.yaml` and keeps its token in your `~/.agentapi`):
+
+```bash
+nohup agentapi host serve >~/.agentapi/host.log 2>&1 &
+```
+
+That lasts until the workspace stops. For a Coder workspace, start it from the template, so it runs
+on every start:
+
+```hcl
+resource "coder_script" "agentapi_host" {
+  agent_id     = coder_agent.main.id
+  display_name = "AgentAPI launcher"
+  run_on_start = true
+  script       = "nohup agentapi host serve >\"$HOME/.agentapi/host.log\" 2>&1 &"
+}
+```
 
 The launcher reads the hub's `webhook-url` and `webhook-secret`, which `agentapi hub join` writes,
 and the `host` section of `~/.agentapi/config.yaml` (`--config` names another file; the launcher

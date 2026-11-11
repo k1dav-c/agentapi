@@ -1777,6 +1777,12 @@ hub 的 GitHub App 存放的檔案（預設是 `--state` 旁的 `github-app.json
 issue 到這台主機，它就在該 issue 分支的 git worktree 裡啟動一個 AgentAPI，之後再停掉。整套派工的
 架設見 [examples/issue-dispatch](examples/issue-dispatch/README.md)。
 
+只有要接 issue 的主機才需要 launcher。光是 `agentapi hub join`，主機上的 AgentAPI 就會回報給 hub，
+在清單裡看得到、也能開啟。launcher 回報的是主機本身（能跑的 agent、repo、容量和 job），顯示在 Issues
+的主機列，並讓 hub 能在這台主機上啟動 AgentAPI；這些 AgentAPI 和其他的一樣會回報。launcher 不需要另外
+設定 hub，直接讀 `hub join` 寫入的設定。兩者分開，是因為 launcher 讓 hub 能在主機上啟動程式，加入 hub
+則不會。
+
 ```bash
 agentapi hub join http://hub.vpn:3290/hooks --secret "$HUB_SECRET" --public-url 'http://{ip}:{port}'
 echo "$INSTANCE_TOKEN" > ~/.agentapi/instance.token && chmod 600 ~/.agentapi/instance.token
@@ -1794,6 +1800,25 @@ agentapi host status
 service 設了 `KillMode=process`：重新啟動或停止 launcher 時，job 的 AgentAPI 繼續執行，由下一個
 launcher 接手。`install` 需要 systemd user instance；登出後 user service 會停止時，它會提醒你，
 用 `sudo loginctl enable-linger <user>` 讓它們繼續執行。
+
+沒有 systemd 的環境（容器，例如 Coder 工作區）裡，`install` 會停在 `no systemd user instance`。
+這時照這台主機啟動其他程式的方式，用你自己的身分執行 `agentapi host serve`，不要加 `sudo`
+（launcher 讀的是你的 `~/.agentapi/config.yaml`，token 也存在你的 `~/.agentapi`）：
+
+```bash
+nohup agentapi host serve >~/.agentapi/host.log 2>&1 &
+```
+
+這樣只會維持到工作區停止。Coder 工作區可以寫進範本，每次啟動都會執行：
+
+```hcl
+resource "coder_script" "agentapi_host" {
+  agent_id     = coder_agent.main.id
+  display_name = "AgentAPI launcher"
+  run_on_start = true
+  script       = "nohup agentapi host serve >\"$HOME/.agentapi/host.log\" 2>&1 &"
+}
+```
 
 launcher 讀 `agentapi hub join` 寫入的 `webhook-url` 和 `webhook-secret`，以及
 `~/.agentapi/config.yaml` 的 `host` 區段（`--config` 可指定其他檔案，launcher 的檔案放在它旁邊）：
