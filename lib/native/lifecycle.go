@@ -42,6 +42,9 @@ func (c *Conversation) launchAsync(ctx context.Context, gen int, resume Resume, 
 // once the adapter accepts turns, when it waits for a login, and when it was
 // stopped while it started.
 func (c *Conversation) launch(ctx context.Context, gen int, resume Resume) error {
+	c.mu.Lock()
+	resume.Provider = c.launchProviderLocked()
+	c.mu.Unlock()
 	adapter, err := c.cfg.Factory(resume)
 	if err != nil {
 		return fmt.Errorf("create adapter: %w", err)
@@ -89,6 +92,7 @@ func (c *Conversation) launch(ctx context.Context, gen int, resume Resume) error
 		c.mu.Unlock()
 		return nil
 	}
+	c.startedOnLocked(adapter, resume.Provider)
 	c.markStartedLocked(caps, settings)
 	// The prompt's turn begins before the lock is released, so no other
 	// message can start a turn first.
@@ -108,7 +112,7 @@ func (c *Conversation) markStartedLocked(caps agentstate.Capabilities, settings 
 	c.started = true
 	c.ran = true
 	c.caps = caps
-	c.settings = settings
+	c.settings = c.withProviderLocked(settings)
 	c.loginWaiting = false
 	c.startErrors = nil
 	c.login = nil

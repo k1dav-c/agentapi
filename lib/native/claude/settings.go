@@ -190,7 +190,13 @@ func (a *Adapter) SettingOptions(context.Context) (native.SettingOptions, error)
 func (a *Adapter) ApplySettings(ctx context.Context, s agentstate.Settings) error {
 	options, _ := a.SettingOptions(ctx)
 	current := a.Settings()
-	if err := options.Check(s, current); err != nil {
+	check := s
+	_, onProvider := a.onProvider()
+	if onProvider {
+		// The conversation checks a provider's models.
+		check.Model = ""
+	}
+	if err := options.Check(check, current); err != nil {
 		return err
 	}
 	if s.Model != "" && s.Model != current.Model {
@@ -200,6 +206,11 @@ func (a *Adapter) ApplySettings(ctx context.Context, s agentstate.Settings) erro
 		a.mu.Lock()
 		a.model = s.Model
 		a.mu.Unlock()
+		if onProvider {
+			if err := a.providerModelChanged(ctx, s.Model); err != nil {
+				return fmt.Errorf("switch the provider's other models: %w", err)
+			}
+		}
 	}
 	if s.Effort != "" && s.Effort != current.Effort {
 		settings := map[string]any{"effortLevel": s.Effort}

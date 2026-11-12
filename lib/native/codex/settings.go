@@ -170,7 +170,12 @@ func (a *Adapter) ApplySettings(ctx context.Context, s agentstate.Settings) erro
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if err := options.Check(s, a.settingsLocked()); err != nil {
+	check := s
+	if a.launch != nil {
+		// The conversation checks a provider's models.
+		check.Model = ""
+	}
+	if err := options.Check(check, a.settingsLocked()); err != nil {
 		return err
 	}
 	// A thread on its model's default effort stays on the new model's.

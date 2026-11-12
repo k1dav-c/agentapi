@@ -9,6 +9,7 @@ import (
 	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/provider"
 )
 
 // ErrClosed is returned by a Start that StartBlock holds when the adapter is
@@ -30,7 +31,10 @@ type Adapter struct {
 	// ResumeRef is the ref the factory created the adapter with.
 	ResumeRef string
 	// Fork is set for an adapter that forks ResumeRef's session.
-	Fork     bool
+	Fork bool
+	// Launch and Carry are the factory's Resume.Provider and Resume.Carry.
+	Launch   *native.ProviderRun
+	Carry    []conv.Message
 	StartErr error
 	// StartWarnings are reported with Sink.Error at the start, before
 	// StartErr is returned.
@@ -69,6 +73,9 @@ type Adapter struct {
 	// OnCall, if set, runs first thing in every method of the adapter's
 	// interfaces, with the method's name.
 	OnCall func(method string)
+	// Relaunch, if set, is what SwitchProvider returns for an agent that
+	// can't switch while it runs; see ProviderAdapter.
+	Relaunch *native.RelaunchError
 
 	mu         sync.Mutex
 	sink       native.Sink
@@ -77,6 +84,8 @@ type Adapter struct {
 	interrupts int
 	responses  []Response
 	applied    []agentstate.Settings
+	switches   []Switch
+	onProvider bool
 	done       chan error
 	once       sync.Once
 	closed     bool
@@ -228,7 +237,12 @@ func (a *Adapter) ApplySettings(_ context.Context, s agentstate.Settings) error 
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if err := a.Options.Check(s, a.Current); err != nil {
+	check := s
+	if a.onProvider || a.Launch != nil {
+		// The conversation checks a provider's models.
+		check.Model = ""
+	}
+	if err := a.Options.Check(check, a.Current); err != nil {
 		return err
 	}
 	a.applied = append(a.applied, s)
@@ -320,6 +334,8 @@ type Factory struct {
 	adapters []*Adapter
 	// Configure, if set, adjusts each new adapter.
 	Configure func(*Adapter)
+	// Providers makes the adapters ProviderAdapters.
+	Providers bool
 }
 
 // New implements native.Factory.
@@ -327,12 +343,17 @@ func (f *Factory) New(resume native.Resume) (native.Adapter, error) {
 	a := New()
 	a.ResumeRef = resume.Ref
 	a.Fork = resume.Fork
+	a.Launch = resume.Provider
+	a.Carry = resume.Carry
 	if f.Configure != nil {
 		f.Configure(a)
 	}
 	f.mu.Lock()
 	f.adapters = append(f.adapters, a)
 	f.mu.Unlock()
+	if f.Providers {
+		return ProviderAdapter{a}, nil
+	}
 	return a, nil
 }
 
@@ -351,4 +372,45 @@ func (f *Factory) Last() *Adapter {
 		return nil
 	}
 	return f.adapters[len(f.adapters)-1]
+}
+
+// Switch is a recorded SwitchProvider call: the provider's ID (empty for
+// the agent's own) and the model.
+type Switch struct {
+	Provider string
+	Model    string
+}
+
+// ProviderAdapter is an Adapter whose agent can run on a model provider. A
+// switch is recorded and takes the model, unless Adapter.Relaunch is set.
+type ProviderAdapter struct {
+	*Adapter
+}
+
+var _ native.ProviderRunner = ProviderAdapter{}
+
+func (p ProviderAdapter) SwitchProvider(_ context.Context, to *provider.Provider, model string) error {
+	p.called("SwitchProvider")
+	if p.Relaunch != nil {
+		return p.Relaunch
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	id := ""
+	if to != nil {
+		id = to.ID
+	}
+	p.switches = append(p.switches, Switch{Provider: id, Model: model})
+	p.onProvider = to != nil
+	if model != "" {
+		p.Current.Model = model
+	}
+	return nil
+}
+
+// Switches returns the SwitchProvider calls the agent took.
+func (a *Adapter) Switches() []Switch {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]Switch(nil), a.switches...)
 }

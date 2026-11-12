@@ -11,6 +11,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,6 +29,7 @@ import (
 	"github.com/coder/agentapi/lib/logctx"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/nativetest"
+	"github.com/coder/agentapi/lib/provider"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -607,6 +610,50 @@ func TestNative_Settings(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, n.do(http.MethodPut, "/settings", map[string]any{"model": "huge"}, nil), "a model the agent doesn't offer")
 	assert.Equal(t, http.StatusUnprocessableEntity, n.do(http.MethodPut, "/settings", map[string]any{"permission_mode": "yolo"}, nil), "not a permission mode")
+}
+
+// A switch of providers the agent can't make while it runs starts another
+// agent on the provider, with the conversation's text.
+func TestNative_SettingsProviderRelaunch(t *testing.T) {
+	factory := &nativetest.Factory{Providers: true, Configure: func(a *nativetest.Adapter) {
+		configurableAdapter(a)
+		a.Relaunch = &native.RelaunchError{Carry: true}
+		a.AutoStartTurn = true
+	}}
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte("providers:\n  - {id: kimi, name: Kimi, base_url: https://gw.example.com/v1, api_key: sk-1, models: [Kimi-K3]}\n"), 0o600))
+	source := provider.NewSource(configPath, nil)
+	n := newNativeServerConfig(t, nil, func(config *httpapi.ServerConfig) {
+		config.Native.Factory = factory.New
+		config.Native.Providers = source
+	})
+	var got httpapi.SettingsResponse
+	require.Equal(t, http.StatusOK, n.do(http.MethodGet, "/settings", nil, &got.Body))
+	assert.Equal(t, "default", got.Body.Settings.Provider)
+	require.Len(t, got.Body.Options.Providers, 1)
+	assert.Equal(t, "Kimi", got.Body.Options.Providers[0].Name)
+
+	code, _ := n.send("remember 7", "")
+	require.Equal(t, http.StatusOK, code)
+	a := factory.Last()
+	require.Eventually(t, func() bool { return len(a.Turns()) == 1 }, 5*time.Second, 5*time.Millisecond)
+	a.Sink().TurnCompleted(native.TurnResult{})
+	require.Eventually(t, func() bool {
+		var status convstate.StatusChangeBody
+		n.do(http.MethodGet, "/status", nil, &status)
+		return status.Status == "stable"
+	}, 5*time.Second, 5*time.Millisecond)
+
+	require.Equal(t, http.StatusOK, n.do(http.MethodPut, "/settings", map[string]any{"provider": "kimi"}, &got.Body))
+	assert.Equal(t, "kimi", got.Body.Settings.Provider)
+	require.Len(t, factory.Adapters(), 2)
+	next := factory.Last()
+	require.NotNil(t, next.Launch)
+	assert.Equal(t, "Kimi-K3", next.Launch.Model)
+	require.NotEmpty(t, next.Carry)
+	assert.Equal(t, "remember 7", next.Carry[0].Message)
+
+	assert.Equal(t, http.StatusBadRequest, n.do(http.MethodPut, "/settings", map[string]any{"provider": "nope"}, nil))
 }
 
 func TestNative_SettingsUnsupported(t *testing.T) {

@@ -25,6 +25,7 @@ import (
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/agentio"
 	"github.com/coder/agentapi/lib/native/procutil"
+	"github.com/coder/agentapi/lib/provider"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -83,10 +84,14 @@ func newFactory(cfg Config, uid int) (native.Factory, error) {
 			"Set IS_SANDBOX=1 if AgentAPI runs in a sandbox, or choose a mode with --permission-mode.")
 	}
 	return func(resume native.Resume) (native.Adapter, error) {
+		var a *Adapter
 		if resume.Fork && resume.Ref != "" {
-			return newForkAdapter(cfg, args, resume.Ref), nil
+			a = newForkAdapter(cfg, args, resume.Ref)
+		} else {
+			a = newAdapter(cfg, args, resume.Ref)
 		}
-		return newAdapter(cfg, args, resume.Ref), nil
+		a.launchProvider(resume.Provider)
+		return a, nil
 	}, nil
 }
 
@@ -204,6 +209,10 @@ type Adapter struct {
 	model  string
 	effort string
 	models []claudeModel
+	// provider is the provider Claude Code runs on, nil for its own; launch
+	// is the one it started on. See provider.go.
+	provider *provider.Provider
+	launch   *native.ProviderRun
 	// usage is the usage the CLI last reported (see usage.go). Read loop
 	// only.
 	usage agentstate.AgentUsage
@@ -272,14 +281,16 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 	cmd := procutil.Command{
 		Program: a.cfg.Program,
 		Args:    buildArgs(a.args, a.sessionID, a.resumeRef, a.fork),
-		Env:     buildEnv(a.cfg.Env),
+		Env:     buildEnv(a.cfg.Env, launchEnv(a.launch)...),
 		Dir:     a.cfg.CWD,
 		Logger:  a.log,
 	}
 	// The login check takes up to 10 s; the host doesn't start the CLI if
-	// a restart closed the adapter meanwhile.
-	if err := a.checkLogin(ctx, cmd.Env); err != nil {
-		return err
+	// a restart closed the adapter meanwhile. A provider has its own key.
+	if a.launch == nil {
+		if err := a.checkLogin(ctx, cmd.Env); err != nil {
+			return err
+		}
 	}
 	a.mu.Lock()
 	a.sink = sink

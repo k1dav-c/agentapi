@@ -1026,6 +1026,41 @@
         ],
         "type": "object"
       },
+      "ProviderOption": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "description": "Value of the provider setting that picks the provider.",
+            "type": "string"
+          },
+          "models": {
+            "description": "Models the provider offers; empty when it defines none and its API listed none, then any model ID goes.",
+            "items": {
+              "$ref": "#/components/schemas/ModelOption"
+            },
+            "type": "array"
+          },
+          "name": {
+            "description": "Name to show.",
+            "type": "string"
+          },
+          "origin": {
+            "description": "Where the provider is defined: config, the machine's ~/.agentapi/config.yaml; hub, the hub this AgentAPI reports to.",
+            "enum": [
+              "config",
+              "hub"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "models",
+          "name",
+          "origin"
+        ],
+        "type": "object"
+      },
       "Question": {
         "additionalProperties": false,
         "properties": {
@@ -2071,7 +2106,7 @@
         "additionalProperties": false,
         "properties": {
           "models": {
-            "description": "Models the agent can switch to.",
+            "description": "Models the agent can switch to on its own provider.",
             "items": {
               "$ref": "#/components/schemas/ModelOption"
             },
@@ -2081,6 +2116,13 @@
             "description": "Permission modes the agent can switch to; empty when it has none (Pi).",
             "items": {
               "$ref": "#/components/schemas/PermissionMode"
+            },
+            "type": "array"
+          },
+          "providers": {
+            "description": "Model providers the agent can switch to besides its own (default), from ~/.agentapi/config.yaml and the hub; missing for an agent that can't switch providers (Pi).",
+            "items": {
+              "$ref": "#/components/schemas/ProviderOption"
             },
             "type": "array"
           }
@@ -2112,6 +2154,10 @@
           "permission_mode": {
             "$ref": "#/components/schemas/PermissionMode",
             "description": "bypass: tools run without asking; auto: the agent's own review decides what may run; ask: tool calls that need approval come as requests; plan: the agent proposes a plan before it changes anything. Missing while the agent runs in a mode of its own, e.g. Claude Code's acceptEdits."
+          },
+          "provider": {
+            "description": "Model provider the agent runs on: default for its own (Claude Code's Anthropic login or key, Codex's OpenAI login or config), else the id of one of the providers GET /settings lists. Missing for an agent that can't switch providers (Pi).",
+            "type": "string"
           }
         },
         "type": "object"

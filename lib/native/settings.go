@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	"github.com/coder/agentapi/lib/agentstate"
+	"github.com/coder/agentapi/lib/provider"
 )
 
 // ErrInvalidSetting is returned by ApplySettings for a value a setting
@@ -16,7 +17,17 @@ var ErrInvalidSetting = errors.New("not a value the setting can take")
 // SettingOptions are the values the settings can take.
 type SettingOptions struct {
 	PermissionModes []agentstate.PermissionMode `json:"permission_modes" nullable:"false" doc:"Permission modes the agent can switch to; empty when it has none (Pi)."`
-	Models          []ModelOption               `json:"models" nullable:"false" doc:"Models the agent can switch to."`
+	Models          []ModelOption               `json:"models" nullable:"false" doc:"Models the agent can switch to on its own provider."`
+	// Providers is empty for an agent that can't switch providers.
+	Providers []ProviderOption `json:"providers,omitempty" nullable:"false" doc:"Model providers the agent can switch to besides its own (default), from ~/.agentapi/config.yaml and the hub; missing for an agent that can't switch providers (Pi)."`
+}
+
+// ProviderOption is a model provider the agent can switch to.
+type ProviderOption struct {
+	ID     string          `json:"id" doc:"Value of the provider setting that picks the provider."`
+	Name   string          `json:"name" doc:"Name to show."`
+	Origin provider.Origin `json:"origin" enum:"config,hub" doc:"Where the provider is defined: config, the machine's ~/.agentapi/config.yaml; hub, the hub this AgentAPI reports to."`
+	Models []ModelOption   `json:"models" nullable:"false" doc:"Models the provider offers; empty when it defines none and its API listed none, then any model ID goes."`
 }
 
 // ModelOption is a model the agent can switch to.
@@ -81,6 +92,30 @@ func (o SettingOptions) Check(s, current agentstate.Settings) error {
 		}
 	}
 	return nil
+}
+
+// ProviderRunner is implemented by adapters whose agent can run on a model
+// provider: it starts on Resume.Provider, and switches providers.
+type ProviderRunner interface {
+	// SwitchProvider moves the agent to to (nil: its own provider) on
+	// model ("" for the agent's default model on its own provider). A
+	// *RelaunchError says the agent can't switch while it runs: the
+	// conversation starts another agent on to, which continues the session
+	// or starts a new one with the conversation's text.
+	SwitchProvider(ctx context.Context, to *provider.Provider, model string) error
+}
+
+// RelaunchError is returned by SwitchProvider for a switch that needs
+// another agent.
+type RelaunchError struct {
+	// Carry: the new agent starts a new session with the conversation's
+	// text (Resume.Carry). Codex binds a thread to its provider, and a
+	// thread holds items of its provider's own that another refuses.
+	Carry bool
+}
+
+func (e *RelaunchError) Error() string {
+	return "the agent switches providers in a new process"
 }
 
 // Configurable is implemented by adapters whose session settings can

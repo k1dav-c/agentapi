@@ -228,10 +228,43 @@ func (s *Server) getSettings(ctx context.Context, _ *struct{}) (*SettingsRespons
 func (s *Server) updateSettings(ctx context.Context, input *UpdateSettingsRequest) (*SettingsResponse, error) {
 	applyCtx, cancel := s.agentCtx(nativeCallTimeout)
 	defer cancel()
-	if err := settingsError(s.native.ApplySettings(applyCtx, input.Body)); err != nil {
+	err := s.native.ApplySettings(applyCtx, input.Body)
+	var relaunch *native.RelaunchError
+	if errors.Is(err, native.ErrProviderRelaunch) && errors.As(err, &relaunch) {
+		err = s.relaunchOnProvider(applyCtx, input.Body, relaunch.Carry)
+	}
+	if err := settingsError(err); err != nil {
 		return nil, err
 	}
 	return s.settingsResponse(ctx)
+}
+
+// relaunchOnProvider switches providers with a new agent, which continues
+// the session, or with carry starts a new one with the conversation's
+// text, the conversation staying as it is: for an agent that can't switch
+// while it runs. Like a restart, it holds s.mu, so messages wait in the
+// queue meanwhile.
+func (s *Server) relaunchOnProvider(ctx context.Context, change agentstate.Settings, carry bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.restartRefusedLocked(); err != nil {
+		return huma.Error409Conflict(err.Error())
+	}
+	replacement, err := s.native.BeginProviderSwitch(ctx, change, carry)
+	if errors.Is(err, native.ErrTurnActive) {
+		return huma.Error409Conflict("the agent is working on a turn or compacting its context; switch providers once it is done")
+	}
+	if err != nil {
+		return err
+	}
+	s.emitter.SetLifecycle(instanceapi.LifecycleRestarting)
+	switch err := s.runRestartLocked(agentRestart{run: replacement.Start}); {
+	case errors.Is(err, errStopping):
+		return huma.Error409Conflict(err.Error())
+	case err != nil:
+		return huma.Error500InternalServerError(fmt.Sprintf("the agent failed to start on the provider: %v", err))
+	}
+	return nil
 }
 
 func (s *Server) settingsResponse(ctx context.Context) (*SettingsResponse, error) {
