@@ -232,7 +232,7 @@ func (l *Launcher) takeOver() {
 			l.fail(job, err)
 		}
 	}
-	l.saveLocked()
+	_ = l.saveLocked()
 }
 
 // check moves the jobs whose AgentAPI serves to running, fails those that
@@ -266,7 +266,7 @@ func (l *Launcher) checkJob(ctx context.Context, job *Job) {
 		l.mu.Lock()
 		defer l.mu.Unlock()
 		l.relaunchLocked(job)
-		l.saveLocked()
+		_ = l.saveLocked()
 		return
 	}
 	if state != JobStarting && state != JobRestarting {
@@ -288,7 +288,7 @@ func (l *Launcher) checkJob(ctx context.Context, job *Job) {
 	default:
 		return
 	}
-	l.saveLocked()
+	_ = l.saveLocked()
 }
 
 // relaunchLocked starts job's AgentAPI, which exited, again: once it
@@ -331,7 +331,8 @@ func (l *Launcher) fail(job *Job, err error) {
 }
 
 // saveLocked persists the current jobs, marking a failed write for check to
-// retry. l.mu is held.
+// retry. l.mu is held. Only a start needs the error, to stop a child it
+// couldn't record; elsewhere the retry is enough, and callers ignore it.
 func (l *Launcher) saveLocked() error {
 	err := l.store.save()
 	l.saveDirty = err != nil
@@ -587,7 +588,7 @@ func (l *Launcher) failStart(job *Job, err error) (JobInfo, bool, error) {
 		kill(job.PID)
 	}
 	l.fail(job, err)
-	l.saveLocked()
+	_ = l.saveLocked()
 	l.mu.Unlock()
 	return JobInfo{}, false, jsonapi.Errorf(http.StatusInternalServerError, "start_failed", "start %s: %v", job.Key, err)
 }
@@ -932,7 +933,7 @@ func (l *Launcher) Stop(ctx context.Context, key Key, opts StopOptions) error {
 	job.State = JobStopping
 	pid, marker := job.PID, job.InstanceID
 	repo, worktree, branch := job.Repo, job.Worktree, job.Branch
-	l.saveLocked()
+	_ = l.saveLocked()
 	l.mu.Unlock()
 
 	l.stopProcess(key, pid, marker)
@@ -949,7 +950,7 @@ func (l *Launcher) Stop(ctx context.Context, key Key, opts StopOptions) error {
 	}
 	l.mu.Lock()
 	l.store.remove(key.String())
-	l.saveLocked()
+	_ = l.saveLocked()
 	l.mu.Unlock()
 	l.logger.Info("Stopped a job", "job", key.String(), "kept_worktree", opts.KeepWorktree, "kept_state", opts.KeepState)
 	if err := errors.Join(errs...); err != nil {
