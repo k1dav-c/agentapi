@@ -29,7 +29,7 @@
 
 ### Fixes
 
-- Dialogs float up into place, fading in as they rise a little and grow, where they flew in from the
+- Dialogs float up into place, fading in as they rise a little and grow, instead of flying in from the
   top-left corner of the page (the slide of the old dialog animation added to its centering). They
   close faster, sinking back a little.
 

@@ -416,8 +416,8 @@ flowchart LR
   `ProviderRunner` 的 adapter 才會設定這個值。`SettingOptions` 列出供應商（`ProviderOption`：ID、名稱、
   來源 `config` 或 `hub`、模型）；選定的供應商屬於選定的設定，保存在 stored state 裡。每次啟動時，
   adapter 從 `Resume.Provider`（`ProviderRun`：供應商和啟動時用的模型）拿到它。選定的供應商若已不存在，
-  conversation 會放棄這個選擇並發出警告，agent 改用自己的供應商啟動。hub 回應之前（`HubSettled`），可能屬於
-  hub 的供應商會保留為選定的設定，agent 這次先用自己的供應商啟動，也不套用選定的模型，因為那是該供應商的模型。
+  conversation 會放棄這個選擇並發出警告，agent 改用自己的供應商啟動。hub 回應之前（`HubSettled`），選定的供應商若可能是
+  hub 的，就繼續保持選定，agent 這次先用自己的供應商啟動，也不套用選定的模型，因為那是該供應商的模型。
 - **切換。** 帶供應商的 `ApplySettings` 先檢查供應商和模型（沒指定時用第一個；換回 agent 自己的供應商時，
   用換過去之前的模型），再呼叫 `SwitchProvider`。Claude Code 在執行中切換：`apply_flag_settings` 設定
   `ANTHROPIC_BASE_URL`（去掉 `/v1` 的 base URL）、`ANTHROPIC_AUTH_TOKEN`、空的 `ANTHROPIC_API_KEY`，

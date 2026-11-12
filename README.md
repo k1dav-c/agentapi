@@ -718,9 +718,9 @@ The chosen provider applies to every agent that starts in the session, also afte
 restart with `--state-db`. A provider that is no longer defined is dropped, with a warning: the
 agent starts on its own provider. The hub's providers are kept beside the config file
 (`hub-providers.json`, sealed with the hub's secret) for the next start, so a session on one of
-them starts on it again while the hub can't be reached. One the hub may have, before the hub
-answered, stays chosen while the agent starts on its own provider; it goes back to it when it starts
-again once the hub answered.
+them starts on it again while the hub can't be reached. Until the hub answers, a chosen provider
+that may be one of the hub's stays chosen while the agent starts on its own provider; the agent goes
+back to it at its first start after the hub answered.
 
 A provider's models (those it lists at `<base_url>/models`) are kept for 10 minutes, then listed
 again in the background. `GET /settings` waits 3 seconds at most for a provider that doesn't
