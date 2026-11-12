@@ -216,6 +216,7 @@ export interface components {
             missed?: boolean;
             /** Format: int64 */
             round: number;
+            server_id?: string;
             /** Format: date-time */
             started_at: string;
         };
@@ -387,6 +388,7 @@ export interface components {
             port: number;
             /** Format: int64 */
             run: number;
+            server_id?: string;
             /** Format: date-time */
             started_at: string;
             state: components["schemas"]["LauncherJobState"];
@@ -416,7 +418,7 @@ export interface components {
         ProviderChange: {
             /** @description Base URL for Claude Code when it isn't base_url without /v1. */
             anthropic_base_url?: string;
-            /** @description The provider's API key; missing keeps the one it has, empty removes it. */
+            /** @description The provider's API key; missing keeps it at unchanged endpoints, empty removes it. */
             api_key?: string;
             /** @description Base URL of the provider's API, e.g. https://gateway.example.com/v1. Codex calls <base_url>/responses; Claude Code calls the same URL without /v1, plus /v1/messages. */
             base_url: string;
@@ -430,7 +432,7 @@ export interface components {
         ProviderCheck: {
             /** @description Base URL for Claude Code when it isn't base_url without /v1. */
             anthropic_base_url?: string;
-            /** @description The key to check with; missing uses the one the provider with the ID has. */
+            /** @description The key to check with; missing uses the saved one at unchanged endpoints. */
             api_key?: string;
             /** @description Base URL of the provider's API, e.g. https://gateway.example.com/v1. Codex calls <base_url>/responses; Claude Code calls the same URL without /v1, plus /v1/messages. */
             base_url: string;
@@ -466,9 +468,13 @@ export interface components {
         };
         ProvidersBody: {
             providers: components["schemas"]["ProviderView"][];
+            /** @description The hub's opaque optimistic-concurrency token for the provider list. */
+            revision: string;
         };
         ProvidersChange: {
             providers: components["schemas"]["ProviderChange"][];
+            /** @description The revision returned by the client's latest provider-list read. */
+            revision: string;
         };
         RemovedEvent: {
             id: string;

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Breaking changes
+
+- `PUT /api/providers` on the hub needs the list's `revision`, which `GET /api/providers` and each
+  `PUT` answer; without it the hub answers 400, and with a stale one 409, changing nothing. A script
+  that replaces the providers reads the list first. A provider sent without `api_key` keeps its key
+  only while its URLs stay the same; a changed URL needs its key (400 otherwise).
+- Upgrade the hub before the machines that report to it, and its launchers with it. An upgraded
+  AgentAPI refuses a provider sync answer without the nonce proof of an older hub (it keeps using the
+  providers it kept). An upgraded hub counts a job's task events only from the AgentAPI process the
+  launcher reported (`server_id`), so the jobs of an older launcher keep their state and cost until
+  it is upgraded too; an upgraded launcher reports the jobs it takes over on its next report.
+
 ### Features
 
 - Claude Code and Codex switch to another model provider while they run, and back: an endpoint that
@@ -32,6 +44,22 @@
 - Dialogs float up into place, fading in as they rise a little and grow, instead of flying in from the
   top-left corner of the page (the slide of the old dialog animation added to its centering). They
   close faster, sinking back a little.
+- The hub no longer reuses a provider's saved key after its endpoint changes: checking or saving the new
+  endpoint requires its key. Model-list redirects don't forward provider credentials to another origin,
+  and provider sync answers are bound to the nonce of their signed request so an old answer can't be
+  replayed. Provider edits use a revision: a stale tab gets a conflict instead of replacing another
+  tab's changes, and a late connection-check answer no longer describes fields edited since it started.
+- A Claude Code provider switch that fails or has an unknown outcome restores its previous provider and
+  model, or starts a replacement in that known state before any more turns; a switch that fails during
+  a turn starts that replacement by itself when the turn ends. Settings mutations of one
+  adapter no longer overlap. Stored-state version 2 carries the provider/model pair, and this AgentAPI
+  leaves any stored-state envelope it can't read unchanged rather than overwriting it on the next
+  status change.
+- Dispatch retries a state write that failed instead of dropping the only pending snapshot, and the
+  host launcher doesn't report a successful start when it couldn't keep the job's initial metadata.
+  Task events carry the AgentAPI server identity, so a delayed event from an old run can't change the
+  new run's state or cost. In the chat, saving one provider draft no longer closes a draft opened
+  later, and an old settings read can't replace options from a completed update.
 
 ### Documentation
 

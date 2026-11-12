@@ -631,20 +631,25 @@ endpoints such as a LiteLLM gateway that Claude Code and Codex sessions can swit
 (lowercase letters, digits, `-` and `_`), an optional name, a base URL, an optional Anthropic base
 URL, an API key and the models it offers; without models, each AgentAPI asks the
 provider's `<base_url>/models`. The hub keeps up to 50. The key is write-only: the page shows
-whether a provider has one, a key left empty in the editor keeps it, and **Remove the key** removes
-it. An ID can't change once added.
+whether a provider has one, and a key left empty in the editor keeps it only while the provider ID and
+endpoints stay the same. Enter the key again after changing either endpoint; **Remove the key**
+removes it. An ID can't change once added. Saving includes the list's revision, so another tab that
+saved since you opened yours gets a conflict rather than silently losing either tab's changes.
 
 ![The editor after Check connection: the provider answered with six models, two of them picked](screenshots/hub-settings-provider-check.png)
 
 **Check connection** in the editor asks the provider for its models from the hub, with the key typed
-or the one the hub keeps, and says how long it took and how many it listed, or why it failed (a
-refused key, a URL without the API, a provider the hub can't reach). Tap the models to offer only
-those; none picked offers all of them.
+or, at an unchanged endpoint, the one the hub keeps. It says how long it took and how many it listed,
+or why it failed (a refused key, an endpoint changed without its key, a URL without the API, a provider
+the hub can't reach). A result applies only to the fields it checked, not to edits made while it ran.
+Tap the models to offer only those; none picked offers all of them.
 
 Each AgentAPI that reports to the hub asks it for the providers when it starts and every minute
 after, in a request signed with the hub's secret. The answer has their keys, encrypted with a key
 derived from the secret (AES-256-GCM), so they don't cross the network in the clear over plain
-HTTP. A change reaches the chats within a minute. On a machine, a provider of its own config file
+HTTP. A separate proof binds that answer to the request's nonce, so an observer can't replay an old
+provider list. New AgentAPIs refuse an unbound answer; upgrade the hub before the machines reporting
+to it. A change reaches the chats within a minute. On a machine, a provider of its own config file
 wins over the hub's with the same ID.
 
 Every machine that joined the hub gets the keys: anyone with the hub's secret can. Give the hub only
@@ -759,6 +764,12 @@ each run (the agent and machine, when it ran, what it cost, how it ended), and e
 agents were sent, from this page or from a review or `/agent` comment on GitHub. The hub keeps the
 last 50 messages of each job. **On the machine** has the branch and the worktree to copy. While
 the agent works, the box at the bottom sends it a message (⌘/Ctrl+Enter).
+
+A run counts the task events of its own AgentAPI process only (the `server_id` the launcher reported
+for it), so a late event from an earlier run can't move or charge the current one. A launcher older
+than this hub reports no `server_id`: the hub then ignores its jobs' task events, which leaves their
+state and cost where they were. Upgrade the launchers along with the hub; an upgraded launcher reports
+the identity of the jobs it takes over on its next report.
 
 #### The list's rows
 
@@ -1085,10 +1096,10 @@ running AgentAPIs, which then no longer follow their conversation for the webhoo
 | `PUT /api/pins` | `{"ids": […]}` orders the pinned instances, from the top. It lists each pinned instance once and no other; 409, with the pinned ones in their order (`ids`), when it doesn't, such as after one was pinned, unpinned or forgotten; 404 for an instance the hub doesn't have |
 | `GET /api/favorites` | The [favorites](#favorites), in their order: `{"favorites": [{"id", "title", "text"}, …]}`; a favorite without a title has none |
 | `PUT /api/favorites` | `{"favorites": […]}` replaces them, in that order. At most 100; a title has at most 100 characters, on one line; a text isn't blank and has at most 20,000; an ID has 1 to 64 letters, digits, `-` or `_`, once. A favorite sent without an ID gets one; the answer is the list as the hub keeps it. 400, changing nothing, for a list it refuses |
-| `GET /api/providers` | The [model providers](#model-providers), without their keys: `{"providers": [{"id", "name", "base_url", "anthropic_base_url", "models": [{"id", "name"}], "has_key"}, …]}` |
-| `PUT /api/providers` | `{"providers": […]}` replaces them. A provider's `api_key` sets its key; missing keeps the key the provider with its ID had, `""` removes it. At most 50; an ID once, not `default`; the URLs http or https. The answer is the list as `GET` has it. 400, changing nothing, for a list it refuses |
-| `POST /api/providers/check` | `{"id", "base_url", "api_key"}` asks the provider at `base_url` for its models (`GET <base_url>/models`) from the hub: `{"models": [{"id", "name"}], "latency_ms"}`. Without `api_key`, with the key the provider with `id` has. 502 with the reason when the provider doesn't answer with its models |
-| `POST /api/providers/sync` | An AgentAPI gets the providers with their keys, sealed with the hub's secret (`{"sealed": …}`); signed with `--secret` as events are, no session needed |
+| `GET /api/providers` | The [model providers](#model-providers), without their keys, and the list's revision: `{"revision", "providers": [{"id", "name", "base_url", "anthropic_base_url", "models": [{"id", "name"}], "has_key"}, …]}`. The revision is an opaque token |
+| `PUT /api/providers` | `{"revision", "providers": […]}` replaces them, with the revision of the last `GET` or `PUT`. A provider's `api_key` sets its key; missing keeps the key the provider with its ID had only while its `base_url` and `anthropic_base_url` stay the same, `""` removes it. At most 50; an ID once, not `default`; the URLs http or https. The answer is the list and its new revision, as `GET` has them. 409, changing nothing, when the list changed since that revision: read it again; 400, changing nothing, for a list it refuses, a missing revision, or a changed URL without its key |
+| `POST /api/providers/check` | `{"id", "base_url", "anthropic_base_url", "api_key"}` asks the provider at `base_url` for its models (`GET <base_url>/models`) from the hub: `{"models": [{"id", "name"}], "latency_ms"}`. Without `api_key`, with the key the provider with `id` has, if its URLs are unchanged; 400 without asking when they changed. 502 with the reason when the provider doesn't answer with its models |
+| `POST /api/providers/sync` | An AgentAPI gets the providers with their keys, sealed with the hub's secret: `{"sealed", "nonce", "proof"}`, `proof` binding `sealed` to the request's `nonce`. Signed with `--secret` as events are, no session needed |
 | `GET /api/events` | Server-sent events: `instances` (all of them and `hub_version`, as `GET /api/instances` has them) and `favorites` (as `GET /api/favorites` has them), then `instance` (one changed what the page shows, or its work time moved by a minute; when it was last heard of counts only while it is offline), `removed` (`{"id"}`), `favorites` (all of them, after a change), `dispatch` (the [issue dispatch's](#issues) machines and jobs, as `GET /api/hosts` and `GET /api/jobs` have them, at first and after each change) and a `heartbeat` every 15 s. A browser that takes no event for 30 s loses the stream |
 | `GET /api/hosts` | The machines whose launchers report: their agents, repositories, jobs and room, and whether each is `online` |
 | `DELETE /api/hosts/{name}` | Forgets a machine and the launcher token the hub pinned its name to, so a launcher with a new token can join under the name. 409 while the machine is online (`host_online`) or has a job that works (`host_busy`): stop its jobs first; 404 for a machine the hub doesn't have |

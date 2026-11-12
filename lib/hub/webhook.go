@@ -188,7 +188,7 @@ func (h *Hub) receiveWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.config.Dispatch != nil && strings.HasPrefix(event.Type, "task.") {
 		// A job's task: its state and cost.
-		h.config.Dispatch.TaskEvent(instance.ID, event.Type, event.Data)
+		h.config.Dispatch.TaskEvent(instance.ID, instance.ServerID, event.Type, event.Data)
 	}
 	switch event.Type {
 	case instanceapi.EventInstanceStarted, instanceapi.EventInstanceHeartbeat:

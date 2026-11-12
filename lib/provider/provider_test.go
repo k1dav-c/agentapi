@@ -159,8 +159,14 @@ func TestHubSync(t *testing.T) {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
+		var request provider.SyncRequest
+		if json.Unmarshal(body, &request) != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
 		sealed, _ := provider.Seal(secret, providers)
-		_ = json.NewEncoder(w).Encode(provider.SyncResponse{Sealed: sealed})
+		proof := instanceapi.Sign(secret, request.Nonce, []byte(sealed))
+		_ = json.NewEncoder(w).Encode(provider.SyncResponse{Sealed: sealed, Nonce: request.Nonce, Proof: proof})
 	}))
 	t.Cleanup(hub.Close)
 
@@ -251,8 +257,15 @@ func TestHubSyncCache(t *testing.T) {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
+		body, _ := io.ReadAll(r.Body)
+		var request provider.SyncRequest
+		if json.Unmarshal(body, &request) != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
 		sealed, _ := provider.Seal(secret, providers)
-		_ = json.NewEncoder(w).Encode(provider.SyncResponse{Sealed: sealed})
+		proof := instanceapi.Sign(secret, request.Nonce, []byte(sealed))
+		_ = json.NewEncoder(w).Encode(provider.SyncResponse{Sealed: sealed, Nonce: request.Nonce, Proof: proof})
 	}))
 	t.Cleanup(hub.Close)
 	dir := t.TempDir()

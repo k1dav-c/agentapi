@@ -516,11 +516,13 @@ flowchart LR
   and key. `cmd/server/userconfig.go` leaves the `providers` section to `lib/provider`, so it
   isn't an unknown setting, and warns when others can read a file that has it.
 - **The hub's.** `HubSync` posts `/api/providers/sync` to the hub of the webhook's URL, signed
-  with its secret as events are, and opens the answer with the same secret. The server syncs once
-  (5 s at most) before the agent starts, which may start on one of the hub's, then every minute;
-  a hub that answers 404 (older than the route) has none. Each answer is kept, sealed, in
-  `hub-providers.json` beside the config file (`HubCachePath`), and `Restore` puts it back before
-  the first sync: until the hub answers, `Source.HubSettled` is false.
+  with its secret as events are, and opens the answer with the same secret. The answer also proves
+  that the sealed provider list belongs to that request's nonce, so a network observer can't replay
+  an earlier list over HTTP. An unbound answer from an older hub is refused; upgrade the hub before
+  the machines that report to it. The server syncs once (5 s at most) before the agent starts, which
+  may start on one of the hub's, then every minute; a hub that answers 404 (older than the route) has
+  none. Each answer is kept, sealed, in `hub-providers.json` beside the config file (`HubCachePath`),
+  and `Restore` puts it back before the first sync: until the hub answers, `Source.HubSettled` is false.
 - **Model lists.** `Source.Models` keeps what a provider listed for 10 minutes, then answers with it
   while it lists again in the background; a failed list isn't made again for a minute. Each list waits
   3 seconds at most, and `SettingOptions` asks the providers at once.
@@ -537,9 +539,14 @@ flowchart LR
   `SwitchProvider`. Claude Code switches while it runs: `apply_flag_settings` sets
   `ANTHROPIC_BASE_URL` (the base URL without `/v1`), `ANTHROPIC_AUTH_TOKEN`, an empty
   `ANTHROPIC_API_KEY` and the model in `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL`,
-  `ANTHROPIC_SMALL_FAST_MODEL` and `CLAUDE_CODE_SUBAGENT_MODEL`, then `set_model`. An agent that
-  starts on a provider gets these variables (and `ANTHROPIC_MODEL`) at launch, and skips the login
-  check.
+  `ANTHROPIC_SMALL_FAST_MODEL` and `CLAUDE_CODE_SUBAGENT_MODEL`, then `set_model`. Settings and
+  provider mutations of one adapter run one at a time, so an older rollback can't overwrite a newer
+  answer. A definite failure restores the previous environment and model. An unconfirmed answer or a
+  failed rollback is an unknown state, not proof that nothing changed: the current adapter can't take
+  more turns, and a replacement starts on the previous known provider and model. When the server
+  can't relaunch then (a turn or compaction runs, it restarts), the conversation starts that
+  replacement by itself once the turn ends (`recoverProviderLocked`). An agent that starts
+  on a provider gets these variables (and `ANTHROPIC_MODEL`) at launch, and skips the login check.
 - **A relaunch.** An adapter that can't make the switch while it runs returns a `RelaunchError`:
   Claude Code going back to its own provider, whose environment only a new process has, and
   every Codex switch. The handler (`relaunchOnProvider`) then holds `s.mu`, as a restart does, so
@@ -764,11 +771,13 @@ The queue is persisted with the conversation, on every change (`storeQueue`, fro
   schema newer than theirs; the schema hasn't changed since 1.0.
 - `conversation_state` holds the settings chosen for the session, a usage
   limit stop and a retry wait as one JSON object,
-  `{"version": 1, "settings": {...}, "limit_stop": {...}, "retry_wait": {...}}`;
+  `{"version": 2, "settings": {...}, "limit_stop": {...}, "retry_wait": {...}}`;
   a reset keeps it. A field added to it keeps the version, which an older
   AgentAPI reads as far as it knows; one that would mislead it raises the
-  version, and an AgentAPI that finds a higher one leaves the object alone
-  and starts without stored state. Up to 3.7.2 the three had a key each
+  version. Version 2 carries the provider/model pair together because restoring only the model can
+  select it on the wrong endpoint. An
+  AgentAPI that finds a higher version starts without stored state, and preserves the unknown envelope
+  through later status changes and a clean close instead of replacing it with defaults. Up to 3.7.2 the three had a key each
   (`settings`, `limit_stop`, `retry_wait`), which AgentAPI 3.7.3 to 3.16
   moved into the object on the first open; AgentAPI 4 doesn't read them, so
   on a file only 3.7.2 or earlier opened it starts without the stored

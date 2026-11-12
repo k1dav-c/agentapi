@@ -406,9 +406,11 @@ flowchart LR
   網址和金鑰保留 10 分鐘。`cmd/server/userconfig.go` 把 `providers` 區段交給 `lib/provider`，不當成
   未知的設定；有這個區段的設定檔若其他人讀得到，會發出警告。
 - **hub 的供應商。** `HubSync` 向 webhook 網址所屬的 hub 送出 `/api/providers/sync`，和事件一樣以
-  secret 簽章，再用同一個 secret 解開回應。伺服器在 agent 啟動前先同步一次（最多 5 秒），因為 agent
-  可能一開始就用 hub 的供應商，之後每分鐘一次；回 404 的 hub（比這個路由舊）沒有供應商。每次的回應都會加密
-  存進設定檔旁的 `hub-providers.json`（`HubCachePath`），`Restore` 在第一次同步前先放回去；hub 回應之前，
+  secret 簽章，再用同一個 secret 解開回應。回應也會證明這份加密的供應商清單屬於這次請求的 nonce，
+  避免網路觀察者透過一般 HTTP 重播舊清單。新版 AgentAPI 會拒絕舊 hub 沒有綁定的回應，因此要先升級 hub，
+  再升級向它回報的主機。伺服器在 agent 啟動前先同步一次（最多 5 秒），因為 agent 可能一開始就用 hub 的供應商，
+  之後每分鐘一次；回 404 的 hub（比這個路由舊）沒有供應商。每次的回應都會加密存進設定檔旁的
+  `hub-providers.json`（`HubCachePath`），`Restore` 在第一次同步前先放回去；hub 回應之前，
   `Source.HubSettled` 為 false。
 - **模型清單。** `Source.Models` 會把供應商列出的模型保留 10 分鐘，之後先回傳舊的清單，同時在背景重新查詢；
   查詢失敗則一分鐘內不再查。每次最多等 3 秒，`SettingOptions` 會同時詢問所有供應商。
@@ -422,8 +424,12 @@ flowchart LR
   用換過去之前的模型），再呼叫 `SwitchProvider`。Claude Code 在執行中切換：`apply_flag_settings` 設定
   `ANTHROPIC_BASE_URL`（去掉 `/v1` 的 base URL）、`ANTHROPIC_AUTH_TOKEN`、空的 `ANTHROPIC_API_KEY`，
   並把模型寫進 `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL`、`ANTHROPIC_SMALL_FAST_MODEL` 和
-  `CLAUDE_CODE_SUBAGENT_MODEL`，接著送 `set_model`。一開始就用供應商啟動的 agent，啟動時就帶著這些變數
-  （以及 `ANTHROPIC_MODEL`），並略過登入檢查。
+  `CLAUDE_CODE_SUBAGENT_MODEL`，接著送 `set_model`。同一個 adapter 的設定與供應商變更一次只做一個，
+  舊操作的 rollback 不會蓋掉較新回應。確定失敗時會恢復先前的環境與模型；未確認的回應或 rollback 失敗代表狀態未知，
+  不能當成什麼都沒改：目前的 adapter 不能再開始回合，替代的 adapter 會用先前已知的供應商與模型啟動。
+  伺服器當下無法重啟時（回合或壓縮進行中、正在重啟），conversation 會在回合結束後自行啟動替代的
+  adapter（`recoverProviderLocked`）。
+  一開始就用供應商啟動的 agent，啟動時就帶著這些變數（以及 `ANTHROPIC_MODEL`），並略過登入檢查。
 - **重新啟動。** adapter 無法在執行中完成切換時，回傳 `RelaunchError`：Claude Code 換回自己的供應商
   （只有新的行程才有原本的環境），以及 Codex 的每一次切換。這時處理常式（`relaunchOnProvider`）和
   重新啟動一樣持有 `s.mu`，讓訊息在佇列中等候，再呼叫 `BeginProviderSwitch`。回合進行中或正在壓縮
@@ -519,7 +525,7 @@ agent 回報或對話保存的值（訊息與請求以外）會當成狀態的�
    資料（`lib/httpapi/webhook_api.go` 的 `webhookInstanceState`）。
 5. 執行 `make gen`，再到 `chat/` 執行 `bun run gen:api`，並補上文件。
 
-`StoredState` 的欄位不必再改其他地方，就會在 `conversation_state` 的第 1 版裡保存、還原並交回
+`StoredState` 的欄位不必再改其他地方，就會在 `conversation_state` 的第 2 版裡保存、還原並交回
 對話（見下文）。
 
 ## 訊息佇列
@@ -575,9 +581,10 @@ context 結束，避免不再讀取的 agent 佔住 `s.mu`。
   最後關閉檔案的 AgentAPI（`writer_version`）。1.9.0 以前的版本不讀這些值，遇到結構比自己新的
   檔案一律拒絕；結構從 1.0 起就沒有改變。
 - `conversation_state` 把為工作階段選擇的設定、用量限制造成的停止和等待重試的失敗回合存成一個
-  JSON 物件：`{"version": 1, "settings": {...}, "limit_stop": {...}, "retry_wait": {...}}`；
-  重設時保留。新增欄位不改版本，較舊的 AgentAPI 讀它認得的部分；會誤導舊版的改變才提高版本，
-  遇到更高版本的 AgentAPI 不動這個物件，啟動時不帶保存的狀態。3.7.2 以前這三項各有一個 key
+  JSON 物件：`{"version": 2, "settings": {...}, "limit_stop": {...}, "retry_wait": {...}}`；
+  重設時保留。新增欄位不改版本，較舊的 AgentAPI 讀它認得的部分；會誤導舊版的改變才提高版本。第 2 版保護
+  供應商與模型的組合，因為第 1 版的讀取端只認得模型。供應商與模型的組合，因為只還原模型可能在錯誤的端點上使用它。遇到更高版本的 AgentAPI 啟動時不帶保存的狀態，之後的狀態
+  變更與正常關閉也會保留這個未知的 envelope，不會用預設值覆寫。3.7.2 以前這三項各有一個 key
   （`settings`、`limit_stop`、`retry_wait`），AgentAPI 3.7.3 到 3.16 第一次開啟時會把它們搬進物件；
   AgentAPI 4 不讀這些 key，所以只有 3.7.2 以前版本開啟過的檔案，啟動時不會帶保存的設定、用量限制
   停止和重試等待（對話仍在）。用 3.7.2 以前的 AgentAPI 開啟較新的檔案也一樣讀不到，它存下的這些

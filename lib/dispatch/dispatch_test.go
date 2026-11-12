@@ -15,6 +15,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -69,6 +70,7 @@ func newFakeLauncher(t *testing.T, name string) *fakeLauncher {
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
 		f.mu.Lock()
 		f.starts = append(f.starts, req)
+		serverID := f.name + "-server-" + strconv.Itoa(len(f.starts))
 		gate, onStart := f.gate, f.onStart
 		f.mu.Unlock()
 		if gate != nil {
@@ -76,7 +78,7 @@ func newFakeLauncher(t *testing.T, name string) *fakeLauncher {
 		}
 		key := host.Key{Issue: req.Issue}
 		key.Owner, key.Name, _ = host.ParseRepo(req.Repo)
-		job := host.JobInfo{Key: key.String(), Agent: req.Agent, InstanceID: f.name + "~" + key.Slug(), DefaultBranch: "main", State: host.JobRunning}
+		job := host.JobInfo{Key: key.String(), Agent: req.Agent, InstanceID: f.name + "~" + key.Slug(), ServerID: serverID, DefaultBranch: "main", State: host.JobRunning}
 		if onStart != nil {
 			onStart(w, job)
 			return
@@ -322,9 +324,10 @@ func TestDispatchWithoutGitHub(t *testing.T) {
 	assert.Equal(t, JobWorking, s.job("acme/widget#12").State)
 
 	// The tasks' events add up the run's cost.
-	s.TaskEvent("pve-1~acme~widget~12", "task.completed", json.RawMessage(`{"duration_seconds":90,"cost":{"usd":0.5,"tokens":{"input":10,"output":2000,"cache_read":80000},"calls":4}}`))
-	s.TaskEvent("pve-1~acme~widget~12", "task.completed", json.RawMessage(`{"duration_seconds":30,"cost":{"usd":0.25,"tokens":{"input":5,"output":1000},"calls":2}}`))
-	s.TaskEvent("someone-else", "task.completed", json.RawMessage(`{"cost":{"usd":100}}`))
+	serverID := s.job("acme/widget#12").Runs[0].ServerID
+	s.TaskEvent("pve-1~acme~widget~12", serverID, "task.completed", json.RawMessage(`{"duration_seconds":90,"cost":{"usd":0.5,"tokens":{"input":10,"output":2000,"cache_read":80000},"calls":4}}`))
+	s.TaskEvent("pve-1~acme~widget~12", serverID, "task.completed", json.RawMessage(`{"duration_seconds":30,"cost":{"usd":0.25,"tokens":{"input":5,"output":1000},"calls":2}}`))
+	s.TaskEvent("someone-else", serverID, "task.completed", json.RawMessage(`{"cost":{"usd":100}}`))
 	job := s.job("acme/widget#12")
 	assert.Equal(t, JobReview, job.State, "a task ended with a pull request open")
 	assert.InDelta(t, 0.75, job.Runs[0].Cost.USD, 1e-9)
@@ -498,7 +501,7 @@ func TestDispatchWithGitHubApp(t *testing.T) {
 	assert.Equal(t, "codex", replaced.Job.Agent)
 	assert.Equal(t, "https://github.com/acme/widget/pull/34", replaced.Job.PRURL, "the pull request stays")
 
-	s.TaskEvent("pve-1~acme~widget~12", "task.completed", json.RawMessage(`{"duration_seconds":600,"cost":{"usd":1.5,"tokens":{"output":5000}}}`))
+	s.TaskEvent("pve-1~acme~widget~12", replaced.Job.Runs[1].ServerID, "task.completed", json.RawMessage(`{"duration_seconds":600,"cost":{"usd":1.5,"tokens":{"output":5000}}}`))
 	stopped, err := s.Dispatch(ctx, Request{Action: ActionStop, Repo: "acme/widget", Issue: 12})
 	require.NoError(t, err)
 	assert.Equal(t, JobDone, stopped.Job.State)
@@ -558,7 +561,7 @@ func TestHostReconcile(t *testing.T) {
 	again := startJob(t, s, Request{Repo: "acme/widget", Issue: 5})
 	require.Len(t, again.Job.Runs, 2)
 	assert.Equal(t, "failed", again.Job.Runs[0].EndReason)
-	s.TaskEvent(again.Job.InstanceID, "task.completed", json.RawMessage(`{"cost":{"usd":0.4}}`))
+	s.TaskEvent(again.Job.InstanceID, again.Job.Runs[1].ServerID, "task.completed", json.RawMessage(`{"cost":{"usd":0.4}}`))
 	assert.InDelta(t, 0.4, s.job("acme/widget#5").Runs[1].Cost.USD, 1e-9)
 }
 
@@ -1060,6 +1063,7 @@ func TestStartWithoutAnswer(t *testing.T) {
 	assert.Equal(t, "pve-1~acme~widget~12", job.InstanceID)
 	require.Len(t, job.Runs, 1)
 	assert.Equal(t, "pve-1", job.Runs[0].Host)
+	assert.NotEmpty(t, job.Runs[0].ServerID, "the host report adopts the process identity too")
 	assert.Empty(t, l.stopped(), "adopted, not stopped")
 
 	// A start the launcher never had.
@@ -1221,6 +1225,164 @@ func TestCapacityRefusalTriesAnother(t *testing.T) {
 	assert.Contains(t, job.Error, "its most")
 }
 
+// newFlushTestService returns a service whose background writer has stopped,
+// so a test controls every Flush and its injected write failure.
+func newFlushTestService(t *testing.T) *Service {
+	t.Helper()
+	s, err := New(Config{StatePath: filepath.Join(t.TempDir(), "dispatch.json")})
+	require.NoError(t, err)
+	close(s.done)
+	<-s.stopped
+	return s
+}
+
+// A failed state write stays pending even if nothing else changes.
+func TestFlushRetriesFailedSnapshot(t *testing.T) {
+	s := newFlushTestService(t)
+	s.jobs["acme/widget#1"] = &Job{Key: "acme/widget#1", State: JobWorking, Runs: []Run{{Cost: Cost{USD: 0.5}}}}
+	s.mu.Lock()
+	s.saveLocked()
+	s.mu.Unlock()
+	writes := 0
+	s.writeState = func(path string, data []byte) error {
+		writes++
+		if writes == 1 {
+			return fmt.Errorf("injected write failure")
+		}
+		return writeStateFile(path, data)
+	}
+
+	s.Flush()
+	s.mu.Lock()
+	assert.NotNil(t, s.pending, "the failed snapshot isn't dropped")
+	s.mu.Unlock()
+	assert.Equal(t, 1, writes)
+
+	// No new save: Close's final Flush uses this same pending state too.
+	s.Flush()
+	assert.Equal(t, 2, writes)
+	again, err := New(s.config)
+	require.NoError(t, err)
+	defer again.Close()
+	require.NotNil(t, again.job("acme/widget#1"))
+	assert.InDelta(t, 0.5, again.job("acme/widget#1").Runs[0].Cost.USD, 1e-9)
+}
+
+// The background writer retries a failed snapshot without a newer mutation
+// nudging it, while leaving enough time between attempts to avoid a log loop.
+func TestWriteLoopRetriesFailedSnapshot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "dispatch.json")
+	s, err := New(Config{StatePath: path})
+	require.NoError(t, err)
+	t.Cleanup(s.Close)
+	var writesMu sync.Mutex
+	writes := 0
+	s.writeState = func(path string, data []byte) error {
+		writesMu.Lock()
+		writes++
+		first := writes == 1
+		writesMu.Unlock()
+		if first {
+			return fmt.Errorf("injected write failure")
+		}
+		return writeStateFile(path, data)
+	}
+	s.mu.Lock()
+	s.jobs["acme/widget#1"] = &Job{Key: "acme/widget#1", State: JobWorking}
+	s.saveLocked()
+	s.mu.Unlock()
+
+	require.Eventually(t, func() bool {
+		writesMu.Lock()
+		attempted := writes >= 2
+		writesMu.Unlock()
+		if !attempted {
+			return false
+		}
+		data, err := os.ReadFile(path)
+		return err == nil && strings.Contains(string(data), `"acme/widget#1"`)
+	}, 5*time.Second, 10*time.Millisecond)
+}
+
+// Close stops the retry loop after one final failed flush, rather than
+// repeatedly selecting a closed done channel and spinning on the writer.
+func TestCloseStopsFailedWriteRetry(t *testing.T) {
+	s, err := New(Config{StatePath: filepath.Join(t.TempDir(), "dispatch.json")})
+	require.NoError(t, err)
+	attempted := make(chan struct{})
+	var once sync.Once
+	s.writeState = func(string, []byte) error {
+		once.Do(func() { close(attempted) })
+		return fmt.Errorf("injected persistent write failure")
+	}
+	s.mu.Lock()
+	s.jobs["acme/widget#1"] = &Job{Key: "acme/widget#1", State: JobWorking}
+	s.saveLocked()
+	s.mu.Unlock()
+	select {
+	case <-attempted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the pending snapshot was never written")
+	}
+
+	closed := make(chan struct{})
+	go func() {
+		s.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close keeps retrying a permanently failed state write")
+	}
+}
+
+// A snapshot made during a failed disk write supersedes the failed one: the
+// requeue must not overwrite the newer pending state with the older bytes.
+func TestFlushFailureKeepsNewerPending(t *testing.T) {
+	s := newFlushTestService(t)
+	job := &Job{Key: "acme/widget#1", State: JobWorking, Title: "before"}
+	s.jobs[job.Key] = job
+	s.mu.Lock()
+	s.saveLocked()
+	s.mu.Unlock()
+	entered, release := make(chan struct{}), make(chan struct{})
+	writes := 0
+	s.writeState = func(path string, data []byte) error {
+		writes++
+		if writes == 1 {
+			close(entered)
+			<-release
+			return fmt.Errorf("injected write failure")
+		}
+		return writeStateFile(path, data)
+	}
+	flushed := make(chan struct{})
+	go func() {
+		s.Flush()
+		close(flushed)
+	}()
+	<-entered
+
+	s.mu.Lock()
+	job.Title = "after"
+	s.saveLocked()
+	newer := slices.Clone(s.pending)
+	s.mu.Unlock()
+	close(release)
+	<-flushed
+	s.mu.Lock()
+	assert.Equal(t, newer, s.pending, "the newer pending snapshot survives")
+	s.mu.Unlock()
+
+	s.Flush()
+	assert.Equal(t, 2, writes)
+	again, err := New(s.config)
+	require.NoError(t, err)
+	defer again.Close()
+	assert.Equal(t, "after", again.job(job.Key).Title)
+}
+
 // A dispatch without a state file drops old jobs and delivery IDs too,
 // which the browsers' stream would carry on otherwise.
 func TestPruneWithoutStateFile(t *testing.T) {
@@ -1312,15 +1474,15 @@ func TestTaskEventByState(t *testing.T) {
 	} {
 		name := fmt.Sprintf("%s pr=%v %s", test.state, test.pr, test.event)
 		s, now := newService(t, nil)
-		job := &Job{Key: "acme/widget#1", Host: "a", State: test.state, UpdatedAt: now.Add(-time.Hour), Runs: []Run{{InstanceID: "a~acme~widget~1", StartedAt: now.Add(-time.Hour)}}}
+		job := &Job{Key: "acme/widget#1", Host: "a", State: test.state, UpdatedAt: now.Add(-time.Hour), Runs: []Run{{InstanceID: "a~acme~widget~1", ServerID: "server-1", StartedAt: now.Add(-time.Hour)}}}
 		if test.pr {
 			job.PRURL = "https://github.com/acme/widget/pull/2"
 		}
 		s.mu.Lock()
 		s.jobs[job.Key] = job
 		s.mu.Unlock()
-		s.TaskEvent("a~acme~widget~1", test.event, json.RawMessage(`{"duration_seconds": 3}`))
-		s.TaskEvent("b~acme~widget~1", "task.started", nil) // another instance's
+		s.TaskEvent("a~acme~widget~1", "server-1", test.event, json.RawMessage(`{"duration_seconds": 3}`))
+		s.TaskEvent("b~acme~widget~1", "server-1", "task.started", nil) // another instance's
 		got := s.job(job.Key)
 		assert.Equal(t, test.want, got.State, name)
 		assert.Equal(t, test.costTasks, got.Runs[0].Cost.Tasks, name)
@@ -1329,16 +1491,93 @@ func TestTaskEventByState(t *testing.T) {
 	// The runs that ended get nothing.
 	for _, state := range []JobState{JobDone, JobStopped} {
 		s, now := newService(t, nil)
-		job := &Job{Key: "acme/widget#1", Host: "a", State: state, Runs: []Run{{InstanceID: "a~acme~widget~1", StartedAt: now.Add(-time.Hour), EndedAt: now.Add(-time.Minute)}}}
+		job := &Job{Key: "acme/widget#1", Host: "a", State: state, Runs: []Run{{InstanceID: "a~acme~widget~1", ServerID: "server-1", StartedAt: now.Add(-time.Hour), EndedAt: now.Add(-time.Minute)}}}
 		s.mu.Lock()
 		s.jobs[job.Key] = job
 		s.mu.Unlock()
-		s.TaskEvent("a~acme~widget~1", "task.started", nil)
-		s.TaskEvent("a~acme~widget~1", "task.completed", nil)
+		s.TaskEvent("a~acme~widget~1", "server-1", "task.started", nil)
+		s.TaskEvent("a~acme~widget~1", "server-1", "task.completed", nil)
 		got := s.job(job.Key)
 		assert.Equal(t, state, got.State)
 		assert.Zero(t, got.Runs[0].Cost.Tasks)
 	}
+}
+
+// A late event of the previous AgentAPI process can't move or charge the run
+// that replaced it, even though both processes use the same instance ID.
+func TestTaskEventRunIdentity(t *testing.T) {
+	ctx := context.Background()
+	s, now := newService(t, nil)
+	l := newFakeLauncher(t, "pve-1")
+	join(t, s, l, "claude", "codex")
+	a := startJob(t, s, Request{Repo: "acme/widget", Issue: 12, Agent: "claude"}).Job
+	require.Len(t, a.Runs, 1)
+	require.NotEmpty(t, a.Runs[0].ServerID)
+	b := startJob(t, s, Request{Repo: "acme/widget", Issue: 12, Agent: "codex"}).Job
+	require.Len(t, b.Runs, 2)
+	require.NotEmpty(t, b.Runs[1].ServerID)
+	require.NotEqual(t, a.Runs[0].ServerID, b.Runs[1].ServerID)
+	_, err := s.Dispatch(ctx, Request{Action: ActionLinkPR, Repo: "acme/widget", Issue: 12, PRURL: "https://github.com/acme/widget/pull/2"})
+	require.NoError(t, err)
+
+	// The expected identity survives the hub, not just its current memory.
+	s.Flush()
+	reloaded, err := New(s.config)
+	require.NoError(t, err)
+	defer reloaded.Close()
+	before := reloaded.job(b.Key)
+	require.Equal(t, b.Runs[1].ServerID, before.Runs[1].ServerID)
+	cost, updated := before.Runs[1].Cost, before.UpdatedAt
+
+	reloaded.TaskEvent(b.InstanceID, a.Runs[0].ServerID, "task.started", nil)
+	reloaded.TaskEvent(b.InstanceID, a.Runs[0].ServerID, "task.completed", json.RawMessage(`{"duration_seconds":100,"cost":{"usd":100}}`))
+	got := reloaded.job(b.Key)
+	assert.Equal(t, JobReview, got.State, "the old start doesn't take B out of review")
+	assert.Equal(t, cost, got.Runs[1].Cost, "the old completion doesn't charge B")
+	assert.Equal(t, updated, got.UpdatedAt, "a refused event isn't a job change")
+	assert.Zero(t, got.Runs[0].Cost.Tasks, "nor is the ended A run charged")
+
+	// Events without an identity, or of a legacy run whose expected identity
+	// was never saved, are refused rather than guessed at.
+	legacyKey := "acme/widget#99"
+	reloaded.mu.Lock()
+	reloaded.jobs[legacyKey] = &Job{Key: legacyKey, State: JobWorking, Runs: []Run{{InstanceID: "pve-1~acme~widget~99", StartedAt: now.Add(-time.Hour)}}}
+	reloaded.mu.Unlock()
+	reloaded.TaskEvent("pve-1~acme~widget~99", "server-old", "task.completed", json.RawMessage(`{"cost":{"usd":100}}`))
+	assert.Zero(t, reloaded.job(legacyKey).Runs[0].Cost.Tasks)
+	reloaded.TaskEvent(b.InstanceID, "", "task.started", nil)
+	assert.Equal(t, JobReview, reloaded.job(b.Key).State)
+
+	// B's own events still count.
+	reloaded.TaskEvent(b.InstanceID, b.Runs[1].ServerID, "task.started", nil)
+	assert.Equal(t, JobWorking, reloaded.job(b.Key).State)
+	reloaded.TaskEvent(b.InstanceID, b.Runs[1].ServerID, "task.completed", json.RawMessage(`{"duration_seconds":3,"cost":{"usd":0.25}}`))
+	got = reloaded.job(b.Key)
+	assert.Equal(t, JobReview, got.State)
+	assert.InDelta(t, 0.25, got.Runs[1].Cost.USD, 1e-9)
+	assert.Equal(t, 1, got.Runs[1].Cost.Tasks)
+}
+
+// A launcher restart needs no POST /jobs: the next host report adopts the
+// new process identity for the same logical run, then old events are stale.
+func TestHostReportAdoptsRestartedProcess(t *testing.T) {
+	s, now := newService(t, nil)
+	l := newFakeLauncher(t, "pve-1")
+	join(t, s, l, "claude")
+	job := startJob(t, s, Request{Repo: "acme/widget", Issue: 12}).Job
+	oldServerID := job.Runs[0].ServerID
+	l.mu.Lock()
+	reported := l.jobs[job.Key]
+	reported.ServerID = "server-restarted"
+	l.jobs[job.Key] = reported
+	l.mu.Unlock()
+	*now = now.Add(3 * time.Minute)
+	join(t, s, l, "claude")
+
+	s.TaskEvent(job.InstanceID, oldServerID, "task.completed", json.RawMessage(`{"cost":{"usd":100}}`))
+	assert.Zero(t, s.job(job.Key).Runs[0].Cost.Tasks)
+	s.TaskEvent(job.InstanceID, "server-restarted", "task.completed", json.RawMessage(`{"cost":{"usd":0.5}}`))
+	assert.InDelta(t, 0.5, s.job(job.Key).Runs[0].Cost.USD, 1e-9)
 }
 
 // What a machine's report does to each of its jobs the hub knows, by the

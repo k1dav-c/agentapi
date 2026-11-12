@@ -112,6 +112,7 @@ func (c *Conversation) launch(ctx context.Context, gen int, resume Resume) error
 func (c *Conversation) markStartedLocked(caps agentstate.Capabilities, settings agentstate.Settings) {
 	c.started = true
 	c.ran = true
+	c.providerUnsafe = false
 	c.caps = caps
 	c.settings = c.withProviderLocked(settings)
 	c.loginWaiting = false

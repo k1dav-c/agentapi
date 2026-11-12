@@ -15,7 +15,7 @@ import (
 // and leaves the object as it is. Nothing else holds the state, so a bump
 // costs an older AgentAPI the stored settings, limit stop and retry wait
 // (not the conversation).
-const storedStateVersion = 1
+const storedStateVersion = 2
 
 // errNewerState: MetaState has a version this AgentAPI doesn't know.
 var errNewerState = errors.New("a newer AgentAPI stored the conversation state")
@@ -27,14 +27,29 @@ type storedState struct {
 }
 
 // SetStoredState stores the part of the conversation's state that survives
-// a restart, which replaces what was stored. It may keep state.
+// a restart, which replaces what was stored. It may keep state. An envelope
+// this version couldn't decode is left for the version that wrote it.
 func (d *DB) SetStoredState(state agentstate.StoredState) {
 	data, err := encodeStoredState(state)
 	if err != nil {
 		d.logger.Error("Failed to encode the conversation state", "error", err)
 		return
 	}
-	d.enqueue(metaKeyPrefix+MetaState, metaWrite(MetaState, data))
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if !d.preserveStoredState {
+		d.enqueueLocked(metaKeyPrefix+MetaState, metaWrite(MetaState, data))
+	}
+}
+
+// observeStoredState remembers whether snap's envelope must survive every
+// later state change made by this older reader. Load runs before any writes.
+func (d *DB) observeStoredState(snap Snapshot) {
+	data, found := snap.Meta[MetaState]
+	_, err := decodeStoredState(data)
+	d.mu.Lock()
+	d.preserveStoredState = found && err != nil
+	d.mu.Unlock()
 }
 
 // encodeStoredState returns the MetaState value that stores state.

@@ -75,7 +75,10 @@ type Launcher struct {
 	// mu guards the fields below and the jobs in store.
 	mu    sync.Mutex
 	store *store
-	repos map[string]string
+	// saveDirty is whether the latest jobs.json write failed; check retries
+	// it so a transition isn't left only in memory until another change.
+	saveDirty bool
+	repos     map[string]string
 	// reserved are the jobs being started, before they are in the store:
 	// they count toward max-jobs, hold their port, and their git gets a
 	// token while it clones and fetches.
@@ -237,6 +240,9 @@ func (l *Launcher) takeOver() {
 // someone starts or stops now is left to them.
 func (l *Launcher) check(ctx context.Context) {
 	l.mu.Lock()
+	if l.saveDirty {
+		_ = l.saveLocked()
+	}
 	jobs := slices.Clone(l.store.jobs)
 	l.mu.Unlock()
 	for _, job := range jobs {
@@ -266,12 +272,12 @@ func (l *Launcher) checkJob(ctx context.Context, job *Job) {
 	if state != JobStarting && state != JobRestarting {
 		return
 	}
-	lifecycle, err := l.lifecycle(ctx, job)
+	status, err := l.instanceStatus(ctx, job)
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	switch {
-	case err == nil && (lifecycle == instanceapi.LifecycleReady || lifecycle == instanceapi.LifecycleRunning):
-		job.State, job.Error = JobRunning, ""
+	case err == nil && (status.Lifecycle == instanceapi.LifecycleReady || status.Lifecycle == instanceapi.LifecycleRunning):
+		job.State, job.Error, job.ServerID = JobRunning, "", status.ServerID
 	case l.now().Sub(since) > readyTimeout:
 		// Alive, but not serving: a PID taken by another process, or an
 		// AgentAPI that hangs. Stopped, it is started again by the next
@@ -324,10 +330,15 @@ func (l *Launcher) fail(job *Job, err error) {
 	job.State, job.Error = JobFailed, err.Error()
 }
 
-func (l *Launcher) saveLocked() {
-	if err := l.store.save(); err != nil {
+// saveLocked persists the current jobs, marking a failed write for check to
+// retry. l.mu is held.
+func (l *Launcher) saveLocked() error {
+	err := l.store.save()
+	l.saveDirty = err != nil
+	if err != nil {
 		l.logger.Error("Couldn't write the launcher's jobs", "path", l.store.path, "error", err)
 	}
+	return err
 }
 
 func (l *Launcher) rescan(ctx context.Context) {
@@ -432,7 +443,14 @@ func (l *Launcher) Start(ctx context.Context, req StartRequest) (JobInfo, bool, 
 	l.mu.Lock()
 	l.store.put(job)
 	err = l.launch(job)
-	l.saveLocked()
+	if err == nil {
+		// A live child whose PID was never saved would be untracked after a
+		// launcher restart. Treat this like any other start failure and stop
+		// it in failStart; a successful retry there keeps the failed record.
+		err = l.saveLocked()
+	} else {
+		_ = l.saveLocked()
+	}
 	l.mu.Unlock()
 	if err == nil {
 		err = l.waitReady(ctx, job)
@@ -491,7 +509,11 @@ func (l *Launcher) restart(ctx context.Context, job *Job, agent string, req Star
 	}
 	job.State, job.since = JobStarting, l.now()
 	err := l.launch(job)
-	l.saveLocked()
+	if err == nil {
+		err = l.saveLocked()
+	} else {
+		_ = l.saveLocked()
+	}
 	l.mu.Unlock()
 	if err == nil {
 		err = l.waitReady(ctx, job)
@@ -740,6 +762,9 @@ func (l *Launcher) launch(job *Job) error {
 	cmd.Dir = job.Worktree
 	cmd.Env = l.jobEnv(key, job.GitUser, job.Credentials)
 	cmd.Stdout, cmd.Stderr = logFile, logFile
+	// A freshly started process has a new random identity until /status says
+	// what it is; never carry the previous process's into this run.
+	job.ServerID = ""
 	if err := startDetached(cmd); err != nil {
 		_ = logFile.Close()
 		return fmt.Errorf("start %s: %w", l.config.AgentAPI, err)
@@ -764,17 +789,17 @@ func (l *Launcher) waitReady(ctx context.Context, job *Job) error {
 	tick := time.NewTicker(300 * time.Millisecond)
 	defer tick.Stop()
 	for {
-		lifecycle, err := l.lifecycle(ctx, job)
+		status, err := l.instanceStatus(ctx, job)
 		if err == nil {
-			switch lifecycle {
+			switch status.Lifecycle {
 			case instanceapi.LifecycleReady, instanceapi.LifecycleRunning:
 				l.mu.Lock()
-				job.State, job.Error = JobRunning, ""
-				l.saveLocked()
+				job.State, job.Error, job.ServerID = JobRunning, "", status.ServerID
+				_ = l.saveLocked()
 				l.mu.Unlock()
 				return nil
 			case instanceapi.LifecycleExited, instanceapi.LifecycleFailed:
-				return fmt.Errorf("the agent %s: %s", lifecycle, l.logTail(job))
+				return fmt.Errorf("the agent %s: %s", status.Lifecycle, l.logTail(job))
 			case instanceapi.LifecycleStarting, instanceapi.LifecycleRestarting:
 			}
 		}
@@ -803,23 +828,29 @@ func (l *Launcher) logTail(job *Job) string {
 	return strings.Join(lines, " | ")
 }
 
-// lifecycle is what GET /status of job's AgentAPI says.
-func (l *Launcher) lifecycle(ctx context.Context, job *Job) (instanceapi.LifecycleState, error) {
+// instanceStatus is what the launcher needs of GET /status: the lifecycle,
+// and the random identity that distinguishes this process from the previous
+// one with the same instance ID.
+type instanceStatus struct {
+	Lifecycle instanceapi.LifecycleState `json:"lifecycle"`
+	ServerID  string                     `json:"server_id"`
+}
+
+// instanceStatus returns what GET /status of job's AgentAPI says.
+func (l *Launcher) instanceStatus(ctx context.Context, job *Job) (instanceStatus, error) {
 	resp, err := l.instanceRequest(ctx, job, http.MethodGet, "/status", nil)
 	if err != nil {
-		return "", err
+		return instanceStatus{}, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("GET /status: %s", resp.Status)
+		return instanceStatus{}, fmt.Errorf("GET /status: %s", resp.Status)
 	}
-	var status struct {
-		Lifecycle instanceapi.LifecycleState `json:"lifecycle"`
-	}
+	var status instanceStatus
 	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
-		return "", err
+		return instanceStatus{}, err
 	}
-	return status.Lifecycle, nil
+	return status, nil
 }
 
 func (l *Launcher) instanceRequest(ctx context.Context, job *Job, method, path string, body []byte) (*http.Response, error) {

@@ -200,6 +200,9 @@ type DB struct {
 
 	mu      sync.Mutex
 	pending []op
+	// preserveStoredState keeps a stored-state envelope this version couldn't
+	// decode from being replaced by the default state restored from it.
+	preserveStoredState bool
 	// index maps the key of a pending op to its position, for ops queued
 	// since the last keyless op.
 	index  map[string]int
@@ -461,6 +464,7 @@ func (d *DB) load(hot int) (Snapshot, error) {
 	if err := d.loadMeta(&snap); err != nil {
 		return snap, err
 	}
+	d.observeStoredState(snap)
 	if err := scanRows(d, "messages", "SELECT seq, data FROM messages ORDER BY id", func(m conv.Message, seq uint64) {
 		snap.Messages = append(snap.Messages, Message{Message: m, Seq: seq})
 	}); err != nil {

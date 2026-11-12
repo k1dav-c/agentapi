@@ -541,18 +541,22 @@ hub 會替每台向它回報的主機保存[模型供應商](../README.zh-TW.md#
 供應商，可以新增、編輯和刪除。每個供應商有 ID（小寫英文字母、數字、`-` 和 `_`）、可省略的名稱、
 base URL、可省略的 Anthropic base URL、API 金鑰，以及它提供的模型；沒有填模型時，各 AgentAPI 會向
 供應商的 `<base_url>/models` 查詢。hub 最多保存 50 個。金鑰只能寫入：頁面只顯示供應商有沒有金鑰，
-編輯時金鑰欄留空就保留原本的金鑰，勾選 **Remove the key** 則移除。ID 新增後就不能更改。
+只有在供應商 ID 與端點都不變時，編輯器金鑰欄留空才會保留原本的金鑰；更改任一端點後都要重新輸入金鑰，
+勾選 **Remove the key** 則移除。ID 新增後就不能更改。保存時會帶上清單的 revision，如果另一個分頁在你開啟
+這個分頁後已經保存，會回報衝突，而不是悄悄讓其中一邊的變更消失。
 
 ![按下 Check connection 之後的編輯器：供應商回了六個模型，其中兩個已選取](screenshots/hub-settings-provider-check.png)
 
-編輯器裡的 **Check connection** 會由 hub 向供應商查詢模型，用你輸入的金鑰，沒輸入就用 hub 保存的金鑰；
-結果會顯示花了多久、列出幾個模型，失敗時則說明原因（金鑰被拒、網址底下沒有 API、hub 連不到供應商）。
+編輯器裡的 **Check connection** 會由 hub 向供應商查詢模型，用你輸入的金鑰；沒輸入時，只有端點未變才會用
+hub 保存的金鑰。結果會顯示花了多久、列出幾個模型，失敗時則說明原因（金鑰被拒、更改端點後沒有輸入金鑰、
+網址底下沒有 API、hub 連不到供應商）。結果只適用於送檢查時的欄位，不會套用在等待期間所做的修改上。
 點選模型就只提供選取的那些；一個都沒選時提供全部。
 
 每個向 hub 回報的 AgentAPI 會在啟動時和之後每分鐘向 hub 取得供應商，請求以 hub 的 secret 簽章；
 回應含有金鑰，以從 secret 衍生的金鑰加密（AES-256-GCM），所以即使透過一般 HTTP 連線，金鑰也不會以
-明文在網路上傳送。變更會在一分鐘內出現在聊天介面。在主機上，自己設定檔裡的供應商和 hub 的 ID 相同時，
-以設定檔的為準。
+明文在網路上傳送。另有證明會把回應綁定到這次請求的 nonce，避免觀察者重播舊的供應商清單。新版 AgentAPI 會拒絕
+沒有綁定的回應；請先升級 hub，再升級回報的主機。變更會在一分鐘內出現在聊天介面。在主機上，自己設定檔裡的
+供應商和 hub 的 ID 相同時，以設定檔的為準。
 
 每台加入 hub 的主機都拿得到這些金鑰：有 hub secret 的人都能取得。存到 hub 的金鑰，必須是你願意交給
 每一台這類主機、也願意交給每個用這個供應商的 agent 的金鑰。
@@ -644,6 +648,11 @@ chat**、**Review #…**、**Open chat**；再下面是 **Switch agent**（保�
 主機、執行時間、花費、怎麼結束），和每則送給 agent 的訊息，不論來自這一頁，還是 GitHub 上的 review 或
 `/agent` 留言。hub 為每個 job 保留最近 50 則訊息。**On the machine** 列出分支和 worktree，可以複製。
 agent 還在工作時，可以從最下面的輸入框傳訊息給它（⌘/Ctrl+Enter 送出）。
+
+每次 run 只採計自己那個 AgentAPI process 的任務事件（launcher 回報的 `server_id`），所以前一次 run
+晚到的事件不會改變目前 run 的狀態或花費。比這個 hub 舊的 launcher 不會回報 `server_id`，hub 會忽略
+它的 job 的任務事件，狀態和花費就停在原處。升級 hub 時請一併升級 launcher；升級後的 launcher 會在
+下一次回報時帶上它接手的 job 的身分。
 
 #### 清單上的列
 
@@ -938,10 +947,10 @@ launcher token（`~/.agentapi/host.token`）：重灌過、或 token 檔被刪�
 | `PUT /api/pins` | `{"ids": […]}` 由上而下排定釘選實例的順序。必須列出每個釘選的實例各一次，不能有其他實例；不符合時回 409，並在 `ids` 附上目前釘選實例的順序，例如這段期間有人釘選、取消釘選或移除了實例；hub 沒有的實例回 404 |
 | `GET /api/favorites` | [我的最愛](#我的最愛)，依排列順序：`{"favorites": [{"id", "title", "text"}, …]}`；沒有標題的項目沒有 `title` |
 | `PUT /api/favorites` | `{"favorites": […]}` 依這個順序整份取代。最多 100 項；標題最多 100 字、只能一行；內容不能空白，最多 20,000 字；ID 為 1 到 64 個英文字母、數字、`-` 或 `_`，不能重複。沒有 ID 的項目由 hub 指定一個；回應是 hub 保存後的清單。hub 不接受的清單回 400，什麼都不改 |
-| `GET /api/providers` | [模型供應商](#模型供應商)，不含金鑰：`{"providers": [{"id", "name", "base_url", "anthropic_base_url", "models": [{"id", "name"}], "has_key"}, …]}` |
-| `PUT /api/providers` | `{"providers": […]}` 整份取代。供應商的 `api_key` 設定它的金鑰；沒有這個欄位時，保留同一 ID 的供應商原本的金鑰，`""` 則移除金鑰。最多 50 個；ID 不能重複，也不能是 `default`；網址必須是 http 或 https。回應是 `GET` 格式的清單。hub 不接受的清單回 400，什麼都不改 |
-| `POST /api/providers/check` | `{"id", "base_url", "api_key"}` 由 hub 向 `base_url` 的供應商查詢模型（`GET <base_url>/models`）：`{"models": [{"id", "name"}], "latency_ms"}`。沒有 `api_key` 時，用 ID 為 `id` 的供應商保存的金鑰。供應商沒有回傳模型時回 502，並附上原因 |
-| `POST /api/providers/sync` | AgentAPI 取得含金鑰的供應商，以 hub 的 secret 加密（`{"sealed": …}`）；請求和事件一樣以 `--secret` 簽章，不需要 session |
+| `GET /api/providers` | [模型供應商](#模型供應商)，不含金鑰，以及清單的 revision：`{"revision", "providers": [{"id", "name", "base_url", "anthropic_base_url", "models": [{"id", "name"}], "has_key"}, …]}`。revision 是不透明的 token |
+| `PUT /api/providers` | `{"revision", "providers": […]}` 整份取代，revision 帶最後一次 `GET` 或 `PUT` 拿到的值。供應商的 `api_key` 設定它的金鑰；沒有這個欄位時，只有在 `base_url` 和 `anthropic_base_url` 都沒變時才保留同一 ID 的供應商原本的金鑰，`""` 則移除金鑰。最多 50 個；ID 不能重複，也不能是 `default`；網址必須是 http 或 https。回應是 `GET` 格式的清單與新的 revision。清單在那個 revision 之後已被改過時回 409，什麼都不改，請重新讀取；hub 不接受的清單、缺少 revision，或網址改了卻沒給金鑰時回 400，什麼都不改 |
+| `POST /api/providers/check` | `{"id", "base_url", "anthropic_base_url", "api_key"}` 由 hub 向 `base_url` 的供應商查詢模型（`GET <base_url>/models`）：`{"models": [{"id", "name"}], "latency_ms"}`。沒有 `api_key` 時，網址沒變才用 ID 為 `id` 的供應商保存的金鑰；網址改了則不發出查詢，直接回 400。供應商沒有回傳模型時回 502，並附上原因 |
+| `POST /api/providers/sync` | AgentAPI 取得含金鑰的供應商，以 hub 的 secret 加密：`{"sealed", "nonce", "proof"}`，`proof` 把 `sealed` 綁定到請求的 `nonce`。請求和事件一樣以 `--secret` 簽章，不需要 session |
 | `GET /api/events` | Server-sent events：先送 `instances`（全部實例和 `hub_version`，格式同 `GET /api/instances`）和 `favorites`（格式同 `GET /api/favorites`），再送 `instance`（某個實例有頁面看得到的變動，或工作時間變動滿一分鐘；最後聯絡時間只在它離線時才算）、`removed`（`{"id"}`）、`favorites`（有變動時送出全部）、`dispatch`（[issue 派工](#issues)的主機和 job，格式同 `GET /api/hosts` 和 `GET /api/jobs`，一開始和每次變動時送出），以及每 15 秒一次的 `heartbeat`。瀏覽器 30 秒都沒收下事件，就會失去串流 |
 | `GET /api/hosts` | 有 launcher 回報的主機：能跑的 agent、有的 repo、job 與上限，以及是否在線（`online`） |
 | `DELETE /api/hosts/{name}` | 移除主機，以及 hub 為這個主機名稱記下的 launcher token，讓換了 token 的 launcher 能以同一個名稱重新加入。主機在線（`host_online`）或還有進行中的 job（`host_busy`）時回 409，請先停掉它的 job；hub 沒有這台主機時回 404 |

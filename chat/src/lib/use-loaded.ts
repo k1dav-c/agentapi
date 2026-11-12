@@ -11,7 +11,7 @@ export type Loaded<T> =
 // useLoaded returns a resource read when load is called (again: read
 // again), null until then; and set, which puts data in place of what was
 // read, as an answer that returns it does. A read that ends after a newer
-// one started is dropped.
+// one started, or after a mutation set newer data, is dropped.
 export function useLoaded<T>(read: () => Promise<T>) {
   const [loaded, setLoaded] = useState<Loaded<T> | null>(null);
   const latest = useRef(0);
@@ -27,6 +27,9 @@ export function useLoaded<T>(read: () => Promise<T>) {
       },
     );
   }, [read]);
-  const set = useCallback((data: T) => setLoaded((previous) => (previous && previous.state !== "ready" ? {...previous, data} : {state: "ready", data})), []);
+  const set = useCallback((data: T) => {
+    latest.current++;
+    setLoaded({state: "ready", data});
+  }, []);
   return [loaded, load, set] as const;
 }

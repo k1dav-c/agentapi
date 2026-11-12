@@ -19,7 +19,7 @@ func TestStoredStateRoundTrip(t *testing.T) {
 	resets := time.Unix(1800000000, 0).UTC()
 	stopped := time.Unix(1700000000, 0).UTC()
 	want := agentstate.StoredState{
-		Settings:  agentstate.Settings{Model: "opus", PermissionMode: agentstate.PermissionModeAsk},
+		Settings:  agentstate.Settings{Provider: "kimi", Model: "opus", PermissionMode: agentstate.PermissionModeAsk},
 		LimitStop: &agentstate.LimitStop{Message: "You've hit your limit", StoppedAt: stopped, ResetsAt: &resets},
 		RetryWait: &agentstate.RetryWait{Message: "API Error: 502 Bad Gateway", APIStatus: 502, StoppedAt: stopped, Attempt: 2, Attempts: 3, RetryAt: stopped.Add(2 * time.Minute)},
 	}
@@ -104,39 +104,74 @@ func TestStoredStateWritesNoOldKeys(t *testing.T) {
 	db.SetStoredState(agentstate.StoredState{Settings: agentstate.Settings{Model: "opus"}})
 	require.NoError(t, db.Close())
 	meta := metaRows(t, path)
-	assert.JSONEq(t, `{"version":1,"settings":{"model":"opus"}}`, meta[statedb.MetaState])
+	assert.JSONEq(t, `{"version":2,"settings":{"model":"opus"}}`, meta[statedb.MetaState])
 	for _, key := range []string{"settings", "limit_stop", "retry_wait"} {
 		assert.NotContains(t, meta, key)
 	}
 }
 
-func TestStoredStateThatCantBeRead(t *testing.T) {
+// Version 1 stored only the model. It still restores, and the next write
+// carries the model forward into the provider-aware envelope.
+func TestStoredStateReadsVersionOne(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.db")
 	db := open(t, path)
-	db.SetMeta(statedb.MetaAgentType, "claude")
 	require.NoError(t, db.Close())
-
-	// A broken object reads as no stored state, and stays.
-	setMetaRows(t, path, map[string]string{statedb.MetaState: "{"})
+	setMetaRows(t, path, map[string]string{
+		statedb.MetaState: `{"version":1,"settings":{"model":"sonnet"}}`,
+	})
 	db = open(t, path)
 	snap, err := db.Load()
 	require.NoError(t, err)
 	got, err := snap.StoredState()
-	assert.ErrorContains(t, err, "decode the stored conversation state")
-	assert.Equal(t, agentstate.StoredState{}, got)
-	require.NoError(t, db.Close())
-	assert.Equal(t, "{", metaRows(t, path)[statedb.MetaState])
-
-	// An object of a newer version is left as it is, and reads as no
-	// stored state.
-	newer := `{"version":2,"settings":{"model":"next"}}`
-	setMetaRows(t, path, map[string]string{statedb.MetaState: newer})
-	db = open(t, path)
-	defer func() { _ = db.Close() }()
-	snap, err = db.Load()
 	require.NoError(t, err)
-	got, err = snap.StoredState()
-	assert.ErrorContains(t, err, "a newer AgentAPI stored the conversation state")
-	assert.Equal(t, agentstate.StoredState{}, got)
-	assert.Equal(t, newer, snap.Meta[statedb.MetaState])
+	assert.Equal(t, agentstate.StoredState{Settings: agentstate.Settings{Model: "sonnet"}}, got)
+	db.SetStoredState(got)
+	require.NoError(t, db.Close())
+	assert.JSONEq(t, `{"version":2,"settings":{"model":"sonnet"}}`, metaRows(t, path)[statedb.MetaState])
+}
+
+func TestStoredStateThatCantBeRead(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		envelope string
+		wantErr  string
+	}{
+		{name: "broken object", envelope: "{", wantErr: "decode the stored conversation state"},
+		{name: "newer version", envelope: `{"version":3,"settings":{"model":"next"}}`, wantErr: "a newer AgentAPI stored the conversation state"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "state.db")
+			db := open(t, path)
+			db.SetMeta(statedb.MetaAgentType, "claude")
+			require.NoError(t, db.Close())
+			setMetaRows(t, path, map[string]string{statedb.MetaState: tc.envelope})
+
+			db = open(t, path)
+			snap, err := db.Load()
+			require.NoError(t, err)
+			got, err := snap.StoredState()
+			assert.ErrorContains(t, err, tc.wantErr)
+			assert.Equal(t, agentstate.StoredState{}, got)
+
+			// Restoring an empty state and changing it later must not destroy
+			// what only a newer AgentAPI, or a repair, can read. Other writes
+			// still go through.
+			db.SetStoredState(agentstate.StoredState{})
+			db.SetStoredState(agentstate.StoredState{Settings: agentstate.Settings{Model: "older"}})
+			db.SetSessionName("changed after restore")
+			require.NoError(t, db.Close())
+			meta := metaRows(t, path)
+			assert.Equal(t, tc.envelope, meta[statedb.MetaState])
+			assert.Equal(t, "changed after restore", meta[statedb.MetaSessionName])
+
+			db = open(t, path)
+			defer func() { _ = db.Close() }()
+			snap, err = db.Load()
+			require.NoError(t, err)
+			assert.Equal(t, tc.envelope, snap.Meta[statedb.MetaState])
+			assert.Equal(t, "changed after restore", snap.Meta[statedb.MetaSessionName])
+			_, err = snap.StoredState()
+			assert.ErrorContains(t, err, tc.wantErr)
+		})
+	}
 }

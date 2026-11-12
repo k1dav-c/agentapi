@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"sync"
 
 	"github.com/coder/agentapi/lib/atomicfile"
@@ -28,33 +29,38 @@ type providerView struct {
 
 // providersBody is GET and PUT /api/providers.
 type providersBody struct {
+	Revision  string         `json:"revision" doc:"The hub's opaque optimistic-concurrency token for the provider list."`
 	Providers []providerView `json:"providers" nullable:"false"`
 }
 
 // providerChange is a provider of PUT /api/providers.
 type providerChange struct {
 	provider.Provider
-	// APIKey nil keeps the key the provider with the ID has.
-	APIKey *string `json:"api_key,omitempty" doc:"The provider's API key; missing keeps the one it has, empty removes it."`
+	// APIKey nil keeps the key only while the provider's endpoints are unchanged.
+	APIKey *string `json:"api_key,omitempty" doc:"The provider's API key; missing keeps it at unchanged endpoints, empty removes it."`
 }
 
 // providersChange is the body of PUT /api/providers.
 type providersChange struct {
+	Revision  string           `json:"revision" doc:"The revision returned by the client's latest provider-list read."`
 	Providers []providerChange `json:"providers" nullable:"false"`
 }
+
+var errProviderRevision = errors.New("the model providers changed since the client read them")
 
 // providerStore keeps the hub's model providers in providers.json beside
 // the instances (0600: it holds their keys), or in memory without a state
 // path.
 type providerStore struct {
-	path string
-	mu   sync.Mutex
-	list []provider.Provider
+	path     string
+	mu       sync.Mutex
+	list     []provider.Provider
+	revision uint64
 }
 
 // newProviderStore reads the providers kept beside statePath.
 func newProviderStore(statePath string) (*providerStore, error) {
-	s := &providerStore{}
+	s := &providerStore{revision: 1}
 	if statePath == "" {
 		return s, nil
 	}
@@ -67,10 +73,17 @@ func newProviderStore(statePath string) (*providerStore, error) {
 		return nil, err
 	}
 	var stored struct {
+		Revision  string            `json:"revision"`
 		Providers []json.RawMessage `json:"providers"`
 	}
 	if err := json.Unmarshal(data, &stored); err != nil {
 		return nil, fmt.Errorf("read %s: %w", s.path, err)
+	}
+	if stored.Revision != "" {
+		s.revision, err = strconv.ParseUint(stored.Revision, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("read %s revision: %w", s.path, err)
+		}
 	}
 	for _, raw := range stored.Providers {
 		var p struct {
@@ -92,42 +105,74 @@ func (s *providerStore) get() []provider.Provider {
 	return slices.Clone(s.list)
 }
 
-// replace checks change and keeps it: a provider without a key in it
-// keeps the key the one with its ID had.
-func (s *providerStore) replace(change []providerChange) ([]provider.Provider, error) {
+// providerAPIKey resolves an edited provider's key. A missing key is inherited
+// only at the same effective OpenAI and Anthropic endpoints; changed reports
+// whether an endpoint changed, so a check can stop before making a request.
+func providerAPIKey(saved []provider.Provider, p provider.Provider, supplied *string) (key string, changed bool) {
+	if supplied != nil {
+		return *supplied, false
+	}
+	if i := slices.IndexFunc(saved, func(o provider.Provider) bool { return o.ID == p.ID }); i >= 0 {
+		o := saved[i]
+		if o.OpenAIBaseURL() != p.OpenAIBaseURL() || o.ClaudeBaseURL() != p.ClaudeBaseURL() {
+			return "", true
+		}
+		return o.APIKey, false
+	}
+	return "", false
+}
+
+// snapshot returns one coherent list/revision pair.
+func (s *providerStore) snapshot() ([]provider.Provider, string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.list), strconv.FormatUint(s.revision, 10)
+}
+
+// replace checks change and keeps it if expected is still current. A missing
+// key is inherited only at unchanged effective endpoints; a changed endpoint
+// requires an explicit replacement, and an explicitly empty key removes it.
+func (s *providerStore) replace(expected string, change []providerChange) (providersBody, error) {
 	if len(change) > maxProviders {
-		return nil, fmt.Errorf("the hub keeps at most %d model providers", maxProviders)
+		return providersBody{}, fmt.Errorf("the hub keeps at most %d model providers", maxProviders)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if expected != strconv.FormatUint(s.revision, 10) {
+		return providersBody{}, errProviderRevision
+	}
 	list := make([]provider.Provider, 0, len(change))
 	for _, c := range change {
 		p := c.Provider
-		switch {
-		case c.APIKey != nil:
-			p.APIKey = *c.APIKey
-		default:
-			if i := slices.IndexFunc(s.list, func(o provider.Provider) bool { return o.ID == p.ID }); i >= 0 {
-				p.APIKey = s.list[i].APIKey
-			}
+		var changed bool
+		p.APIKey, changed = providerAPIKey(s.list, p, c.APIKey)
+		if changed {
+			return providersBody{}, fmt.Errorf("%w: api_key is required when provider %s's URL changes", provider.ErrInvalid, p.ID)
 		}
 		if err := p.Validate(); err != nil {
-			return nil, err
+			return providersBody{}, err
 		}
 		if slices.ContainsFunc(list, func(o provider.Provider) bool { return o.ID == p.ID }) {
-			return nil, fmt.Errorf("%w: %s is listed twice", provider.ErrInvalid, p.ID)
+			return providersBody{}, fmt.Errorf("%w: %s is listed twice", provider.ErrInvalid, p.ID)
 		}
 		list = append(list, p)
 	}
-	if err := s.save(list); err != nil {
-		return nil, err
+	next := s.revision + 1
+	if next == 0 {
+		return providersBody{}, errors.New("the model-provider revision space is exhausted")
+	}
+	if err := s.save(list, next); err != nil {
+		return providersBody{}, err
 	}
 	s.list = list
-	return slices.Clone(list), nil
+	s.revision = next
+	body := viewProviders(list)
+	body.Revision = strconv.FormatUint(next, 10)
+	return body, nil
 }
 
-// save writes list, keys included.
-func (s *providerStore) save(list []provider.Provider) error {
+// save writes list and its next revision, keys included, in one atomic file.
+func (s *providerStore) save(list []provider.Provider, revision uint64) error {
 	if s.path == "" {
 		return nil
 	}
@@ -136,8 +181,9 @@ func (s *providerStore) save(list []provider.Provider) error {
 		APIKey string `json:"api_key,omitempty"`
 	}
 	out := struct {
+		Revision  string   `json:"revision"`
 		Providers []stored `json:"providers"`
-	}{Providers: []stored{}}
+	}{Revision: strconv.FormatUint(revision, 10), Providers: []stored{}}
 	for _, p := range list {
 		out.Providers = append(out.Providers, stored{Provider: p, APIKey: p.APIKey})
 	}
@@ -160,20 +206,27 @@ func viewProviders(list []provider.Provider) providersBody {
 // getProviders answers the model providers, without their keys (GET
 // /api/providers).
 func (h *Hub) getProviders(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, viewProviders(h.providers.get()))
+	list, revision := h.providers.snapshot()
+	body := viewProviders(list)
+	body.Revision = revision
+	writeJSON(w, http.StatusOK, body)
 }
 
-// setProviders replaces the model providers (PUT /api/providers), which
-// the AgentAPIs that report to the hub get within a minute. A list the hub
-// refuses is 400, and changes nothing.
+// setProviders replaces the model providers (PUT /api/providers) if the
+// client's revision is still current, which the AgentAPIs that report to the
+// hub get within a minute. A stale list is 409, an invalid one 400; both
+// change nothing.
 func (h *Hub) setProviders(w http.ResponseWriter, r *http.Request) {
 	var body providersChange
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil || body.Providers == nil {
-		writeError(w, http.StatusBadRequest, `send {"providers": [{"id": ..., "base_url": ..., "api_key": ...}, ...]}`)
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil || body.Providers == nil || body.Revision == "" {
+		writeError(w, http.StatusBadRequest, `send {"revision": ..., "providers": [{"id": ..., "base_url": ..., "api_key": ...}, ...]}`)
 		return
 	}
-	list, err := h.providers.replace(body.Providers)
+	kept, err := h.providers.replace(body.Revision, body.Providers)
 	switch {
+	case errors.Is(err, errProviderRevision):
+		writeError(w, http.StatusConflict, err.Error()+"; read the current list and retry")
+		return
 	case errors.Is(err, provider.ErrInvalid):
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -182,8 +235,8 @@ func (h *Hub) setProviders(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to keep the model providers")
 		return
 	}
-	h.logger.Info("The model providers changed", "providers", len(list))
-	writeJSON(w, http.StatusOK, viewProviders(list))
+	h.logger.Info("The model providers changed", "providers", len(kept.Providers))
+	writeJSON(w, http.StatusOK, kept)
 }
 
 // syncProviders answers an AgentAPI the model providers, keys included,
@@ -204,20 +257,26 @@ func (h *Hub) syncProviders(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "invalid signature: "+err.Error())
 		return
 	}
+	var request provider.SyncRequest
+	if err := json.Unmarshal(body, &request); err != nil || request.Nonce == "" {
+		writeError(w, http.StatusBadRequest, `send {"nonce": ...}`)
+		return
+	}
 	sealed, err := provider.Seal(h.config.Secret, h.providers.get())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to seal the model providers")
 		return
 	}
-	writeJSON(w, http.StatusOK, provider.SyncResponse{Sealed: sealed})
+	proof := instanceapi.Sign(h.config.Secret, request.Nonce, []byte(sealed))
+	writeJSON(w, http.StatusOK, provider.SyncResponse{Sealed: sealed, Nonce: request.Nonce, Proof: proof})
 }
 
 // providerCheck is the body of POST /api/providers/check: a provider as
-// the editor has it, whose key, when it sends none, is the one the
-// provider with the ID has.
+// the editor has it, whose key, when it sends none, is the one the provider
+// with the ID has at unchanged endpoints.
 type providerCheck struct {
 	provider.Provider
-	APIKey *string `json:"api_key,omitempty" doc:"The key to check with; missing uses the one the provider with the ID has."`
+	APIKey *string `json:"api_key,omitempty" doc:"The key to check with; missing uses the saved one at unchanged endpoints."`
 }
 
 // providerCheckResult is the answer of POST /api/providers/check.
@@ -237,11 +296,12 @@ func (h *Hub) checkProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := body.Provider
-	if body.APIKey != nil {
-		p.APIKey = *body.APIKey
-	} else if i := slices.IndexFunc(h.providers.get(), func(o provider.Provider) bool { return o.ID == p.ID }); i >= 0 {
-		p.APIKey = h.providers.get()[i].APIKey
+	key, changed := providerAPIKey(h.providers.get(), p, body.APIKey)
+	if changed {
+		writeError(w, http.StatusBadRequest, "api_key is required when a provider URL changes")
+		return
 	}
+	p.APIKey = key
 	if p.ID == "" {
 		// The URL is what is checked; a new provider may have no ID yet.
 		p.ID = "check"

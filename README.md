@@ -701,7 +701,9 @@ The two agents switch differently:
 
 - **Claude Code** switches while it runs, from its next API call, also during a turn. Going back to
   its own provider starts it again on the same session, which takes a few seconds; during a turn it
-  is refused (409).
+  is refused (409). If a switch fails, AgentAPI restores the previous environment and model. If an
+  answer is unconfirmed or restoration fails, it starts a replacement on the previous known provider
+  instead of allowing another turn with settings that might not match the UI.
 - **Codex** binds a thread to its provider, and an OpenAI thread holds items another provider
   refuses (OpenAI's tool definitions, encrypted reasoning). A switch starts app-server again on the
   other provider, in a new thread that gets the conversation's messages as text, without the tool
