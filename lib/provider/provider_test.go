@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -189,4 +190,109 @@ func TestHubSync(t *testing.T) {
 	url = ""
 	require.NoError(t, sync.Sync(context.Background()))
 	assert.Empty(t, source.List())
+}
+
+// A provider that doesn't answer isn't asked again for a minute, and a
+// list that went stale answers while it is made again in the background.
+func TestSourceModelsCache(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	failing := atomic.Bool{}
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		if failing.Load() {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":[{"id":"K3"}]}`))
+	}))
+	t.Cleanup(api.Close)
+	now := time.Now()
+	var clock atomic.Int64
+	clock.Store(now.UnixNano())
+	source := provider.NewSource("", nil)
+	source.SetNow(func() time.Time { return time.Unix(0, clock.Load()) })
+	advance := func(d time.Duration) { clock.Add(int64(d)) }
+	p := provider.Provider{ID: "p", BaseURL: api.URL + "/v1"}
+	ctx := context.Background()
+
+	failing.Store(true)
+	assert.Empty(t, source.Models(ctx, p))
+	assert.Empty(t, source.Models(ctx, p))
+	assert.EqualValues(t, 1, calls.Load(), "a failed list is kept")
+	advance(61 * time.Second)
+	failing.Store(false)
+	assert.Equal(t, []provider.Model{{ID: "K3"}}, source.Models(ctx, p), "asked again after a minute")
+	assert.EqualValues(t, 2, calls.Load())
+
+	// Stale: the old list answers at once, and the new one comes in the
+	// background.
+	advance(11 * time.Minute)
+	failing.Store(true)
+	assert.Equal(t, []provider.Model{{ID: "K3"}}, source.Models(ctx, p))
+	require.Eventually(t, func() bool { return calls.Load() == 3 }, 5*time.Second, time.Millisecond)
+	// That failed: the models it had stay, for a minute without asking.
+	require.Eventually(t, func() bool {
+		return len(source.Models(ctx, p)) == 1 && calls.Load() == 3
+	}, 5*time.Second, time.Millisecond)
+}
+
+// The hub's providers are kept for the next start, sealed, and stand in
+// until the hub answers; a provider missing from them isn't known to be
+// deleted until then.
+func TestHubSyncCache(t *testing.T) {
+	t.Parallel()
+	const secret = "hub-secret"
+	providers := []provider.Provider{{ID: "kimi", BaseURL: "https://gw.example.com/v1", APIKey: "sk-1"}}
+	up := atomic.Bool{}
+	up.Store(true)
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !up.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		sealed, _ := provider.Seal(secret, providers)
+		_ = json.NewEncoder(w).Encode(provider.SyncResponse{Sealed: sealed})
+	}))
+	t.Cleanup(hub.Close)
+	dir := t.TempDir()
+	config := filepath.Join(dir, "config.yaml")
+	url := hub.URL + "/hooks"
+	newSync := func() *provider.HubSync {
+		source := provider.NewSource(config, nil)
+		return &provider.HubSync{Source: source, Hub: func() (string, string) { return url, secret }, CachePath: source.HubCachePath()}
+	}
+
+	first := newSync()
+	assert.False(t, first.Source.HubSettled())
+	require.NoError(t, first.Sync(context.Background()))
+	assert.True(t, first.Source.HubSettled())
+	data, err := os.ReadFile(filepath.Join(dir, "hub-providers.json"))
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "sk-1", "sealed")
+
+	// The next start, with the hub down: last time's stand in.
+	up.Store(false)
+	next := newSync()
+	next.Restore()
+	got, ok := next.Source.Lookup("kimi")
+	require.True(t, ok)
+	assert.Equal(t, "sk-1", got.APIKey)
+	assert.Error(t, next.Sync(context.Background()))
+	assert.False(t, next.Source.HubSettled(), "the hub hasn't answered")
+	_, ok = next.Source.Lookup("kimi")
+	assert.True(t, ok)
+
+	// Another hub's aren't restored.
+	url = "http://other.example.com/hooks"
+	other := newSync()
+	other.Restore()
+	assert.Empty(t, other.Source.List())
+
+	// Without a hub, the file goes.
+	url = ""
+	require.NoError(t, other.Sync(context.Background()))
+	assert.True(t, other.Source.HubSettled())
+	_, err = os.Stat(filepath.Join(dir, "hub-providers.json"))
+	assert.ErrorIs(t, err, os.ErrNotExist)
 }

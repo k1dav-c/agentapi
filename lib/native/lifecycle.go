@@ -10,6 +10,7 @@ import (
 
 	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
+	"github.com/coder/agentapi/lib/provider"
 )
 
 // Start launches the agent in the background. Status reports initializing
@@ -80,7 +81,7 @@ func (c *Conversation) launch(ctx context.Context, gen int, resume Resume) error
 	caps := adapter.Capabilities()
 	startedAt := c.cfg.Clock.Now()
 	go func() { c.signalExit(gen, adapter, startedAt, adapter.Wait()) }()
-	settings := c.applyChosen(ctx, gen, adapter, caps)
+	settings := c.applyChosen(ctx, gen, adapter, caps, resume.Provider)
 	var prompt Input
 	if c.cfg.InitialPrompt != "" {
 		// Before the lock: it looks for the files the prompt names.
@@ -149,10 +150,10 @@ func (c *Conversation) sendInitialPrompt(ctx context.Context, turn pendingTurn) 
 	}
 }
 
-// applyChosen gives the new adapter of generation gen the settings chosen
-// for the session, and returns its settings. A setting it can't take is
+// applyChosen gives the new adapter of generation gen, started on run, the
+// settings chosen for the session, and returns its settings. A setting it can't take is
 // reported and left to the agent.
-func (c *Conversation) applyChosen(ctx context.Context, gen int, adapter Adapter, caps agentstate.Capabilities) agentstate.Settings {
+func (c *Conversation) applyChosen(ctx context.Context, gen int, adapter Adapter, caps agentstate.Capabilities, run *ProviderRun) agentstate.Settings {
 	configurable, ok := adapter.(Configurable)
 	if !ok || !caps.Settings {
 		return agentstate.Settings{}
@@ -160,6 +161,11 @@ func (c *Conversation) applyChosen(ctx context.Context, gen int, adapter Adapter
 	c.mu.Lock()
 	chosen := c.chosen
 	c.mu.Unlock()
+	if p := chosen.Provider; p != "" && p != provider.Default && (run == nil || run.Provider.ID != p) {
+		// The agent started on its own provider while the chosen one isn't
+		// known: the model chosen is that provider's.
+		chosen.Model = ""
+	}
 	current := configurable.Settings()
 	// One at a time, so that one failure doesn't stop the others; the
 	// model goes first, as the effort depends on it.

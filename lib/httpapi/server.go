@@ -348,8 +348,11 @@ func (s *Server) syncProviders(providers *provider.Source) {
 			config := s.webhook.Config()
 			return config.URL, config.Secret
 		},
-		Logger: s.logger,
+		Logger:    s.logger,
+		CachePath: providers.HubCachePath(),
 	}
+	// What the hub answered last time stands in until it answers.
+	sync.Restore()
 	ctx, cancel := context.WithTimeout(s.shutdownCtx, 5*time.Second)
 	defer cancel()
 	if err := sync.Sync(ctx); err != nil {

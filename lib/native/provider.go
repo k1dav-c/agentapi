@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sync"
 
 	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
@@ -18,13 +19,21 @@ var ErrProviderRelaunch = errors.New("the switch of providers starts the agent a
 
 // launchProviderLocked is the provider the next agent starts on: the one
 // chosen, nil for the agent's own. A chosen provider no longer defined is
-// dropped, with a warning: the agent starts on its own.
+// dropped, with a warning: the agent starts on its own. One the hub may
+// have, before it answered, stays chosen while the agent starts on its own.
 func (c *Conversation) launchProviderLocked() *ProviderRun {
 	id := c.chosen.Provider
 	if id == "" || id == provider.Default {
 		return nil
 	}
 	listed, ok := c.cfg.Providers.Lookup(id)
+	if !ok && !c.cfg.Providers.HubSettled() {
+		// It may be the hub's, which didn't answer yet: it stays chosen,
+		// for the next start.
+		c.cfg.Logger.Warn("The provider chosen for the session isn't known yet (the hub didn't answer); the agent starts on its own this time", "provider", id)
+		c.cfg.Emitter.EmitError(fmt.Sprintf("The model provider %s isn't known yet: the hub didn't answer. The agent starts on its own provider; it goes back to %s when it starts again once the hub answers.", id, id), conv.ErrorLevelWarning)
+		return nil
+	}
 	if !ok {
 		c.cfg.Logger.Warn("The provider chosen for the session is no longer defined; the agent starts on its own", "provider", id)
 		c.cfg.Emitter.EmitError(fmt.Sprintf("The model provider %s is no longer defined; the agent starts on its own provider.", id), conv.ErrorLevelWarning)
@@ -58,14 +67,20 @@ func (c *Conversation) withProviderLocked(settings agentstate.Settings) agentsta
 // providerOptions are the providers an agent that can switch providers
 // can switch to, with their models.
 func (c *Conversation) providerOptions(ctx context.Context) []ProviderOption {
-	options := []ProviderOption{}
-	for _, listed := range c.cfg.Providers.List() {
-		option := ProviderOption{ID: listed.ID, Name: listed.DisplayName(), Host: listed.Host(), Origin: listed.Origin, Models: []ModelOption{}}
-		for _, m := range c.cfg.Providers.Models(ctx, listed.Provider) {
-			option.Models = append(option.Models, ModelOption{ID: m.ID, Name: m.DisplayName()})
-		}
-		options = append(options, option)
+	all := c.cfg.Providers.List()
+	options := make([]ProviderOption, len(all))
+	// The providers that list their models are asked at once, not one
+	// after the other.
+	var wg sync.WaitGroup
+	for i, listed := range all {
+		options[i] = ProviderOption{ID: listed.ID, Name: listed.DisplayName(), Host: listed.Host(), Origin: listed.Origin, Models: []ModelOption{}}
+		wg.Go(func() {
+			for _, m := range c.cfg.Providers.Models(ctx, listed.Provider) {
+				options[i].Models = append(options[i].Models, ModelOption{ID: m.ID, Name: m.DisplayName()})
+			}
+		})
 	}
+	wg.Wait()
 	return options
 }
 

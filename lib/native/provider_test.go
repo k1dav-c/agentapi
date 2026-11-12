@@ -157,3 +157,25 @@ func TestChosenProviderNoLongerDefined(t *testing.T) {
 	assert.Equal(t, "default", c.Settings().Provider)
 	assert.Contains(t, rec.get().errors, "The model provider kimi is no longer defined; the agent starts on its own provider.")
 }
+
+// A chosen provider the hub may have, before the hub answered, stays
+// chosen while the agent starts on its own provider, and the agent goes
+// back to it when it starts again once the hub answered.
+func TestChosenProviderWhileTheHubHasntAnswered(t *testing.T) {
+	source := provider.NewSource("", nil)
+	factory := &nativetest.Factory{Providers: true, Configure: configurable(agentstate.Settings{Model: "fast"})}
+	c, rec := run(t, factory, native.Config{
+		Providers: source,
+		State:     agentstate.StoredState{Settings: agentstate.Settings{Provider: "kimi", Model: "Kimi-K3"}},
+	})
+	require.Eventually(t, func() bool { return c.Status() != conversation.StatusInitializing }, 5*time.Second, time.Millisecond)
+	assert.Nil(t, factory.Last().Launch)
+	assert.Equal(t, "default", c.Settings().Provider)
+	require.NotEmpty(t, rec.get().errors)
+	assert.Contains(t, rec.get().errors[len(rec.get().errors)-1], "isn't known yet")
+
+	source.SetHub([]provider.Provider{testProviders().List()[0].Provider})
+	require.NoError(t, c.Restart(context.Background()))
+	require.NotNil(t, factory.Last().Launch, "still chosen")
+	assert.Equal(t, "kimi", factory.Last().Launch.Provider.ID)
+}

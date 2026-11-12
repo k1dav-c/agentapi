@@ -16,10 +16,12 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/coder/agentapi/lib/atomicfile"
 	"github.com/coder/agentapi/lib/instanceapi"
 )
 
@@ -129,6 +131,65 @@ type HubSync struct {
 	Hub    func() (url, secret string)
 	Client *http.Client
 	Logger *slog.Logger
+	// CachePath, if set, keeps the hub's providers for the next start
+	// (Restore), sealed with its secret.
+	CachePath string
+}
+
+// hubCache is CachePath's content: the providers the hub at URL answered.
+type hubCache struct {
+	URL    string `json:"url"`
+	Sealed string `json:"sealed"`
+}
+
+// Restore gives the Source the providers the hub answered last time, if
+// it is still the hub the AgentAPI reports to: a session on one of them
+// starts on it again even while the hub can't be reached.
+func (h *HubSync) Restore() {
+	url, secret := h.Hub()
+	if h.CachePath == "" || url == "" || secret == "" {
+		return
+	}
+	data, err := os.ReadFile(h.CachePath)
+	if err != nil {
+		return
+	}
+	var cache hubCache
+	if json.Unmarshal(data, &cache) != nil || cache.URL != url {
+		return
+	}
+	providers, err := Open(secret, cache.Sealed)
+	if err != nil {
+		return
+	}
+	h.Source.RestoreHub(Valid(providers, h.logger()))
+}
+
+// keep writes the providers the hub at url answered to CachePath, or
+// removes it without a hub.
+func (h *HubSync) keep(url, secret string, providers []Provider) {
+	if h.CachePath == "" {
+		return
+	}
+	if url == "" {
+		_ = os.Remove(h.CachePath)
+		return
+	}
+	sealed, err := Seal(secret, providers)
+	if err != nil {
+		return
+	}
+	data, _ := json.Marshal(hubCache{URL: url, Sealed: sealed})
+	if err := atomicfile.Write(h.CachePath, ".hub-providers-*", data); err != nil {
+		h.logger().Warn("Failed to keep the hub's model providers for the next start", "error", err)
+	}
+}
+
+func (h *HubSync) logger() *slog.Logger {
+	if h.Logger == nil {
+		return slog.Default()
+	}
+	return h.Logger
 }
 
 // Run gets the hub's providers every minute, until ctx ends.
@@ -164,6 +225,7 @@ func (h *HubSync) Sync(ctx context.Context) error {
 	url, secret := h.Hub()
 	if url == "" || secret == "" {
 		h.Source.SetHub(nil)
+		h.keep("", "", nil)
 		return nil
 	}
 	nonce := make([]byte, 16)
@@ -191,6 +253,7 @@ func (h *HubSync) Sync(ctx context.Context) error {
 	switch {
 	case resp.StatusCode == http.StatusNotFound:
 		h.Source.SetHub(nil)
+		h.keep(url, secret, nil)
 		return nil
 	case resp.StatusCode != http.StatusOK:
 		return fmt.Errorf("the hub answered %s", resp.Status)
@@ -203,6 +266,8 @@ func (h *HubSync) Sync(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	h.Source.SetHub(Valid(providers, h.Logger))
+	providers = Valid(providers, h.logger())
+	h.Source.SetHub(providers)
+	h.keep(url, secret, providers)
 	return nil
 }

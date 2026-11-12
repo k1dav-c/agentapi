@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"slices"
 	"sync"
 	"time"
@@ -33,8 +34,16 @@ type Listed struct {
 	Origin Origin
 }
 
-// modelsTTL is how long the models a provider listed are kept.
+// modelsTTL is how long the models a provider listed are kept; after it
+// they still answer while they are listed again in the background.
 const modelsTTL = 10 * time.Minute
+
+// failedTTL is how long a provider whose models couldn't be listed isn't
+// asked again: GET /settings doesn't wait for one that is down each time.
+const failedTTL = time.Minute
+
+// settingsListTimeout bounds a model list GET /settings waits for.
+const settingsListTimeout = 3 * time.Second
 
 // listTimeout bounds a provider's model list.
 const listTimeout = 10 * time.Second
@@ -46,6 +55,8 @@ type Source struct {
 	path   string
 	logger *slog.Logger
 	client *http.Client
+	// now is the clock of the model lists; tests set it.
+	now func() time.Time
 
 	mu sync.Mutex
 	// file are the config file's providers as read at fileMod.
@@ -53,13 +64,21 @@ type Source struct {
 	fileMod time.Time
 	fileErr string
 	hub     []Provider
-	listed  map[string]listedModels
+	// hubSettled: hub are the hub's as it answered since the server
+	// started, or there is no hub; else they are those it answered last
+	// time (RestoreHub), or none yet.
+	hubSettled bool
+	listed     map[string]listedModels
 }
 
 type listedModels struct {
 	key    string
 	models []Model
 	at     time.Time
+	// failed: the last list failed; models are those of the one before.
+	failed bool
+	// refreshing: a list runs in the background.
+	refreshing bool
 }
 
 // NewSource returns a source of the providers in the config file at path
@@ -68,7 +87,7 @@ func NewSource(path string, logger *slog.Logger) *Source {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Source{path: path, logger: logger, client: &http.Client{Timeout: listTimeout}, listed: map[string]listedModels{}}
+	return &Source{path: path, logger: logger, client: &http.Client{Timeout: settingsListTimeout}, now: time.Now, listed: map[string]listedModels{}}
 }
 
 // LoadFile reads the providers of the config file at path. A provider
@@ -111,7 +130,8 @@ func Valid(all []Provider, logger *slog.Logger) []Provider {
 	return out
 }
 
-// SetHub replaces the hub's providers.
+// SetHub replaces the hub's providers with those it answered (none when
+// there is no hub).
 func (s *Source) SetHub(providers []Provider) {
 	if s == nil {
 		return
@@ -119,6 +139,42 @@ func (s *Source) SetHub(providers []Provider) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.hub = slices.Clone(providers)
+	s.hubSettled = true
+}
+
+// RestoreHub has the hub's providers be those it answered last time,
+// until it answers again.
+func (s *Source) RestoreHub(providers []Provider) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.hubSettled {
+		s.hub = slices.Clone(providers)
+	}
+}
+
+// HubSettled reports whether the hub's providers are those it answered
+// since the server started (or there is no hub): a provider missing from
+// them was deleted, not just not known yet.
+func (s *Source) HubSettled() bool {
+	if s == nil {
+		return true
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.hubSettled
+}
+
+// HubCachePath is the file that keeps the hub's providers for the next
+// start, sealed with the hub's secret: hub-providers.json beside the
+// config file; empty without one.
+func (s *Source) HubCachePath() string {
+	if s == nil || s.path == "" {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(s.path), "hub-providers.json")
 }
 
 // List returns the providers: the config file's, then the hub's.
@@ -177,8 +233,10 @@ func (s *Source) reloadLocked() {
 }
 
 // Models returns the models p offers: those it lists in its definition,
-// else those its API lists at <base_url>/models, kept for 10 minutes. A
-// provider whose API lists none offers none.
+// else those its API lists at <base_url>/models. A list is kept for 10
+// minutes, then answers while it is made again in the background; a list
+// that failed isn't made again for a minute. A provider whose API lists
+// none, or doesn't answer the first time, offers none.
 func (s *Source) Models(ctx context.Context, p Provider) []Model {
 	if len(p.Models) > 0 || s == nil {
 		return p.Models
@@ -187,22 +245,50 @@ func (s *Source) Models(ctx context.Context, p Provider) []Model {
 	key := p.OpenAIBaseURL() + "\x00" + p.APIKey
 	s.mu.Lock()
 	cached, ok := s.listed[p.ID]
-	s.mu.Unlock()
-	if ok && cached.key == key && time.Since(cached.at) < modelsTTL {
-		return cached.models
-	}
-	models, err := ListModels(ctx, s.client, p)
-	if err != nil {
-		s.logger.Warn("Failed to list a model provider's models", "provider", p.ID, "error", err)
-		if ok && cached.key == key {
+	ok = ok && cached.key == key
+	if ok {
+		age := s.now().Sub(cached.at)
+		switch {
+		case cached.failed && age < failedTTL, !cached.failed && age < modelsTTL:
+			s.mu.Unlock()
+			return cached.models
+		case !cached.failed:
+			if !cached.refreshing {
+				cached.refreshing = true
+				s.listed[p.ID] = cached
+				go s.list(context.WithoutCancel(ctx), p, key, cached.models)
+			}
+			s.mu.Unlock()
 			return cached.models
 		}
-		return nil
+	}
+	s.mu.Unlock()
+	var previous []Model
+	if ok {
+		previous = cached.models
+	}
+	return s.list(ctx, p, key, previous)
+}
+
+// list lists p's models and keeps them under key, or keeps that it
+// failed, with the models listed before (previous). It returns the models
+// it keeps.
+func (s *Source) list(ctx context.Context, p Provider, key string, previous []Model) []Model {
+	models, err := ListModels(ctx, s.client, p)
+	entry := listedModels{key: key, models: models}
+	if err != nil {
+		s.logger.Warn("Failed to list a model provider's models", "provider", p.ID, "error", err)
+		entry.models, entry.failed = previous, true
 	}
 	s.mu.Lock()
-	s.listed[p.ID] = listedModels{key: key, models: models, at: time.Now()}
-	s.mu.Unlock()
-	return models
+	defer s.mu.Unlock()
+	entry.at = s.now()
+	if current, ok := s.listed[p.ID]; ok && current.key != key && current.at.After(entry.at) {
+		// The provider changed meanwhile.
+		return entry.models
+	}
+	s.listed[p.ID] = entry
+	return entry.models
 }
 
 // ListModels asks p's API for its models (GET <base_url>/models, OpenAI's
