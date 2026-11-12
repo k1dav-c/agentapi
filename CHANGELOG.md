@@ -21,6 +21,11 @@
   answered encrypted with it). A machine's own provider with the same ID wins.
   **Check connection** in the editor asks the provider for its models from the hub
   (`POST /api/providers/check`) and lets you pick which to offer.
+  Each AgentAPI keeps what the hub answered, sealed, in `hub-providers.json` beside its config
+  file, so a session on one of the hub's providers starts on it again while the hub can't be
+  reached.
+- A provider's models are kept for 10 minutes and then listed again in the background; one that
+  doesn't answer holds the model menu up for 3 seconds at most, and isn't asked again for a minute.
 
 ### Fixes
 

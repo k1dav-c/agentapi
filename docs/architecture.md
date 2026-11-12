@@ -515,13 +515,20 @@ flowchart LR
 - **The hub's.** `HubSync` posts `/api/providers/sync` to the hub of the webhook's URL, signed
   with its secret as events are, and opens the answer with the same secret. The server syncs once
   (5 s at most) before the agent starts, which may start on one of the hub's, then every minute;
-  a hub that answers 404 (older than the route) has none.
+  a hub that answers 404 (older than the route) has none. Each answer is kept, sealed, in
+  `hub-providers.json` beside the config file (`HubCachePath`), and `Restore` puts it back before
+  the first sync: until the hub answers, `Source.HubSettled` is false.
+- **Model lists.** `Source.Models` keeps what a provider listed for 10 minutes, then answers with it
+  while it lists again in the background; a failed list isn't made again for a minute. Each waits
+  3 seconds at most, and `SettingOptions` asks the providers at once.
 - **Settings.** `agentstate.Settings.Provider` is the provider the agent runs on, `default` for
   its own; it is set only for an adapter that implements `ProviderRunner`. `SettingOptions`
   lists the providers (`ProviderOption`: ID, name, `config` or `hub` origin, models), and the
   chosen provider is part of the chosen settings, kept in the stored state. Each launch gets it as
   `Resume.Provider` (`ProviderRun`: the provider and the model to start on). A chosen provider
-  that is no longer defined is dropped with a warning, and the agent starts on its own.
+  that is no longer defined is dropped with a warning, and the agent starts on its own. Before the
+  hub answered (`HubSettled`), one it may have stays chosen while the agent starts on its own,
+  without the chosen model, which is that provider's.
 - **A switch.** `ApplySettings` with a provider checks the provider and the model (its first when
   none is given; back on the agent's own, the model it had before), then calls
   `SwitchProvider`. Claude Code switches while it runs: `apply_flag_settings` sets

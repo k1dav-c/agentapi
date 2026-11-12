@@ -407,12 +407,17 @@ flowchart LR
   未知的設定；有這個區段的設定檔若其他人讀得到，會發出警告。
 - **hub 的供應商。** `HubSync` 向 webhook 網址所屬的 hub 送出 `/api/providers/sync`，和事件一樣以
   secret 簽章，再用同一個 secret 解開回應。伺服器在 agent 啟動前先同步一次（最多 5 秒），因為 agent
-  可能一開始就用 hub 的供應商，之後每分鐘一次；回 404 的 hub（比這個路由舊）沒有供應商。
+  可能一開始就用 hub 的供應商，之後每分鐘一次；回 404 的 hub（比這個路由舊）沒有供應商。每次的回應都會加密
+  存進設定檔旁的 `hub-providers.json`（`HubCachePath`），`Restore` 在第一次同步前先放回去；hub 回應之前，
+  `Source.HubSettled` 為 false。
+- **模型清單。** `Source.Models` 會把供應商列出的模型保留 10 分鐘，之後先回傳舊的清單，同時在背景重新查詢；
+  查詢失敗則一分鐘內不再查。每次最多等 3 秒，`SettingOptions` 會同時詢問所有供應商。
 - **設定。** `agentstate.Settings.Provider` 是 agent 目前用的供應商，`default` 表示它自己的；只有實作
   `ProviderRunner` 的 adapter 才會設定這個值。`SettingOptions` 列出供應商（`ProviderOption`：ID、名稱、
   來源 `config` 或 `hub`、模型）；選定的供應商屬於選定的設定，保存在 stored state 裡。每次啟動時，
   adapter 從 `Resume.Provider`（`ProviderRun`：供應商和啟動時用的模型）拿到它。選定的供應商若已不存在，
-  conversation 會放棄這個選擇並發出警告，agent 改用自己的供應商啟動。
+  conversation 會放棄這個選擇並發出警告，agent 改用自己的供應商啟動。hub 回應之前（`HubSettled`），可能屬於
+  hub 的供應商會保留為選定的設定，agent 這次先用自己的供應商啟動，也不套用選定的模型，因為那是該供應商的模型。
 - **切換。** 帶供應商的 `ApplySettings` 先檢查供應商和模型（沒指定時用第一個；換回 agent 自己的供應商時，
   用換過去之前的模型），再呼叫 `SwitchProvider`。Claude Code 在執行中切換：`apply_flag_settings` 設定
   `ANTHROPIC_BASE_URL`（去掉 `/v1` 的 base URL）、`ANTHROPIC_AUTH_TOKEN`、空的 `ANTHROPIC_API_KEY`，
