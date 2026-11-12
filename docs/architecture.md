@@ -13,6 +13,7 @@ chat UI. This guide covers the implementation of the single Go binary; see the [
 - [Startup and shutdown](#startup-and-shutdown)
 - [The HTTP server](#the-http-server)
 - [The native transport](#the-native-transport)
+  - [Model providers](#model-providers)
 - [Events and the conversation state](#events-and-the-conversation-state)
 - [The message queue](#the-message-queue)
 - [Persistence](#persistence)
@@ -72,16 +73,17 @@ emitter. Handlers call the conversation and read state from the emitter.
 | `lib/agentlog/` | The agents' session-log formats, one package each (`claudelog`, `codexlog`, `pilog`): their records, the parsers into rich messages and timeline events (the adapters use them too), prompts and injected context, model calls and file layout; plus line reading, the incremental file index and format-drift warnings |
 | `lib/sessions/` | A server-held `Store` reads earlier sessions and their conversations (`history.go`), subagents (`subagents.go`) and costs (`cost.go`) for a directory |
 | `lib/pricing/` | Model prices per million tokens (built-in `prices.json` and a `--prices` file), and per-call cost calculation |
-| `lib/native/` | The native transport: `Conversation`, the `Adapter` and `Sink` contracts, requests, settings, usage, logins, the queue's hold (`hold.go`: a usage limit stop or a failed turn that waits to be tried again), its `Policy` (`policy.go`: continue, retry and restart delays) and `ClassifyFailure` (a failed turn's stop reason) |
+| `lib/native/` | The native transport: `Conversation`, the `Adapter` and `Sink` contracts, requests, settings, usage, logins, the queue's hold (`hold.go`: a usage limit stop or a failed turn that waits to be tried again), its `Policy` (`policy.go`: continue, retry and restart delays), `ClassifyFailure` (a failed turn's stop reason) and the switch of model providers (`provider.go`) |
 | `lib/agentstate/` | The values a native agent reports and the API serves: capabilities, login, settings, usage, requests, the limit stop and the retry wait, and `ConversationState`, the conversation's state the observer gets whole, with the `StoredState` that survives a restart. A leaf package (huma and `lib/util` only), so the packages that serve them don't depend on `lib/native` |
 | `lib/native/claude`, `codex`, `pi` | One adapter per agent protocol |
+| `lib/provider/` | The [model providers](#model-providers) an agent can run on instead of its own: `Provider` and its checks, `Source` (the config file's `providers` section, read again when it changes, then the hub's; the models a provider lists, kept 10 minutes) and `HubSync`, which gets the hub's every minute, sealed with the hub's secret (`Seal`, `Open`) |
 | `lib/native/agentio` | What those adapters share to run their agent: the process and its loop (`Host`), writing to its stdin, matching its responses to the requests waiting for them, where the answer to one of its requests stands (`Answer`), lenient decoding with drift warnings, the snapshot throttle |
 | `lib/native/demo` | `native-demo`, a simulated agent for working on the chat |
 | `lib/native/nativetest` | A scriptable fake adapter for tests |
 | `lib/native/procutil` | Child process groups and graceful shutdown |
 | `lib/statedb/` | SQLite persistence for `--state-db` |
 | `lib/instanceapi/` | The contract between an AgentAPI and the clients that watch many: who it is (`WebhookInstance`, in its webhook events, summary and registry entry, with its `AgentType`), its summary, the webhook envelope with its signature (`Sign`, `Verify`), and the state a hub shows of each instance (`StateOf`). It imports only `lib/agentstate` and `lib/util` |
-| `lib/hub/` | `agentapi hub serve`, over `lib/instanceapi` and `lib/httpmw` rather than the server: the instances, the groups and pins set on its page, when each last changed what its row shows and when the hub saw each working (`store.go`, `work.go`, kept in a file by `persist.go`), the activity of the last year hour by hour (`activity.go`, `activity.json`, `GET /api/activity`: the work, and each scope's spend from the summaries' `spend.hours`), the favorite prompts (`favorites.go`, `GET`/`PUT /api/favorites`, among the hub's settings in the same file), the schema of its wire types (`schema.go`, `hub-schema.json`, for the page's types), the signed webhook receiver (`webhook.go`), each instance's summary stream (`watch.go`), sign-in, the browser's event stream and the proxy to the instances (`hub.go`, `proxy.go`), where machines join it (`join.go`: its addresses for `GET /api/join` and the startup log); the user guide is [hub.md](hub.md) |
+| `lib/hub/` | `agentapi hub serve`, over `lib/instanceapi` and `lib/httpmw` rather than the server: the instances, the groups and pins set on its page, when each last changed what its row shows and when the hub saw each working (`store.go`, `work.go`, kept in a file by `persist.go`), the activity of the last year hour by hour (`activity.go`, `activity.json`, `GET /api/activity`: the work, and each scope's spend from the summaries' `spend.hours`), the favorite prompts (`favorites.go`, `GET`/`PUT /api/favorites`, among the hub's settings in the same file), the model providers (`providers.go`, `providers.json`, `GET`/`PUT /api/providers`, and `POST /api/providers/sync` for the AgentAPIs), the schema of its wire types (`schema.go`, `hub-schema.json`, for the page's types), the signed webhook receiver (`webhook.go`), each instance's summary stream (`watch.go`), sign-in, the browser's event stream and the proxy to the instances (`hub.go`, `proxy.go`), where machines join it (`join.go`: its addresses for `GET /api/join` and the startup log); the user guide is [hub.md](hub.md) |
 | `lib/dispatch/` | The hub's issue dispatch, which `lib/hub` mounts: the machines whose launchers report (`host.*` events; each name pinned to the launcher token it first came with), the jobs with their runs' costs (`task.*` events) and the last 50 messages their agents were sent (`send`, from the hub's page, a review or an `/agent` comment), `POST /api/dispatch` (a start answers once its job is `starting`; the hub calls the launcher in the background and keeps the start until it ends, adopting it from the machine's next report if the answer was lost), the GitHub App, kept in `dispatch.json` and `github-app.json`. `Subscribe` and `Board` give the hub's stream the machines and jobs after each change (its `dispatch` event); the spec is [issue-dispatch.zh-TW.md](specs/issue-dispatch.zh-TW.md) |
 | `lib/host/` | `agentapi host`, the launcher on each machine: its settings (the `host` section of the config file), the repositories it has or clones, a git worktree and an AgentAPI for each job the hub starts (restarted after it exits, kept in `jobs.json`), its API for the hub behind its token (`server.go`), its `host.*` events and heartbeats to the hub (`hub.go`), and each job's GitHub token over a unix socket for its `git` and `gh` (`credentials.go`) |
 | `lib/github/` | The hub's GitHub App, with no dependency beyond the standard library: registering it from a manifest, its JWT, installation tokens for one repository (kept until five minutes before they expire) or all, and the REST calls the dispatch makes as the app |
@@ -111,6 +113,7 @@ The internal imports point one way, from the commands to the leaves:
 - `lib/convstate`, `lib/webhook` → `lib/instanceapi` → `lib/agentstate` → `lib/util`
 - `lib/native` and its adapters, `lib/statedb` → `lib/agentstate`: only the server reaches
   `lib/native`
+- `lib/native`, `lib/hub` → `lib/provider` → `lib/userconfig`, `lib/instanceapi`
 - `cmd/hub`, `lib/hub` → `lib/instanceapi`, `lib/httpmw`, which imports no package of the
   repository: the hub doesn't build the server
 - `lib/hub` → `lib/dispatch` → `lib/host`, `lib/github`, `lib/jsonapi`: the dispatch uses the
@@ -483,9 +486,62 @@ The adapters:
 | Adapter | Process | Protocol |
 | --- | --- | --- |
 | `claude` | `claude -p --input-format stream-json --output-format stream-json ...` | Stream-json messages on stdin and stdout, plus Claude Code's control protocol: `initialize`, `can_use_tool` (approvals, questions, plans), `set_permission_mode`, `set_model`, `apply_flag_settings`, `get_settings`, `get_context_usage`, `interrupt` |
-| `codex` | `codex app-server` | JSON-RPC: `thread/start`, `thread/resume` or `thread/fork`, `turn/start` (carrying the settings), `turn/steer`, `turn/interrupt`, `thread/compact/start`, `model/list`; approvals, questions and MCP elicitations arrive as server requests; the plan mode is a collaboration mode |
+| `codex` | `codex app-server` | JSON-RPC: `thread/start`, `thread/resume` or `thread/fork`, `thread/inject_items` (the conversation a new thread gets from another provider), `turn/start` (carrying the settings), `turn/steer`, `turn/interrupt`, `thread/compact/start`, `model/list`; approvals, questions and MCP elicitations arrive as server requests; the plan mode is a collaboration mode |
 | `pi` | `pi --mode rpc --session-id <id>` (`--fork <id>` for a copy) | JSON lines: `prompt` (also for steering), `abort`, `get_state`, `get_available_models`, `set_model`, `set_thinking_level`, `compact`; extension dialogs arrive as UI requests and are answered with `extension_ui_response` |
 | `demo` | none | A simulated agent that streams thinking, a tool call and a reply, and opens every kind of request |
+
+### Model providers
+
+Claude Code and Codex can run on another model provider than their own
+([Model providers](../README.md#model-providers)): an endpoint such as a LiteLLM gateway, defined
+in the config file's `providers` section or on the hub.
+
+```mermaid
+flowchart LR
+  file["config.yaml<br/>providers"] --> source["provider.Source"]
+  hub["hub: POST /api/providers/sync"] -- "HubSync, every minute" --> source
+  source -- "Lookup, Models" --> conv["native.Conversation"]
+  conv -- "SwitchProvider" --> adapter["ProviderRunner<br/>claude, codex"]
+  adapter -. "RelaunchError" .-> http["PUT /settings<br/>relaunchOnProvider"]
+  http -- "BeginProviderSwitch" --> conv
+```
+
+- **Where they come from.** `cmd/server` gives a Claude Code or Codex server a `provider.Source`
+  (`NativeConfig.Providers`). `List` reads the config file again when its modification time
+  changed, and returns its providers, then the hub's whose ID the file doesn't have. A provider
+  that defines no models offers those `GET <base_url>/models` lists, kept 10 minutes per ID, URL
+  and key. `cmd/server/userconfig.go` leaves the `providers` section to `lib/provider`, so it
+  isn't an unknown setting, and warns when others can read a file that has it.
+- **The hub's.** `HubSync` posts `/api/providers/sync` to the hub of the webhook's URL, signed
+  with its secret as events are, and opens the answer with the same secret. The server syncs once
+  (5 s at most) before the agent starts, which may start on one of the hub's, then every minute;
+  a hub that answers 404 (older than the route) has none.
+- **Settings.** `agentstate.Settings.Provider` is the provider the agent runs on, `default` for
+  its own; it is set only for an adapter that implements `ProviderRunner`. `SettingOptions`
+  lists the providers (`ProviderOption`: ID, name, `config` or `hub` origin, models), and the
+  chosen provider is part of the chosen settings, kept in the stored state. Each launch gets it as
+  `Resume.Provider` (`ProviderRun`: the provider and the model to start on). A chosen provider
+  that is no longer defined is dropped with a warning, and the agent starts on its own.
+- **A switch.** `ApplySettings` with a provider checks the provider and the model (its first when
+  none is given; back on the agent's own, the model it had before), then calls
+  `SwitchProvider`. Claude Code switches while it runs: `apply_flag_settings` sets
+  `ANTHROPIC_BASE_URL` (the base URL without `/v1`), `ANTHROPIC_AUTH_TOKEN`, an empty
+  `ANTHROPIC_API_KEY` and the model in `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL`,
+  `ANTHROPIC_SMALL_FAST_MODEL` and `CLAUDE_CODE_SUBAGENT_MODEL`, then `set_model`. An agent that
+  starts on a provider gets these variables (and `ANTHROPIC_MODEL`) at launch, and skips the login
+  check.
+- **A relaunch.** An adapter that can't make the switch while it runs returns a `RelaunchError`:
+  Claude Code going back to its own provider, whose environment only a new process has, and
+  every Codex switch. The handler (`relaunchOnProvider`) then holds `s.mu`, as a restart does, so
+  messages wait in the queue, and calls `BeginProviderSwitch`. That refuses with `ErrTurnActive`
+  (409) while a turn runs or the context is compacted, chooses the settings, and returns the
+  `Replacement` the server starts: on the same session (`Resume.Ref`), or with `Carry` on a new
+  one that gets the conversation's messages (`Resume.Carry`). Codex binds a thread to its
+  provider, and an OpenAI thread holds items others refuse (additional tools, encrypted
+  reasoning): app-server starts with `-c model_providers.agentapi-<id>={…}` (the Responses API,
+  its key in `AGENTAPI_PROVIDER_API_KEY`) and `-c model_provider="agentapi-<id>"`, and the new
+  thread gets the messages as text through `thread/inject_items`, the latest that fit in 200,000
+  characters.
 
 ## Events and the conversation state
 
@@ -930,6 +986,12 @@ of the content's SHA-256, so a path never changes; unused ones are removed after
   instance's webhook, which names where the hub sends its token. A signed-in
   browser gets the secret, for joining a machine (`GET /api/join`), only from
   a hub with a token; the startup log never has it.
+- Model providers' keys are in the config file, which AgentAPI warns about when others can read
+  it, and in the hub's `providers.json` (0600). The hub's API never answers a key (`has_key`
+  says whether there is one); `POST /api/providers/sync` answers them, to a request signed with
+  the hub's secret, sealed with AES-256-GCM under a key derived from the secret (HKDF-SHA256), so
+  they don't cross plain HTTP in the clear. Every machine with the secret gets every key. An
+  agent on a provider has its key in its environment and runs as the user, so it can read it.
 - Agents don't inherit the variables (one of them a
   secret) that a parent agent session sets for the commands it runs, nor
   AgentAPI's secrets: its API token, the webhook and hub secrets and tokens
@@ -1014,7 +1076,9 @@ the assign menu; `use-dispatch.ts` reads the issues and acts) works on the board
 `lib/hub-issues.ts` (the cards by section, the suggested agent and machine, the timeline), with the
 dispatch's calls in `lib/hub-dispatch.ts`, which checks each answer as it comes. The hub's GitHub
 App is read once for Issues and the settings' GitHub tab (`lib/hub-github-store.ts`,
-`useHubGitHub`), again whenever the page shows again. The machines and jobs come with the stream's
+`useHubGitHub`), again whenever the page shows again. The settings' Providers tab
+(`components/hub/providers-settings.tsx`, its logic in `lib/hub-providers.ts`) edits the model
+providers. The machines and jobs come with the stream's
 `dispatch` event, which also feeds the badge on the Issues button and the rows' chips of the agents
 of issues (`HubListContext.jobs`); an action's answer shows on the board until the stream has the
 job as new. The hub's API isn't huma's: its wire types are generated, `make gen`
@@ -1089,7 +1153,8 @@ chat and `parseFromFrame` in the hub.
 - `components/chat.tsx` lays out the page: the message list (tasks, tool rows,
   thinking), the dock above the composer (the status strip, the login card, request cards, the usage limit card,
   the retry card, the cold prompt cache note), the composer (`message-input.tsx`, with slash
-  commands, the session settings and the usage meter), the Explorer (with the
+  commands, the session settings and the usage meter; the model menu groups the agent's own
+models and each provider's, `lib/session-settings.ts`), the Explorer (with the
   earlier sessions and what they cost, `session-history.tsx`, and the webhook,
   `webhook-settings.tsx`), the Lineage panel of the
   subagents (`lineage.tsx`), the file viewer and the shell terminal

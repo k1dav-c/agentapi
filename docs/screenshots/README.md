@@ -50,6 +50,11 @@ his), with the accounts' pictures drawn locally in place of GitHub's. Since the 
 has tabs, `hub-settings-favorites.png` was taken the same way, with the favorites
 `capture-docs.mjs` puts on its hub; the script takes it again as before.
 
+`model-providers.png` and `hub-settings-providers.png` came from a development build of the
+`feat/custom-providers` branch, with a hub that keeps one provider, `gateway` (LiteLLM gateway, two
+models). They aren't part of `capture-docs.mjs`, and unlike the others they are in the dark theme,
+at 2200 × 1800.
+
 ## Gallery
 
 Desktop views are 1440 × 1000 (or a part of one), phone views 390 × 844, all in the light theme at a
@@ -67,6 +72,7 @@ device scale factor of 1.
 | [join-hub.png](join-hub.png) | Add to an AgentAPI hub: the hub's address and the commands to copy |
 | [permission-mode.png](permission-mode.png) | The permission mode menu |
 | [model-settings.png](model-settings.png) | The model and reasoning effort menu |
+| [model-providers.png](model-providers.png) | Claude Code's model menu: its own models, then those of a provider from the hub, LiteLLM gateway, marked **hub** |
 | [context-usage.png](context-usage.png) | The context window and the usage limits |
 | [slash-commands.png](slash-commands.png) | The slash commands |
 | [attachments.png](attachments.png) | An image attached in the composer |
@@ -102,6 +108,7 @@ device scale factor of 1.
 | [hub-list.png](hub-list.png) | The hub's list: two pinned agents, then two groups and Ungrouped, with every state's glyph: approval, question, login, usage limit, working, finished, idle, unreachable, stopped; and each agent's AgentAPI version, one older than the hub |
 | [hub-add.png](hub-add.png) | The Add dialog: joining a machine (the hub's address, updates from the hub, the command and a prompt for an agent, the secret masked), or adding an instance by its URL and token |
 | [hub-settings-favorites.png](hub-settings-favorites.png) | Hub settings at its Favorites tab: the favorites, each with its buttons to move, edit and delete it |
+| [hub-settings-providers.png](hub-settings-providers.png) | Hub settings at its Providers tab: a LiteLLM gateway with its base URL, its model count, a sign that it has a key, and its buttons to edit and delete it |
 | [hub-settings-github.png](hub-settings-github.png) | Hub settings at its GitHub tab: the hub's GitHub App, the accounts it is installed on with their repositories, and Choose repositories, App settings on GitHub, Reconnect and Disconnect |
 | [hub-recent.png](hub-recent.png) | The hub's list by the agents' latest changes: the pinned agents, then one list without group headers, the most recent first, and each row's group where it has room |
 | [hub-machines.png](hub-machines.png) | The hub's list By machine in the groups: the pinned agents, then each group with a card per machine: the machine with its version and spend once, a tab per agent with its state's dot, and the picked agent below, one older than the hub |

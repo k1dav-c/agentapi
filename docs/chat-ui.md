@@ -227,6 +227,17 @@ Pi has no permission modes, so its toolbar has no mode menu.
 The menu lists the agent's models with their descriptions, and the reasoning efforts the chosen
 model supports. Codex takes a new model or effort with its next turn.
 
+![The model menu of Claude Code: its own models, then the models of a provider from the hub, LiteLLM gateway](screenshots/model-providers.png)
+
+For Claude Code and Codex, the menu then lists the models of each
+[model provider](../README.md#model-providers), under the provider's name with a cloud; a provider
+the hub keeps is marked **hub**. Picking one switches the agent to that provider, and picking one of
+the agent's own models switches it back. The conversation goes on: Claude Code switches from its
+next API call, and starts again on its session to go back; Codex starts again in a new thread that
+gets the conversation's messages as text. A switch that starts the agent again can't be made during
+a turn. On a provider, the button shows a cloud in place of the brain. A provider that lists no
+models isn't in the menu.
+
 ### Context and usage limits
 
 ![The context popover: the tokens in the context window, and the 5-hour and weekly usage limits](screenshots/context-usage.png)
@@ -521,7 +532,9 @@ the chat's own buttons in it, and a button for each other agent of its machine, 
 place. It opens through the hub, which sends the instance's token.
 
 The gear opens the hub's settings, where you keep favorite prompts that ☆ in this chat's composer
-inserts ([The composer](#the-composer)). `+` adds an instance by its URL and token. Each row's `⋯` menu pins the instance to the top, puts it in a group of your own (the list
+inserts ([The composer](#the-composer)), and the model providers the model menu offers
+([Model and reasoning effort](#model-and-reasoning-effort)).
+`+` adds an instance by its URL and token. Each row's `⋯` menu pins the instance to the top, puts it in a group of your own (the list
 then shows a folding header per group), mutes what it waits for until that changes, or forgets a
 stopped or unreachable one. Rows and group headers show what the agents spent in the last 24 hours
 (hover for 7 days), and rows how long they worked. Each row shows its AgentAPI version, marked when

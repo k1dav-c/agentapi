@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Features
+
+- Claude Code and Codex switch to another model provider while they run, and back: an endpoint that
+  speaks the Anthropic Messages API or the OpenAI Responses API, such as a LiteLLM gateway. Define
+  providers under `providers:` in `~/.agentapi/config.yaml` (ID, base URL, key, and optionally the
+  models; by default those the provider lists), or once on the hub. `GET /settings` lists them
+  (`options.providers`) and the `provider` setting says which one the agent runs on (`default` for
+  its own); `PUT /settings` with `{"provider": …}` switches. In the chat, the model menu lists each
+  provider's models after the agent's own. The conversation goes on: Claude Code switches from its
+  next API call, and starts again on its session to go back to its own provider; Codex starts again
+  on the provider, in a new thread that gets the conversation's messages as text, since an OpenAI
+  thread holds items other providers refuse. See
+  [Model providers](README.md#model-providers).
+- The hub keeps model providers in its settings (**Providers** tab, `GET`/`PUT /api/providers`,
+  `providers.json`) for every machine that reports to it. Each AgentAPI gets them with their keys
+  when it starts and every minute after (`POST /api/providers/sync`, signed with the hub's secret,
+  answered encrypted with it). A machine's own provider with the same ID wins.
+
 ### Documentation
 
 - `agentapi host` says when a machine needs the launcher (only to take issues: `hub join` alone has

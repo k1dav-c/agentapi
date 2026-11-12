@@ -519,7 +519,7 @@ AgentAPI 正在更新時，上方那一列也會顯示進度，還在等任務�
 ![Hub settings：我的最愛，每一項都有自己的按鈕](screenshots/hub-settings-favorites.png)
 
 我的最愛是你常送出的提示，保存在 hub 上。標題列的齒輪按鈕會開啟 **Hub settings** 的
-**Favorites** 分頁（另一個分頁是 [GitHub](#github-設定)），列出所有項目，可以新增、編輯、刪除和上下移動。每一項有一段最多 20,000 字的提示，
+**Favorites** 分頁（其他分頁是 [Providers](#模型供應商) 和 [GitHub](#github-設定)），列出所有項目，可以新增、編輯、刪除和上下移動。每一項有一段最多 20,000 字的提示，
 以及最多 100 字、可省略的標題；沒有標題時，以提示的第一行當名稱。hub 最多保存 100 項。每次修改都
 會立即儲存，登入這個 hub 的每個頁面也會跟著更新，所以手機和桌機看到的我的最愛都一樣。**Undo** 可以
 救回最後刪除的那一項。在編輯區裡，⌘/Ctrl+Enter 儲存，**Esc** 取消。
@@ -531,6 +531,25 @@ AgentAPI 正在更新時，上方那一列也會顯示進度，還在等任務�
 游標停在它後面。按 Ctrl/⌘+Z 可以把它拿掉。超過七項時會出現搜尋框，在清單上直接打字也會輸入到搜尋框。
 **Manage favorites…** 會開啟 hub 設定的我的最愛區。還沒有任何一項時選單照樣出現，裡面只有這個連結。
 單獨開啟的聊天介面（新分頁，或 AgentAPI 自己的網址）沒有 ☆。
+
+### 模型供應商
+
+![Hub settings：Providers 分頁，列出一個有金鑰的 LiteLLM gateway](screenshots/hub-settings-providers.png)
+
+hub 會替每台向它回報的主機保存[模型供應商](../README.zh-TW.md#模型供應商)：Claude Code 和 Codex
+的工作階段可以換用的端點，例如 LiteLLM gateway。**Hub settings** 的 **Providers** 分頁列出所有
+供應商，可以新增、編輯和刪除。每個供應商有 ID（小寫英文字母、數字、`-` 和 `_`）、可省略的名稱、
+base URL、可省略的 Anthropic base URL、API 金鑰，以及它提供的模型；沒有填模型時，各 AgentAPI 會向
+供應商的 `<base_url>/models` 查詢。hub 最多保存 50 個。金鑰只能寫入：頁面只顯示供應商有沒有金鑰，
+編輯時金鑰欄留空就保留原本的金鑰，勾選 **Remove the key** 則移除。ID 新增後就不能更改。
+
+每個向 hub 回報的 AgentAPI 會在啟動時和之後每分鐘向 hub 取得供應商，請求以 hub 的 secret 簽章；
+回應含有金鑰，以從 secret 衍生的金鑰加密（AES-256-GCM），所以即使透過一般 HTTP 連線，金鑰也不會以
+明文在網路上傳送。變更會在一分鐘內出現在聊天介面。在主機上，自己設定檔裡的供應商和 hub 的 ID 相同時，
+以設定檔的為準。
+
+每台加入 hub 的主機都拿得到這些金鑰：有 hub secret 的人都能取得。存到 hub 的金鑰，必須是你願意交給
+每一台這類主機、也願意交給每個用這個供應商的 agent 的金鑰。
 
 ### GitHub 設定
 
@@ -730,7 +749,7 @@ AgentAPI 1.1 以上。在這裡輸入的 token 會為這個實例保存，取代
 | 值 | 誰持有 | 用途 |
 | --- | --- | --- |
 | hub token（`--token`） | 你和 hub | 讓瀏覽器登入 hub |
-| hub secret（`--secret`） | hub 和每台主機的設定檔 | 為 AgentAPI 的事件簽章，只有你的主機能新增實例 |
+| hub secret（`--secret`） | hub 和每台主機的設定檔 | 為 AgentAPI 的事件簽章，只有你的主機能新增實例；可取得[模型供應商](#模型供應商)和它們的金鑰 |
 | 實例 token（`--instance-token`，或手動加入時各自的） | hub 和各 AgentAPI | 讓 hub 呼叫 AgentAPI；瀏覽器永遠拿不到 |
 
 - hub 只接受具備有效 `X-AgentAPI-Signature-256`（`<timestamp>.<body>` 的 HMAC-SHA256）、
@@ -911,6 +930,9 @@ launcher token（`~/.agentapi/host.token`）：重灌過、或 token 檔被刪�
 | `PUT /api/pins` | `{"ids": […]}` 由上而下排定釘選實例的順序。必須列出每個釘選的實例各一次，不能有其他實例；不符合時回 409，並在 `ids` 附上目前釘選實例的順序，例如這段期間有人釘選、取消釘選或移除了實例；hub 沒有的實例回 404 |
 | `GET /api/favorites` | [我的最愛](#我的最愛)，依排列順序：`{"favorites": [{"id", "title", "text"}, …]}`；沒有標題的項目沒有 `title` |
 | `PUT /api/favorites` | `{"favorites": […]}` 依這個順序整份取代。最多 100 項；標題最多 100 字、只能一行；內容不能空白，最多 20,000 字；ID 為 1 到 64 個英文字母、數字、`-` 或 `_`，不能重複。沒有 ID 的項目由 hub 指定一個；回應是 hub 保存後的清單。hub 不接受的清單回 400，什麼都不改 |
+| `GET /api/providers` | [模型供應商](#模型供應商)，不含金鑰：`{"providers": [{"id", "name", "base_url", "anthropic_base_url", "models": [{"id", "name"}], "has_key"}, …]}` |
+| `PUT /api/providers` | `{"providers": […]}` 整份取代。供應商的 `api_key` 設定它的金鑰；沒有這個欄位時，保留同一 ID 的供應商原本的金鑰，`""` 則移除金鑰。最多 50 個；ID 不能重複，也不能是 `default`；網址必須是 http 或 https。回應是 `GET` 格式的清單。hub 不接受的清單回 400，什麼都不改 |
+| `POST /api/providers/sync` | AgentAPI 取得含金鑰的供應商，以 hub 的 secret 加密（`{"sealed": …}`）；請求和事件一樣以 `--secret` 簽章，不需要 session |
 | `GET /api/events` | Server-sent events：先送 `instances`（全部實例和 `hub_version`，格式同 `GET /api/instances`）和 `favorites`（格式同 `GET /api/favorites`），再送 `instance`（某個實例有頁面看得到的變動，或工作時間變動滿一分鐘；最後聯絡時間只在它離線時才算）、`removed`（`{"id"}`）、`favorites`（有變動時送出全部）、`dispatch`（[issue 派工](#issues)的主機和 job，格式同 `GET /api/hosts` 和 `GET /api/jobs`，一開始和每次變動時送出），以及每 15 秒一次的 `heartbeat`。瀏覽器 30 秒都沒收下事件，就會失去串流 |
 | `GET /api/hosts` | 有 launcher 回報的主機：能跑的 agent、有的 repo、job 與上限，以及是否在線（`online`） |
 | `DELETE /api/hosts/{name}` | 移除主機，以及 hub 為這個主機名稱記下的 launcher token，讓換了 token 的 launcher 能以同一個名稱重新加入。主機在線（`host_online`）或還有進行中的 job（`host_busy`）時回 409，請先停掉它的 job；hub 沒有這台主機時回 404 |
@@ -923,7 +945,7 @@ launcher token（`~/.agentapi/host.token`）：重灌過、或 token 檔被刪�
 | `GET /api/join` | 主機加入 hub 用的資訊：`urls` 的每一項是一個 webhook 網址（`url`）和這個位址所在的網路介面（`interface`；`--bind` 的位址沒有），順序和啟動時的 log 相同；只有設了 token 的 hub 才會附上 secret（`secret`，並帶 `secret_shown: true`） |
 | `/i/{id}/…` | 透過 hub 存取實例自己的 API 和聊天介面；頁面用 `POST /i/{id}/update` 更新實例，用 `DELETE` 取消 |
 
-除了 `/hooks` 和 `/api/session`，每個端點都需要 session cookie 或
+除了 `/hooks`、`/api/providers/sync` 和 `/api/session`，每個端點都需要 session cookie 或
 `Authorization: Bearer <hub token>`。任何回應裡都不會出現實例 token。請求被拒或失敗時回
 `{"code": …, "message": …, "error": …}`：`code` 是端點自己的代碼（例如 `host_online`），或 snake
 case 的 HTTP 狀態（例如 `not_found`）；`error` 和 `message` 相同，較舊的 hub 只回這個欄位。
@@ -940,6 +962,7 @@ case 的 HTTP 狀態（例如 `not_found`）；`error` 和 `message` 相同，�
 | `~/.agentapi/hub/instances.deliveries.json` | `agentapi hub serve` | hub 處理過、簽章仍有效的事件的 delivery ID，用來拒絕重送的事件 |
 | `~/.agentapi/hub/dispatch.json` | `agentapi hub serve` | [issue 派工](#issues)的主機（含 launcher 的 token）和 job：各次 run、花費與最近 50 則訊息 |
 | `~/.agentapi/hub/github-app.json` | `agentapi hub serve` | hub 的 GitHub App 與它的私鑰 |
+| `~/.agentapi/hub/providers.json` | `agentapi hub serve` | [模型供應商](#模型供應商)和它們的金鑰（0600） |
 
 `instances.json` 的格式是 `{"version": 1, "instances": [...]}`。2.2 以前的 hub 只寫、也只讀陣列：
 現在的 hub 讀得懂舊格式，但舊 hub 會把新格式當成損壞的檔案放到一旁，從空的清單開始。要改回舊

@@ -86,6 +86,9 @@ has the complete commit history.
   in the chat.
 - Switch the [permission mode, model and reasoning effort](#settings-permission-mode-model-and-effort)
   while the agent runs: bypass (the default), auto, ask or plan.
+- Switch Claude Code or Codex to [another model provider](#model-providers), such as a LiteLLM
+  gateway, while it runs, and back; the conversation goes on. Define providers per machine or once
+  on the hub.
 - See how full the [context and the rate limits](#context-and-rate-limits)
   are, and [compact](#slash-commands-and-compaction) the context; the chat
   suggests it once Claude Code's prompt cache has expired.
@@ -660,6 +663,64 @@ phone in a row of their own above the buttons).
 ![The model menu with three models and the reasoning efforts of the chosen one](docs/screenshots/model-settings.png)
 
 Swift, Deep, and Plain are demonstration models supplied by `native-demo`.
+
+### Model providers
+
+Claude Code and Codex can switch to another model provider while they run: an endpoint that speaks
+the Anthropic Messages API (Claude Code) or the OpenAI Responses API (Codex), such as a LiteLLM or
+vLLM gateway. One gateway that speaks both serves both agents. Define providers in the machine's
+`~/.agentapi/config.yaml` (`--config`):
+
+```yaml
+providers:
+  - id: kimi                      # lowercase letters, digits, - and _
+    name: Kimi K3                 # optional
+    base_url: https://gateway.example.com/v1
+    api_key: sk-...               # optional
+    models: [Kimi-K3-NVFP4]       # optional: by default, those GET <base_url>/models lists
+```
+
+Codex calls `<base_url>/responses`. Claude Code calls the same URL without `/v1`, plus
+`/v1/messages`; set `anthropic_base_url` when its endpoint is elsewhere. A `base_url` without a
+version gets `/v1` for Codex. AgentAPI reads the file again when it changes. Keep it readable by
+you only (`chmod 600`): it holds the keys, and AgentAPI warns when others can read it.
+
+A hub keeps providers for every machine that reports to it (see
+[Running a hub](#running-a-hub)). On a machine, a provider of its config file wins over the hub's
+with the same `id`.
+
+`GET /settings` lists the providers under `options.providers`, with their models, and the setting
+`provider` says which one the agent runs on: `default` for its own (Claude Code's Anthropic login or
+key, Codex's OpenAI login or its config's `model_provider`). Switch with `PUT /settings`:
+
+```bash
+curl -X PUT localhost:3284/settings -d '{"provider": "kimi", "model": "Kimi-K3-NVFP4"}'
+curl -X PUT localhost:3284/settings -d '{"provider": "default"}'
+```
+
+Without `model`, the agent takes the provider's first model; back on its own provider, the model
+it had before. On a provider, `{"model": ...}` picks among that provider's models. In the chat, the
+model menu lists the agent's own models, then each provider's.
+
+![The model menu of Claude Code: its own models, then the models of a provider from the hub, LiteLLM gateway](docs/screenshots/model-providers.png)
+
+The two agents switch differently:
+
+- **Claude Code** switches while it runs, from its next API call, also during a turn. Going back to
+  its own provider starts it again on the same session, which takes a few seconds; during a turn it
+  is refused (409).
+- **Codex** binds a thread to its provider, and an OpenAI thread holds items another provider
+  refuses (OpenAI's tool definitions, encrypted reasoning). A switch starts app-server again on the
+  other provider, in a new thread that gets the conversation's messages as text, without the tool
+  calls. During a turn the switch is refused (409).
+
+The chosen provider applies to every agent that starts in the session, also after an AgentAPI
+restart with `--state-db`. A provider that is no longer defined is dropped, with a warning: the
+agent starts on its own provider.
+
+An agent on a provider can read that provider's key: it runs as your user, with the key in its
+environment. Give a provider only a key you would give the agent. Model calls on a provider have no
+known price, so they add tokens but no cost (`--prices` adds prices).
 
 ### Context and rate limits
 
@@ -1401,8 +1462,9 @@ one to open it in the chat. On a phone the list and the chat take turns.
   that changes (a login you won't do), or forgets a stopped or unreachable one. The Offline tile
   and filter forget every stopped one at once.
 - The gear opens the hub's settings. There you keep [favorite prompts](docs/hub.md#favorites),
-  which ☆ in the composer of a chat the hub opens inserts in the message, and connect the hub's
-  [GitHub App](docs/hub.md#github-settings).
+  which ☆ in the composer of a chat the hub opens inserts in the message, keep the
+  [model providers](docs/hub.md#model-providers) every machine's sessions can switch to, and
+  connect the hub's [GitHub App](docs/hub.md#github-settings).
 - ◎ (or `i`) opens [Issues](docs/hub.md#issues), the issue dispatch: the open issues of your
   repositories by stage, the machines whose launchers report (an offline one can be forgotten
   there), and each job's agent, pull request and cost. Machines take issues with
