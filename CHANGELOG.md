@@ -22,6 +22,12 @@
   **Check connection** in the editor asks the provider for its models from the hub
   (`POST /api/providers/check`) and lets you pick which to offer.
 
+### Fixes
+
+- Dialogs float up into place, fading in as they rise a little and grow, where they flew in from the
+  top-left corner of the page (the slide of the old dialog animation added to its centering). They
+  close faster, sinking back a little.
+
 ### Documentation
 
 - `agentapi host` says when a machine needs the launcher (only to take issues: `hub join` alone has
