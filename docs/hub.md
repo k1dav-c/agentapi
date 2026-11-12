@@ -37,7 +37,7 @@ hub never has to be on the public internet.
    `~/.agentapi/config.yaml`, which every `agentapi server` of that user reads when it starts. Each
    AgentAPI then sends signed `instance.started`, `instance.heartbeat` (every minute) and
    `instance.stopped` events, and the hub adds, updates or stops the instance (`instance.stopped`
-   doesn't stop one added by hand: the hub keeps trying it). One the hub can't reach that also
+   doesn't stop one added by hand: the hub keeps trying it). An instance the hub can't reach that also
    missed three heartbeats, such as one whose workspace was killed, counts as stopped, and the hub
    stops trying until its next heartbeat. These events only add instances and say where they are;
    what each one does comes from its summary. An event that names another URL moves the instance
@@ -177,8 +177,9 @@ agentapi list         # the AgentAPIs running here and what each one's summary s
 
 An agent on the machine can do this step for you. The
 [agentapi-hub-join skill](../skills/agentapi-hub-join/SKILL.md) has Claude Code check the version
-and that the hub answers, ask you for the hub's URL, its secret, this machine's address and whether
-the hub may update this machine's AgentAPIs, join, and check where each AgentAPI reports. It never
+and that the hub answers, and ask you for the hub's URL, its secret, this machine's address and
+whether the hub may update this machine's AgentAPIs. It then joins and checks where each AgentAPI
+reports. It never
 restarts an AgentAPI or prints the secret, and asks before it runs anything with `sudo`. Install it
 on that machine:
 
@@ -468,7 +469,7 @@ change the hub refuses or doesn't get (a group, a pin, a mute, a forget) changes
 why in a notice.
 
 Once there is a group, the list gets a header per group, by name, with the instances in no group
-last under **Ungrouped**, [By machine](#by-machine) too; [Recent changes](#recent-changes) shows no
+last under **Ungrouped**, in [By machine](#by-machine) too; [Recent changes](#recent-changes) shows no
 group headers. A header shows
 how many instances the group has and, in amber, how many need you, so a folded group still tells
 you. Tap a header to fold or unfold it; each browser remembers which groups it folded. The pencil
@@ -538,7 +539,7 @@ long ago that change was. The card shows the agent open beside the list when it 
 otherwise the tab picked on it, as long as you picked it after the card's latest change; else the
 agent that changed last. So a pick stays until something on the machine changes, and then the card
 shows what changed. The panel names the agent's group and how long ago it last changed, as a
-recent row does. Picks in Recent changes are apart from those in Groups.
+recent row does. Picks in Recent changes are separate from those in Groups.
 
 `j` and `k` step from card to card, to the agent the card shows, and ← and → show the card's other
 agents there without opening them; `Enter` opens the one shown. On the tabs themselves, ← and →
@@ -558,7 +559,7 @@ next pinned agent the list shows, and **Unpin** takes it out. `p` pins or unpins
 focus.
 
 A pinned agent shows only there, not again in its group, its machine's card or below in the recent
-list; [By machine](#by-machine) too, it keeps a row of its own. The row has a pin after the name and,
+list; in [By machine](#by-machine) it keeps a row of its own too. The row has a pin after the name and,
 where there is room, names its group. The section's header counts its
 agents and those that need you, and folds like a group's. Below it, the rest of the list gets
 headers too: the groups and **Ungrouped**, or **Recent changes**. The filters and the search apply
@@ -603,7 +604,8 @@ for the task ([Updating from the hub](#updating-from-the-hub)).
 ![Hub settings: the favorites, each with its buttons](screenshots/hub-settings-favorites.png)
 
 Favorites are prompts you send often, kept on the hub. The gear in the header opens **Hub
-settings** at its **Favorites** tab (the other is [GitHub](#github-settings)), which lists them, and adds, edits, deletes and moves them up and
+settings** at its **Favorites** tab (the others are [Providers](#model-providers) and
+[GitHub](#github-settings)), which lists them, and adds, edits, deletes and moves them up and
 down. Each has a prompt of up to 20,000 characters and an optional title of up to 100; without a
 title, its first line names it. The hub keeps up to 100. A change is saved at once, and every page
 signed in to the hub shows it, so your phone and desktop have the same favorites. **Undo** brings
@@ -619,12 +621,41 @@ and typing in the list types in it. **Manage favorites…** opens the hub's sett
 favorites. The menu shows even before the first favorite, with that link. A chat opened on its own,
 in a new tab or at its AgentAPI's URL, has no ☆.
 
+### Model providers
+
+![Hub settings: the Providers tab, with two providers, their endpoints, models and keys](screenshots/hub-settings-providers.png)
+
+The hub keeps [model providers](../README.md#model-providers) for every machine that reports to it:
+endpoints such as a LiteLLM gateway that Claude Code and Codex sessions can switch to. The
+**Providers** tab of **Hub settings** lists them, and adds, edits and deletes them. Each has an ID
+(lowercase letters, digits, `-` and `_`), an optional name, a base URL, an optional Anthropic base
+URL, an API key and the models it offers; without models, each AgentAPI asks the
+provider's `<base_url>/models`. The hub keeps up to 50. The key is write-only: the page shows
+whether a provider has one, a key left empty in the editor keeps it, and **Remove the key** removes
+it. An ID can't change once added.
+
+![The editor after Check connection: the provider answered with six models, two of them picked](screenshots/hub-settings-provider-check.png)
+
+**Check connection** in the editor asks the provider for its models from the hub, with the key typed
+or the one the hub keeps, and says how long it took and how many it listed, or why it failed (a
+refused key, a URL without the API, a provider the hub can't reach). Tap the models to offer only
+those; none picked offers all of them.
+
+Each AgentAPI that reports to the hub asks it for the providers when it starts and every minute
+after, in a request signed with the hub's secret. The answer has their keys, encrypted with a key
+derived from the secret (AES-256-GCM), so they don't cross the network in the clear over plain
+HTTP. A change reaches the chats within a minute. On a machine, a provider of its own config file
+wins over the hub's with the same ID.
+
+Every machine that joined the hub gets the keys: anyone with the hub's secret can. Give the hub only
+keys you would give each of those machines, and each agent that runs on the provider.
+
 ### GitHub settings
 
 ![Hub settings: the hub's GitHub App, where it is installed and on which repositories](screenshots/hub-settings-github.png)
 
-The **GitHub** tab of **Hub settings** shows the hub's GitHub App, which lists the
-[Issues](#issues) and which the jobs push branches and open pull requests as. On the Issues page,
+The **GitHub** tab of **Hub settings** shows the hub's GitHub App. The app lists the
+[Issues](#issues), and the jobs push branches and open pull requests as the app. On the Issues page,
 the app's name beside **Issues**, and **GitHub settings…** at the foot of the repository menu, open
 it too. It has the app's name, linked to its page on GitHub, and the account or organization that
 owns it. Below, each account the app is installed on has its picture, **All repositories** or how
@@ -686,7 +717,7 @@ page gets the machines and jobs from the hub's stream as they change. What you d
 shows at once, as the hub answers it; the stream takes over from there.
 
 The repository menu at the top picks the board's scope. **Recent repositories** shows the open
-issues of the 20 that the hub's GitHub App can see that were pushed to or changed last, and the
+issues of the 20 repositories the hub's GitHub App can see that were pushed to or changed last, and the
 jobs of all of them. Pick one repository to see only its issues; past eight, a search box finds
 one. The page keeps the choice.
 
@@ -855,7 +886,7 @@ right is forgotten, it closes.
 | Value | Who holds it | What it does |
 | --- | --- | --- |
 | Hub token (`--token`) | You, and the hub | Signs a browser in to the hub |
-| Hub secret (`--secret`) | The hub, and each machine's config file | Signs the AgentAPIs' events, so only your machines can add instances |
+| Hub secret (`--secret`) | The hub, and each machine's config file | Signs the AgentAPIs' events, so only your machines can add instances; gets the [model providers](#model-providers) and their keys |
 | Instance token (`--instance-token`, or one per added instance) | The hub, and the AgentAPIs | Lets the hub call the AgentAPIs; browsers never get it |
 
 - The hub takes an event only with a valid `X-AgentAPI-Signature-256` (HMAC-SHA256 of
@@ -1054,6 +1085,10 @@ running AgentAPIs, which then no longer follow their conversation for the webhoo
 | `PUT /api/pins` | `{"ids": […]}` orders the pinned instances, from the top. It lists each pinned instance once and no other; 409, with the pinned ones in their order (`ids`), when it doesn't, such as after one was pinned, unpinned or forgotten; 404 for an instance the hub doesn't have |
 | `GET /api/favorites` | The [favorites](#favorites), in their order: `{"favorites": [{"id", "title", "text"}, …]}`; a favorite without a title has none |
 | `PUT /api/favorites` | `{"favorites": […]}` replaces them, in that order. At most 100; a title has at most 100 characters, on one line; a text isn't blank and has at most 20,000; an ID has 1 to 64 letters, digits, `-` or `_`, once. A favorite sent without an ID gets one; the answer is the list as the hub keeps it. 400, changing nothing, for a list it refuses |
+| `GET /api/providers` | The [model providers](#model-providers), without their keys: `{"providers": [{"id", "name", "base_url", "anthropic_base_url", "models": [{"id", "name"}], "has_key"}, …]}` |
+| `PUT /api/providers` | `{"providers": […]}` replaces them. A provider's `api_key` sets its key; missing keeps the key the provider with its ID had, `""` removes it. At most 50; an ID once, not `default`; the URLs http or https. The answer is the list as `GET` has it. 400, changing nothing, for a list it refuses |
+| `POST /api/providers/check` | `{"id", "base_url", "api_key"}` asks the provider at `base_url` for its models (`GET <base_url>/models`) from the hub: `{"models": [{"id", "name"}], "latency_ms"}`. Without `api_key`, with the key the provider with `id` has. 502 with the reason when the provider doesn't answer with its models |
+| `POST /api/providers/sync` | An AgentAPI gets the providers with their keys, sealed with the hub's secret (`{"sealed": …}`); signed with `--secret` as events are, no session needed |
 | `GET /api/events` | Server-sent events: `instances` (all of them and `hub_version`, as `GET /api/instances` has them) and `favorites` (as `GET /api/favorites` has them), then `instance` (one changed what the page shows, or its work time moved by a minute; when it was last heard of counts only while it is offline), `removed` (`{"id"}`), `favorites` (all of them, after a change), `dispatch` (the [issue dispatch's](#issues) machines and jobs, as `GET /api/hosts` and `GET /api/jobs` have them, at first and after each change) and a `heartbeat` every 15 s. A browser that takes no event for 30 s loses the stream |
 | `GET /api/hosts` | The machines whose launchers report: their agents, repositories, jobs and room, and whether each is `online` |
 | `DELETE /api/hosts/{name}` | Forgets a machine and the launcher token the hub pinned its name to, so a launcher with a new token can join under the name. 409 while the machine is online (`host_online`) or has a job that works (`host_busy`): stop its jobs first; 404 for a machine the hub doesn't have |
@@ -1066,7 +1101,7 @@ running AgentAPIs, which then no longer follow their conversation for the webhoo
 | `GET /api/join` | Where machines join the hub: `urls`, each a webhook URL (`url`) with the interface of its address (`interface`; none for `--bind`'s), in the order the startup log has them; and the secret (`secret`, with `secret_shown: true`) only on a hub with a token |
 | `/i/{id}/…` | The instance's own API and chat, through the hub; the page updates an instance with `POST /i/{id}/update` and cancels with `DELETE` |
 
-Every endpoint but `/hooks` and `/api/session` needs the session cookie or
+Every endpoint but `/hooks`, `/api/providers/sync` and `/api/session` needs the session cookie or
 `Authorization: Bearer <hub token>`. Instance tokens never appear in any response. A refused or
 failed request answers `{"code": …, "message": …, "error": …}`: `code` is the route's own (such as
 `host_online`) or the HTTP status in snake case (such as `not_found`), and `error` repeats
@@ -1084,6 +1119,8 @@ failed request answers `{"code": …, "message": …, "error": …}`: `code` is 
 | `~/.agentapi/hub/instances.deliveries.json` | `agentapi hub serve` | The delivery IDs of the events the hub took whose signature still holds, to refuse copies |
 | `~/.agentapi/hub/dispatch.json` | `agentapi hub serve` | The [issue dispatch's](#issues) machines with their launchers' tokens, and the jobs: their runs, costs and last 50 messages |
 | `~/.agentapi/hub/github-app.json` | `agentapi hub serve` | The hub's GitHub App and its private key |
+| `~/.agentapi/hub/providers.json` | `agentapi hub serve` | The [model providers](#model-providers) and their keys (0600) |
+| `~/.agentapi/hub-providers.json` | `agentapi server` | On each machine, beside its config file: the providers the hub last answered, sealed with the hub's secret, which stand in at the next start until the hub answers |
 
 `instances.json` is `{"version": 1, "instances": [...]}`. Hubs of 2.2 and earlier wrote, and read,
 only the array: the hub reads that too, but such a hub sets the newer file aside as damaged and

@@ -3,6 +3,7 @@ package native
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"reflect"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
+	"github.com/coder/agentapi/lib/provider"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -94,6 +96,9 @@ type Config struct {
 	// lock: work that can be slow (storing the images of a tool result)
 	// holds up nothing else. It gets the conversation's own copy.
 	PrepareRichMessage func(*transcript.RichMessage)
+	// Providers are the model providers an agent that can run on one (a
+	// ProviderRunner) can switch to; nil offers none.
+	Providers *provider.Source
 }
 
 const (
@@ -166,6 +171,14 @@ type Conversation struct {
 	startErrors map[string]bool
 	// settings are the agent's session settings, kept while no agent runs.
 	settings agentstate.Settings
+	// providerCap: the last agent that started can switch providers (a
+	// ProviderRunner); provider is the one it runs on (provider.Default
+	// for its own).
+	providerCap bool
+	provider    string
+	// ownModel is the model the agent ran on its own provider before it
+	// switched to another, which it goes back to.
+	ownModel string
 	// chosen are the settings chosen through ApplySettings (or restored
 	// with Config.Settings), which every agent that starts gets; a setting
 	// the agent changes by itself is changed here too.
@@ -340,6 +353,9 @@ func (c *Conversation) SettingOptions(ctx context.Context) (SettingOptions, erro
 	if err != nil {
 		return SettingOptions{}, err
 	}
+	if _, ok := configurable.(ProviderRunner); ok {
+		options.Providers = c.providerOptions(ctx)
+	}
 	// What the agent learned with them can complete its settings, e.g. the
 	// effort a model uses by default.
 	settings := configurable.Settings()
@@ -357,6 +373,30 @@ func (c *Conversation) ApplySettings(ctx context.Context, s agentstate.Settings)
 	configurable, gen, err := c.configurable()
 	if err != nil {
 		return err
+	}
+	c.mu.Lock()
+	running := c.provider
+	c.mu.Unlock()
+	runner, canSwitch := configurable.(ProviderRunner)
+	switch {
+	case s.Provider != "" && !canSwitch:
+		return fmt.Errorf("%w: the agent can't switch providers", ErrInvalidSetting)
+	case s.Provider != "" && s.Provider != running:
+		return c.switchProvider(ctx, gen, runner, configurable, s)
+	}
+	s.Provider = ""
+	if s.Model != "" && running != "" && running != provider.Default {
+		// On a provider, its models are the options.
+		listed, ok := c.cfg.Providers.Lookup(running)
+		if !ok {
+			return fmt.Errorf("%w: provider %q is no longer defined", ErrInvalidSetting, running)
+		}
+		if _, err := c.providerModel(ctx, listed.Provider, s.Model); err != nil {
+			return err
+		}
+	}
+	if s.IsZero() {
+		return nil
 	}
 	applyErr := configurable.ApplySettings(ctx, s)
 	settings := configurable.Settings()
@@ -398,7 +438,7 @@ func (c *Conversation) chooseLocked(chosen agentstate.Settings) {
 
 // setSettingsLocked records the agent's settings.
 func (c *Conversation) setSettingsLocked(settings agentstate.Settings) {
-	c.settings = settings
+	c.settings = c.withProviderLocked(settings)
 	c.stateChangedLocked()
 }
 

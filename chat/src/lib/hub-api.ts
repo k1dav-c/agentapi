@@ -1,11 +1,13 @@
 // The hub's API for the changes its page makes: signing in, an instance
 // added by its URL, its pin, group and mute, forgetting one or the stopped
-// ones, the order of the pinned ones, and the favorites. Each change comes
-// back on the event stream (/api/events), like any other; a call throws
+// ones, the order of the pinned ones, the favorites, and the model
+// providers. Each change but the providers' comes back on the event stream
+// (/api/events), like any other; a call throws
 // HubAPIError when the hub refuses it or doesn't answer.
 
 import type {HubWire} from "./hub";
 import {parseFavorites, type Favorite, type FavoriteDraft} from "./hub-favorites";
+import {parseProviders, type Provider, type ProviderChange} from "./hub-providers";
 import type {Fetcher} from "./hub-update";
 
 // HubAPIError is a call the hub refused (status is its answer's) or didn't
@@ -83,7 +85,32 @@ export function createHubAPI(root: string, fetcher: Fetcher = (url, init) => fet
       if (!kept) throw new HubAPIError("The hub's answer has no favorites.", response?.status ?? 0);
       return kept;
     },
+    // The model providers (GET /api/providers), without their keys.
+    getProviders: async (): Promise<Provider[]> => providersOf(await call("/api/providers")),
+    // Replaces the model providers (PUT /api/providers), and returns them as
+    // the hub keeps them.
+    setProviders: async (providers: ProviderChange[]): Promise<Provider[]> =>
+      providersOf(await call("/api/providers", json("PUT", {providers} satisfies HubWire["ProvidersChange"]))),
+    // Asks a provider for its models from the hub (POST
+    // /api/providers/check): without api_key, with the key the provider
+    // with the ID has. A provider that doesn't answer throws its reason.
+    checkProvider: async (check: HubWire["ProviderCheck"]): Promise<ProviderCheckResult> => {
+      const response = await call("/api/providers/check", json("POST", check));
+      const body = (await response.json().catch(() => null)) as Partial<ProviderCheckResult> | null;
+      if (!Array.isArray(body?.models)) throw new HubAPIError("The hub's answer has no models.", response.status);
+      return {models: body.models.filter((m) => typeof m?.id === "string"), latency_ms: Number(body.latency_ms) || 0};
+    },
   };
+}
+
+export type ProviderCheckResult = HubWire["ProviderCheckResult"];
+
+// providersOf reads the providers of an answer, or throws.
+async function providersOf(response: Response): Promise<Provider[]> {
+  const body = (await response.json().catch(() => null)) as Partial<Record<keyof HubWire["ProvidersBody"], unknown>> | null;
+  const providers = parseProviders(body?.providers);
+  if (!providers) throw new HubAPIError("The hub's answer has no providers.", response.status);
+  return providers;
 }
 
 // hubErrorText is what a toast says of error.

@@ -12,6 +12,7 @@ Codex 或 Pi），並提供 HTTP API、事件串流與內建聊天介面。本�
 - [啟動與關閉](#啟動與關閉)
 - [HTTP 伺服器](#http-伺服器)
 - [Native transport](#native-transport)
+  - [模型供應商](#模型供應商)
 - [事件與對話狀態](#事件與對話狀態)
 - [訊息佇列](#訊息佇列)
 - [持久保存](#持久保存)
@@ -71,16 +72,17 @@ flowchart TB
 | `lib/agentlog/` | 各 agent 工作階段紀錄的格式，一種 agent 一個套件（`claudelog`、`codexlog`、`pilog`）：紀錄型別、解析成結構化訊息與時間軸事件的 parser（adapter 也使用）、prompt 與注入內容的辨識、模型呼叫與檔案配置；另有逐行讀取、增量檔案索引和格式變動警告 |
 | `lib/sessions/` | 伺服器持有的 `Store` 讀取目錄中先前的工作階段與對話（`history.go`）、sub agent（`subagents.go`）及花費（`cost.go`） |
 | `lib/pricing/` | 每百萬 tokens 的模型價格（內建 `prices.json` 與 `--prices` 檔案），以及單次呼叫的花費計算 |
-| `lib/native/` | Native transport：`Conversation`、`Adapter` 與 `Sink` 的約定、請求、設定、用量、登入、暫停佇列的狀態（`hold.go`：用量限制停下的回合或等待重試的失敗回合）、它的 `Policy`（`policy.go`：繼續、重試與重新啟動的間隔），以及 `ClassifyFailure`（失敗回合的停止原因） |
+| `lib/native/` | Native transport：`Conversation`、`Adapter` 與 `Sink` 的約定、請求、設定、用量、登入、暫停佇列的狀態（`hold.go`：用量限制停下的回合或等待重試的失敗回合）、它的 `Policy`（`policy.go`：繼續、重試與重新啟動的間隔）、`ClassifyFailure`（失敗回合的停止原因），以及切換模型供應商（`provider.go`） |
 | `lib/agentstate/` | Native agent 回報、API 提供的值：功能、登入、設定、用量、請求、用量限制停止與重試等待，以及 `ConversationState`（observer 整份收到的對話狀態），連同重新啟動後保留的 `StoredState`。它是末端套件（只用 huma 和 `lib/util`），提供這些值的套件因此不必依賴 `lib/native` |
 | `lib/native/claude`、`codex`、`pi` | 每種 agent 協定各一個 adapter |
+| `lib/provider/` | agent 可以用來取代自己供應商的[模型供應商](#模型供應商)：`Provider` 和它的檢查、`Source`（設定檔的 `providers` 區段，有變動就重新讀取，接著是 hub 的；供應商列出的模型保留 10 分鐘），以及 `HubSync`：每分鐘向 hub 取得供應商，以 hub 的 secret 加密（`Seal`、`Open`） |
 | `lib/native/agentio` | 這些 adapter 執行 agent 時共用的部分：行程與它的迴圈（`Host`）、寫入 stdin、把回應對應到等待中的請求、agent 請求的回答進度（`Answer`）、寬鬆解碼與協定變動警告、快照節流 |
 | `lib/native/demo` | `native-demo`，開發聊天介面用的模擬 agent |
 | `lib/native/nativetest` | 測試用、可以寫腳本控制的假 adapter |
 | `lib/native/procutil` | 子行程：行程群組（process group）與正常關閉流程 |
 | `lib/statedb/` | `--state-db` 的 SQLite 持久保存 |
-| `lib/instanceapi/` | AgentAPI 和同時監看多個 AgentAPI 的客戶端之間的約定：它是誰（`WebhookInstance`，出現在 webhook 事件、摘要和登記檔中，含它的 `AgentType`）、它的摘要、webhook 的外層格式和簽章（`Sign`、`Verify`），以及 hub 對每個實例顯示的狀態（`StateOf`）。它只匯入 `lib/agentstate` 和 `lib/util` |
-| `lib/hub/` | `agentapi hub serve`，建立在 `lib/instanceapi` 和 `lib/httpmw` 上，不經過伺服器：實例、頁面上設定的群組和釘選、每個實例這一列顯示的內容最近一次變動的時間，以及 hub 看到它工作的區段（`store.go`、`work.go`，由 `persist.go` 保存在檔案中）、最近一年逐小時的活動（`activity.go`、`activity.json`、`GET /api/activity`：工作時間，以及摘要 `spend.hours` 裡每個 scope 的花費）、我的最愛提示（`favorites.go`，`GET`／`PUT /api/favorites`，屬於 hub 的設定，保存在同一個檔案）、傳輸型別的 schema（`schema.go`、`hub-schema.json`，給頁面的型別用）、有簽章的 webhook 接收端（`webhook.go`）、每個實例的摘要串流（`watch.go`）、登入、瀏覽器的事件串流，以及到實例的代理（`hub.go`、`proxy.go`），還有主機怎麼加入（`join.go`：`GET /api/join` 和啟動 log 列出的位址）；使用說明見 [hub.zh-TW.md](hub.zh-TW.md) |
+| `lib/instanceapi/` | AgentAPI 和同時監看多個 AgentAPI 的用戶端之間的約定：它是誰（`WebhookInstance`，出現在 webhook 事件、摘要和登記檔中，含它的 `AgentType`）、它的摘要、webhook 的外層格式和簽章（`Sign`、`Verify`），以及 hub 對每個實例顯示的狀態（`StateOf`）。它只匯入 `lib/agentstate` 和 `lib/util` |
+| `lib/hub/` | `agentapi hub serve`，建立在 `lib/instanceapi` 和 `lib/httpmw` 上，不經過伺服器：實例、頁面上設定的群組和釘選、每個實例這一列顯示的內容最近一次變動的時間，以及 hub 看到它工作的區段（`store.go`、`work.go`，由 `persist.go` 保存在檔案中）、最近一年逐小時的活動（`activity.go`、`activity.json`、`GET /api/activity`：工作時間，以及摘要 `spend.hours` 裡每個 scope 的花費）、我的最愛提示（`favorites.go`，`GET`／`PUT /api/favorites`，屬於 hub 的設定，保存在同一個檔案）、模型供應商（`providers.go`、`providers.json`、`GET`／`PUT /api/providers`、給編輯器 Check connection 用的 `POST /api/providers/check`，以及給 AgentAPI 用的 `POST /api/providers/sync`）、傳輸型別的 schema（`schema.go`、`hub-schema.json`，給頁面的型別用）、有簽章的 webhook 接收端（`webhook.go`）、每個實例的摘要串流（`watch.go`）、登入、瀏覽器的事件串流，以及到實例的代理（`hub.go`、`proxy.go`），還有主機怎麼加入（`join.go`：`GET /api/join` 和啟動 log 列出的位址）；使用說明見 [hub.zh-TW.md](hub.zh-TW.md) |
 | `lib/dispatch/` | hub 的 issue 派工，由 `lib/hub` 掛上：有 launcher 回報的主機（`host.*` 事件；主機名稱綁定第一次帶來的 launcher token）、job 與各次 run 的花費（`task.*` 事件）和最近 50 則送給 agent 的訊息（`send`，來自 hub 的頁面、review 或 `/agent` 留言）、`POST /api/dispatch`（`start` 在 job 進入 `starting` 時就回應，hub 在背景呼叫 launcher，並記下這次啟動直到有結果；沒收到回應時從主機下一次回報接回）、GitHub App，保存在 `dispatch.json` 和 `github-app.json`。`Subscribe` 與 `Board` 讓 hub 的串流在每次變動後送出主機和 job（`dispatch` 事件）；規格見 [issue-dispatch.zh-TW.md](specs/issue-dispatch.zh-TW.md) |
 | `lib/host/` | `agentapi host`，每台主機上的 launcher：設定（設定檔的 `host` 區段）、它有或會 clone 的 repo、hub 每啟動一個 job 就建一個 git worktree 和一個 AgentAPI（結束後重新啟動，記在 `jobs.json`）、給 hub 呼叫且需要 token 的 API（`server.go`）、送給 hub 的 `host.*` 事件與 heartbeat（`hub.go`），以及經由 unix socket 交給 job 的 `git`、`gh` 的 GitHub token（`credentials.go`） |
 | `lib/github/` | hub 的 GitHub App，只依賴標準函式庫：以 manifest 註冊、App 的 JWT、限單一 repo（快取到到期前 5 分鐘）或整個安裝的 installation token，以及派工以 App 身分呼叫的 REST API |
@@ -109,6 +111,7 @@ flowchart TB
   `lib/httpmw`
 - `lib/convstate`、`lib/webhook` → `lib/instanceapi` → `lib/agentstate` → `lib/util`
 - `lib/native` 與各 adapter、`lib/statedb` → `lib/agentstate`：只有伺服器會用到 `lib/native`
+- `lib/native`、`lib/hub` → `lib/provider` → `lib/userconfig`、`lib/instanceapi`
 - `cmd/hub`、`lib/hub` → `lib/instanceapi`、`lib/httpmw`（它不匯入本儲存庫的任何套件）：hub
   不會連同伺服器一起編譯
 - `lib/hub` → `lib/dispatch` → `lib/host`、`lib/github`、`lib/jsonapi`：派工使用 launcher 的型別；
@@ -129,7 +132,7 @@ flowchart TB
    webhook 網址那條路由的來源位址。`refreshIP` 在 emitter 的鎖之外透過 `netaddr.Resolver` 查詢這個
    位址（結果保留 30 秒，每次查詢最多等 `netaddr.DialTimeout`）：`instance.started` 之前、設定變更後、
    每次 heartbeat 之前，以及每 30 秒一次。事件只讀取最後查到的位址。agent 類型取自 `--type`；沒有指定時，
-   取自 agent 指令的名稱（`claude`、`codex`、`pi` 或 `native-demo`）。其他 agent 都會被拒絕，
+   取自 agent 指令的名稱（`claude`、`codex`、`pi` 或 `native-demo`）。其他 agent 一律拒絕，
    並指向最後一個提供 PTY transport 的版本 v2.5.1。
 2. `nativeFactory` 依 agent 類型建立 `native.Factory`（Claude Code、Codex、Pi 或
    `native-demo`）。每個 adapter 會先檢查 agent 的參數，拒絕和它的協定衝突的參數。
@@ -150,7 +153,7 @@ flowchart TB
    `PATH` 上的名稱），這樣更新改指向新版本的 symlink 也會跟著走；否則採用 `os.Executable`。停止前，
    伺服器先以 `--version` 執行程式，再以之後要用的參數、環境變數加上隱藏的 `--validate`
    （`cmd/server/validate.go`）執行一次，各限 10 秒。
-   `--validate` 像正式啟動那樣解析旗標、環境變數和設定檔，並在不啟動任何東西的前提下檢查能檢查的
+   `--validate` 像正式啟動那樣解析旗標、環境變數和設定檔，不啟動任何東西，只檢查能檢查的
    部分：各項值、佔位符、連接埠、agent 類型與傳輸方式、agent 的參數、
    價格檔、允許的主機與來源、綁定位址、webhook（`httpapi.CheckConfig`），以及狀態資料庫（不加鎖
    讀取、不做遷移，`statedb.Check`）。它不會監聽連接埠、不啟動 agent、不寫任何檔案，成功時印出
@@ -286,7 +289,7 @@ type Factory func(resume Resume) (Adapter, error)
   接收 context 與用量限制的使用量。`Capabilities` 說明 agent 支援 steer、interrupt、resume、
   images、settings 和 compact 中的哪些。API 和聊天介面依這些能力決定可用操作，不以 agent 類型判斷。
 - **世代（generation）。** 每個 adapter 都屬於一個世代。重新啟動或替換 agent 會開始新的世代，
-  較舊 adapter 的事件會被忽略，所以被替換掉的 agent 無法再改變對話。
+  較舊 adapter 的事件一律忽略，所以被替換掉的 agent 無法再改變對話。
 - **生命週期。** 啟動 adapter 時會啟動行程和它的工作階段（新的，或依工作階段參照接續）。找不到
   有效登入資訊的 adapter 會回傳 `LoginRequiredError`：對話會回報 `login_required`，每 5 秒重新啟動它
   一次，或在 `POST /login/retry` 要求時立刻啟動。agent 執行之後，對話會套用為這個工作階段
@@ -320,7 +323,7 @@ type Factory func(resume Resume) (Adapter, error)
   每個紀錄檔的每一種只會以 Warn 記錄一次，並附上紀錄中的 CLI 版本，所以格式改變時會出現在
   伺服器的 log 裡。Claude Code 自己寫的訊息（`<synthetic>`）、Codex 只有用量上限的計數，以及 Pi
   失敗或中止的呼叫本來就不用 token，不算在內。
-- **協定變動。** Adapter 以 `agentio.Decode` 解碼 agent 送來的內容：值的型別變了的欄位會被略過，
+- **協定變動。** Adapter 以 `agentio.Decode` 解碼 agent 送來的內容：會略過型別變了的欄位，
   整筆紀錄不會因此遺失，因為遺失回合結束的紀錄會讓回合一直停在進行中。adapter 不認得的紀錄類型、
   型別變了的欄位和無法解碼的紀錄，會依行程分別計數（`agentio.Drift`），每一種只以 Warn 記錄一次，
   並附上握手時取得的 CLI 版本。adapter 自行繞過的異常行為（`Drift.Unexpected`）也一樣：Pi 在沒有
@@ -378,9 +381,58 @@ type Factory func(resume Resume) (Adapter, error)
 | Adapter | 行程 | 協定 |
 | --- | --- | --- |
 | `claude` | `claude -p --input-format stream-json --output-format stream-json ...` | stdin 與 stdout 上的 stream-json 訊息，加上 Claude Code 的 control protocol：`initialize`、`can_use_tool`（核准、提問、計畫）、`set_permission_mode`、`set_model`、`apply_flag_settings`、`get_settings`、`get_context_usage`、`interrupt` |
-| `codex` | `codex app-server` | JSON-RPC：`thread/start`、`thread/resume` 或 `thread/fork`、`turn/start`（帶著設定）、`turn/steer`、`turn/interrupt`、`thread/compact/start`、`model/list`；核准、提問和 MCP elicitation 以伺服器請求送來；plan 模式是一種 collaboration mode |
+| `codex` | `codex app-server` | JSON-RPC：`thread/start`、`thread/resume` 或 `thread/fork`、`thread/inject_items`（新 thread 從另一個供應商帶過來的對話）、`turn/start`（帶著設定）、`turn/steer`、`turn/interrupt`、`thread/compact/start`、`model/list`；核准、提問和 MCP elicitation 以伺服器請求送來；plan 模式是一種 collaboration mode |
 | `pi` | `pi --mode rpc --session-id <id>`（副本加上 `--fork <id>`） | JSON lines：`prompt`（steer 也用它）、`abort`、`get_state`、`get_available_models`、`set_model`、`set_thinking_level`、`compact`；擴充功能的對話框以 UI 請求送來，用 `extension_ui_response` 回答 |
 | `demo` | 無 | 模擬的 agent，會串流思考、一個工具呼叫和回覆，並能開啟每一種請求 |
+
+### 模型供應商
+
+Claude Code 和 Codex 可以改用自己以外的模型供應商（見[模型供應商](../README.zh-TW.md#模型供應商)）：
+例如 LiteLLM gateway 這類端點，定義在設定檔的 `providers` 區段或 hub 上。
+
+```mermaid
+flowchart LR
+  file["config.yaml<br/>providers"] --> source["provider.Source"]
+  hub["hub: POST /api/providers/sync"] -- "HubSync, every minute" --> source
+  source -- "Lookup, Models" --> conv["native.Conversation"]
+  conv -- "SwitchProvider" --> adapter["ProviderRunner<br/>claude, codex"]
+  adapter -. "RelaunchError" .-> http["PUT /settings<br/>relaunchOnProvider"]
+  http -- "BeginProviderSwitch" --> conv
+```
+
+- **來源。** `cmd/server` 會給 Claude Code 或 Codex 的伺服器一個 `provider.Source`
+  （`NativeConfig.Providers`）。設定檔的修改時間變了，`List` 就重新讀取，先回傳設定檔的供應商，再回傳
+  設定檔沒有的 ID 的 hub 供應商。沒有定義模型的供應商，提供 `GET <base_url>/models` 列出的模型，依 ID、
+  網址和金鑰保留 10 分鐘。`cmd/server/userconfig.go` 把 `providers` 區段交給 `lib/provider`，不當成
+  未知的設定；有這個區段的設定檔若其他人讀得到，會發出警告。
+- **hub 的供應商。** `HubSync` 向 webhook 網址所屬的 hub 送出 `/api/providers/sync`，和事件一樣以
+  secret 簽章，再用同一個 secret 解開回應。伺服器在 agent 啟動前先同步一次（最多 5 秒），因為 agent
+  可能一開始就用 hub 的供應商，之後每分鐘一次；回 404 的 hub（比這個路由舊）沒有供應商。每次的回應都會加密
+  存進設定檔旁的 `hub-providers.json`（`HubCachePath`），`Restore` 在第一次同步前先放回去；hub 回應之前，
+  `Source.HubSettled` 為 false。
+- **模型清單。** `Source.Models` 會把供應商列出的模型保留 10 分鐘，之後先回傳舊的清單，同時在背景重新查詢；
+  查詢失敗則一分鐘內不再查。每次最多等 3 秒，`SettingOptions` 會同時詢問所有供應商。
+- **設定。** `agentstate.Settings.Provider` 是 agent 目前用的供應商，`default` 表示它自己的；只有實作
+  `ProviderRunner` 的 adapter 才會設定這個值。`SettingOptions` 列出供應商（`ProviderOption`：ID、名稱、
+  來源 `config` 或 `hub`、模型）；選定的供應商屬於選定的設定，保存在 stored state 裡。每次啟動時，
+  adapter 從 `Resume.Provider`（`ProviderRun`：供應商和啟動時用的模型）拿到它。選定的供應商若已不存在，
+  對話會放棄這個選擇並發出警告，agent 改用自己的供應商啟動。hub 回應之前（`HubSettled`），選定的供應商若可能是
+  hub 的，就繼續保持選定，agent 這次先用自己的供應商啟動，也不套用選定的模型，因為那是該供應商的模型。
+- **切換。** 帶供應商的 `ApplySettings` 先檢查供應商和模型（沒指定時用第一個；換回 agent 自己的供應商時，
+  用換過去之前的模型），再呼叫 `SwitchProvider`。Claude Code 在執行中切換：`apply_flag_settings` 設定
+  `ANTHROPIC_BASE_URL`（去掉 `/v1` 的 base URL）、`ANTHROPIC_AUTH_TOKEN`、空的 `ANTHROPIC_API_KEY`，
+  並把模型寫進 `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL`、`ANTHROPIC_SMALL_FAST_MODEL` 和
+  `CLAUDE_CODE_SUBAGENT_MODEL`，接著送 `set_model`。一開始就用供應商啟動的 agent，啟動時就帶著這些變數
+  （以及 `ANTHROPIC_MODEL`），並略過登入檢查。
+- **重新啟動。** adapter 無法在執行中完成切換時，回傳 `RelaunchError`：Claude Code 換回自己的供應商
+  （只有新的行程才有原本的環境），以及 Codex 的每一次切換。這時處理常式（`relaunchOnProvider`）和
+  重新啟動一樣持有 `s.mu`，讓訊息在佇列中等候，再呼叫 `BeginProviderSwitch`。回合進行中或正在壓縮
+  context 時，它以 `ErrTurnActive` 拒絕（409）；否則選定設定，回傳伺服器要啟動的 `Replacement`：
+  接續同一個工作階段（`Resume.Ref`），或在有 `Carry` 時開一個新的工作階段，帶入對話的訊息
+  （`Resume.Carry`）。Codex 把 thread 綁定在它的供應商上，而 OpenAI 的 thread 裡有其他供應商不接受的
+  項目（additional tools、加密的推理內容）：app-server 以 `-c model_providers.agentapi-<id>={…}`
+  （Responses API，金鑰在 `AGENTAPI_PROVIDER_API_KEY`）和 `-c model_provider="agentapi-<id>"` 啟動，
+  新的 thread 透過 `thread/inject_items` 以文字拿到訊息，只取放得進 200,000 字元的最近訊息。
 
 ## 事件與對話狀態
 
@@ -427,7 +479,7 @@ type Factory func(resume Resume) (Adapter, error)
   在同一次呼叫裡），摘要不同才送出 `summary_update`；回覆文字增長不會送出摘要更新。
   只有 `/events?only=summary` 訂閱這些更新，串流另會送出心跳。`PUT /webhook` 可修改
   instance 的 ID 與網址，因此也會觸發摘要檢查，並重寫登記檔。
-- 對於會讀取 session log 的 agent，伺服器每分鐘計算一次摘要的 `spend`（`spend.go`）：
+- agent 有 session log 可讀時，伺服器每分鐘計算一次摘要的 `spend`（`spend.go`）：
   `sessions.Store.Costs` 以增量方式讀取 log，再把總計中結束於最近 24 小時和 7 天內的各小時加總，
   金額和 token 都算（`SessionCost` 的每個小時兩者都記，所以一個呼叫的 token 只算一次，和金額算在
   同一處）。`EventEmitter.SetSpend` 只在金額或 token 改變時才送出摘要，`updated_at` 記錄改變的時間。`scope` 是主機的
@@ -483,7 +535,7 @@ agent 忙碌時，訊息會在 `s.queue` 等待；對 agent 最後一則訊息�
 訊息照樣送給 agent。佇列的第一則訊息還要等到 agent 閒置，而且沒有用量限制或失敗回合暫停佇列。
 
 被拒絕的訊息最多嘗試 5 次。可能重複送達的訊息會立即丟棄：已寫出但未確認的訊息
-（`native.ErrUnconfirmed`，原因可能是逾時、取消或 agent 結束）。寫入 stdin 的動作會隨呼叫的
+（`native.ErrUnconfirmed`，原因可能是逾時、取消或 agent 結束）。寫入 stdin 會隨呼叫的
 context 結束，避免不再讀取的 agent 佔住 `s.mu`。
 
 訊息也能 steer 或中斷目前回合。佇列變更會在佇列鎖之外以 `queue_update` 送到 emitter，
@@ -680,6 +732,11 @@ Content-Security-Policy。
   內容不會以 hub 的網頁身分執行；代理也拒絕修改實例的 webhook，因為 webhook 決定 hub 把 token 送到哪裡。
   讓主機加入用的 secret，只有設了 token 的 hub 才會交給已登入的瀏覽器（`GET /api/join`）；啟動時的
   log 一律不寫。
+- 模型供應商的金鑰放在設定檔（其他人讀得到時 AgentAPI 會警告）和 hub 的 `providers.json`（0600）。
+  hub 的 API 從不回傳金鑰（`has_key` 只說有沒有）；`POST /api/providers/sync` 會回傳金鑰，但只回應以
+  hub secret 簽章的請求，並以從 secret 衍生（HKDF-SHA256）的金鑰用 AES-256-GCM 加密，所以金鑰不會以
+  明文經過一般 HTTP。持有 secret 的每台主機都拿得到每一把金鑰。用供應商的 agent 環境變數裡就有金鑰，
+  又以使用者身分執行，所以讀得到它。
 - 上層 agent 工作階段會為它執行的指令設定環境變數（包含機密資訊）；agent 不會繼承這些變數，也不會拿到 AgentAPI 的機密：API token、webhook 與 hub 的 secret 和
   token（`lib/procenv`）。
 
@@ -755,7 +812,8 @@ AgentAPI 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
 頁面、卡片、含狀態和 run 時間軸的詳細資料、交辦選單；`use-dispatch.ts` 讀 issue 並執行動作）建立在
 `lib/hub-issues.ts` 的看板模型上（依區塊排列的卡片、建議的 agent 與主機、時間軸），派工的呼叫在
 `lib/hub-dispatch.ts`，每個回應進來時都會檢查。hub 的 GitHub App 由 Issues 和設定的 GitHub 分頁共用一份
-（`lib/hub-github-store.ts`、`useHubGitHub`），頁面重新顯示時會再讀一次。主機和 job 隨串流的 `dispatch`
+（`lib/hub-github-store.ts`、`useHubGitHub`），頁面重新顯示時會再讀一次。設定的 Providers 分頁
+（`components/hub/providers-settings.tsx`，邏輯在 `lib/hub-providers.ts`）用來編輯模型供應商。主機和 job 隨串流的 `dispatch`
 事件送來，Issues 按鈕上的數字和清單上處理 issue 的 agent 的標籤（`HubListContext.jobs`）也用它；操作的
 回應會先顯示在看板上，直到串流裡的 job 一樣新為止。hub 的 API 不是用 huma 寫的，它的傳輸型別是產生出來的：
 `make gen` 從 Go 型別（`hub.Schema`）寫出 `lib/hub/hub-schema.json`，`bun run gen:api` 再從它寫出
@@ -801,7 +859,8 @@ AgentAPI 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
   匯入。
 - `components/chat.tsx` 負責頁面版面：訊息清單（任務、工具呼叫列、思考）、輸入框上方的停靠區
   （狀態列、登入卡片、請求卡片、用量限制卡片、重試卡片、prompt cache 過期提醒）、
-  輸入框（`message-input.tsx`，含斜線指令、工作階段設定和用量指示）、Explorer（含先前的工作階段和
+  輸入框（`message-input.tsx`，含斜線指令、工作階段設定和用量指示；模型選單把 agent 自己的模型和
+  每個供應商的模型分組列出，`lib/session-settings.ts`）、Explorer（含先前的工作階段和
   它們的花費，`session-history.tsx`，以及 webhook 設定，`webhook-settings.tsx`）、sub agent 的
   Lineage 面板（`lineage.tsx`）、檔案檢視器以及 shell
   終端機（`shell-view.tsx`，來自 `/terminal`）。
@@ -823,12 +882,14 @@ AgentAPI 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
   `nativetest` 為對話與 HTTP 測試提供假 adapter。
 - `e2e/` 以腳本化的 Claude Code `e2e/fakeclaude` 測試伺服器執行檔，包括原地重新啟動。
 - CI 執行 `golangci-lint`（包含對列舉的 exhaustive 檢查）、`paralleltestctx` 和 `make gen`
-  （OpenAPI schema 必須和程式碼一致）；聊天介面有 eslint、`bun test` 和 `tsc`。CI 也以 race
-  detector 執行 `lib/` 和 `cmd/` 的測試，在 macOS 上執行所有測試，在 Windows 上建置所有測試，
-  並執行含 Windows 程式碼的套件的測試。Release workflow 會對要發行的 commit 執行這些測試
-  （以可重複使用的 workflow 呼叫 `go-test.yml`），Linux 的 job 通過後才發行；推送到 `main`、手動執行和
-  手動發布的發行版都一樣。macOS 和 Windows 的 job 在另一次呼叫中執行，發行不等它們。pull request 則
-  自己執行所有 job。Release workflow 也會檢查每個執行檔都是為對應平台建置的。之後的推送發行的版本已包含這個 commit，或這個 commit 已不在 `main` 上時，這次推送不會發行。
+  （OpenAPI schema 和由它產生的聊天介面型別都必須和程式碼一致）；聊天介面有 eslint、`bun test` 和
+  `tsc`。CI 也以 race detector 執行 `lib/` 和 `cmd/` 的測試，全都在 repo 自架的 Linux 測試 runner 上；
+  沒有任何 job 測 macOS 或 Windows。Release workflow 先問 `release-version.sh` 這個 commit 會不會
+  發行任何版本，會的話才對它執行這些測試（以可重複使用的 workflow 呼叫 `go-test.yml`），通過後才發行；
+  推送到 `main`、手動執行和手動發布的發行版都一樣。它在自己專用的 runner 上執行（見 MAINTAINERS.md）。
+  pull request 自己執行所有 job，但來自 fork 的不執行，因為它們的程式碼會在 runner 的機器上執行。
+  Release workflow 也會檢查每個執行檔都是為對應平台建置的；如果之後的推送已發行包含這個 commit 的
+  版本，或這個 commit 已不在 `main` 上，這次推送就不會發行。
 
 ## 設計原則
 

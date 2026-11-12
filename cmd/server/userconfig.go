@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/coder/agentapi/lib/host"
+	"github.com/coder/agentapi/lib/provider"
 	"github.com/coder/agentapi/lib/userconfig"
 )
 
@@ -20,12 +21,9 @@ import (
 // is reported. A missing file is fine; one AgentAPI can't read is reported
 // and left out, so a broken file doesn't keep the agent from starting.
 func readUserConfig(v *viper.Viper, flags *pflag.FlagSet, logger *slog.Logger) {
-	path := v.GetString(FlagConfig)
+	path := userConfigPath(v)
 	if path == "" {
-		var err error
-		if path, err = userconfig.DefaultPath(); err != nil {
-			return
-		}
+		return
 	}
 	config, err := userconfig.Load(path)
 	if err != nil {
@@ -48,8 +46,8 @@ func readUserConfig(v *viper.Viper, flags *pflag.FlagSet, logger *slog.Logger) {
 		slices.Sort(unknown)
 		logger.Warn("The AgentAPI config file names settings agentapi server doesn't have", "path", path, "settings", unknown)
 	}
-	if info, err := os.Stat(path); err == nil && info.Mode().Perm()&0o077 != 0 && config["webhook-secret"] != nil {
-		logger.Warn("The AgentAPI config file holds a webhook secret others can read; chmod 600 it", "path", path)
+	if info, err := os.Stat(path); err == nil && info.Mode().Perm()&0o077 != 0 && (config["webhook-secret"] != nil || config[provider.ConfigKey] != nil) {
+		logger.Warn("The AgentAPI config file holds secrets (a webhook secret, model providers' keys) others can read; chmod 600 it", "path", path)
 	}
 	v.SetConfigFile(path)
 	v.SetConfigType("yaml")
@@ -67,9 +65,20 @@ func readUserConfig(v *viper.Viper, flags *pflag.FlagSet, logger *slog.Logger) {
 	logger.Info("Read the AgentAPI config file", "path", path)
 }
 
-// otherSections are the config file's sections other commands read,
-// which agentapi server leaves alone: agentapi host's.
-var otherSections = []string{host.ConfigKey}
+// userConfigPath is the config file: --config, else
+// ~/.agentapi/config.yaml; empty without a home directory.
+func userConfigPath(v *viper.Viper) string {
+	if path := v.GetString(FlagConfig); path != "" {
+		return path
+	}
+	path, _ := userconfig.DefaultPath()
+	return path
+}
+
+// otherSections are the config file's sections agentapi server doesn't
+// read as flags: agentapi host's, and the model providers, which it
+// reads by itself (lib/provider).
+var otherSections = []string{host.ConfigKey, provider.ConfigKey}
 
 // perServerFiles are the settings that name a file only one server can
 // use: the first locks a state database, and the others refuse a PID file

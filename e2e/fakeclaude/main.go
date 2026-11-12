@@ -5,7 +5,10 @@
 // frames a real CLI writes (see lib/native/claude/testdata). Each turn goes
 // to the session's log too, as Claude Code keeps it (projects/ in
 // $CLAUDE_CONFIG_DIR or ~/.claude), so that AgentAPI can read the session
-// back.
+// back. It keeps the provider its environment names (ANTHROPIC_BASE_URL,
+// ANTHROPIC_AUTH_TOKEN, as apply_flag_settings changes them) and the model
+// set_model picks; on a provider its reply says which, "Echo: <message>
+// [via <base URL> on <model>]".
 package main
 
 import (
@@ -53,8 +56,18 @@ func main() {
 	}
 }
 
+// agent is what fakeclaude runs on: the provider's base URL (empty for
+// Anthropic) and the model.
+type agent struct {
+	base, model string
+}
+
 // serve reads AgentAPI's frames from stdin until it closes.
 func serve(session string) error {
+	runs := agent{base: os.Getenv("ANTHROPIC_BASE_URL"), model: os.Getenv("ANTHROPIC_MODEL")}
+	if runs.model == "" {
+		runs.model = "claude-haiku-5-5"
+	}
 	out := json.NewEncoder(os.Stdout)
 	cwd, _ := os.Getwd()
 	in := bufio.NewScanner(os.Stdin)
@@ -67,6 +80,7 @@ func serve(session string) error {
 		switch msg["type"] {
 		case "control_request":
 			request, _ := msg["request"].(map[string]any)
+			runs.change(request)
 			if request["subtype"] == "generate_session_title" && request["persist"] == true {
 				if err := appendLog(session, cwd, map[string]any{"type": "ai-title", "aiTitle": sessionTitle, "sessionId": session}); err != nil {
 					return err
@@ -77,7 +91,7 @@ func serve(session string) error {
 			}
 		case "user":
 			text := userText(msg)
-			frames := turn(session, cwd, text)
+			frames := turn(session, cwd, text, runs)
 			if err := logTurn(session, cwd, text, frames[1]); err != nil {
 				return err
 			}
@@ -114,15 +128,34 @@ func controlResponse(id, subtype any) map[string]any {
 	}}
 }
 
-// turn is the output of one turn that answers text.
-func turn(session, cwd, text string) []map[string]any {
+// change applies a control request that changes the provider or model.
+func (a *agent) change(request map[string]any) {
+	switch request["subtype"] {
+	case "set_model":
+		if model, ok := request["model"].(string); ok && model != "" {
+			a.model = model
+		}
+	case "apply_flag_settings":
+		settings, _ := request["settings"].(map[string]any)
+		env, _ := settings["env"].(map[string]any)
+		if base, ok := env["ANTHROPIC_BASE_URL"].(string); ok {
+			a.base = base
+		}
+	}
+}
+
+// turn is the output of one turn that answers text, on a.
+func turn(session, cwd, text string, a agent) []map[string]any {
 	reply := "Echo: " + text
+	if a.base != "" {
+		reply += fmt.Sprintf(" [via %s on %s]", a.base, a.model)
+	}
 	messageID := "msg_" + strings.ReplaceAll(newID(), "-", "")
 	usage := map[string]any{"input_tokens": 2, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 5}
 	return []map[string]any{
-		{"type": "system", "subtype": "init", "cwd": cwd, "session_id": session, "model": "claude-haiku-5-5", "permissionMode": "default", "claude_code_version": version, "uuid": newID()},
+		{"type": "system", "subtype": "init", "cwd": cwd, "session_id": session, "model": a.model, "permissionMode": "default", "claude_code_version": version, "uuid": newID()},
 		{"type": "assistant", "message": map[string]any{
-			"model": "claude-haiku-5-5", "id": messageID, "type": "message", "role": "assistant",
+			"model": a.model, "id": messageID, "type": "message", "role": "assistant",
 			"content":     []map[string]any{{"type": "text", "text": reply}},
 			"stop_reason": "end_turn", "usage": usage,
 		}, "parent_tool_use_id": nil, "session_id": session, "uuid": newID()},

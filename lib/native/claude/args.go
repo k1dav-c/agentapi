@@ -277,11 +277,11 @@ func buildArgs(p parsedArgs, sessionID, resumeRef string, fork bool) []string {
 // buildEnv returns env (the process environment if nil) without the
 // variables a parent agent session leaves behind, and adds the ones the
 // adapter relies on.
-func buildEnv(env []string) []string {
-	return procenv.ForAgent(env,
+func buildEnv(env []string, set ...string) []string {
+	return procenv.ForAgent(env, append([]string{
 		// Reports session state changes; "idle" is the turn-over signal.
 		"CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1",
 		// The entrypoint for the CLI driven by another program.
 		"CLAUDE_CODE_ENTRYPOINT=sdk-cli",
-	)
+	}, set...)...)
 }

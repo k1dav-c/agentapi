@@ -2,25 +2,31 @@
 
 import {useRef, useState} from "react";
 import * as TabsPrimitive from "@radix-ui/react-tabs";
-import {Github, Star} from "lucide-react";
+import {Cloud, Github, Star} from "lucide-react";
 import {Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle} from "@/components/ui/dialog";
 import type {Favorite} from "@/lib/hub-favorites";
 import {FavoritesSettings} from "./favorites-settings";
 import {GitHubSettings} from "./github-settings";
+import {ProvidersSettings} from "./providers-settings";
 
 // The sections of the hub's settings, each a tab of the dialog; opening it
 // at one shows that one.
-export type SettingsSection = "favorites" | "github";
+export type SettingsSection = "favorites" | "providers" | "github";
 
 const sections: {id: SettingsSection; label: string; icon: React.ReactNode}[] = [
   {id: "favorites", label: "Favorites", icon: <Star />},
+  {id: "providers", label: "Providers", icon: <Cloud />},
   {id: "github", label: "GitHub", icon: <Github />},
 ];
 
+// An editor of a section: whether it is open, and what closes it.
+type Editor = {open: boolean; cancel: () => void};
+
 // HubSettings is the dialog of the settings kept on the hub, which every
-// browser signed in to it shares: the favorites, and the hub's GitHub App.
-// section is the one it opens at; null is closed. activeJobs is how many
-// jobs at work push with the app's tokens.
+// browser signed in to it shares: the favorites, the model providers the
+// AgentAPIs that report to it get, and the hub's GitHub App. section is the
+// one it opens at; null is closed. activeJobs is how many jobs at work push
+// with the app's tokens.
 export function HubSettings({
   root,
   section,
@@ -36,10 +42,15 @@ export function HubSettings({
   onFavoritesSaved: (favorites: Favorite[]) => void;
   activeJobs?: number;
 }) {
-  const editor = useRef<{open: boolean; cancel: () => void} | null>(null);
+  // The favorites' and the providers' editors: Escape closes the one of the
+  // section shown.
+  const editors = {
+    favorites: useRef<Editor | null>(null),
+    providers: useRef<Editor | null>(null),
+  };
   const headings = useRef<Partial<Record<SettingsSection, HTMLHeadingElement | null>>>({});
   const [shown, setShown] = useState<SettingsSection>(section ?? "favorites");
-  // The GitHub section reads GitHub through the hub: only once it shows,
+  // The Providers and GitHub sections read the hub: only once they show,
   // again each time the dialog opens.
   const [seen, setSeen] = useState<ReadonlySet<SettingsSection>>(new Set(section ? [section] : []));
   const show = (next: SettingsSection) => {
@@ -66,12 +77,13 @@ export function HubSettings({
         // Escape closes the editor first, then the dialog; a click outside
         // leaves an open editor be.
         onEscapeKeyDown={(event) => {
-          if (!editor.current?.open) return;
+          const editor = shown === "github" ? null : editors[shown].current;
+          if (!editor?.open) return;
           event.preventDefault();
-          editor.current.cancel();
+          editor.cancel();
         }}
         onInteractOutside={(event) => {
-          if (editor.current?.open) event.preventDefault();
+          if (editors.favorites.current?.open || editors.providers.current?.open) event.preventDefault();
         }}
       >
         <DialogHeader>
@@ -91,17 +103,28 @@ export function HubSettings({
               </TabsPrimitive.Trigger>
             ))}
           </TabsPrimitive.List>
-          {/* Both stay mounted: a half-written favorite outlives a look at GitHub. */}
+          {/* They stay mounted: a half-written favorite outlives a look at GitHub. */}
           <TabsPrimitive.Content value="favorites" forceMount className="outline-none data-[state=inactive]:hidden">
             <FavoritesSettings
               root={root}
               favorites={favorites}
               onSaved={onFavoritesSaved}
-              editor={editor}
+              editor={editors.favorites}
               headingRef={(heading) => {
                 headings.current.favorites = heading;
               }}
             />
+          </TabsPrimitive.Content>
+          <TabsPrimitive.Content value="providers" forceMount className="outline-none data-[state=inactive]:hidden">
+            {seen.has("providers") && (
+              <ProvidersSettings
+                root={root}
+                editor={editors.providers}
+                headingRef={(heading) => {
+                  headings.current.providers = heading;
+                }}
+              />
+            )}
           </TabsPrimitive.Content>
           <TabsPrimitive.Content value="github" forceMount className="outline-none data-[state=inactive]:hidden">
             {seen.has("github") && (

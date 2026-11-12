@@ -38,7 +38,12 @@ type Settings struct {
 	PermissionMode PermissionMode `json:"permission_mode,omitempty" doc:"bypass: tools run without asking; auto: the agent's own review decides what may run; ask: tool calls that need approval come as requests; plan: the agent proposes a plan before it changes anything. Missing while the agent runs in a mode of its own, e.g. Claude Code's acceptEdits."`
 	Model          string         `json:"model,omitempty" doc:"Model: the id of one of the models GET /settings lists."`
 	Effort         string         `json:"effort,omitempty" doc:"Reasoning effort: one of the efforts GET /settings lists for the model, e.g. low, medium or high."`
+	// Provider is empty for an agent that can't run on another provider.
+	Provider string `json:"provider,omitempty" doc:"Model provider the agent runs on: default for its own (Claude Code's Anthropic login or key, Codex's OpenAI login or config), else the id of one of the providers GET /settings lists. Missing for an agent that can't switch providers (Pi)."`
 }
+
+// ProviderDefault is the Provider setting of an agent on its own provider.
+const ProviderDefault = "default"
 
 // IsZero reports whether no setting is set.
 func (s Settings) IsZero() bool { return s == Settings{} }
@@ -53,6 +58,9 @@ func (s Settings) Merge(o Settings) Settings {
 	}
 	if o.Effort != "" {
 		s.Effort = o.Effort
+	}
+	if o.Provider != "" {
+		s.Provider = o.Provider
 	}
 	return s
 }

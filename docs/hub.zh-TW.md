@@ -3,7 +3,7 @@
 [English](hub.md) | [繁體中文](hub.zh-TW.md)
 
 hub 在一個頁面上監看多台主機的 AgentAPI：列出每個實例，需要你處理的排最前面，點一下就能在聊天
-介面中開啟，桌面和手機都能用。hub 就在同一個 binary 裡：`agentapi hub serve`。
+介面中開啟，桌面和手機都能用。hub 也在 AgentAPI 的 binary 裡：`agentapi hub serve`。
 
 ![hub：所有實例、需要你處理的排最前面，以及在聊天介面中開啟的一個](screenshots/hub-desktop.png)
 
@@ -36,13 +36,13 @@ hub 和各個 AgentAPI 透過你掌控的網路互連，例如你自己的 VPN�
    AgentAPI 都送出有簽章的 `instance.started`、`instance.heartbeat`（每分鐘一次）和
    `instance.stopped`，hub 據此新增、更新或停止實例（手動加入的實例不會因 `instance.stopped`
    停止，hub 會持續嘗試連線）。hub 連不到、又錯過三次 heartbeat 的實例，例如 workspace 被強制
-   關掉的，視為已停止，hub 不再嘗試連線，直到它下一次送 heartbeat。這些事件只用來新增實例、告訴
+   關掉的，視為已停止；在它下一次送 heartbeat 之前，hub 不再嘗試連線。這些事件只用來新增實例、告訴
    hub 它在哪裡；每個實例在做什麼，以它的摘要為準。事件寫了另一個網址時，只有 hub 確定舊網址
-   已經失效，才會改用新網址：在那裡連線失敗超過 10 秒的寬限（Unreachable，或錯過 heartbeat 而視為
+   已經失效，才會改用新網址：在舊網址連線失敗超過 10 秒的寬限（Unreachable，或錯過 heartbeat 而視為
    已停止），或那裡回應的是另一個 AgentAPI。hub 已連上或還在連線中（hub 剛重新啟動，或串流斷線
    未滿 10 秒）時一律不改，手動加入的實例也一律不改。因 `instance.stopped` 而停止的實例，hub 會先
    回舊網址試一次。主機換了位址的 AgentAPI（`--public-url` 裡用 `{ip}`），會在舊位址變成
-   Unreachable 後的第一次 heartbeat 搬到新位址，大約兩分鐘內（見[疑難排解](#疑難排解)）。檔案會記下
+   Unreachable 後的第一次 heartbeat 搬到新位址，大約兩分鐘內（見[疑難排解](#疑難排解)）。實例檔案會記下
    hub 最後一次讀到每個實例摘要的網址，hub 重新啟動後先從那裡追蹤。
 2. hub 追蹤每個實例的摘要（`GET /events?only=summary`），以它為實例狀況的依據：狀態、在等什麼、
    標題、最新任務、佇列和用量限制。每個實例一條連線；斷線時 1 秒後重連，之後間隔逐次拉長，最多
@@ -68,7 +68,7 @@ openssl rand -hex 32   # HUB_TOKEN：登入用
 openssl rand -hex 32   # HUB_SECRET：AgentAPI 為事件簽章用
 ```
 
-第三個是 AgentAPI 自己的 API token（`--api-token`），有設定的話才需要，hub 會把它送給各實例。所有
+第三個是 AgentAPI 自己的 API token（`--api-token`），有設定才需要，hub 會把它送給各實例。所有
 實例可以共用一個；手動加入的實例也可以各有各的。
 
 ### 2. 執行 hub
@@ -209,7 +209,7 @@ hub 沒有回應時（它停了，或它前面的 proxy 回了錯誤頁），頁
 
 ![agent 的花費：最近 24 小時和 7 天、花最多的 agent，以及各主機](screenshots/hub-spend.png)
 
-每個 AgentAPI 每分鐘從 agent 的 session log 算出它在工作目錄裡的所有 session，最近 24 小時和最近
+每個 AgentAPI 每分鐘從 agent 的 session log 算出工作目錄裡所有 session 在最近 24 小時和最近
 7 天花了多少，放進摘要（`spend`）。這是換算成 API 的金額：依模型供應商的牌價計算 token，訂閱方案
 並不會實際收取。Claude Code、Codex 和 Pi 有這個數字；`native-demo` 和 AgentAPI 2 的 PTY agent
 不會顯示。
@@ -347,7 +347,7 @@ hub 舊。
 - 2.1.0 以後的 AgentAPI 能原地重新啟動：執行 `sudo agentapi update --restart`，更新 binary 後，
   這台主機的 AgentAPI 會原地重新啟動到新版（binary 屬於你自己時不必加 `sudo`）。
 - 想讓之後都能從 hub 更新，就加上 `--allow-update`（3.8.0 起），它會先把 `allow-update: true`
-  寫進設定檔。舊版的 `agentapi` 沒有這個參數：先自己把這一行加進 `~/.agentapi/config.yaml`，
+  寫進設定檔。舊版的 `agentapi` 沒有這個旗標：先自己把這一行加進 `~/.agentapi/config.yaml`，
   再執行 `sudo agentapi update --restart`。
 - 2.1.0 之前的版本：先執行 `sudo agentapi update`，再把每個 AgentAPI（或它的 workspace）重新啟動
   一次。
@@ -519,7 +519,7 @@ AgentAPI 正在更新時，上方那一列也會顯示進度，還在等任務�
 ![Hub settings：我的最愛，每一項都有自己的按鈕](screenshots/hub-settings-favorites.png)
 
 我的最愛是你常送出的提示，保存在 hub 上。標題列的齒輪按鈕會開啟 **Hub settings** 的
-**Favorites** 分頁（另一個分頁是 [GitHub](#github-設定)），列出所有項目，可以新增、編輯、刪除和上下移動。每一項有一段最多 20,000 字的提示，
+**Favorites** 分頁（其他分頁是 [Providers](#模型供應商) 和 [GitHub](#github-設定)），列出所有項目，可以新增、編輯、刪除和上下移動。每一項有一段最多 20,000 字的提示，
 以及最多 100 字、可省略的標題；沒有標題時，以提示的第一行當名稱。hub 最多保存 100 項。每次修改都
 會立即儲存，登入這個 hub 的每個頁面也會跟著更新，所以手機和桌機看到的我的最愛都一樣。**Undo** 可以
 救回最後刪除的那一項。在編輯區裡，⌘/Ctrl+Enter 儲存，**Esc** 取消。
@@ -531,6 +531,31 @@ AgentAPI 正在更新時，上方那一列也會顯示進度，還在等任務�
 游標停在它後面。按 Ctrl/⌘+Z 可以把它拿掉。超過七項時會出現搜尋框，在清單上直接打字也會輸入到搜尋框。
 **Manage favorites…** 會開啟 hub 設定的我的最愛區。還沒有任何一項時選單照樣出現，裡面只有這個連結。
 單獨開啟的聊天介面（新分頁，或 AgentAPI 自己的網址）沒有 ☆。
+
+### 模型供應商
+
+![Hub settings：Providers 分頁，列出兩個供應商和它們的端點、模型與金鑰狀態](screenshots/hub-settings-providers.png)
+
+hub 會替每台向它回報的主機保存[模型供應商](../README.zh-TW.md#模型供應商)：Claude Code 和 Codex
+的工作階段可以換用的端點，例如 LiteLLM gateway。**Hub settings** 的 **Providers** 分頁列出所有
+供應商，可以新增、編輯和刪除。每個供應商有 ID（小寫英文字母、數字、`-` 和 `_`）、可省略的名稱、
+base URL、可省略的 Anthropic base URL、API 金鑰，以及它提供的模型；沒有填模型時，各 AgentAPI 會向
+供應商的 `<base_url>/models` 查詢。hub 最多保存 50 個。金鑰只能寫入：頁面只顯示供應商有沒有金鑰，
+編輯時金鑰欄留空就保留原本的金鑰，勾選 **Remove the key** 則移除。ID 新增後就不能更改。
+
+![按下 Check connection 之後的編輯器：供應商回了六個模型，其中兩個已選取](screenshots/hub-settings-provider-check.png)
+
+編輯器裡的 **Check connection** 會由 hub 向供應商查詢模型，用你輸入的金鑰，沒輸入就用 hub 保存的金鑰；
+結果會顯示花了多久、列出幾個模型，失敗時則說明原因（金鑰被拒、網址底下沒有 API、hub 連不到供應商）。
+點選模型就只提供選取的那些；一個都沒選時提供全部。
+
+每個向 hub 回報的 AgentAPI 會在啟動時和之後每分鐘向 hub 取得供應商，請求以 hub 的 secret 簽章；
+回應含有金鑰，以從 secret 衍生的金鑰加密（AES-256-GCM），所以即使透過一般 HTTP 連線，金鑰也不會以
+明文在網路上傳送。變更會在一分鐘內出現在聊天介面。在主機上，自己設定檔裡的供應商和 hub 的 ID 相同時，
+以設定檔的為準。
+
+每台加入 hub 的主機都拿得到這些金鑰：有 hub secret 的人都能取得。存到 hub 的金鑰，必須是你願意交給
+每一台這類主機、也願意交給每個用這個供應商的 agent 的金鑰。
 
 ### GitHub 設定
 
@@ -582,8 +607,8 @@ agent。離線的主機有 **×**，確認後 hub 會移除這台主機，以及
 下該做的那件事：**Assign**、**Answer**、**Review #21**、**Retry**。卡片換狀態時，會移到新的區塊。主機
 和 job 有變動時，hub 會透過串流推給頁面。你在頁面上做的操作，hub 一回應就會顯示，之後再以串流為準。
 
-上方的 repo 選單決定看板的範圍。**Recent repositories** 顯示 hub 的 GitHub App 看得到的 repo 中，最近
-有 push 或變動的 20 個的 open issue，以及所有 repo 的 job。選一個 repo 就只看它的 issue；超過八個時
+上方的 repo 選單決定看板的範圍。**Recent repositories** 從 hub 的 GitHub App 看得到的 repo 中，取最近
+有 push 或變動的 20 個，顯示它們的 open issue，以及所有 repo 的 job。選一個 repo 就只看它的 issue；超過八個時
 有搜尋框可以找。頁面會記住你的選擇。
 
 #### 交辦 issue
@@ -662,7 +687,9 @@ hub 還沒有 GitHub App 時，Issues 會顯示 **Connect GitHub**，從 manifes
 
 `/`、`i` 和 `Esc` 在 hub 頁面上輸入框以外的任何地方都有效；`j`、`k`、方向鍵和 `p` 只在焦點位於清單或沒有焦點時有效，
 所以在其他地方，方向鍵照常捲動總覽。在 Issues 裡，`j`、`k` 在卡片之間移動，`Enter` 開啟，`a` 交辦，
-`c` 開啟它的聊天介面，`n` 開新 issue，`r` 重新讀取 issue。在開啟的聊天介面裡，按鍵會交給聊天介面。鈴鐺的選單決定有 agent 開始需要你時怎麼提醒你：
+`c` 開啟它的聊天介面，`n` 開新 issue，`r` 重新讀取 issue。在開啟的聊天介面裡，按鍵會交給聊天介面。
+
+鈴鐺的選單決定有 agent 開始需要你時怎麼提醒你：
 **Notifications** 在 hub 分頁位於背景時由瀏覽器顯示通知（只限 https 頁面）；**Sound** 在你沒在看這個頁面時
 （分頁在背景，或前面是別的視窗）發出短短的提示音，純 http 也能用。兩個選擇都由瀏覽器記住。螢幕閱讀器也會即時讀出
 同樣的訊息。
@@ -730,7 +757,7 @@ AgentAPI 1.1 以上。在這裡輸入的 token 會為這個實例保存，取代
 | 值 | 誰持有 | 用途 |
 | --- | --- | --- |
 | hub token（`--token`） | 你和 hub | 讓瀏覽器登入 hub |
-| hub secret（`--secret`） | hub 和每台主機的設定檔 | 為 AgentAPI 的事件簽章，只有你的主機能新增實例 |
+| hub secret（`--secret`） | hub 和每台主機的設定檔 | 為 AgentAPI 的事件簽章，只有你的主機能新增實例；可取得[模型供應商](#模型供應商)和它們的金鑰 |
 | 實例 token（`--instance-token`，或手動加入時各自的） | hub 和各 AgentAPI | 讓 hub 呼叫 AgentAPI；瀏覽器永遠拿不到 |
 
 - hub 只接受具備有效 `X-AgentAPI-Signature-256`（`<timestamp>.<body>` 的 HMAC-SHA256）、
@@ -764,7 +791,7 @@ AgentAPI 1.1 以上。在這裡輸入的 token 會為這個實例保存，取代
 - 實例回應的內容不會以 hub 的網頁身分執行（`Content-Security-Policy: sandbox`），所以就算某個
   workspace 被人控制，也無法透過你的瀏覽器碰到其他 workspace。經由 hub 只能讀取實例的 webhook，
   不能修改：webhook 決定 hub 把 token 送到哪裡。
-- 加入網址不會搬動 hub 已有的實例；要先把它移除。
+- 以網址加入不會搬動 hub 已有的實例；要先把它移除。
 - `~/.agentapi/hub/instances.json` 和它的 `.bak` 保存手動加入的實例的 token，建立時只有擁有者
   能讀取。`~/.agentapi/config.yaml` 保存 hub secret，`agentapi hub join` 也以同樣的權限寫入。
 - 登入時會送出 hub token。hub 請只開在 VPN 上，或放在 HTTPS 後面。
@@ -911,6 +938,10 @@ launcher token（`~/.agentapi/host.token`）：重灌過、或 token 檔被刪�
 | `PUT /api/pins` | `{"ids": […]}` 由上而下排定釘選實例的順序。必須列出每個釘選的實例各一次，不能有其他實例；不符合時回 409，並在 `ids` 附上目前釘選實例的順序，例如這段期間有人釘選、取消釘選或移除了實例；hub 沒有的實例回 404 |
 | `GET /api/favorites` | [我的最愛](#我的最愛)，依排列順序：`{"favorites": [{"id", "title", "text"}, …]}`；沒有標題的項目沒有 `title` |
 | `PUT /api/favorites` | `{"favorites": […]}` 依這個順序整份取代。最多 100 項；標題最多 100 字、只能一行；內容不能空白，最多 20,000 字；ID 為 1 到 64 個英文字母、數字、`-` 或 `_`，不能重複。沒有 ID 的項目由 hub 指定一個；回應是 hub 保存後的清單。hub 不接受的清單回 400，什麼都不改 |
+| `GET /api/providers` | [模型供應商](#模型供應商)，不含金鑰：`{"providers": [{"id", "name", "base_url", "anthropic_base_url", "models": [{"id", "name"}], "has_key"}, …]}` |
+| `PUT /api/providers` | `{"providers": […]}` 整份取代。供應商的 `api_key` 設定它的金鑰；沒有這個欄位時，保留同一 ID 的供應商原本的金鑰，`""` 則移除金鑰。最多 50 個；ID 不能重複，也不能是 `default`；網址必須是 http 或 https。回應是 `GET` 格式的清單。hub 不接受的清單回 400，什麼都不改 |
+| `POST /api/providers/check` | `{"id", "base_url", "api_key"}` 由 hub 向 `base_url` 的供應商查詢模型（`GET <base_url>/models`）：`{"models": [{"id", "name"}], "latency_ms"}`。沒有 `api_key` 時，用 ID 為 `id` 的供應商保存的金鑰。供應商沒有回傳模型時回 502，並附上原因 |
+| `POST /api/providers/sync` | AgentAPI 取得含金鑰的供應商，以 hub 的 secret 加密（`{"sealed": …}`）；請求和事件一樣以 `--secret` 簽章，不需要 session |
 | `GET /api/events` | Server-sent events：先送 `instances`（全部實例和 `hub_version`，格式同 `GET /api/instances`）和 `favorites`（格式同 `GET /api/favorites`），再送 `instance`（某個實例有頁面看得到的變動，或工作時間變動滿一分鐘；最後聯絡時間只在它離線時才算）、`removed`（`{"id"}`）、`favorites`（有變動時送出全部）、`dispatch`（[issue 派工](#issues)的主機和 job，格式同 `GET /api/hosts` 和 `GET /api/jobs`，一開始和每次變動時送出），以及每 15 秒一次的 `heartbeat`。瀏覽器 30 秒都沒收下事件，就會失去串流 |
 | `GET /api/hosts` | 有 launcher 回報的主機：能跑的 agent、有的 repo、job 與上限，以及是否在線（`online`） |
 | `DELETE /api/hosts/{name}` | 移除主機，以及 hub 為這個主機名稱記下的 launcher token，讓換了 token 的 launcher 能以同一個名稱重新加入。主機在線（`host_online`）或還有進行中的 job（`host_busy`）時回 409，請先停掉它的 job；hub 沒有這台主機時回 404 |
@@ -923,7 +954,7 @@ launcher token（`~/.agentapi/host.token`）：重灌過、或 token 檔被刪�
 | `GET /api/join` | 主機加入 hub 用的資訊：`urls` 的每一項是一個 webhook 網址（`url`）和這個位址所在的網路介面（`interface`；`--bind` 的位址沒有），順序和啟動時的 log 相同；只有設了 token 的 hub 才會附上 secret（`secret`，並帶 `secret_shown: true`） |
 | `/i/{id}/…` | 透過 hub 存取實例自己的 API 和聊天介面；頁面用 `POST /i/{id}/update` 更新實例，用 `DELETE` 取消 |
 
-除了 `/hooks` 和 `/api/session`，每個端點都需要 session cookie 或
+除了 `/hooks`、`/api/providers/sync` 和 `/api/session`，每個端點都需要 session cookie 或
 `Authorization: Bearer <hub token>`。任何回應裡都不會出現實例 token。請求被拒或失敗時回
 `{"code": …, "message": …, "error": …}`：`code` 是端點自己的代碼（例如 `host_online`），或 snake
 case 的 HTTP 狀態（例如 `not_found`）；`error` 和 `message` 相同，較舊的 hub 只回這個欄位。
@@ -940,6 +971,8 @@ case 的 HTTP 狀態（例如 `not_found`）；`error` 和 `message` 相同，�
 | `~/.agentapi/hub/instances.deliveries.json` | `agentapi hub serve` | hub 處理過、簽章仍有效的事件的 delivery ID，用來拒絕重送的事件 |
 | `~/.agentapi/hub/dispatch.json` | `agentapi hub serve` | [issue 派工](#issues)的主機（含 launcher 的 token）和 job：各次 run、花費與最近 50 則訊息 |
 | `~/.agentapi/hub/github-app.json` | `agentapi hub serve` | hub 的 GitHub App 與它的私鑰 |
+| `~/.agentapi/hub/providers.json` | `agentapi hub serve` | [模型供應商](#模型供應商)和它們的金鑰（0600） |
+| `~/.agentapi/hub-providers.json` | `agentapi server` | 每台主機上、設定檔旁邊：hub 上次回應的供應商，以 hub 的 secret 加密；下次啟動時在 hub 回應前先拿來用 |
 
 `instances.json` 的格式是 `{"version": 1, "instances": [...]}`。2.2 以前的 hub 只寫、也只讀陣列：
 現在的 hub 讀得懂舊格式，但舊 hub 會把新格式當成損壞的檔案放到一旁，從空的清單開始。要改回舊

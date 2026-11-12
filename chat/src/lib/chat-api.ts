@@ -48,6 +48,7 @@ export type PermissionMode = Schemas["PermissionMode"];
 export type AgentSettings = Body<Schemas["Settings"]>;
 export type ModelOption = Schemas["ModelOption"];
 export type SettingOptions = Schemas["SettingOptions"];
+export type ProviderOption = Schemas["ProviderOption"];
 // GET and PUT /settings.
 export type SettingsResponse = Body<Schemas["SettingsResponseBody"]>;
 

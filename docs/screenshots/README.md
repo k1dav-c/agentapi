@@ -41,14 +41,23 @@ Codex, a local bare repository in place of github.com, and a fake GitHub API. No
 part of `capture-docs.mjs`.
 
 The Issues side of `dispatch-no-github.png` was taken again from a 3.16 build, for the machines
-it shows since: a hub of its own with three machines' launchers (one offline) reported by hand,
+it has shown since: a hub of its own with three machines' launchers (one offline) reported by hand,
 and the list beside it kept from the first.
 
 `hub-settings-github.png` came from the same kind of build and fixtures: an app of the `acme`
 organization installed on `acme` (24 selected repositories) and on a user, `dave` (all three of
 his), with the accounts' pictures drawn locally in place of GitHub's. Since the settings dialog
 has tabs, `hub-settings-favorites.png` was taken the same way, with the favorites
-`capture-docs.mjs` puts on its hub; the script takes it again as before.
+`capture-docs.mjs` puts on its hub; the script takes it again as before. Both were taken again once
+the dialog had a third tab, Providers, from a build of the `feat/custom-providers` branch with the
+same fixtures.
+
+`model-providers.png`, `hub-settings-providers.png` and `hub-settings-provider-check.png` came from
+a development build of the `feat/custom-providers` branch, with a hub that keeps two providers,
+`gateway` (LiteLLM gateway, three models, a key) and `local` (Local vLLM, one model), and a fake
+provider that lists six models for the check. They aren't part of `capture-docs.mjs`, but are taken
+as it takes the others: in the light theme at 1x, the model menu with the composer as
+`model-settings.png`, and the settings dialog as `hub-settings-favorites.png`.
 
 ## Gallery
 
@@ -67,6 +76,7 @@ device scale factor of 1.
 | [join-hub.png](join-hub.png) | Add to an AgentAPI hub: the hub's address and the commands to copy |
 | [permission-mode.png](permission-mode.png) | The permission mode menu |
 | [model-settings.png](model-settings.png) | The model and reasoning effort menu |
+| [model-providers.png](model-providers.png) | Claude Code's model menu: its own models, then those of a provider from the hub, LiteLLM gateway, marked **hub** |
 | [context-usage.png](context-usage.png) | The context window and the usage limits |
 | [slash-commands.png](slash-commands.png) | The slash commands |
 | [attachments.png](attachments.png) | An image attached in the composer |
@@ -102,6 +112,8 @@ device scale factor of 1.
 | [hub-list.png](hub-list.png) | The hub's list: two pinned agents, then two groups and Ungrouped, with every state's glyph: approval, question, login, usage limit, working, finished, idle, unreachable, stopped; and each agent's AgentAPI version, one older than the hub |
 | [hub-add.png](hub-add.png) | The Add dialog: joining a machine (the hub's address, updates from the hub, the command and a prompt for an agent, the secret masked), or adding an instance by its URL and token |
 | [hub-settings-favorites.png](hub-settings-favorites.png) | Hub settings at its Favorites tab: the favorites, each with its buttons to move, edit and delete it |
+| [hub-settings-providers.png](hub-settings-providers.png) | Hub settings at its Providers tab: two providers, each with its monogram, ID and endpoint, its models and whether it has a key |
+| [hub-settings-provider-check.png](hub-settings-provider-check.png) | A new provider's editor after Check connection: reached in 184 ms with six models, two of them picked to offer |
 | [hub-settings-github.png](hub-settings-github.png) | Hub settings at its GitHub tab: the hub's GitHub App, the accounts it is installed on with their repositories, and Choose repositories, App settings on GitHub, Reconnect and Disconnect |
 | [hub-recent.png](hub-recent.png) | The hub's list by the agents' latest changes: the pinned agents, then one list without group headers, the most recent first, and each row's group where it has room |
 | [hub-machines.png](hub-machines.png) | The hub's list By machine in the groups: the pinned agents, then each group with a card per machine: the machine with its version and spend once, a tab per agent with its state's dot, and the picked agent below, one older than the hub |

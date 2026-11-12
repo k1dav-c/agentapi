@@ -26,6 +26,7 @@ import (
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/demo"
 	"github.com/coder/agentapi/lib/pricing"
+	"github.com/coder/agentapi/lib/provider"
 	"github.com/coder/agentapi/lib/statedb"
 )
 
@@ -311,6 +312,9 @@ func serverConfig(opts serverOptions, agent *runningAgent, stateDB *statedb.DB, 
 			Terminal:    opts.terminal,
 			Policy:      opts.policy,
 			Prices:      prices,
+		}
+		if opts.agentType == instanceapi.AgentTypeClaude || opts.agentType == instanceapi.AgentTypeCodex {
+			config.Native.Providers = provider.NewSource(userConfigPath(viper.GetViper()), nil)
 		}
 		if opts.agentType == instanceapi.AgentTypePi {
 			config.Native.PiSessionDir = piSessionDir(opts.agentArgs)

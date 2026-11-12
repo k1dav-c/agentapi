@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { Brain, ChevronDown, ClipboardList, Hand, LoaderCircle, Shield, ShieldCheck, Zap } from "lucide-react";
+import { Brain, ChevronDown, ClipboardList, Cloud, Hand, Info, LoaderCircle, Shield, ShieldCheck, Zap } from "lucide-react";
 import { toast } from "sonner";
 import {useChatActions, useChatSelector} from "./chat-provider";
 import { Button } from "./ui/button";
@@ -17,7 +17,8 @@ import {
 } from "./ui/dropdown-menu";
 import type { AgentSettings, PermissionMode } from "@/lib/chat-api";
 import { getErrorMessage } from "@/lib/error-utils";
-import { modeMeta, modelLabel, effortsOf } from "@/lib/session-settings";
+import { modeMeta, modelChange, modelGroups, modelLabel, modelValue, effortsOf, providerLabel, providerSwitchHint } from "@/lib/session-settings";
+import { providerHue, providerMonogram } from "@/lib/hub-providers";
 import { OPEN_SETTINGS_EVENT, type SettingsMenu } from "@/lib/slash-commands";
 import { cn } from "@/lib/utils";
 import {useLoaded} from "@/lib/use-loaded";
@@ -31,10 +32,13 @@ const MODE_ICONS: Record<PermissionMode, ReactNode> = {
 
 // The agent's permission mode, model and reasoning effort in the composer's
 // toolbar (native agents with the settings capability). Each opens a menu
-// that switches it; the values come from GET /settings when it opens.
+// that switches it; the values come from GET /settings when it opens. The
+// model menu has the agent's own models, then those of the model providers
+// it can switch to (Claude Code, Codex).
 export function SessionSettings({ className }: { className?: string }) {
   const features = useChatSelector((chat) => chat.features);
   const agentSettings = useChatSelector((chat) => chat.agentSettings);
+  const agentType = useChatSelector((chat) => chat.agentType);
   const {getSettings, updateSettings} = useChatActions();
   // The menu that is open, also when a slash command opened it.
   const [openMenu, setOpenMenu] = useState<SettingsMenu | null>(null);
@@ -45,6 +49,9 @@ export function SessionSettings({ className }: { className?: string }) {
   const loading = choices?.state === "loading";
   const loadError = choices?.state === "error" ? getErrorMessage(choices.error) : "";
   const [saving, setSaving] = useState(false);
+  // The provider being switched to, while the switch runs: Codex starts
+  // again, which takes seconds.
+  const [switching, setSwitching] = useState<string | null>(null);
   const enabled = features.settings && agentSettings !== null;
 
   // The names of the models (the settings carry ids) and whether the agent
@@ -76,12 +83,17 @@ export function SessionSettings({ className }: { className?: string }) {
 
   const apply = async (change: AgentSettings) => {
     setSaving(true);
+    const to = change.provider ? providerLabel(options, change.provider) || "the agent's own provider" : null;
+    setSwitching(to);
     try {
-      setChoices((await updateSettings(change)).options);
+      const answer = await updateSettings(change);
+      setChoices(answer.options);
+      if (to) toast.success(`Now on ${modelLabel(answer.options, answer.settings.model ?? "", answer.settings.provider)}`, { description: `via ${to}` });
     } catch (error) {
-      toast.error("Couldn't change the setting", { description: getErrorMessage(error) });
+      toast.error(to ? `Couldn't switch to ${to}` : "Couldn't change the setting", { description: getErrorMessage(error) });
     } finally {
       setSaving(false);
+      setSwitching(null);
     }
   };
 
@@ -89,7 +101,11 @@ export function SessionSettings({ className }: { className?: string }) {
   const meta = modeMeta(mode);
   // Pi has no permission modes: its trigger shows once the options say so.
   const showMode = mode !== undefined || (options?.permission_modes.length ?? 0) > 0;
-  const efforts = effortsOf(options, agentSettings.model);
+  const provider = agentSettings.provider;
+  const efforts = effortsOf(options, agentSettings.model, provider);
+  // The name of the provider the agent runs on, empty on its own.
+  const onProvider = providerLabel(options, provider);
+  const groups = modelGroups(options);
   const status = (
     <>
       {loading && !options && <DropdownMenuItem disabled><LoaderCircle className="animate-spin" />Loading…</DropdownMenuItem>}
@@ -119,7 +135,7 @@ export function SessionSettings({ className }: { className?: string }) {
               <ChevronDown className="size-3 opacity-60" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" side="top" className="max-h-[70dvh] w-72 overflow-y-auto">
+          <DropdownMenuContent align="start" side="top" collisionPadding={8} className="max-h-[70dvh] w-72 overflow-y-auto">
             <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">Permission mode</DropdownMenuLabel>
             {status}
             {options && (
@@ -155,30 +171,77 @@ export function SessionSettings({ className }: { className?: string }) {
               size="sm"
               disabled={saving}
               className="h-9 min-w-0 shrink gap-1 rounded-full px-2.5 text-xs text-muted-foreground hover:text-foreground"
-              title="Model and reasoning effort"
+              title={onProvider ? `Model on ${onProvider}, and reasoning effort` : "Model and reasoning effort"}
             >
-              <Brain />
-              <span className="min-w-0 truncate">
-                {modelLabel(options, agentSettings.model)}
-                {agentSettings.effort && <span className="opacity-70"> · {agentSettings.effort}</span>}
+              {switching ? <LoaderCircle className="animate-spin" /> : onProvider ? <Cloud /> : <Brain />}
+              <span className="min-w-0 truncate" aria-live="polite">
+                {switching ? (
+                  <>Switching to {switching}…</>
+                ) : (
+                  <>
+                    {modelLabel(options, agentSettings.model, provider)}
+                    {onProvider && <span className="opacity-70 max-sm:hidden"> · {onProvider}</span>}
+                    {agentSettings.effort && <span className="opacity-70"> · {agentSettings.effort}</span>}
+                  </>
+                )}
               </span>
               <ChevronDown className="size-3 shrink-0 opacity-60" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" side="top" className="max-h-[70dvh] w-72 overflow-y-auto">
+          <DropdownMenuContent align="start" side="top" collisionPadding={8} className="max-h-[70dvh] w-72 overflow-y-auto">
             <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">Model</DropdownMenuLabel>
             {status}
             {options && (
-              <DropdownMenuRadioGroup value={agentSettings.model} onValueChange={(value) => void apply({ model: value })}>
-                {options.models.map((model) => (
-                  <DropdownMenuRadioItem key={model.id} value={model.id} className="min-h-11 items-start">
-                    <span className="grid min-w-0">
-                      <span className="truncate">{model.name || model.id}</span>
-                      {model.description && <span className="text-[11px] text-muted-foreground">{model.description}</span>}
-                    </span>
-                  </DropdownMenuRadioItem>
+              <DropdownMenuRadioGroup
+                value={modelValue(provider, agentSettings.model)}
+                onValueChange={(value) => void apply(modelChange(value, provider))}
+              >
+                {groups.map((group) => (
+                  <div key={group.provider} role="group" aria-label={group.label || "The agent's own models"}>
+                    {group.label && (
+                      <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuLabel className="flex items-center gap-2 py-2">
+                          <span
+                            aria-hidden="true"
+                            style={{ "--hue": providerHue(group.provider) } as React.CSSProperties}
+                            className="grid size-6 shrink-0 place-items-center rounded-md bg-[oklch(0.94_0.04_var(--hue))] text-[9px] font-semibold text-[oklch(0.42_0.12_var(--hue))] dark:bg-[oklch(0.32_0.06_var(--hue))] dark:text-[oklch(0.88_0.08_var(--hue))]"
+                          >
+                            {providerMonogram(group.label)}
+                          </span>
+                          <span className="grid min-w-0 flex-1 leading-tight">
+                            <span className="truncate text-xs font-medium text-foreground">{group.label}</span>
+                            {group.host && <span className="truncate font-mono text-[10px] font-normal text-muted-foreground">{group.host}</span>}
+                          </span>
+                          {group.origin === "hub" && (
+                            <span className="shrink-0 rounded-full border px-1.5 text-[10px] font-normal text-muted-foreground" title="Kept on the hub">
+                              hub
+                            </span>
+                          )}
+                        </DropdownMenuLabel>
+                      </>
+                    )}
+                    {group.models.map((model) => (
+                      <DropdownMenuRadioItem
+                        key={model.id}
+                        value={modelValue(group.provider, model.id)}
+                        className={cn("min-h-11 items-start", group.label && "min-h-9 items-center font-mono text-[13px]")}
+                      >
+                        <span className="grid min-w-0">
+                          <span className="truncate">{model.name || model.id}</span>
+                          {model.description && <span className="text-[11px] text-muted-foreground">{model.description}</span>}
+                        </span>
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </div>
                 ))}
               </DropdownMenuRadioGroup>
+            )}
+            {groups.length > 1 && (
+              <p className="mx-1 mt-1 mb-0.5 flex items-start gap-1.5 rounded-md bg-muted/60 px-2 py-1.5 text-[11px] leading-4 text-muted-foreground">
+                <Info className="mt-px size-3 shrink-0" aria-hidden="true" />
+                {providerSwitchHint(agentType)}
+              </p>
             )}
             {efforts.length > 0 && (
               <>

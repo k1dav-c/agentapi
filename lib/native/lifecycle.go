@@ -10,6 +10,7 @@ import (
 
 	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
+	"github.com/coder/agentapi/lib/provider"
 )
 
 // Start launches the agent in the background. Status reports initializing
@@ -42,6 +43,9 @@ func (c *Conversation) launchAsync(ctx context.Context, gen int, resume Resume, 
 // once the adapter accepts turns, when it waits for a login, and when it was
 // stopped while it started.
 func (c *Conversation) launch(ctx context.Context, gen int, resume Resume) error {
+	c.mu.Lock()
+	resume.Provider = c.launchProviderLocked()
+	c.mu.Unlock()
 	adapter, err := c.cfg.Factory(resume)
 	if err != nil {
 		return fmt.Errorf("create adapter: %w", err)
@@ -77,7 +81,7 @@ func (c *Conversation) launch(ctx context.Context, gen int, resume Resume) error
 	caps := adapter.Capabilities()
 	startedAt := c.cfg.Clock.Now()
 	go func() { c.signalExit(gen, adapter, startedAt, adapter.Wait()) }()
-	settings := c.applyChosen(ctx, gen, adapter, caps)
+	settings := c.applyChosen(ctx, gen, adapter, caps, resume.Provider)
 	var prompt Input
 	if c.cfg.InitialPrompt != "" {
 		// Before the lock: it looks for the files the prompt names.
@@ -89,6 +93,7 @@ func (c *Conversation) launch(ctx context.Context, gen int, resume Resume) error
 		c.mu.Unlock()
 		return nil
 	}
+	c.startedOnLocked(adapter, resume.Provider)
 	c.markStartedLocked(caps, settings)
 	// The prompt's turn begins before the lock is released, so no other
 	// message can start a turn first.
@@ -108,7 +113,7 @@ func (c *Conversation) markStartedLocked(caps agentstate.Capabilities, settings 
 	c.started = true
 	c.ran = true
 	c.caps = caps
-	c.settings = settings
+	c.settings = c.withProviderLocked(settings)
 	c.loginWaiting = false
 	c.startErrors = nil
 	c.login = nil
@@ -145,10 +150,10 @@ func (c *Conversation) sendInitialPrompt(ctx context.Context, turn pendingTurn) 
 	}
 }
 
-// applyChosen gives the new adapter of generation gen the settings chosen
-// for the session, and returns its settings. A setting it can't take is
+// applyChosen gives the new adapter of generation gen, started on run, the
+// settings chosen for the session, and returns its settings. A setting it can't take is
 // reported and left to the agent.
-func (c *Conversation) applyChosen(ctx context.Context, gen int, adapter Adapter, caps agentstate.Capabilities) agentstate.Settings {
+func (c *Conversation) applyChosen(ctx context.Context, gen int, adapter Adapter, caps agentstate.Capabilities, run *ProviderRun) agentstate.Settings {
 	configurable, ok := adapter.(Configurable)
 	if !ok || !caps.Settings {
 		return agentstate.Settings{}
@@ -156,6 +161,11 @@ func (c *Conversation) applyChosen(ctx context.Context, gen int, adapter Adapter
 	c.mu.Lock()
 	chosen := c.chosen
 	c.mu.Unlock()
+	if p := chosen.Provider; p != "" && p != provider.Default && (run == nil || run.Provider.ID != p) {
+		// The agent started on its own provider while the chosen one isn't
+		// known: the model chosen is that provider's.
+		chosen.Model = ""
+	}
 	current := configurable.Settings()
 	// One at a time, so that one failure doesn't stop the others; the
 	// model goes first, as the effort depends on it.

@@ -33,8 +33,8 @@ Upstream changes should be reviewed and tested against the native transports, ch
 before integration; upstream and fork version numbers are separate release lines.
 
 This fork builds on upstream v0.12.2. Since 3.0 it drives only Claude Code, Codex and Pi, through
-their own protocols (the [native transport](#native-transport)); the terminal emulation of the PTY
-transport, for other agents, ended with v2.5.1 (see [Agents](#agents)). Session management and
+their own protocols (the [native transport](#native-transport)); the PTY transport, which emulated
+a terminal for other agents, ended with v2.5.1 (see [Agents](#agents)). Session management and
 chat features support long-running tasks, and [webhooks](#webhooks) report them to a central
 platform. [CHANGELOG.md](CHANGELOG.md) lists what
 changed, [docs/architecture.md](docs/architecture.md) describes how it is built,
@@ -86,6 +86,9 @@ has the complete commit history.
   in the chat.
 - Switch the [permission mode, model and reasoning effort](#settings-permission-mode-model-and-effort)
   while the agent runs: bypass (the default), auto, ask or plan.
+- Switch Claude Code or Codex to [another model provider](#model-providers), such as a LiteLLM
+  gateway, while it runs, and back; the conversation goes on. Define providers per machine or once
+  on the hub.
 - See how full the [context and the rate limits](#context-and-rate-limits)
   are, and [compact](#slash-commands-and-compaction) the context; the chat
   suggests it once Claude Code's prompt cache has expired.
@@ -160,7 +163,7 @@ has the complete commit history.
    curl -fsSL "https://github.com/k1dav-c/agentapi/releases/latest/download/agentapi-${OS}-${ARCH}" -o agentapi && chmod +x agentapi
    ```
 
-   Alternatively, you can download this fork's latest binary from the
+   Or download this fork's latest binary from the
    [releases page](https://github.com/k1dav-c/agentapi/releases). Upstream
    `coder/agentapi` release binaries do not include this fork's features.
 
@@ -170,7 +173,7 @@ has the complete commit history.
    agentapi --help
    ```
 
-   > On macOS, if you're prompted that the system was unable to verify the binary, go to `System Settings -> Privacy & Security`, click "Open Anyway", and run the command again.
+   > On macOS, if the system says it can't verify the binary, go to `System Settings -> Privacy & Security`, click "Open Anyway", and run the command again.
 
 1. Run a Claude Code server (assumes `claude` is installed on your system and in the `PATH`):
 
@@ -246,21 +249,21 @@ Pi, or a square for other agents. See the [chat UI guide](docs/chat-ui.md) for s
 ### Tasks and the transcript
 
 The chat groups each user request with its response, thinking, tool calls and background activity
-as a task. You can navigate between tasks in the transcript.
+as a task. You can move between tasks in the transcript.
 
 Each task has a timeline on the left: when it started, how long it took and, for Claude Code, Codex
 and Pi, what it [cost](#session-costs). Your prompt appears in a tinted block labelled "You", followed
-by the agent's logo, name, and reply in Markdown. Each tool call occupies one row with its command
+by the agent's logo, name, and reply in Markdown. Each tool call takes one row with its command
 (`$ command`), exit code, duration, and output preview. On wide screens, thinking appears as margin
 notes.
 
 The server's [task](#tasks) determines the displayed state (Working, Done, Failed, Limit reached)
 and which tool calls and thinking belong to it. A strip above the composer shows the agent's
 current activity. While the agent waits for an answer or a login, or a usage limit stopped it, the
-header, tab title and status strip show "Needs you", and queued tasks are marked as held; while a
-failed turn waits to be [tried again](#transient-api-errors), the agent shows as working and they are
-held too. A message
-steered into a task shows inside it, so the chat numbers tasks as the server does. Long tasks show
+header, tab title and status strip show "Needs you", and queued tasks are marked as held. While a
+failed turn waits to be [tried again](#transient-api-errors), the agent shows as working and queued
+tasks are held too. A message steered into a task shows inside it, so the chat numbers tasks as the
+server does. Long tasks show
 their latest 40 steps first.
 
 Each agent message has its own Markdown/raw toggle.
@@ -594,21 +597,14 @@ approving it does not change files.
 - `POST /message` takes `dispatch_mode`: `queue` (the default: send the
   message once the agent is idle), `steer` (add it to the
   turn the agent is working on; the reply says `steered`) or `interrupt` (stop
-  that turn and send the message next). While a turn runs `steer` and
-  `interrupt` need the matching capability,
-  otherwise the answer is 400. When no turn is running (including while the
-  agent restarts or waits for a login), both send or queue the message as
-  usual.
+  that turn and send the message next). While a turn runs, `steer` and
+  `interrupt` need the matching capability; otherwise the answer is 400.
+  When no turn is running (including while the agent restarts or waits for a
+  login), both send or queue the message as usual.
 - `POST /interrupt` stops the running turn (409 if there is none, or while no
   agent runs).
-- `POST /queue/{id}/steer` moves a queued message into the running turn (409
-  if no turn is running; the message stays queued).
-- `PUT /queue` with `{"ids": [...]}` reorders the queue. It must list every
-  queued message once (409 otherwise).
-- If the agent refuses a queued message, AgentAPI tries it up to 5 times in
-  all, then drops it with an error that quotes it. A message the agent didn't
-  answer in time is dropped at once: it may have reached the agent, and
-  sending it again could run the task twice.
+- A queued message can be steered into the running turn too; see
+  [Message queue](#message-queue) for the queue's endpoints.
 
 `GET /status` reports the supported `capabilities`: `steer`, `interrupt`, `resume` (the session
 can be resumed when AgentAPI starts again, see [Persistent sessions](#persistent-sessions)),
@@ -660,6 +656,72 @@ phone in a row of their own above the buttons).
 ![The model menu with three models and the reasoning efforts of the chosen one](docs/screenshots/model-settings.png)
 
 Swift, Deep, and Plain are demonstration models supplied by `native-demo`.
+
+### Model providers
+
+Claude Code and Codex can switch to another model provider while they run: an endpoint that speaks
+the Anthropic Messages API (Claude Code) or the OpenAI Responses API (Codex), such as a LiteLLM or
+vLLM gateway. One gateway that speaks both serves both agents. Define providers in the machine's
+`~/.agentapi/config.yaml` (`--config`):
+
+```yaml
+providers:
+  - id: kimi                      # lowercase letters, digits, - and _
+    name: Kimi K3                 # optional
+    base_url: https://gateway.example.com/v1
+    api_key: sk-...               # optional
+    models: [Kimi-K3-NVFP4]       # optional: by default, those GET <base_url>/models lists
+```
+
+Codex calls `<base_url>/responses`. Claude Code calls the same URL without `/v1`, plus
+`/v1/messages`; set `anthropic_base_url` when its endpoint is elsewhere. A `base_url` without a
+version gets `/v1` for Codex. AgentAPI reads the file again when it changes. Keep it readable by
+you only (`chmod 600`): it holds the keys, and AgentAPI warns when others can read it.
+
+A hub keeps providers for every machine that reports to it (see
+[Running a hub](#running-a-hub)). On a machine, a provider of its config file wins over the hub's
+with the same `id`.
+
+`GET /settings` lists the providers under `options.providers`, with their models, and the setting
+`provider` says which one the agent runs on: `default` for its own (Claude Code's Anthropic login or
+key, Codex's OpenAI login or its config's `model_provider`). Switch with `PUT /settings`:
+
+```bash
+curl -X PUT localhost:3284/settings -d '{"provider": "kimi", "model": "Kimi-K3-NVFP4"}'
+curl -X PUT localhost:3284/settings -d '{"provider": "default"}'
+```
+
+Without `model`, the agent takes the provider's first model; back on its own provider, the model
+it had before. On a provider, `{"model": ...}` picks among that provider's models. In the chat, the
+model menu lists the agent's own models, then each provider's.
+
+![The model menu of Claude Code: its own models, then those of two providers from the hub, each under its name and host](docs/screenshots/model-providers.png)
+
+The two agents switch differently:
+
+- **Claude Code** switches while it runs, from its next API call, also during a turn. Going back to
+  its own provider starts it again on the same session, which takes a few seconds; during a turn it
+  is refused (409).
+- **Codex** binds a thread to its provider, and an OpenAI thread holds items another provider
+  refuses (OpenAI's tool definitions, encrypted reasoning). A switch starts app-server again on the
+  other provider, in a new thread that gets the conversation's messages as text, without the tool
+  calls. During a turn the switch is refused (409).
+
+The chosen provider applies to every agent that starts in the session, also after an AgentAPI
+restart with `--state-db`. A provider that is no longer defined is dropped, with a warning: the
+agent starts on its own provider. The hub's providers are kept beside the config file
+(`hub-providers.json`, sealed with the hub's secret) for the next start, so a session on one of
+them starts on it again while the hub can't be reached. Until the hub answers, a chosen provider
+that may be one of the hub's stays chosen while the agent starts on its own provider; the agent goes
+back to it at its first start after the hub answered.
+
+A provider's models (those it lists at `<base_url>/models`) are kept for 10 minutes, then listed
+again in the background. `GET /settings` waits 3 seconds at most for a provider that doesn't
+answer, and doesn't ask it again for a minute.
+
+An agent on a provider can read that provider's key: it runs as your user, with the key in its
+environment. Give a provider only a key you would give the agent. Model calls on a provider have no
+known price, so they add tokens but no cost (`--prices` adds prices).
 
 ### Context and rate limits
 
@@ -769,8 +831,8 @@ press. The Ctrl and Alt buttons hold the modifier for the next key.
   time, and `POST /terminal/resize` (`{"cols": 120, "rows": 40}`) sizes it.
   Input a busy program doesn't read gets 503 after 10 seconds; part of it may
   have been typed.
-- It is on by default; `--terminal=false` turns it off. It is as protected as the rest of the API, so use `--api-token` when
-  the server is reachable by others.
+- It is on by default; `--terminal=false` turns it off. It has the same protection as the rest of
+  the API, so use `--api-token` when others can reach the server.
 
 ![The shell terminal: git status and git log in the agent's working directory, and the key bar](docs/screenshots/terminal.png)
 
@@ -823,7 +885,7 @@ state-db: ~/.agentapi/state/{port}.db
 
 - Every `agentapi server` reads the config file, and the first to start locks
   the database, so a `state-db` there without `{port}` is ignored with a
-  warning rather than keep the others from starting. `--state-db` and
+  warning rather than keeping the others from starting. `--state-db` and
   `AGENTAPI_STATE_DB` still set one.
 - Requests that were open when AgentAPI stopped are marked expired: the agent
   that asked is gone.
@@ -1187,7 +1249,7 @@ The [HTTP API reference](#http-api-reference) lists all the endpoints.
 - `DELETE /messages` clears the conversation (messages, rich messages,
   requests, tasks, timeline, errors and the queue) and restarts the agent
   in a new session. While the agent restarts, messages wait in the queue;
-  another restart and opening a session get 409, and so does a restart while AgentAPI stops. Before the
+  another restart and opening a session get 409, and so does a restart while AgentAPI is stopping. Before the
   restart AgentAPI updates Codex (`codex update`) and Pi (`pi update --self`)
   when it launches those CLIs directly, one AgentAPI at a time; an update that
   fails or takes over 3 minutes leaves the installed version. Claude Code
@@ -1262,10 +1324,14 @@ The API and the chat UI can show, edit or delete a queued message before it goes
 - `GET /queue` lists the queued messages.
 - `PUT /queue/{id}` edits a queued message and `DELETE /queue/{id}` removes
   it.
-- `PUT /queue` with `{"ids": [...]}` reorders the queue; it must list every
-  queued message once.
-- `POST /queue/{id}/steer` moves a queued message into the turn the agent is
-  working on.
+- `PUT /queue` with `{"ids": [...]}` reorders the queue. It must list every
+  queued message once (409 otherwise).
+- `POST /queue/{id}/steer` moves a queued message into the running turn (409
+  if no turn is running; the message stays queued).
+- If the agent refuses a queued message, AgentAPI tries it up to 5 times in
+  all, then drops it with an error that quotes it. A message the agent didn't
+  answer in time is dropped at once: it may have reached the agent, and
+  sending it again could run the task twice.
 - With `?sync=1`, `/events` sends a `queue_update` with the whole queue
   whenever it changes, so a client sees what another client queued without
   asking.
@@ -1401,8 +1467,9 @@ one to open it in the chat. On a phone the list and the chat take turns.
   that changes (a login you won't do), or forgets a stopped or unreachable one. The Offline tile
   and filter forget every stopped one at once.
 - The gear opens the hub's settings. There you keep [favorite prompts](docs/hub.md#favorites),
-  which ☆ in the composer of a chat the hub opens inserts in the message, and connect the hub's
-  [GitHub App](docs/hub.md#github-settings).
+  which ☆ in the composer of a chat the hub opens inserts in the message, keep the
+  [model providers](docs/hub.md#model-providers) every machine's sessions can switch to, and
+  connect the hub's [GitHub App](docs/hub.md#github-settings).
 - ◎ (or `i`) opens [Issues](docs/hub.md#issues), the issue dispatch: the open issues of your
   repositories by stage, the machines whose launchers report (an offline one can be forgotten
   there), and each job's agent, pull request and cost. Machines take issues with
@@ -1692,7 +1759,7 @@ AGENTAPI_API_TOKEN=my-secret agentapi server -- claude
 A generated token stays the same across a restart in place (SIGUSR2, `POST /update`,
 `agentapi restart`), so clients stay signed in; a new `agentapi server` generates a new one.
 
-When enabled, every API request must include `Authorization: Bearer <token>` or the chat UI's
+With authentication on, every API request must include `Authorization: Bearer <token>` or the chat UI's
 session cookie. Static file routes (`/`, `/chat/*`) are exempt so browsers can open the chat UI
 without a token. Tokens are compared in constant time.
 
@@ -1757,8 +1824,8 @@ To allow a specific host, use:
 agentapi server --allowed-hosts 'example.com' -- claude
 ```
 
-To specify multiple hosts, use a comma-separated list when using the `--allowed-hosts` flag, or a
-space-separated list when using the `AGENTAPI_ALLOWED_HOSTS` environment variable.
+To specify multiple hosts, use a comma-separated list in the `--allowed-hosts` flag, or a
+space-separated list in the `AGENTAPI_ALLOWED_HOSTS` environment variable.
 
 ```bash
 agentapi server --allowed-hosts 'example.com,example.org' -- claude
@@ -1784,8 +1851,8 @@ To allow a specific origin, use:
 agentapi server --allowed-origins 'https://example.com' -- claude
 ```
 
-To specify multiple origins, use a comma-separated list when using the `--allowed-origins` flag, or
-a space-separated list when using the `AGENTAPI_ALLOWED_ORIGINS` environment variable. Origins must
+To specify multiple origins, use a comma-separated list in the `--allowed-origins` flag, or a
+space-separated list in the `AGENTAPI_ALLOWED_ORIGINS` environment variable. Origins must
 include the protocol (`http://` or `https://`) and may use wildcards (e.g.,
 `https://*.example.com`):
 
@@ -2284,7 +2351,7 @@ Pending feedback, we're considering the following features:
 
 ## Long-term vision
 
-AgentAPI currently lets developers control coding agents programmatically. We hope the major agents
+AgentAPI lets developers control coding agents programmatically. We hope the major agents
 will eventually offer official SDKs. Whether AgentAPI is still needed will depend on whether vendors
 adopt a common API or continue to use their own formats.
 

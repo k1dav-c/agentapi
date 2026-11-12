@@ -87,8 +87,8 @@ input a click away. Tool results that are images (Claude Code reading a screensh
 ### Thinking
 
 On wide screens, thinking appears in the right margin beside the relevant step. The notes beside a
-step take no more height than the step: what doesn't fit fades out above **Show all**, which shows
-every note and makes room for them, so long thinking doesn't open a gap in the transcript. Long
+step take no more height than the step, so long thinking doesn't open a gap in the transcript: what
+doesn't fit fades out above **Show all**, which shows every note and makes room for them. Long
 notes show six lines; click to expand.
 On narrow screens, thinking collapses into a "Thinking · *title*" line within the task.
 
@@ -143,14 +143,15 @@ as thumbnails that open in full size, and can be removed before you send.
 
 The agent gets the path of each attachment, and PNG, JPEG, GIF and WebP attachments as images too.
 AgentAPI removes an upload once it is 7 days old and the conversation no longer refers to it.
+
 **More input options** (⋯) has voice input where the browser supports speech recognition: it
 dictates into the composer in the browser's language.
 
 The draft and its attachments survive a reload. A message that didn't reach the server stays in the
 chat marked as not sent, even after a reload, with buttons to retry or dismiss it.
 
-In a chat the hub opens, **☆** in the composer inserts one of the hub's [favorites](hub.md#favorites),
-prompts you keep on the hub: into an empty message, or as a paragraph after what you typed. It
+In a chat the hub opens, **☆** in the composer inserts one of the hub's [favorites](hub.md#favorites)
+(prompts you keep on the hub) into an empty message, or as a paragraph after what you typed. It
 doesn't send it, and Ctrl/⌘+Z takes it back out. **Manage favorites…** in the same menu opens them
 in the hub's settings.
 
@@ -199,7 +200,7 @@ commands go directly to the agent, including Claude Code's `/code-review`.
 
 ![The keyboard shortcuts](screenshots/keyboard-shortcuts.png)
 
-? shows the shortcuts; the session details menu has them too.
+Press ? for the shortcuts; the session details menu has them too.
 
 ## Agent settings
 
@@ -227,6 +228,19 @@ Pi has no permission modes, so its toolbar has no mode menu.
 The menu lists the agent's models with their descriptions, and the reasoning efforts the chosen
 model supports. Codex takes a new model or effort with its next turn.
 
+![The model menu of Claude Code: its own models, then those of two providers from the hub, each under its name and host](screenshots/model-providers.png)
+
+For Claude Code and Codex, the menu then lists the models of each
+[model provider](../README.md#model-providers), under the provider's monogram, name and host; a
+provider the hub keeps is marked **hub**. A line under them says what a switch does with this
+agent. Picking a provider's model switches the agent to that provider, and picking one of the
+agent's own models switches it back. The conversation goes on: Claude Code switches from its next
+API call, and starts again on its session to go back; Codex starts again in a new thread that gets
+the conversation's messages as text. While a switch runs, the button says **Switching to …**, and a
+toast says which model the agent is on once it is done. A switch that starts the agent again can't
+be made during a turn. On a provider, the button shows a cloud in place of the brain, and the
+provider's name after the model. A provider that lists no models isn't in the menu.
+
 ### Context and usage limits
 
 ![The context popover: the tokens in the context window, and the 5-hour and weekly usage limits](screenshots/context-usage.png)
@@ -253,7 +267,7 @@ limit resets*, instead of failing one by one. **Continue at reset** sends a mess
 agent go on with the task a minute after the reset, **Continue now** sends it now, and **Send queued
 tasks** lets the queue go at once. A task you send yourself goes out right away. Until the reset
 the agent needs you, as with a request: the header, the tab title and its icon say so, and a background
-tab with notifications on shows one.
+tab with notifications on shows a notification.
 
 ### A failed API request
 
@@ -472,7 +486,7 @@ falling when it finishes; it works over plain http too. In a chat the hub opens,
 an agent that needs you, and the chat only when it finishes.
 
 **Add to an AgentAPI hub…** has the steps to copy: run a hub, join this machine to it, open it.
-The hub's address, typed in, goes into the commands. When this AgentAPI already reports to a hub,
+The hub address you type goes into the commands. When this AgentAPI already reports to a hub,
 it says which.
 
 ![Adding this AgentAPI to a hub: the hub's address, and the commands to copy](screenshots/join-hub.png)
@@ -485,8 +499,8 @@ list` and other tabs stop showing the task as unread (see the README's
 The agent's warnings and errors (a turn that failed, a setting it ignores) show as notifications in
 the corner that stay until you close them. A closed one stays closed after a reload, although the
 server sends its recent ones again on every connection; a warning the agent repeats on every start
-shows once per page. While two or more show, **Clear all** below them closes them all, each as
-closed as if you had closed it.
+shows once per page. While two or more show, **Clear all** below them closes them all, as if
+you had closed each one.
 
 ## Phones
 
@@ -521,7 +535,9 @@ the chat's own buttons in it, and a button for each other agent of its machine, 
 place. It opens through the hub, which sends the instance's token.
 
 The gear opens the hub's settings, where you keep favorite prompts that ☆ in this chat's composer
-inserts ([The composer](#the-composer)). `+` adds an instance by its URL and token. Each row's `⋯` menu pins the instance to the top, puts it in a group of your own (the list
+inserts ([The composer](#the-composer)), and the model providers the model menu offers
+([Model and reasoning effort](#model-and-reasoning-effort)).
+`+` adds an instance by its URL and token. Each row's `⋯` menu pins the instance to the top, puts it in a group of your own (the list
 then shows a folding header per group), mutes what it waits for until that changes, or forgets a
 stopped or unreachable one. Rows and group headers show what the agents spent in the last 24 hours
 (hover for 7 days), and rows how long they worked. Each row shows its AgentAPI version, marked when

@@ -28,6 +28,7 @@ import (
 	"github.com/coder/agentapi/lib/logctx"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/pricing"
+	"github.com/coder/agentapi/lib/provider"
 	"github.com/coder/agentapi/lib/sessions"
 	"github.com/coder/agentapi/lib/shellterm"
 	"github.com/coder/agentapi/lib/statedb"
@@ -158,6 +159,9 @@ type NativeConfig struct {
 	// PiSessionDir is the --session-dir Pi runs with, where its session
 	// logs are; empty without one.
 	PiSessionDir string
+	// Providers are the model providers the agent can switch to (Claude
+	// Code, Codex); nil offers none.
+	Providers *provider.Source
 	// Policy is the conversation's: whether it continues a turn a usage
 	// limit stopped, and how long it waits before it tries a failed turn
 	// again or starts an agent that exited again.
@@ -323,11 +327,38 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 
 	// Without a factory (--print-openapi) no agent runs.
 	if config.Native.Factory != nil {
+		s.syncProviders(config.Native.Providers)
 		s.native.Start(ctx)
 		s.startMessageQueue()
 		s.startUploadPruning()
 	}
 	return s, nil
+}
+
+// syncProviders keeps the hub's providers in providers while the server
+// runs. The first sync is done before the agent starts, which may start
+// on one of them.
+func (s *Server) syncProviders(providers *provider.Source) {
+	if providers == nil {
+		return
+	}
+	sync := &provider.HubSync{
+		Source: providers,
+		Hub: func() (string, string) {
+			config := s.webhook.Config()
+			return config.URL, config.Secret
+		},
+		Logger:    s.logger,
+		CachePath: providers.HubCachePath(),
+	}
+	// What the hub answered last time stands in until it answers.
+	sync.Restore()
+	ctx, cancel := context.WithTimeout(s.shutdownCtx, 5*time.Second)
+	defer cancel()
+	if err := sync.Sync(ctx); err != nil {
+		s.logger.Warn("Couldn't get the hub's model providers; trying again in a minute", "error", err)
+	}
+	go sync.Run(s.shutdownCtx)
 }
 
 // newServerID returns a random ID for this run of the server.
@@ -424,6 +455,7 @@ func newNativeConversation(config ServerConfig, restored restoredState, emitter 
 		ResumeRef:         restored.resumeRef,
 		State:             restored.state,
 		Policy:            config.Native.Policy,
+		Providers:         config.Native.Providers,
 		InitialMessages:   restored.messages,
 		InitialPrompt:     config.InitialPrompt,
 		InitialPromptSent: config.InitialPromptSent,

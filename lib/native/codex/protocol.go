@@ -196,6 +196,13 @@ type turnStartParams struct {
 	CollaborationMode *collaborationMode `json:"collaborationMode,omitempty"`
 }
 
+// threadInjectItemsParams is ThreadInjectItemsParams: raw Responses API
+// items appended to the thread's history.
+type threadInjectItemsParams struct {
+	ThreadID string `json:"threadId"`
+	Items    []any  `json:"items"`
+}
+
 type threadCompactStartParams struct {
 	ThreadID string `json:"threadId"`
 }

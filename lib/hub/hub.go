@@ -33,6 +33,7 @@ import (
 	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/jsonapi"
 	"github.com/coder/agentapi/lib/netaddr"
+	"github.com/coder/agentapi/lib/provider"
 	"github.com/coder/agentapi/lib/sse"
 )
 
@@ -83,6 +84,7 @@ type Hub struct {
 	config     Config
 	logger     *slog.Logger
 	store      *store
+	providers  *providerStore
 	client     *http.Client
 	deliveries *deliveries
 	// badSignatures limits the log of events refused for their signature.
@@ -131,12 +133,16 @@ func New(config Config) (*Hub, error) {
 	if err != nil {
 		return nil, err
 	}
+	providers, err := newProviderStore(config.StatePath)
+	if err != nil {
+		return nil, err
+	}
 	var deliveriesFile string
 	if config.StatePath != "" {
 		deliveriesFile = deliveriesPath(config.StatePath)
 	}
 	return &Hub{
-		config: config, logger: config.Logger, store: st, client: client, clock: config.Clock,
+		config: config, logger: config.Logger, store: st, providers: providers, client: client, clock: config.Clock,
 		deliveries: newDeliveries(deliveriesFile, config.Logger, config.Clock.Now()),
 		interfaces: netaddr.Interfaces, watchers: map[string]context.CancelFunc{},
 		streamWriteTimeout: streamWriteTimeout,
@@ -195,6 +201,8 @@ func (h *Hub) Handler() http.Handler {
 	// Instances sign their webhook events, whatever name or origin they
 	// come by.
 	r.Post("/hooks", h.receiveWebhook)
+	// Signed with the hub's secret too: an AgentAPI gets the providers.
+	r.Post(provider.SyncPath, h.syncProviders)
 	if h.config.Dispatch != nil {
 		// Signed with the hub's secret, as the events are.
 		h.config.Dispatch.MountLauncher(r)
@@ -232,6 +240,9 @@ func (h *Hub) routes(r chi.Router) {
 		r.Put("/api/pins", h.setPins)
 		r.Get("/api/favorites", h.getFavorites)
 		r.Put("/api/favorites", h.setFavorites)
+		r.Get("/api/providers", h.getProviders)
+		r.Put("/api/providers", h.setProviders)
+		r.Post("/api/providers/check", h.checkProvider)
 		r.Get("/api/events", h.streamEvents)
 		r.Get("/api/join", h.getJoin)
 		r.Get("/api/activity", h.getActivity)

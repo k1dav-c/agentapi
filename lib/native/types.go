@@ -12,6 +12,7 @@ import (
 
 	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
+	"github.com/coder/agentapi/lib/provider"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -226,6 +227,20 @@ type Resume struct {
 	// Fork opens a new session that starts as a copy of Ref's, which goes
 	// on unchanged. The adapter reports the new session's ref.
 	Fork bool
+	// Provider, for an adapter that is a ProviderRunner, is the provider
+	// the agent runs on; nil for its own. The conversation sets it.
+	Provider *ProviderRun
+	// Carry, with no Ref, is the conversation a new session starts with:
+	// that of an agent that switched providers and can't continue its
+	// session on the new one (RelaunchError.Carry). The adapter gives the
+	// agent its text.
+	Carry []conv.Message
+}
+
+// ProviderRun is a provider an agent runs on, and the model it starts on.
+type ProviderRun struct {
+	Provider provider.Provider
+	Model    string
 }
 
 // Factory creates an adapter that opens the session resume says.

@@ -17,6 +17,7 @@ import (
 
 	"github.com/coder/agentapi/internal/version"
 	"github.com/coder/agentapi/lib/agentstate"
+	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/agentio"
 	"github.com/coder/agentapi/lib/native/procutil"
@@ -66,6 +67,8 @@ func NewFactory(cfg Config) (native.Factory, error) {
 	return func(resume native.Resume) (native.Adapter, error) {
 		a := newAdapter(cfg, opts, resume.Ref)
 		a.fork = resume.Fork && resume.Ref != ""
+		a.launch = resume.Provider
+		a.carry = resume.Carry
 		return a, nil
 	}, nil
 }
@@ -90,7 +93,13 @@ type Adapter struct {
 	resumeRef string
 	// fork opens a copy of the thread resumeRef.
 	fork bool
-	log  *slog.Logger
+	// launch is the provider app-server runs on, nil for Codex's own. See
+	// provider.go.
+	launch *native.ProviderRun
+	// carry is the conversation a new thread gets, of a switch of
+	// providers.
+	carry []conv.Message
+	log   *slog.Logger
 	// drift counts what app-server sends that the adapter doesn't read.
 	drift *agentio.Drift
 	// prefix makes request IDs unique across processes: app-server numbers
@@ -206,7 +215,20 @@ func (a *Adapter) Capabilities() agentstate.Capabilities {
 
 // command returns the app-server command line.
 func (a *Adapter) command() []string {
-	return append([]string{"app-server"}, a.opts.appServerArgs...)
+	args := append([]string{"app-server"}, a.opts.appServerArgs...)
+	if a.launch != nil {
+		// After the user's -c, which they override.
+		args = append(args, providerArgs(a.launch.Provider)...)
+	}
+	return args
+}
+
+// env is app-server's environment: on a provider, with its key.
+func (a *Adapter) env() []string {
+	if a.launch == nil {
+		return procenv.ForAgent(a.cfg.Env)
+	}
+	return procenv.ForAgent(a.cfg.Env, providerKeyEnv+"="+a.launch.Provider.APIKey)
 }
 
 // Start implements native.Adapter: it starts app-server, initializes the
@@ -222,7 +244,7 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 		Program: a.cfg.Program,
 		Args:    a.command(),
 		Dir:     a.cwd(),
-		Env:     procenv.ForAgent(a.cfg.Env),
+		Env:     a.env(),
 		Logger:  a.log,
 	}, agentio.Loop{Line: a.handleLine, NextWake: a.loop.nextWake, Wake: a.loop.wake, Ended: a.outputEnded})
 	if err != nil {
@@ -293,12 +315,15 @@ func (a *Adapter) handshake(ctx context.Context) error {
 	}
 	err = a.openThread(ctx, "thread/start", threadStartParams{
 		CWD:            a.cwd(),
-		Model:          a.opts.model,
+		Model:          a.launchModel(),
 		ApprovalPolicy: a.opts.approvalPolicy,
 		Sandbox:        a.opts.sandbox,
 	}, false)
 	if err != nil {
 		return fmt.Errorf("start codex thread: %w", err)
+	}
+	if err := a.injectCarry(ctx); err != nil {
+		return fmt.Errorf("give the codex thread the conversation: %w", err)
 	}
 	return nil
 }
@@ -310,7 +335,7 @@ func (a *Adapter) resumeParams() threadResumeParams {
 		ThreadID:       a.resumeRef,
 		ExcludeTurns:   true,
 		CWD:            a.cwd(),
-		Model:          a.opts.model,
+		Model:          a.launchModel(),
 		ApprovalPolicy: a.opts.approvalPolicy,
 		Sandbox:        a.opts.sandbox,
 	}
