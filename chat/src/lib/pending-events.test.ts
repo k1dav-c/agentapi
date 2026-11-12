@@ -140,6 +140,58 @@ describe("PendingEvents", () => {
     expect(tasksAfter(cached, batch({messages: [message(9, 42)]}))).toBe(cached);
   });
 
+  test("a full replay that comes the newest task first carries its order, the same in each batch", () => {
+    const sync = new SyncTracker();
+    const pending = new PendingEvents(sync);
+    sync.begin({epoch: "e1", full: true, seq: 20}, "");
+    pending.replaceAll();
+    // Task 4, then task 2: a message with a lower ID starts an earlier task.
+    pending.addMessage(prompt(4, 5, "2026-10-22T10:04:00Z"));
+    pending.addMessage(message(5, 6));
+    pending.addRichMessage(rich("r4", 12));
+    pending.addMessage(prompt(2, 3, "2026-10-22T10:02:00Z"));
+    pending.addMessage(message(3, 4));
+    pending.addRichMessage(rich("r2b", 11));
+    pending.addRichMessage(rich("r2a", 10));
+    const progress = pending.take();
+    expect(progress).toMatchObject({replace: true, held: true, replayFrom: "2026-10-22T10:02:00Z"});
+    expect([...progress.richOrder!]).toEqual([
+      ["r4\u0000assistant", {block: 4, index: 0}],
+      ["r2b\u0000assistant", {block: 2, index: 1}],
+      ["r2a\u0000assistant", {block: 2, index: 2}],
+    ]);
+    // The earliest message so far starts the conversation.
+    pending.addMessage(prompt(0, 1, "2026-10-22T10:00:00Z"));
+    pending.addRichMessage(rich("r0", 9));
+    sync.noteEvent("20");
+    // After the replay, an update of an earlier message starts no task.
+    pending.addMessage(message(1, 21));
+    pending.addRichMessage(rich("live", 22));
+    const last = pending.take();
+    expect(last).toMatchObject({held: false, replaceHeld: true});
+    expect(last.richOrder).toBe(progress.richOrder!);
+    expect(last.richOrder!.get("r0\u0000assistant")).toEqual({block: 0, index: 3});
+    expect(last.richOrder!.has("live\u0000assistant")).toBe(false);
+    // The replay is over: the batches after it have no order.
+    pending.addRichMessage(rich("r4", 23));
+    expect(pending.take().richOrder).toBeUndefined();
+  });
+
+  test("a full replay in the conversation's order carries none", () => {
+    const sync = new SyncTracker();
+    const pending = new PendingEvents(sync);
+    sync.begin({epoch: "e1", full: true, seq: 9}, "");
+    pending.replaceAll();
+    pending.addMessage(prompt(0, 1, "2026-10-22T09:00:00Z"));
+    pending.addMessage(message(1, 2));
+    pending.addMessage(prompt(2, 3, "2026-10-22T10:00:00Z"));
+    pending.addRichMessage(rich("r0", 4));
+    expect(pending.take()).toMatchObject({held: true, richOrder: undefined, replayFrom: "2026-10-22T09:00:00Z"});
+    pending.addRichMessage(rich("r2", 9));
+    sync.noteEvent("9");
+    expect(pending.take()).toMatchObject({replaceHeld: true, richOrder: undefined});
+  });
+
   test("a full replay replaces what is pending, and has the new epoch", () => {
     const sync = new SyncTracker();
     const pending = new PendingEvents(sync);

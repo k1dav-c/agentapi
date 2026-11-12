@@ -625,6 +625,13 @@ usage limit stop, a retry wait, login).
   before `coldSeq`, the latest change of a rich message it let go of, is
   full instead. Tasks carry their `number`, set where the emitter hands
   them out (`numbered`) and not stored.
+- A full replay to a `sync=1` client sends the status and errors first,
+  then the tasks the newest first, each with its messages in ID order and
+  then its rich messages, and what came before the first task last
+  (`newestTaskFirstLocked`): the task the user looks at arrives whole
+  before the earlier ones. A rich message without a `task_id` goes with
+  the one before it. Other replays keep their order: the messages, the
+  status, the rich messages.
 - The emitter keeps the pending requests and the 50 that closed last
   (`native.MaxClosedRequests`). It drops an older closed request without an
   event, so a client that resumes with `since=` keeps the same bound: of the
@@ -1161,7 +1168,12 @@ chat and `parseFromFrame` in the hub.
   after the messages, keep the chat's earlier ones until the replay's own
   replace them. Those of another conversation go at once: a task whose
   message the replay sends as another one, a request made before the
-  replay's first message. `EventSourceConnection`
+  replay's earliest message. A replay that comes the newest task first is
+  put back in the conversation's order whatever its batches
+  (`PendingEvents`: a message with a lower ID than the one before it starts
+  an earlier task, and each rich message goes with the task it came with,
+  `richOrder`); a replay in that order already, from an older server,
+  applies as it comes. `EventSourceConnection`
   (`lib/event-source.ts`, and the `use-event-source.ts` hook) keeps it, the
   hub page's stream and the shell terminal's open: a stream that ends is opened
   again at once, without a notice, unless that keeps failing; one that fails

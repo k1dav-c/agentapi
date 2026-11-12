@@ -1,7 +1,7 @@
 // How far the client has applied the server's changes: the epoch of the
 // conversation and the seq it resumes from on the next connection (the
-// watermark). The replay that starts a connection comes grouped by kind
-// (messages, then rich messages, then requests), not in seq order, so the
+// watermark). The replay that starts a connection comes grouped (by task,
+// the newest first, then the requests), not in seq order, so the
 // watermark only moves to the replay's seq once the whole replay arrived:
 // the server gives the replay's last event an SSE id. Moving it earlier
 // would make a reconnect or a cached reload skip what was still on its way.

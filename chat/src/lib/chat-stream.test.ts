@@ -144,6 +144,91 @@ describe("ChatStream", () => {
     expect(requests.map((request) => [request.id, request.seq])).toEqual([["r1", 8], ["r2", 9]]);
   });
 
+  test("a full replay that comes the newest task first shows each task whole, in the conversation's order", () => {
+    // Tasks 0, 2 and 4, each a prompt, a reply and its rich messages: the
+    // server sends task 4 first, then 2, then 0.
+    const {env, batches} = stream();
+    let state: ConversationState = initialConversation;
+    const apply = () => {
+      for (const batch of batches.splice(0)) state = conversationReducer(state, {type: "batch", batch});
+    };
+    const richEvent = (id: string, task: number, seq: number) => ({message_id: id, role: "assistant", timestamp: "2026-10-27T10:00:01Z", content: [{type: "text", text: id}], task_id: task, seq});
+    const shown = () => ({
+      messages: state.messages.map((m) => m.id),
+      rich: state.richMessages.map((m) => m.message_id),
+      replaying: state.replaying,
+    });
+    const source = env.latest();
+    source.open();
+    source.emit("session_sync", {epoch: "e1", full: true, seq: 20});
+    source.emit("status_change", {status: "stable", agent_type: "claude", transport: "native", seq: 0});
+    source.emit("message_update", message(4, 5));
+    source.emit("message_update", message(5, 6));
+    source.emit("rich_message_update", richEvent("r4a", 4, 11));
+    source.emit("rich_message_update", richEvent("r4b", 4, 12));
+    env.clock.advance(REPLAY_FLUSH_MAX_MS);
+    apply();
+    // The first progress already shows the newest task with its reply.
+    expect(shown()).toEqual({messages: [4, 5], rich: ["r4a", "r4b"], replaying: true});
+
+    source.emit("message_update", message(2, 3));
+    source.emit("message_update", message(3, 4));
+    source.emit("rich_message_update", richEvent("r2", 2, 10));
+    env.clock.advance(REPLAY_FLUSH_MAX_MS);
+    apply();
+    expect(shown()).toEqual({messages: [2, 3, 4, 5], rich: ["r2", "r4a", "r4b"], replaying: true});
+
+    source.emit("message_update", message(0, 1));
+    source.emit("message_update", message(1, 2));
+    source.emit("rich_message_update", richEvent("r0", 0, 9));
+    source.emit("task_update", {id: 0, status: "completed", prompt: "message 0", started_at: "2026-10-27T10:00:00Z", seq: 13});
+    source.emit("task_update", {id: 2, status: "completed", prompt: "message 2", started_at: "2026-10-27T10:00:00Z", seq: 14});
+    source.emit("task_update", {id: 4, status: "completed", prompt: "message 4", started_at: "2026-10-27T10:00:00Z", seq: 20}, "20");
+    env.clock.advance(0);
+    apply();
+    expect(shown()).toEqual({messages: [0, 1, 2, 3, 4, 5], rich: ["r0", "r2", "r4a", "r4b"], replaying: false});
+    expect(state.tasks.map((task) => task.id)).toEqual([0, 2, 4]);
+
+    // Later updates merge as ever: a rich message keeps its place, a new
+    // one goes last.
+    source.emit("rich_message_update", {...richEvent("r2", 2, 21), content: [{type: "text", text: "r2, grown"}]});
+    source.emit("message_update", message(6, 22));
+    source.emit("rich_message_update", richEvent("r6", 6, 23));
+    env.clock.advance(EVENT_FLUSH_MS);
+    apply();
+    expect(shown()).toEqual({messages: [0, 1, 2, 3, 4, 5, 6], rich: ["r0", "r2", "r4a", "r4b", "r6"], replaying: false});
+    expect(state.richMessages[1].content).toEqual([{type: "text", text: "r2, grown"}]);
+  });
+
+  test("a full replay in the conversation's order applies as it comes", () => {
+    const {env, batches} = stream();
+    let state: ConversationState = initialConversation;
+    const apply = () => {
+      for (const batch of batches.splice(0)) {
+        expect(batch.richOrder).toBeUndefined();
+        state = conversationReducer(state, {type: "batch", batch});
+      }
+    };
+    const richEvent = (id: string, seq: number) => ({message_id: id, role: "assistant", timestamp: "2026-10-27T10:00:01Z", content: [], seq});
+    const source = env.latest();
+    source.open();
+    source.emit("session_sync", {epoch: "e1", full: true, seq: 9});
+    for (let id = 0; id < 4; id++) source.emit("message_update", message(id, id + 1));
+    env.clock.advance(REPLAY_FLUSH_MAX_MS);
+    apply();
+    expect(state.messages.map((m) => m.id)).toEqual([0, 1, 2, 3]);
+    source.emit("status_change", {status: "stable", agent_type: "claude", transport: "native", seq: 0});
+    // An earlier server's rich messages come in the order it has them,
+    // which the chat keeps.
+    source.emit("rich_message_update", richEvent("b", 6));
+    source.emit("rich_message_update", richEvent("a", 7));
+    source.emit("rich_message_update", richEvent("c", 9), "9");
+    env.clock.advance(0);
+    apply();
+    expect(state.messages.map((m) => m.id)).toEqual([0, 1, 2, 3]);
+    expect(state.richMessages.map((m) => m.message_id)).toEqual(["b", "a", "c"]);
+  });
+
   test("an older server's full replay, without tasks, clears them once it is complete", () => {
     const sync = new SyncTracker();
     sync.restore("old", 40);

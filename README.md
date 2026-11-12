@@ -1360,7 +1360,10 @@ again. Opening a session with more than 256 rich messages ends them too, rather 
 
 The full replay (a new client, another epoch) holds the latest 20 tasks, not the whole
 conversation; the earlier ones are read a page at a time (below). A client that resumes from
-before a change the server no longer holds gets the full replay too.
+before a change the server no longer holds gets the full replay too. With `?sync=1` it comes the
+newest task first: the status and errors, then each task's messages and its rich messages, and
+what came before the first task last. Without `sync` it keeps the order it always had: the
+messages, the status, then the rich messages.
 
 ### Long conversations
 

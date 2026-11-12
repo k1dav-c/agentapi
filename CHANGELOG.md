@@ -53,6 +53,10 @@
 
 ### Fixes
 
+- A full replay of a conversation (`/events?sync=1` with nothing to resume from) sends the newest task
+  first, each task with its rich messages, so the end of the transcript, which the chat shows, is whole
+  first; the chat puts the tasks back in order. Other clients, and a resumed replay, get the order they
+  had.
 - While the chat loads a conversation's history, a task whose reply hasn't arrived yet says
   **Loading the reply…** under its prompt, and the transcript says **Loading the conversation…** at
   the top, instead of showing each task as its prompt alone until the rest came.

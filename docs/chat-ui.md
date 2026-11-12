@@ -109,9 +109,10 @@ tasks**, and the chat reads the 20 before them; what you were reading stays wher
 numbers are the server's, so they count the tasks not loaded yet. A server older than AgentAPI 4.3
 sends every task at once.
 
-A long conversation arrives in parts: the prompts first, the replies after them. Until it is all
-there, the top of the transcript says **Loading the conversation…**, and a task whose reply hasn't
-come yet says **Loading the reply…** under its prompt.
+A long conversation arrives in parts: the newest tasks first, each with its reply, then the older
+ones above them. Until it is all there, the top of the transcript says **Loading the
+conversation…**, and a task whose reply hasn't come yet says **Loading the reply…** under its
+prompt. An older server sends all the prompts first and the replies after them.
 
 ### The task menu
 

@@ -149,6 +149,20 @@ describe("richMessagesAfter", () => {
     expect(richMessagesAfter(previous, batch({replace: true, richMessages: [updated]}))).toEqual([withoutSeq(updated)]);
     expect(richMessagesAfter(previous, batch({}))).toBe(previous);
   });
+
+  test("a replay that came the newest task first goes by task, the earliest first; what came after it last", () => {
+    const place = (block: number, index: number) => ({block, index});
+    const richOrder = new Map([
+      ["r4\u0000assistant", place(4, 0)],
+      ["r2b\u0000assistant", place(2, 1)],
+      ["r2a\u0000assistant", place(2, 2)],
+    ]);
+    const first = richMessagesAfter([], batch({replace: true, held: true, richOrder, richMessages: [rich("r4", 3), rich("r2b", 2)]}));
+    expect(first.map((m) => m.message_id)).toEqual(["r2b", "r4"]);
+    const next = richMessagesAfter(first, batch({replaceHeld: true, richOrder, richMessages: [rich("live", 9), rich("r2a", 1)]}));
+    expect(next.map((m) => m.message_id)).toEqual(["r2b", "r2a", "r4", "live"]);
+    expect(next[0]).toBe(first[0]);
+  });
 });
 
 describe("messagesAfter", () => {
@@ -177,6 +191,20 @@ describe("messagesAfter", () => {
     const next = messagesAfter([prompt(0, 1), failed, sending], batch({replace: true, messages: [message(1, 2), sent(2, "lost", 3)]}));
     expect(next.slice(0, 2)).toEqual([failed, sending]);
     expect(next).toHaveLength(4);
+  });
+});
+
+describe("messagesAfter in a replay that came the newest task first", () => {
+  test("the server's messages go in ID order; the drafts keep their places", () => {
+    const richOrder = new Map();
+    const sending = draft("c1", "on its way");
+    const first = messagesAfter([sending], batch({replace: true, held: true, richOrder, messages: [prompt(4, 5), message(5, 6)]}));
+    expect(first.map((item) => ("clientId" in item ? item.clientId : item.id))).toEqual(["c1", 4, 5]);
+    const next = messagesAfter(first, batch({held: true, richOrder, messages: [prompt(2, 3), message(3, 4)]}));
+    expect(next.map((item) => ("clientId" in item ? item.clientId : item.id))).toEqual(["c1", 2, 3, 4, 5]);
+    expect(next[3]).toBe(first[1]);
+    // Without the order a batch merges as it comes.
+    expect(messagesAfter(first, batch({messages: [prompt(2, 3)]})).map((item) => item.id)).toEqual([undefined, 4, 5, 2]);
   });
 });
 

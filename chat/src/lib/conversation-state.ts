@@ -7,7 +7,7 @@
 import {isDraftMessage, richMessageKey, withoutSeq, type DraftMessage, type Message, type RichMessage} from "./conversation";
 import {prependPage, type HistoryPage} from "./history";
 import {mergeListedRequests, mergeRequests, type NativeRequest} from "./native-requests";
-import type {EventBatch, SyncPoint} from "./pending-events";
+import type {EventBatch, RichPlace, SyncPoint} from "./pending-events";
 import {mergeTasks, type ServerTask} from "./server-tasks";
 import type {CachedSession} from "./session-cache";
 
@@ -149,7 +149,9 @@ function samePoint(a: SyncPoint, b: SyncPoint): boolean {
 // them: a new user message of the batch with their content takes the
 // place of one, and sendMessage drops the others once the server answered.
 // A draft dropped before that, by any update, would leave a send that
-// fails nothing to mark failed.
+// fails nothing to mark failed. A replay that came the newest task first
+// (richOrder) puts the server's messages in ID order, in the places they
+// hold among the drafts.
 export function messagesAfter(previous: (Message | DraftMessage)[], batch: EventBatch): (Message | DraftMessage)[] {
   if (!batch.replace && batch.messages.length === 0) return previous;
   const known = new Set(previous.flatMap((message) => (isDraftMessage(message) ? [] : [message.id])));
@@ -169,14 +171,48 @@ export function messagesAfter(previous: (Message | DraftMessage)[], batch: Event
     arrived.set(content, count - 1);
     return false;
   });
-  return mergeByKey(kept, batch.messages.map(withoutSeq), (message) => (isDraftMessage(message) ? undefined : String(message.id)));
+  const merged = mergeByKey(kept, batch.messages.map(withoutSeq), (message) => (isDraftMessage(message) ? undefined : String(message.id)));
+  return batch.richOrder ? inIdOrder(merged) : merged;
+}
+
+// inIdOrder returns messages with the server's in ID order; the drafts
+// keep their places.
+function inIdOrder(messages: (Message | DraftMessage)[]): (Message | DraftMessage)[] {
+  const slots: number[] = [];
+  const server: Message[] = [];
+  messages.forEach((message, i) => {
+    if (isDraftMessage(message)) return;
+    slots.push(i);
+    server.push(message);
+  });
+  server.sort((a, b) => a.id - b.id);
+  const ordered = messages.slice();
+  slots.forEach((slot, i) => {
+    ordered[slot] = server[i];
+  });
+  return ordered;
 }
 
 // richMessagesAfter returns the rich messages once batch is applied to
 // previous: a full replay replaces them, and an update replaces its own.
+// A replay that came the newest task first puts them in the order of the
+// conversation: by task, the earliest first, and within a task as they
+// came (richOrder); any that came after it go last.
 export function richMessagesAfter(previous: RichMessage[], batch: EventBatch): RichMessage[] {
   if (!batch.replace && batch.richMessages.length === 0) return previous;
-  return mergeByKey(batch.replace ? [] : previous, batch.richMessages.map(withoutSeq), richMessageKey);
+  const merged = mergeByKey(batch.replace ? [] : previous, batch.richMessages.map(withoutSeq), richMessageKey);
+  const order = batch.richOrder;
+  if (!order) return merged;
+  const last: RichPlace = {block: Number.POSITIVE_INFINITY, index: Number.POSITIVE_INFINITY};
+  const placed = merged.map((message) => ({message, place: order.get(richMessageKey(message)) ?? last}));
+  // A stable sort: those that came after the replay keep their order.
+  placed.sort((a, b) => compare(a.place.block, b.place.block) || compare(a.place.index, b.place.index));
+  return placed.map(({message}) => message);
+}
+
+// compare orders numbers, the infinite ones too (whose difference is NaN).
+function compare(a: number, b: number): number {
+  return a < b ? -1 : a > b ? 1 : 0;
 }
 
 // tasksAfter returns the tasks once batch is applied to previous. Tasks

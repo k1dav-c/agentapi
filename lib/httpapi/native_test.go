@@ -475,8 +475,8 @@ func TestNative_RefusedMessageIsTakenBack(t *testing.T) {
 	}
 
 	// The client reconnects with the epoch it had and gets the full state,
-	// the agent's message and its rich message: only the replay's last
-	// event carries an id, the replay's seq.
+	// the status first, then the agent's message and its rich message:
+	// only the replay's last event carries an id, the replay's seq.
 	events = openEvents(t, n.url+"/events?sync=1&since=3&epoch="+epoch)
 	sync := nextEvent(t, events)
 	require.Equal(t, "session_sync", sync.event)
@@ -492,7 +492,7 @@ func TestNative_RefusedMessageIsTakenBack(t *testing.T) {
 			break
 		}
 	}
-	assert.Equal(t, []string{"message_update", "status_change", "rich_message_update"}, replay)
+	assert.Equal(t, []string{"status_change", "message_update", "rich_message_update"}, replay)
 }
 
 // sseEvent is an event read from an event stream.
