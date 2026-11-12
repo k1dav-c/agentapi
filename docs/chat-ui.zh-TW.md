@@ -94,6 +94,9 @@ Claude Code、Codex 和 Pi 另會顯示任務執行期間的模型呼叫花費�
 原位。任務編號由伺服器提供，所以會把還沒載入的任務也算進去。AgentAPI 4.3 以前的伺服器會一次
 送出所有任務。
 
+長對話會分批送達：先是提示，回覆隨後才到。全部到齊之前，對話紀錄頂端會顯示
+**Loading the conversation…**，還沒收到回覆的任務會在提示下方顯示 **Loading the reply…**。
+
 ### 任務選單
 
 ![任務選單，包含 Preview Markdown、Copy task and output 和 Export Markdown](screenshots/task-menu.png)

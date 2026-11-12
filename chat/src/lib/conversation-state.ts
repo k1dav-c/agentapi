@@ -18,6 +18,11 @@ export interface ConversationState {
   requests: NativeRequest[];
   // The tasks as the server derives them (lib/server-tasks).
   tasks: ServerTask[];
+  // A full replay is on its way: what the state holds is its progress (held
+  // batches, see EventBatch), the messages so far and the rich messages that
+  // came; a task's reply may be among those still to come. The batch that
+  // completes the replay, a reset and a cached conversation end it.
+  replaying: boolean;
   // The point of the conversation the state is at. It changes with the
   // updates that bring the state there, and renders with them: the
   // tracker's watermark runs ahead, and a cache that saved it with the
@@ -31,6 +36,7 @@ export const initialConversation: ConversationState = {
   richMessages: [],
   requests: [],
   tasks: [],
+  replaying: false,
   synced: {epoch: "", seq: 0},
 };
 
@@ -75,6 +81,9 @@ export function conversationReducer(state: ConversationState, action: Conversati
         messages: messagesAfter(state.messages, batch),
         richMessages: richMessagesAfter(state.richMessages, batch),
         tasks: tasksAfter(state.tasks, batch),
+        // Only a full replay's progress is held: any other batch is a
+        // replay's last, or comes after it.
+        replaying: batch.held,
       });
     }
     case "batchRequests":
@@ -87,6 +96,7 @@ export function conversationReducer(state: ConversationState, action: Conversati
         richMessages: cached.richMessages,
         requests: cached.requests,
         tasks: cached.tasks,
+        replaying: false,
         synced: samePoint(state.synced, point) ? state.synced : point,
       };
     }

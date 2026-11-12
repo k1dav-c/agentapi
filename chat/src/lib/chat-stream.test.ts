@@ -3,7 +3,7 @@ import {ChatStream, EVENT_FLUSH_MS, REPLAY_FLUSH_MAX_MS, STALE_CONNECTION_MS, ty
 import {QUIET_RECONNECT_MS, type ConnectionState} from "./event-source";
 import {fakeEnvironment} from "@/test/fake-event-source";
 import type {NativeRequest} from "./native-requests";
-import {requestsAfter, tasksAfter} from "./conversation-state";
+import {conversationReducer, initialConversation, requestsAfter, tasksAfter, type ConversationState} from "./conversation-state";
 import type {EventBatch} from "./pending-events";
 import type {ServerTask} from "./server-tasks";
 import {SyncTracker} from "./session-sync";
@@ -160,6 +160,58 @@ describe("ChatStream", () => {
     env.clock.advance(0);
     for (const batch of batches.splice(0)) tasks = tasksAfter(tasks, batch);
     expect(tasks).toEqual([]);
+  });
+
+  test("a full replay says it is still arriving until it completes, through a reconnect", () => {
+    const {env, batches} = stream();
+    let state: ConversationState = initialConversation;
+    const apply = () => {
+      for (const batch of batches.splice(0)) state = conversationReducer(state, {type: "batch", batch});
+    };
+    const source = env.latest();
+    source.open();
+    source.emit("session_sync", {epoch: "e1", seq: 9});
+    source.emit("message_update", message(0, 1));
+    env.clock.advance(REPLAY_FLUSH_MAX_MS);
+    apply();
+    expect(state.replaying).toBe(true);
+    // The stream fails before the replay is complete: the next connection
+    // replays from the same point, and its last event completes it.
+    source.fail();
+    const next = env.latest();
+    expect(next).not.toBe(source);
+    expect(next.url).toBe(`${BASE}/events?sync=1&since=0&epoch=e1`);
+    next.open();
+    next.emit("session_sync", {epoch: "e1", seq: 9});
+    next.emit("message_update", message(1, 2));
+    env.clock.advance(REPLAY_FLUSH_MAX_MS);
+    apply();
+    expect(state.replaying).toBe(true);
+    next.emit("task_update", {id: 0, status: "completed", prompt: "message 0", started_at: "2026-10-27T10:00:00Z", seq: 9}, "9");
+    env.clock.advance(0);
+    apply();
+    expect(state.replaying).toBe(false);
+    expect(state.messages.map((m) => m.id)).toEqual([0, 1]);
+    expect(state.tasks.map((task) => task.id)).toEqual([0]);
+  });
+
+  test("a reconnect with nothing to replay ends a replay the failed stream left", () => {
+    const {env, batches} = stream();
+    let state: ConversationState = initialConversation;
+    const source = env.latest();
+    source.open();
+    source.emit("session_sync", {epoch: "e1", seq: 9});
+    source.emit("message_update", message(0, 1));
+    env.clock.advance(REPLAY_FLUSH_MAX_MS);
+    source.fail();
+    const next = env.latest();
+    next.open();
+    // The conversation started over in the same epoch: nothing to send.
+    next.emit("session_sync", {epoch: "e1", seq: 0});
+    env.clock.advance(EVENT_FLUSH_MS);
+    for (const batch of batches) state = conversationReducer(state, {type: "batch", batch});
+    expect(batches[0].held).toBe(true);
+    expect(state.replaying).toBe(false);
   });
 
   test("a connection that resumes gets what changed, and says when it is applied", () => {

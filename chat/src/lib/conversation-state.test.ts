@@ -105,6 +105,31 @@ describe("conversationReducer", () => {
     expect(apply(initialConversation, {type: "reset"}).synced).toBe(initialConversation.synced);
   });
 
+  test("a full replay's progress says it is replaying; the batch that completes it doesn't", () => {
+    const progress = apply(initialConversation, {type: "batch", batch: batch({replace: true, held: true, messages: [prompt(0, 1)], point: at("e1", 0)})});
+    expect(progress.replaying).toBe(true);
+    const more = apply(progress, {type: "batch", batch: batch({held: true, richMessages: [rich("r1", 2)], point: at("e1", 0)})});
+    expect(more.replaying).toBe(true);
+    // Requests apply apart and leave it.
+    expect(apply(more, {type: "batchRequests", batch: batch({held: true})}).replaying).toBe(true);
+    const done = apply(more, {type: "batch", batch: batch({replaceHeld: true, tasks: [task(0, 3)], point: at("e1", 3)})});
+    expect(done.replaying).toBe(false);
+    // A replay that arrives in one batch never says it.
+    expect(apply(initialConversation, {type: "batch", batch: batch({replace: true, replaceHeld: true, messages: [prompt(0, 1)], point: at("e1", 1)})}).replaying).toBe(false);
+  });
+
+  test("a resumed replay, live updates, a reset and the cache don't leave it replaying", () => {
+    const progress = apply(initialConversation, {type: "batch", batch: batch({replace: true, held: true, messages: [prompt(0, 1)], point: at("e1", 0)})});
+    // What follows a replay: any batch not held.
+    expect(apply(progress, {type: "batch", batch: batch({messages: [message(1, 4)], point: at("e1", 4)})}).replaying).toBe(false);
+    expect(apply(progress, {type: "reset"}).replaying).toBe(false);
+    const cached: CachedSession = {epoch: "e1", seq: 9, messages: [], richMessages: [], requests: [], tasks: []};
+    expect(apply(progress, {type: "restore", cached}).replaying).toBe(false);
+    // Nor does a resumed connection's replay, which is never held.
+    const resumed = apply(initialConversation, {type: "batch", batch: batch({messages: [message(1, 4)], point: at("e1", 4)})});
+    expect(resumed.replaying).toBe(false);
+  });
+
   test("drafts: added, marked failed, dismissed, and restored once", () => {
     const sent = apply(initialConversation, {type: "draftAdded", draft: draft("c1", "hi")});
     const failed = apply(sent, {type: "draftFailed", clientId: "c1", error: "offline"});

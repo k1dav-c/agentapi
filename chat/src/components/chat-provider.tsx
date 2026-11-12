@@ -219,6 +219,10 @@ export interface ChatState {
   // (lib/history.ts), and whether it is reading them.
   earlierTasks: number;
   loadingEarlier: boolean;
+  // A full replay of the conversation is still arriving: a task may show
+  // its prompt before its reply came (ConversationState.replaying). Not
+  // while offline: nothing arrives then.
+  replaying: boolean;
   // Whether stop can stop what the agent is doing now.
   canStop: boolean;
   reconnectAttempt: number;
@@ -522,6 +526,7 @@ function ChatSession({ agentAPIUrl, children }: PropsWithChildren<{agentAPIUrl: 
     taskByMessage,
     earlierTasks: earlier,
     loadingEarlier,
+    replaying: conversation.replaying && connectionStatus !== "offline",
     canStop: stoppable,
     serverStatus,
     connectionStatus,

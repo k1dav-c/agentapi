@@ -53,6 +53,9 @@
 
 ### Fixes
 
+- While the chat loads a conversation's history, a task whose reply hasn't arrived yet says
+  **Loading the reply…** under its prompt, and the transcript says **Loading the conversation…** at
+  the top, instead of showing each task as its prompt alone until the rest came.
 - Dialogs float up into place, fading in as they rise a little and grow, instead of flying in from the
   top-left corner of the page (the slide of the old dialog animation added to its centering). They
   close faster, sinking back a little.

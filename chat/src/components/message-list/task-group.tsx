@@ -3,7 +3,7 @@
 import React, { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { formatDuration, formatTimeOfDay, secondsBetween } from "@/lib/clock";
 import { useNow } from "@/lib/use-elapsed";
-import { ChevronRight, Clipboard, Download, Eye, MoreHorizontal } from "lucide-react";
+import { ChevronRight, Clipboard, Download, Eye, LoaderCircle, MoreHorizontal } from "lucide-react";
 import { Button } from "../ui/button";
 import { ProcessedMessage } from "../processed-message";
 import { toast } from "sonner";
@@ -49,6 +49,7 @@ export const TaskGroup = React.memo(function TaskGroup({
   searchResultIndex,
   isCurrentSearchResult,
   deferred = false,
+  replaying = false,
   waitingForUser = false,
   agentType = "unknown",
   promptAuthor,
@@ -69,6 +70,9 @@ export const TaskGroup = React.memo(function TaskGroup({
   // Render only the prompt and a step count for now; the list renders the
   // full activity of older tasks progressively after the page has loaded.
   deferred?: boolean;
+  // A full replay of the conversation is still arriving: the reply of a
+  // task that shows none yet may be on its way.
+  replaying?: boolean;
   // The agent is showing a prompt for this (the latest) task.
   waitingForUser?: boolean;
   // Names the agent's side of the task.
@@ -83,7 +87,6 @@ export const TaskGroup = React.memo(function TaskGroup({
   // limited one's limit.
   statusDetail?: string;
 }) {
-  const agentName = AgentType[agentType as keyof typeof AgentType]?.displayName ?? "Agent";
   const statusMeta = waitingForUser ? {label: "Waiting for you", className: "text-state-needs"} : TASK_STATUS_META[status];
   const live = status === "running";
   const activity = useMemo(() => {
@@ -98,6 +101,9 @@ export const TaskGroup = React.memo(function TaskGroup({
       task.richActivity.some(item => item.type === "tool");
     return hasRichInterleaving ? raw : groupConsecutiveTools(raw);
   }, [task, deferred]);
+  const replyLoading = isReplyLoading({replaying, deferred, live, waitingForUser, steps: activity.length});
+  // What a task whose rendering is deferred says it has.
+  const steps = task.richActivity.length + task.responses.length;
   // A long task shows its latest steps; earlier ones load on request.
   // Rendering hundreds of steps (Markdown, highlighted code) at once froze
   // slower devices. Search shows every step so matches can be found.
@@ -214,16 +220,10 @@ export const TaskGroup = React.memo(function TaskGroup({
           author={promptAuthor}
         />
         <div className="mt-5 space-y-4">
-          {(deferred || activity.length > 0) && (
-            // The agent's turn, so it doesn't read as part of your message.
-            <div className="flex items-center gap-2 text-xs font-semibold text-foreground" data-agent-turn>
-              <AgentMark agentType={agentType} />
-              {agentName}
-            </div>
-          )}
+          {(deferred || replyLoading || activity.length > 0) && <AgentTurn agentType={agentType} replyLoading={replyLoading} />}
           {deferred && (
             <p className="text-xs text-muted-foreground" role="status">
-              {task.richActivity.length + task.responses.length} steps · loading…
+              {steps} {steps === 1 ? "step" : "steps"} · loading…
             </p>
           )}
           {hiddenSteps > 0 && (
@@ -311,6 +311,42 @@ export const TaskGroup = React.memo(function TaskGroup({
     </section>
   );
 });
+
+// isReplyLoading says whether a task says its reply is loading: while a
+// full replay brings the rest, one with nothing to show under its prompt.
+// Not the one the agent works on, or waits on you for: its status (and the
+// dock) says what it does; nor a deferred one, which counts its steps.
+export function isReplyLoading({replaying, deferred, live, waitingForUser, steps}: {
+  replaying: boolean;
+  deferred: boolean;
+  live: boolean;
+  waitingForUser: boolean;
+  steps: number;
+}): boolean {
+  return replaying && !deferred && !live && !waitingForUser && steps === 0;
+}
+
+// The head of the agent's turn, so it doesn't read as part of your
+// message; and while its reply is still on its way, a row that says so.
+export function AgentTurn({agentType, replyLoading = false}: {agentType: string; replyLoading?: boolean}) {
+  const agentName = AgentType[agentType as keyof typeof AgentType]?.displayName ?? "Agent";
+  return (
+    <>
+      <div className="flex items-center gap-2 text-xs font-semibold text-foreground" data-agent-turn>
+        <AgentMark agentType={agentType} />
+        {agentName}
+      </div>
+      {replyLoading && (
+        // The list says it once for screen readers ("Loading the
+        // conversation…"), not each task.
+        <p className="flex items-center gap-1.5 text-xs text-muted-foreground" aria-hidden="true" data-reply-loading>
+          <LoaderCircle className="size-3.5 motion-safe:animate-spin" />
+          Loading the reply…
+        </p>
+      )}
+    </>
+  );
+}
 
 // MarginNotes is the column of thinking notes beside a part's steps on a wide
 // screen. Beside steps it is as tall as they are, not taller, so that long
