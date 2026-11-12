@@ -40,6 +40,8 @@ var wireTypes = []reflect.Type{
 	reflect.TypeFor[instanceList](),
 	reflect.TypeFor[Instance](),
 	reflect.TypeFor[favoritesBody](),
+	reflect.TypeFor[providersBody](),
+	reflect.TypeFor[providersChange](),
 	reflect.TypeFor[instanceChange](),
 	reflect.TypeFor[addInstanceBody](),
 	reflect.TypeFor[pinsBody](),
@@ -95,6 +97,7 @@ var hubLimits = []struct {
 	{"max_favorite_title", maxFavoriteTitle, "The longest favorite title, in characters."},
 	{"max_favorite_text", maxFavoriteText, "The longest favorite text, in characters."},
 	{"max_favorite_id", maxFavoriteID, "The longest favorite ID."},
+	{"max_providers", maxProviders, "The most model providers the hub keeps."},
 	{"max_group_name", maxGroupName, "The longest group name, in characters."},
 }
 
