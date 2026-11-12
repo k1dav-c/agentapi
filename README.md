@@ -33,8 +33,8 @@ Upstream changes should be reviewed and tested against the native transports, ch
 before integration; upstream and fork version numbers are separate release lines.
 
 This fork builds on upstream v0.12.2. Since 3.0 it drives only Claude Code, Codex and Pi, through
-their own protocols (the [native transport](#native-transport)); the terminal emulation of the PTY
-transport, for other agents, ended with v2.5.1 (see [Agents](#agents)). Session management and
+their own protocols (the [native transport](#native-transport)); the PTY transport, which emulated
+a terminal for other agents, ended with v2.5.1 (see [Agents](#agents)). Session management and
 chat features support long-running tasks, and [webhooks](#webhooks) report them to a central
 platform. [CHANGELOG.md](CHANGELOG.md) lists what
 changed, [docs/architecture.md](docs/architecture.md) describes how it is built,
@@ -163,7 +163,7 @@ has the complete commit history.
    curl -fsSL "https://github.com/k1dav-c/agentapi/releases/latest/download/agentapi-${OS}-${ARCH}" -o agentapi && chmod +x agentapi
    ```
 
-   Alternatively, you can download this fork's latest binary from the
+   Or download this fork's latest binary from the
    [releases page](https://github.com/k1dav-c/agentapi/releases). Upstream
    `coder/agentapi` release binaries do not include this fork's features.
 
@@ -173,7 +173,7 @@ has the complete commit history.
    agentapi --help
    ```
 
-   > On macOS, if you're prompted that the system was unable to verify the binary, go to `System Settings -> Privacy & Security`, click "Open Anyway", and run the command again.
+   > On macOS, if the system says it can't verify the binary, go to `System Settings -> Privacy & Security`, click "Open Anyway", and run the command again.
 
 1. Run a Claude Code server (assumes `claude` is installed on your system and in the `PATH`):
 
@@ -249,21 +249,21 @@ Pi, or a square for other agents. See the [chat UI guide](docs/chat-ui.md) for s
 ### Tasks and the transcript
 
 The chat groups each user request with its response, thinking, tool calls and background activity
-as a task. You can navigate between tasks in the transcript.
+as a task. You can move between tasks in the transcript.
 
 Each task has a timeline on the left: when it started, how long it took and, for Claude Code, Codex
 and Pi, what it [cost](#session-costs). Your prompt appears in a tinted block labelled "You", followed
-by the agent's logo, name, and reply in Markdown. Each tool call occupies one row with its command
+by the agent's logo, name, and reply in Markdown. Each tool call takes one row with its command
 (`$ command`), exit code, duration, and output preview. On wide screens, thinking appears as margin
 notes.
 
 The server's [task](#tasks) determines the displayed state (Working, Done, Failed, Limit reached)
 and which tool calls and thinking belong to it. A strip above the composer shows the agent's
 current activity. While the agent waits for an answer or a login, or a usage limit stopped it, the
-header, tab title and status strip show "Needs you", and queued tasks are marked as held; while a
-failed turn waits to be [tried again](#transient-api-errors), the agent shows as working and they are
-held too. A message
-steered into a task shows inside it, so the chat numbers tasks as the server does. Long tasks show
+header, tab title and status strip show "Needs you", and queued tasks are marked as held. While a
+failed turn waits to be [tried again](#transient-api-errors), the agent shows as working and queued
+tasks are held too. A message steered into a task shows inside it, so the chat numbers tasks as the
+server does. Long tasks show
 their latest 40 steps first.
 
 Each agent message has its own Markdown/raw toggle.
@@ -597,11 +597,10 @@ approving it does not change files.
 - `POST /message` takes `dispatch_mode`: `queue` (the default: send the
   message once the agent is idle), `steer` (add it to the
   turn the agent is working on; the reply says `steered`) or `interrupt` (stop
-  that turn and send the message next). While a turn runs `steer` and
-  `interrupt` need the matching capability,
-  otherwise the answer is 400. When no turn is running (including while the
-  agent restarts or waits for a login), both send or queue the message as
-  usual.
+  that turn and send the message next). While a turn runs, `steer` and
+  `interrupt` need the matching capability; otherwise the answer is 400.
+  When no turn is running (including while the agent restarts or waits for a
+  login), both send or queue the message as usual.
 - `POST /interrupt` stops the running turn (409 if there is none, or while no
   agent runs).
 - `POST /queue/{id}/steer` moves a queued message into the running turn (409
@@ -838,8 +837,8 @@ press. The Ctrl and Alt buttons hold the modifier for the next key.
   time, and `POST /terminal/resize` (`{"cols": 120, "rows": 40}`) sizes it.
   Input a busy program doesn't read gets 503 after 10 seconds; part of it may
   have been typed.
-- It is on by default; `--terminal=false` turns it off. It is as protected as the rest of the API, so use `--api-token` when
-  the server is reachable by others.
+- It is on by default; `--terminal=false` turns it off. It has the same protection as the rest of
+  the API, so use `--api-token` when others can reach the server.
 
 ![The shell terminal: git status and git log in the agent's working directory, and the key bar](docs/screenshots/terminal.png)
 
@@ -892,7 +891,7 @@ state-db: ~/.agentapi/state/{port}.db
 
 - Every `agentapi server` reads the config file, and the first to start locks
   the database, so a `state-db` there without `{port}` is ignored with a
-  warning rather than keep the others from starting. `--state-db` and
+  warning rather than keeping the others from starting. `--state-db` and
   `AGENTAPI_STATE_DB` still set one.
 - Requests that were open when AgentAPI stopped are marked expired: the agent
   that asked is gone.
@@ -1256,7 +1255,7 @@ The [HTTP API reference](#http-api-reference) lists all the endpoints.
 - `DELETE /messages` clears the conversation (messages, rich messages,
   requests, tasks, timeline, errors and the queue) and restarts the agent
   in a new session. While the agent restarts, messages wait in the queue;
-  another restart and opening a session get 409, and so does a restart while AgentAPI stops. Before the
+  another restart and opening a session get 409, and so does a restart while AgentAPI is stopping. Before the
   restart AgentAPI updates Codex (`codex update`) and Pi (`pi update --self`)
   when it launches those CLIs directly, one AgentAPI at a time; an update that
   fails or takes over 3 minutes leaves the installed version. Claude Code
@@ -1762,7 +1761,7 @@ AGENTAPI_API_TOKEN=my-secret agentapi server -- claude
 A generated token stays the same across a restart in place (SIGUSR2, `POST /update`,
 `agentapi restart`), so clients stay signed in; a new `agentapi server` generates a new one.
 
-When enabled, every API request must include `Authorization: Bearer <token>` or the chat UI's
+With authentication on, every API request must include `Authorization: Bearer <token>` or the chat UI's
 session cookie. Static file routes (`/`, `/chat/*`) are exempt so browsers can open the chat UI
 without a token. Tokens are compared in constant time.
 
@@ -1827,8 +1826,8 @@ To allow a specific host, use:
 agentapi server --allowed-hosts 'example.com' -- claude
 ```
 
-To specify multiple hosts, use a comma-separated list when using the `--allowed-hosts` flag, or a
-space-separated list when using the `AGENTAPI_ALLOWED_HOSTS` environment variable.
+To specify multiple hosts, use a comma-separated list in the `--allowed-hosts` flag, or a
+space-separated list in the `AGENTAPI_ALLOWED_HOSTS` environment variable.
 
 ```bash
 agentapi server --allowed-hosts 'example.com,example.org' -- claude
@@ -1854,8 +1853,8 @@ To allow a specific origin, use:
 agentapi server --allowed-origins 'https://example.com' -- claude
 ```
 
-To specify multiple origins, use a comma-separated list when using the `--allowed-origins` flag, or
-a space-separated list when using the `AGENTAPI_ALLOWED_ORIGINS` environment variable. Origins must
+To specify multiple origins, use a comma-separated list in the `--allowed-origins` flag, or a
+space-separated list in the `AGENTAPI_ALLOWED_ORIGINS` environment variable. Origins must
 include the protocol (`http://` or `https://`) and may use wildcards (e.g.,
 `https://*.example.com`):
 
@@ -2354,7 +2353,7 @@ Pending feedback, we're considering the following features:
 
 ## Long-term vision
 
-AgentAPI currently lets developers control coding agents programmatically. We hope the major agents
+AgentAPI lets developers control coding agents programmatically. We hope the major agents
 will eventually offer official SDKs. Whether AgentAPI is still needed will depend on whether vendors
 adopt a common API or continue to use their own formats.
 

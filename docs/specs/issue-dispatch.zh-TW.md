@@ -336,7 +336,7 @@ starting ──► working ──► review ──► done
 - `working` / `review` 之間由 instance 的 `task.started`、`task.completed` 與 `link_pr` 推動。
 - 主機離線超過 3 次 heartbeat：job 顯示 `host offline`，不改 state。
 - 每次 `host.*` 事件，hub 比對主機回報的 job 與自己的紀錄：
-  - hub 沒收到結果的啟動（呼叫失敗、hub 重啟）：主機回報了這個 job 且 agent 相符時接回，改為 `working`；回報的是 `failed` 時標 `failed`；回報為準備中（沒有 `instance_id`）時繼續等；啟動已超過 2 次 heartbeat 主機卻沒有這個 job 時標 `failed`。換 agent 時舊 agent 沒被停掉的，job 照舊由舊 agent 繼續，並附上「換 agent 沒有完成」的錯誤。
+  - hub 沒收到結果的啟動（呼叫失敗、hub 重啟）：主機回報了這個 job 且 agent 相符時接回，改為 `working`；回報的是 `failed` 時標 `failed`；回報為準備中（沒有 `instance_id`）時繼續等；啟動已超過 2 次 heartbeat 主機卻沒有這個 job 時標 `failed`。換 agent 時舊 agent 沒停掉的，job 照舊由舊 agent 繼續，並附上「換 agent 沒有完成」的錯誤。
   - 主機回報、但沒有任何 hub 的啟動要求過的 job（hub 不知道、在別台主機上或已 `done`）：在那台主機上停掉，保留 worktree 與 state db（`?keep_worktree=true&keep_state=true`）。準備中與 `failed` 的 job 不動。
 
 ### 5.5 畫面
@@ -375,7 +375,7 @@ hub 的 **Issues** 頁（標題列的 ◎，或按 `i`）取代總覽的位置�
 - issue 加上另一個 `agent:<type>` label，或
 - hub 畫面 **Switch agent**（dispatch `start` 帶不同的 `agent`）。
 
-job 還沒結束時（`working`、`review`、`failed`；還在 `starting` 時回 409 `job_starting`）。hub 先把 job 標為 `starting` 並回應，以下在背景進行（§5.3）：
+job 還沒結束時（`working`、`review`、`failed`；還在 `starting` 時回 409 `job_starting`），hub 先把 job 標為 `starting` 並回應，以下在背景進行（§5.3）：
 1. launcher 停掉舊的 instance（SIGTERM：AgentAPI 存好狀態再停 agent，所以不另外先 interrupt），**保留 worktree 與分支**（`DELETE /jobs/{key}?keep_worktree=true&keep_state=true`），舊 run 標 `replaced`，記下花費。
 2. 以新 agent 在同一個 worktree 啟動 instance，state db 另開新檔（`state-<n>.db`；不同 agent 的對話無法互通），用 §8 的「接手」prompt。
 3. job 的 `agent` 改為新的，PR 保持不變。
@@ -402,7 +402,7 @@ job 已結束（`done`）時：視為新的一輪開發。遠端與本機分支�
   _金額依 API 牌價換算；使用訂閱方案登入時不會實際計費。_
   ```
 
-- hub 漏收事件時（離線、重啟），以 instance 的 `GET /summary` 的 spend 不足以還原單一 job 的金額，所以花費可能偏低；表格註明「hub 未收到部分事件」。
+- hub 漏收事件時（離線、重啟），instance `GET /summary` 的 spend 不足以還原單一 job 的金額，所以花費可能偏低；表格註明「hub 未收到部分事件」。
 
 ## 6. GitHub App 設定（manifest flow）
 
@@ -436,7 +436,7 @@ job 已結束（`done`）時：視為新的一輪開發。遠端與本機分支�
 
    hub 的網址取自瀏覽器目前的 origin，所以 `http://192.168.9.210:3290` 也能用（GitHub 只把使用者導回這個網址，不會自己連）。webhook 設為停用，事件由 runner 處理。
 
-4. 使用者在 GitHub 按 **Create GitHub App** 後，瀏覽器被導到 `/github/callback?code=...&state=...`。hub 驗證 `state`，一小時內呼叫 `POST https://api.github.com/app-manifests/{code}/conversions`，取得 `id`、`slug`、`client_id`、`client_secret`、`pem`、`webhook_secret`，存入 `github-app.json`；再查 `GET /users/<slug>[bot]` 取得 bot 的 user id。
+4. 使用者在 GitHub 按 **Create GitHub App** 後，GitHub 把瀏覽器導到 `/github/callback?code=...&state=...`。hub 驗證 `state`，一小時內呼叫 `POST https://api.github.com/app-manifests/{code}/conversions`，取得 `id`、`slug`、`client_id`、`client_secret`、`pem`、`webhook_secret`，存入 `github-app.json`；再查 `GET /users/<slug>[bot]` 取得 bot 的 user id。
 5. hub 把瀏覽器導向 `https://github.com/apps/<slug>/installations/new?state=<新的 state>`，讓使用者選要安裝的 repo。
 6. App 的名稱預設為 `agentapi-hub-<6 位隨機十六進位>`（GitHub 上 App 名稱不能重複），可在 GitHub 的表單上修改。
 
@@ -554,7 +554,7 @@ PR {{pr_url}} 有新的 review（{{author}}，{{review_state}}）。
 
 - issue 編號從分支名 `agent/issue-<n>` 取得。
 - 一次只處理事件裡的那個 label：加上不同的 `agent:<type>` 會觸發換 agent（§5.7）；hub 會移除其他 `agent:*` label，移除 label 不觸發任何動作。
-- `/agent` 留言在 issue 或它的 PR 上都可以；PR 上的留言以 PR 的 head 分支找回 issue。須是 `/agent` 加空白或結尾；不是 agent 分支的 PR 上的 `/agent` 會被忽略。
+- `/agent` 留言在 issue 或它的 PR 上都可以；PR 上的留言以 PR 的 head 分支找回 issue。`/agent` 後面須是空白或結尾；不是 agent 分支的 PR 上的 `/agent` 會被忽略。
 - 權限：`author_association` 只做初步過濾（組織的 MEMBER 不一定有 write）；job 再以 `GET /repos/{repo}/collaborators/{user}/permission` 查加 label、留言、review 的人，只接受 write（含 maintain）或 admin，查不到就忽略。
 - review 只有逐行留言、本文是空的也會轉送（逐行留言另以 API 讀取）；兩者都沒有時不轉送。
 - `delivery_id` 是 `github-<repo>-<run_id>`：重跑同一個 run 只算一次（失敗的不算，所以重跑可以重試）。
@@ -600,7 +600,7 @@ jobs:
   2. `config.yaml` 沒有 hub 設定時，執行 `agentapi hub join "$HUB_URL/hooks" --secret ... --public-url 'http://{ip}:{port}'`。
   3. 把 `hub_instance_token` 寫入 `~/.agentapi/instance.token`。
   4. `agentapi host install --now`。
-- 同時修正既有問題（與本功能一起做）：
+- 同時修正既有問題：
   - 移除 Gemini（AgentAPI 3 不支援）。
   - 既有 agent 的 `start_script` 改用 `--state-db`（舊的 `AGENTAPI_STATE_FILE` 已無作用）。
   - 既有 agent 的 `start_script` 經 `AGENTAPI_API_TOKEN` 帶入 `hub_instance_token`。

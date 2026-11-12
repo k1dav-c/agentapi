@@ -3,7 +3,7 @@
 [English](hub.md) | [繁體中文](hub.zh-TW.md)
 
 hub 在一個頁面上監看多台主機的 AgentAPI：列出每個實例，需要你處理的排最前面，點一下就能在聊天
-介面中開啟，桌面和手機都能用。hub 就在同一個 binary 裡：`agentapi hub serve`。
+介面中開啟，桌面和手機都能用。hub 也在 AgentAPI 的 binary 裡：`agentapi hub serve`。
 
 ![hub：所有實例、需要你處理的排最前面，以及在聊天介面中開啟的一個](screenshots/hub-desktop.png)
 
@@ -36,13 +36,13 @@ hub 和各個 AgentAPI 透過你掌控的網路互連，例如你自己的 VPN�
    AgentAPI 都送出有簽章的 `instance.started`、`instance.heartbeat`（每分鐘一次）和
    `instance.stopped`，hub 據此新增、更新或停止實例（手動加入的實例不會因 `instance.stopped`
    停止，hub 會持續嘗試連線）。hub 連不到、又錯過三次 heartbeat 的實例，例如 workspace 被強制
-   關掉的，視為已停止，hub 不再嘗試連線，直到它下一次送 heartbeat。這些事件只用來新增實例、告訴
+   關掉的，視為已停止；在它下一次送 heartbeat 之前，hub 不再嘗試連線。這些事件只用來新增實例、告訴
    hub 它在哪裡；每個實例在做什麼，以它的摘要為準。事件寫了另一個網址時，只有 hub 確定舊網址
-   已經失效，才會改用新網址：在那裡連線失敗超過 10 秒的寬限（Unreachable，或錯過 heartbeat 而視為
+   已經失效，才會改用新網址：在舊網址連線失敗超過 10 秒的寬限（Unreachable，或錯過 heartbeat 而視為
    已停止），或那裡回應的是另一個 AgentAPI。hub 已連上或還在連線中（hub 剛重新啟動，或串流斷線
    未滿 10 秒）時一律不改，手動加入的實例也一律不改。因 `instance.stopped` 而停止的實例，hub 會先
    回舊網址試一次。主機換了位址的 AgentAPI（`--public-url` 裡用 `{ip}`），會在舊位址變成
-   Unreachable 後的第一次 heartbeat 搬到新位址，大約兩分鐘內（見[疑難排解](#疑難排解)）。檔案會記下
+   Unreachable 後的第一次 heartbeat 搬到新位址，大約兩分鐘內（見[疑難排解](#疑難排解)）。實例檔案會記下
    hub 最後一次讀到每個實例摘要的網址，hub 重新啟動後先從那裡追蹤。
 2. hub 追蹤每個實例的摘要（`GET /events?only=summary`），以它為實例狀況的依據：狀態、在等什麼、
    標題、最新任務、佇列和用量限制。每個實例一條連線；斷線時 1 秒後重連，之後間隔逐次拉長，最多
@@ -68,7 +68,7 @@ openssl rand -hex 32   # HUB_TOKEN：登入用
 openssl rand -hex 32   # HUB_SECRET：AgentAPI 為事件簽章用
 ```
 
-第三個是 AgentAPI 自己的 API token（`--api-token`），有設定的話才需要，hub 會把它送給各實例。所有
+第三個是 AgentAPI 自己的 API token（`--api-token`），有設定才需要，hub 會把它送給各實例。所有
 實例可以共用一個；手動加入的實例也可以各有各的。
 
 ### 2. 執行 hub
@@ -209,7 +209,7 @@ hub 沒有回應時（它停了，或它前面的 proxy 回了錯誤頁），頁
 
 ![agent 的花費：最近 24 小時和 7 天、花最多的 agent，以及各主機](screenshots/hub-spend.png)
 
-每個 AgentAPI 每分鐘從 agent 的 session log 算出它在工作目錄裡的所有 session，最近 24 小時和最近
+每個 AgentAPI 每分鐘從 agent 的 session log 算出工作目錄裡所有 session 在最近 24 小時和最近
 7 天花了多少，放進摘要（`spend`）。這是換算成 API 的金額：依模型供應商的牌價計算 token，訂閱方案
 並不會實際收取。Claude Code、Codex 和 Pi 有這個數字；`native-demo` 和 AgentAPI 2 的 PTY agent
 不會顯示。
@@ -347,7 +347,7 @@ hub 舊。
 - 2.1.0 以後的 AgentAPI 能原地重新啟動：執行 `sudo agentapi update --restart`，更新 binary 後，
   這台主機的 AgentAPI 會原地重新啟動到新版（binary 屬於你自己時不必加 `sudo`）。
 - 想讓之後都能從 hub 更新，就加上 `--allow-update`（3.8.0 起），它會先把 `allow-update: true`
-  寫進設定檔。舊版的 `agentapi` 沒有這個參數：先自己把這一行加進 `~/.agentapi/config.yaml`，
+  寫進設定檔。舊版的 `agentapi` 沒有這個旗標：先自己把這一行加進 `~/.agentapi/config.yaml`，
   再執行 `sudo agentapi update --restart`。
 - 2.1.0 之前的版本：先執行 `sudo agentapi update`，再把每個 AgentAPI（或它的 workspace）重新啟動
   一次。
@@ -607,8 +607,8 @@ agent。離線的主機有 **×**，確認後 hub 會移除這台主機，以及
 下該做的那件事：**Assign**、**Answer**、**Review #21**、**Retry**。卡片換狀態時，會移到新的區塊。主機
 和 job 有變動時，hub 會透過串流推給頁面。你在頁面上做的操作，hub 一回應就會顯示，之後再以串流為準。
 
-上方的 repo 選單決定看板的範圍。**Recent repositories** 顯示 hub 的 GitHub App 看得到的 repo 中，最近
-有 push 或變動的 20 個的 open issue，以及所有 repo 的 job。選一個 repo 就只看它的 issue；超過八個時
+上方的 repo 選單決定看板的範圍。**Recent repositories** 從 hub 的 GitHub App 看得到的 repo 中，取最近
+有 push 或變動的 20 個，顯示它們的 open issue，以及所有 repo 的 job。選一個 repo 就只看它的 issue；超過八個時
 有搜尋框可以找。頁面會記住你的選擇。
 
 #### 交辦 issue
@@ -687,7 +687,9 @@ hub 還沒有 GitHub App 時，Issues 會顯示 **Connect GitHub**，從 manifes
 
 `/`、`i` 和 `Esc` 在 hub 頁面上輸入框以外的任何地方都有效；`j`、`k`、方向鍵和 `p` 只在焦點位於清單或沒有焦點時有效，
 所以在其他地方，方向鍵照常捲動總覽。在 Issues 裡，`j`、`k` 在卡片之間移動，`Enter` 開啟，`a` 交辦，
-`c` 開啟它的聊天介面，`n` 開新 issue，`r` 重新讀取 issue。在開啟的聊天介面裡，按鍵會交給聊天介面。鈴鐺的選單決定有 agent 開始需要你時怎麼提醒你：
+`c` 開啟它的聊天介面，`n` 開新 issue，`r` 重新讀取 issue。在開啟的聊天介面裡，按鍵會交給聊天介面。
+
+鈴鐺的選單決定有 agent 開始需要你時怎麼提醒你：
 **Notifications** 在 hub 分頁位於背景時由瀏覽器顯示通知（只限 https 頁面）；**Sound** 在你沒在看這個頁面時
 （分頁在背景，或前面是別的視窗）發出短短的提示音，純 http 也能用。兩個選擇都由瀏覽器記住。螢幕閱讀器也會即時讀出
 同樣的訊息。
@@ -789,7 +791,7 @@ AgentAPI 1.1 以上。在這裡輸入的 token 會為這個實例保存，取代
 - 實例回應的內容不會以 hub 的網頁身分執行（`Content-Security-Policy: sandbox`），所以就算某個
   workspace 被人控制，也無法透過你的瀏覽器碰到其他 workspace。經由 hub 只能讀取實例的 webhook，
   不能修改：webhook 決定 hub 把 token 送到哪裡。
-- 加入網址不會搬動 hub 已有的實例；要先把它移除。
+- 以網址加入不會搬動 hub 已有的實例；要先把它移除。
 - `~/.agentapi/hub/instances.json` 和它的 `.bak` 保存手動加入的實例的 token，建立時只有擁有者
   能讀取。`~/.agentapi/config.yaml` 保存 hub secret，`agentapi hub join` 也以同樣的權限寫入。
 - 登入時會送出 hub token。hub 請只開在 VPN 上，或放在 HTTPS 後面。

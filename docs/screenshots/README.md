@@ -41,7 +41,7 @@ Codex, a local bare repository in place of github.com, and a fake GitHub API. No
 part of `capture-docs.mjs`.
 
 The Issues side of `dispatch-no-github.png` was taken again from a 3.16 build, for the machines
-it shows since: a hub of its own with three machines' launchers (one offline) reported by hand,
+it has shown since: a hub of its own with three machines' launchers (one offline) reported by hand,
 and the list beside it kept from the first.
 
 `hub-settings-github.png` came from the same kind of build and fixtures: an app of the `acme`

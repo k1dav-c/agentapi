@@ -172,7 +172,9 @@ The internal imports point one way, from the commands to the leaves:
    then: once an update replaced the file, `/proc/self/exe` names a deleted
    one. The program is argv[0] as the shell found it (a path, or a name on
    `PATH`) if that is the running file, so a symlink an update repoints is
-   followed; else `os.Executable`. Before it stops, the server runs the
+   followed; else `os.Executable`.
+
+   Before it stops, the server runs the
    program with `--version`, then with the arguments and environment it will
    run with plus the hidden `--validate` (`cmd/server/validate.go`), 10 s each.
    `--validate` resolves the flags, variables and config file as a start
@@ -190,7 +192,9 @@ The internal imports point one way, from the commands to the leaves:
    check fails, the server logs why (the last line the program wrote) and
    goes on. Otherwise the server stops as in step 5, keeps its PID file (the PID
    stays), and `syscall.Exec` runs the program again with stdin, stdout and
-   stderr; every other file Go opened closes on exec. A token a bare
+   stderr; every other file Go opened closes on exec.
+
+   A token a bare
    `--api-token` generated goes along in `AGENTAPI_GENERATED_API_TOKEN`,
    which the new program takes instead of generating one and removes from
    its environment, so clients stay signed in. Without a state DB, an
@@ -293,7 +297,6 @@ type Emitter interface {
 `stable` becomes the API's backward-compatible `stable` status (the agent is idle, or only waits for
 an answer); `initializing` and `changing` become `running`.
 
-
 ```mermaid
 flowchart LR
   http["HTTP handlers"] -- "StartTurn, Steer, Interrupt,<br/>Respond, ApplySettings, Compact" --> conv["native.Conversation"]
@@ -383,7 +386,7 @@ type Factory func(resume Resume) (Adapter, error)
   changed returns the last result; otherwise it works out again only the
   sessions whose logs changed, and adds up the sessions' costs. Concurrent
   requests share the read. The index's size limit doesn't apply to the logs a
-  reading of the costs read (`agentlog.Pass`): every reading reads all of them
+  cost reading goes through (`agentlog.Pass`): every reading reads all of them
   in the same order, and a limit that forgot the log read longest ago would
   forget each one just before it is read again. The index removes logs that no
   longer exist.
@@ -472,7 +475,7 @@ type Factory func(resume Resume) (Adapter, error)
   that answer. That goroutine calls the Sink. The agent has exited, for
   `Wait`, once the process is gone and the loop has handled its output, or
   2 seconds after the process is gone: a process the agent started can keep
-  the output open. Stopping it
+  the output open. Stopping the agent
   closes its input, then sends the group SIGTERM after 3 seconds and SIGKILL
   2 seconds later. Before that, the adapters interrupt a running turn and
   wait up to 3 seconds for it to end, so the agent's session log doesn't end
@@ -639,8 +642,8 @@ usage limit stop, a retry wait, login).
 - A status change between `running` and `stable` triggers the
   `run.status_changed` webhook event. While the webhook sends events of the
   conversation (`task.*`, `request.*`, `message.*`, `tool.*`, `login.*`,
-  `limit.*`, `agent.error`; one of `instance.*` alone, a hub's default,
-  doesn't), the
+  `limit.*`, `agent.error`; one that sends only `instance.*`, a hub's
+  default, doesn't), the
   webhook observer subscribes to the emitter like an `/events` client and
   turns its events into them: the emitter's task updates into `task.*`, an
   agent message once the next one starts or the turn ends. `PUT /webhook`
@@ -799,10 +802,10 @@ as damaged, so going back to one takes `jq .instances` first ([hub.md](hub.md#fi
 inside version 1, such as each instance's work time (`work`: the spans of the last 7 days, written
 only when a span starts or ends), are ones an older hub of the envelope ignores. So are the hub's
 settings, `"settings": {"favorites": [...]}` next to `instances` (`hubSettings`, changed through
-`store.updateSettings`); such a hub drops them at its next write, and the `.bak` it made keeps them.
+`store.updateSettings`); such a hub drops them at its next write, and the `.bak` it made keeps them. A new version
+instead would make every older hub refuse the file.
 Hubs of 3.5 to 3.7 kept the favorites at the top level, `"favorites": [...]`, which the hub reads
-when `settings` is missing; 3.8 to 3.15.1 wrote that copy too, and later hubs don't. A new version
-instead would make every older hub refuse the file. The delivery
+when `settings` is missing; 3.8 to 3.15.1 wrote that copy too, and later hubs don't. The delivery
 IDs of the webhook events it took, each until its signature no longer holds, go the same way into
 `instances.deliveries.json`, so a copy replayed after a restart is refused too.
 
@@ -981,7 +984,9 @@ of the content's SHA-256, so a path never changes; unused ones are removed after
   follows first. Every joined machine has the same secret, so any of them
   can still point a new instance ID, or one whose address stopped answering,
   at an address of its own and get `--instance-token`; a key per machine
-  would close that. Browsers sign in with the hub token for an HttpOnly, SameSite=Lax cookie
+  would close that.
+
+  Browsers sign in with the hub token for an HttpOnly, SameSite=Lax cookie
   that holds its issue time, signed with the token, which the hub refuses
   after 30 days. The proxy drops their cookies and `Authorization`, `Origin`,
   `Referer` and `Sec-Fetch-*` headers and the instances' `Set-Cookie`, so
@@ -1070,8 +1075,9 @@ check each message's origin, window and `source: "agentapi.hub"`. The hub sends 
 the chat says `ready` and when they change; the chat asks for `back`, `cancel-update`, `open` (another
 agent of the machine) and `manage-favorites`, which opens the hub's settings. Each side ignores a
 message it doesn't know, so a chat and a hub of different versions get along: without `favorites`
-the composer shows no ☆. `/chat/hub/` is the
-hub's page (`components/hub-view.tsx`, its parts and hooks in `components/hub/`, the rows' shared
+the composer shows no ☆.
+
+`/chat/hub/` is the hub's page (`components/hub-view.tsx`, its parts and hooks in `components/hub/`, the rows' shared
 props in `HubListContext`; its logic in `lib/hub.ts`, the instance, its state and the stream's
 events, and beside it `lib/hub-groups.ts`, `hub-machines.ts`, `hub-filter.ts`, `hub-format.ts`,
 `hub-spend.ts`, `hub-work.ts`, `hub-version.ts` and `hub-order.ts`; the changes it makes through
@@ -1083,12 +1089,14 @@ the assign menu; `use-dispatch.ts` reads the issues and acts) works on the board
 `lib/hub-issues.ts` (the cards by section, the suggested agent and machine, the timeline), with the
 dispatch's calls in `lib/hub-dispatch.ts`, which checks each answer as it comes. The hub's GitHub
 App is read once for Issues and the settings' GitHub tab (`lib/hub-github-store.ts`,
-`useHubGitHub`), again whenever the page shows again. The settings' Providers tab
+`useHubGitHub`), and again whenever the page shows again. The settings' Providers tab
 (`components/hub/providers-settings.tsx`, its logic in `lib/hub-providers.ts`) edits the model
 providers. The machines and jobs come with the stream's
-`dispatch` event, which also feeds the badge on the Issues button and the rows' chips of the agents
-of issues (`HubListContext.jobs`); an action's answer shows on the board until the stream has the
-job as new. The hub's API isn't huma's: its wire types are generated, `make gen`
+`dispatch` event, which also feeds the badge on the Issues button and the list rows' issue chips
+(`HubListContext.jobs`); an action's answer shows on the board until the stream has the
+job as new.
+
+The hub's API isn't huma's: its wire types are generated, `make gen`
 writing `lib/hub/hub-schema.json` from the Go types (`hub.Schema`) and `bun run gen:api` writing
 `lib/hub-schema.ts` from it, with `hubLimits`, the limits the page checks; `parseHubEvent` reads
 each event of `/api/events`. The frame's messages are read field by field, `parseToFrame` in the
@@ -1124,7 +1132,7 @@ chat and `parseFromFrame` in the hub.
   newer server (the hub serves its own build to instances of every
   version), becomes one it knows there too. IndexedDB keeps each server's
   conversation for the next visit, one record per message, writing only
-  what changed, with the sequence number of what it saved; a server's cache goes after 14 days without use,
+  what changed, with the sequence number of what it saved. A server's cache goes after 14 days without use,
   and the least recently used go beyond 100 servers or 50,000 records in
   all; a hub opens each instance as a server of its own
   (`lib/session-cache.ts`).
@@ -1161,7 +1169,7 @@ chat and `parseFromFrame` in the hub.
   thinking), the dock above the composer (the status strip, the login card, request cards, the usage limit card,
   the retry card, the cold prompt cache note), the composer (`message-input.tsx`, with slash
   commands, the session settings and the usage meter; the model menu groups the agent's own
-models and each provider's, `lib/session-settings.ts`), the Explorer (with the
+  models and each provider's, `lib/session-settings.ts`), the Explorer (with the
   earlier sessions and what they cost, `session-history.tsx`, and the webhook,
   `webhook-settings.tsx`), the Lineage panel of the
   subagents (`lineage.tsx`), the file viewer and the shell terminal

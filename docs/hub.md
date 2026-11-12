@@ -37,7 +37,7 @@ hub never has to be on the public internet.
    `~/.agentapi/config.yaml`, which every `agentapi server` of that user reads when it starts. Each
    AgentAPI then sends signed `instance.started`, `instance.heartbeat` (every minute) and
    `instance.stopped` events, and the hub adds, updates or stops the instance (`instance.stopped`
-   doesn't stop one added by hand: the hub keeps trying it). One the hub can't reach that also
+   doesn't stop one added by hand: the hub keeps trying it). An instance the hub can't reach that also
    missed three heartbeats, such as one whose workspace was killed, counts as stopped, and the hub
    stops trying until its next heartbeat. These events only add instances and say where they are;
    what each one does comes from its summary. An event that names another URL moves the instance
@@ -177,8 +177,9 @@ agentapi list         # the AgentAPIs running here and what each one's summary s
 
 An agent on the machine can do this step for you. The
 [agentapi-hub-join skill](../skills/agentapi-hub-join/SKILL.md) has Claude Code check the version
-and that the hub answers, ask you for the hub's URL, its secret, this machine's address and whether
-the hub may update this machine's AgentAPIs, join, and check where each AgentAPI reports. It never
+and that the hub answers, and ask you for the hub's URL, its secret, this machine's address and
+whether the hub may update this machine's AgentAPIs. It then joins and checks where each AgentAPI
+reports. It never
 restarts an AgentAPI or prints the secret, and asks before it runs anything with `sudo`. Install it
 on that machine:
 
@@ -468,7 +469,7 @@ change the hub refuses or doesn't get (a group, a pin, a mute, a forget) changes
 why in a notice.
 
 Once there is a group, the list gets a header per group, by name, with the instances in no group
-last under **Ungrouped**, [By machine](#by-machine) too; [Recent changes](#recent-changes) shows no
+last under **Ungrouped**, in [By machine](#by-machine) too; [Recent changes](#recent-changes) shows no
 group headers. A header shows
 how many instances the group has and, in amber, how many need you, so a folded group still tells
 you. Tap a header to fold or unfold it; each browser remembers which groups it folded. The pencil
@@ -538,7 +539,7 @@ long ago that change was. The card shows the agent open beside the list when it 
 otherwise the tab picked on it, as long as you picked it after the card's latest change; else the
 agent that changed last. So a pick stays until something on the machine changes, and then the card
 shows what changed. The panel names the agent's group and how long ago it last changed, as a
-recent row does. Picks in Recent changes are apart from those in Groups.
+recent row does. Picks in Recent changes are separate from those in Groups.
 
 `j` and `k` step from card to card, to the agent the card shows, and ← and → show the card's other
 agents there without opening them; `Enter` opens the one shown. On the tabs themselves, ← and →
@@ -558,7 +559,7 @@ next pinned agent the list shows, and **Unpin** takes it out. `p` pins or unpins
 focus.
 
 A pinned agent shows only there, not again in its group, its machine's card or below in the recent
-list; [By machine](#by-machine) too, it keeps a row of its own. The row has a pin after the name and,
+list; in [By machine](#by-machine) it keeps a row of its own too. The row has a pin after the name and,
 where there is room, names its group. The section's header counts its
 agents and those that need you, and folds like a group's. Below it, the rest of the list gets
 headers too: the groups and **Ungrouped**, or **Recent changes**. The filters and the search apply
@@ -653,8 +654,8 @@ keys you would give each of those machines, and each agent that runs on the prov
 
 ![Hub settings: the hub's GitHub App, where it is installed and on which repositories](screenshots/hub-settings-github.png)
 
-The **GitHub** tab of **Hub settings** shows the hub's GitHub App, which lists the
-[Issues](#issues) and which the jobs push branches and open pull requests as. On the Issues page,
+The **GitHub** tab of **Hub settings** shows the hub's GitHub App. The app lists the
+[Issues](#issues), and the jobs push branches and open pull requests as the app. On the Issues page,
 the app's name beside **Issues**, and **GitHub settings…** at the foot of the repository menu, open
 it too. It has the app's name, linked to its page on GitHub, and the account or organization that
 owns it. Below, each account the app is installed on has its picture, **All repositories** or how
@@ -716,7 +717,7 @@ page gets the machines and jobs from the hub's stream as they change. What you d
 shows at once, as the hub answers it; the stream takes over from there.
 
 The repository menu at the top picks the board's scope. **Recent repositories** shows the open
-issues of the 20 that the hub's GitHub App can see that were pushed to or changed last, and the
+issues of the 20 repositories the hub's GitHub App can see that were pushed to or changed last, and the
 jobs of all of them. Pick one repository to see only its issues; past eight, a search box finds
 one. The page keeps the choice.
 

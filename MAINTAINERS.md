@@ -3,8 +3,8 @@
 ## Release Process
 
 On every push to `main`, `.github/workflows/release.yml` first asks `release-version.sh` whether
-the push releases anything (job Plan, a few seconds); a push that doesn't, such as one of `docs:`
-commits alone, runs nothing more. Otherwise it runs the tests (`.github/workflows/go-test.yml`, as
+the push releases anything (job Plan, a few seconds); a push that doesn't, such as one with only `docs:`
+commits, runs nothing more. Otherwise it runs the tests (`.github/workflows/go-test.yml`, as
 a reusable workflow) on that commit, and releases nothing unless its jobs (test, race, lint) pass,
 because AgentAPIs with `--allow-update` install the latest release. The release job asks
 `release-version.sh` again, which runs `next-version.sh` to choose the next version from
@@ -56,7 +56,7 @@ users have no sudo and can't read each other's home directories: a pull request'
 the Go and Bun the release builds with, nor reach the files of the machine's own AgentAPIs and
 hub. `ghrunner-firewall.service` (`/usr/local/sbin/ghrunner-firewall`) keeps both users to the
 internet: they can't connect to the machine's services on fixed ports (its AgentAPIs, hub, ssh,
-Coder, Docker), nor to the LAN, Docker's networks, Tailscale or the cloud metadata address; DNS and
+Coder, Docker), nor to the LAN, Docker's networks, Tailscale or the cloud metadata address. DNS and
 the ports their own tests listen on (20000-60999: the launcher's tests pick theirs below the
 ephemeral ports) stay open. The jobs need `gcc` (the race detector), `shellcheck`, `file`, `unzip`
 (to set up Bun) and `gh` on the machine; the workflows set up Go and Bun themselves, Bun at a pinned
