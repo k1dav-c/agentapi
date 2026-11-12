@@ -603,14 +603,8 @@ approving it does not change files.
   login), both send or queue the message as usual.
 - `POST /interrupt` stops the running turn (409 if there is none, or while no
   agent runs).
-- `POST /queue/{id}/steer` moves a queued message into the running turn (409
-  if no turn is running; the message stays queued).
-- `PUT /queue` with `{"ids": [...]}` reorders the queue. It must list every
-  queued message once (409 otherwise).
-- If the agent refuses a queued message, AgentAPI tries it up to 5 times in
-  all, then drops it with an error that quotes it. A message the agent didn't
-  answer in time is dropped at once: it may have reached the agent, and
-  sending it again could run the task twice.
+- A queued message can be steered into the running turn too; see
+  [Message queue](#message-queue) for the queue's endpoints.
 
 `GET /status` reports the supported `capabilities`: `steer`, `interrupt`, `resume` (the session
 can be resumed when AgentAPI starts again, see [Persistent sessions](#persistent-sessions)),
@@ -1330,10 +1324,14 @@ The API and the chat UI can show, edit or delete a queued message before it goes
 - `GET /queue` lists the queued messages.
 - `PUT /queue/{id}` edits a queued message and `DELETE /queue/{id}` removes
   it.
-- `PUT /queue` with `{"ids": [...]}` reorders the queue; it must list every
-  queued message once.
-- `POST /queue/{id}/steer` moves a queued message into the turn the agent is
-  working on.
+- `PUT /queue` with `{"ids": [...]}` reorders the queue. It must list every
+  queued message once (409 otherwise).
+- `POST /queue/{id}/steer` moves a queued message into the running turn (409
+  if no turn is running; the message stays queued).
+- If the agent refuses a queued message, AgentAPI tries it up to 5 times in
+  all, then drops it with an error that quotes it. A message the agent didn't
+  answer in time is dropped at once: it may have reached the agent, and
+  sending it again could run the task twice.
 - With `?sync=1`, `/events` sends a `queue_update` with the whole queue
   whenever it changes, so a client sees what another client queued without
   asking.
