@@ -228,11 +228,9 @@ func (s *Server) getSettings(ctx context.Context, _ *struct{}) (*SettingsRespons
 func (s *Server) updateSettings(ctx context.Context, input *UpdateSettingsRequest) (*SettingsResponse, error) {
 	applyCtx, cancel := s.agentCtx(nativeCallTimeout)
 	defer cancel()
-	err := s.native.ApplySettings(applyCtx, input.Body)
-	var relaunch *native.RelaunchError
-	if errors.Is(err, native.ErrProviderRelaunch) && errors.As(err, &relaunch) {
-		err = s.relaunchOnProvider(applyCtx, input.Body, relaunch.Carry)
-	}
+	err := s.native.ApplySettingsAndRelaunch(applyCtx, input.Body, func(relaunch native.ProviderRelaunch) error {
+		return s.relaunchOnProvider(applyCtx, relaunch)
+	})
 	if err := settingsError(err); err != nil {
 		return nil, err
 	}
@@ -240,17 +238,17 @@ func (s *Server) updateSettings(ctx context.Context, input *UpdateSettingsReques
 }
 
 // relaunchOnProvider switches providers with a new agent, which continues
-// the session, or with carry starts a new one with the conversation's
-// text, the conversation staying as it is: for an agent that can't switch
-// while it runs. Like a restart, it holds s.mu, so messages wait in the
-// queue meanwhile.
-func (s *Server) relaunchOnProvider(ctx context.Context, change agentstate.Settings, carry bool) error {
+// the session, or with carry starts a new one with the conversation's text,
+// the conversation staying as it is. Like a restart, it holds s.mu, so
+// messages wait in the queue meanwhile. ApplySettingsAndRelaunch keeps the
+// adapter's mutation sequence across this call and replacement.Start's caller.
+func (s *Server) relaunchOnProvider(ctx context.Context, begin native.ProviderRelaunch) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.restartRefusedLocked(); err != nil {
 		return huma.Error409Conflict(err.Error())
 	}
-	replacement, err := s.native.BeginProviderSwitch(ctx, change, carry)
+	replacement, err := begin()
 	if errors.Is(err, native.ErrTurnActive) {
 		return huma.Error409Conflict("the agent is working on a turn or compacting its context; switch providers once it is done")
 	}

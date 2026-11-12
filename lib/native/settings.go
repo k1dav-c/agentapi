@@ -113,11 +113,23 @@ type RelaunchError struct {
 	// text (Resume.Carry). Codex binds a thread to its provider, and a
 	// thread holds items of its provider's own that another refuses.
 	Carry bool
+	// Recovery, if set, is the last known provider/model to launch instead
+	// of the requested target after a switch left the running agent's state
+	// unknown or couldn't roll it back.
+	Recovery *agentstate.Settings
+	// Cause is the switch failure a recovery relaunch must still report
+	// after the previous configuration is running again.
+	Cause error
 }
 
 func (e *RelaunchError) Error() string {
+	if e.Cause != nil {
+		return fmt.Sprintf("the provider switch failed; the agent starts again on its previous provider: %v", e.Cause)
+	}
 	return "the agent switches providers in a new process"
 }
+
+func (e *RelaunchError) Unwrap() error { return e.Cause }
 
 // Configurable is implemented by adapters whose session settings can
 // change while the agent runs; agentstate.Capabilities.Settings reports

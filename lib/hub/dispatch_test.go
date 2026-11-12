@@ -29,7 +29,7 @@ func TestHubDispatch(t *testing.T) {
 		}
 		starts.Add(1)
 		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(host.StartResponse{Job: host.JobInfo{Key: "acme/widget#3", Agent: "claude", InstanceID: "pve~acme~widget~3", State: host.JobRunning}, Created: true})
+		_ = json.NewEncoder(w).Encode(host.StartResponse{Job: host.JobInfo{Key: "acme/widget#3", Agent: "claude", InstanceID: "pve~acme~widget~3", ServerID: "run-9", State: host.JobRunning}, Created: true})
 	}))
 	defer launcher.Close()
 

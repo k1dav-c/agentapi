@@ -1,6 +1,20 @@
 import {describe, expect, test} from "bun:test";
 import {idleInstance as instance, summary} from "./hub-fixtures";
-import {countedSpends, countedTokens, currentSpend, spendTitle, spendTotals, tokensTitle, tokenTotals, type Spend} from "./hub-spend";
+import {
+  countedSpends,
+  countedTokens,
+  currentSpend,
+  providerPeriod,
+  providerPriced,
+  providerTitle,
+  providerTotals,
+  spendTitle,
+  spendTotals,
+  tokensTitle,
+  tokenTotals,
+  type ProviderSpend,
+  type Spend,
+} from "./hub-spend";
 
 describe("spend", () => {
   const spending = (day_usd: number, week_usd: number, scope: string, updated_at = "2026-10-26T00:00:00Z") =>
@@ -67,6 +81,54 @@ describe("spend", () => {
     expect(spendTitle(4.2, 30, false, 3_400_000)).toBe("$4.20 in the last 24 hours, $30 in the last 7 days (API-equivalent, at list prices; a subscription doesn't charge it); 3.4M tokens in the last 24 hours");
     expect(spendTitle(4.2, 30, true, 950)).toStartWith("Last known, not counted: $4.20");
     expect(spendTitle(4.2, 30, true, 950)).toEndWith("; 950 tokens in the last 24 hours");
+  });
+
+  // A provider's figures: day dollars and n tokens in the last 24 hours,
+  // seven times both in the week.
+  const onProvider = (provider: string, day: number, n: number): ProviderSpend => ({
+    provider,
+    day_usd: day,
+    week_usd: 7 * day,
+    day_tokens: tokens(n / 10),
+    week_tokens: tokens((7 * n) / 10),
+  });
+  const byProvider = (scope: string, providers: ProviderSpend[], updated_at = "2026-10-26T00:00:00Z") =>
+    summary({spend: {day_usd: 0, week_usd: 0, scope, updated_at, providers}});
+
+  test("providers: each provider's totals, each scope once, the most spent this week first", () => {
+    const rows = [
+      instance("a", {summary: byProvider("same", [onProvider("default", 1, 100)], "2026-10-26T10:00:00Z")}),
+      // The same sessions, read later: they count, not a's.
+      instance("b", {summary: byProvider("same", [onProvider("default", 2, 200), onProvider("gateway", 0, 5000)], "2026-10-26T10:01:00Z")}),
+      instance("c", {summary: byProvider("other", [onProvider("vllm", 3, 10), onProvider("gateway", 0, 1000)])}),
+      // An earlier AgentAPI: a spend, no providers.
+      instance("d", {summary: spending(9, 90, "older")}),
+      instance("e", {state: "stopped", connection: "stopped", summary: byProvider("gone", [onProvider("vllm", 100, 100)])}),
+    ];
+    const totals = providerTotals(rows);
+    expect(totals.counted).toBe(3);
+    expect(totals.providers).toEqual([
+      {provider: "vllm", day: 3, week: 21, dayTokens: 10, weekTokens: 70},
+      {provider: "default", day: 2, week: 14, dayTokens: 200, weekTokens: 1400},
+      // Unpriced: the most tokens after the amounts.
+      {provider: "gateway", day: 0, week: 0, dayTokens: 6000, weekTokens: 42000},
+    ]);
+    expect(providerTotals([instance("f")])).toEqual({providers: [], counted: 0});
+  });
+
+  test("providers: an amount of nothing with tokens has no known price", () => {
+    expect(providerPriced(0, 0)).toBe(true);
+    expect(providerPriced(1.5, 100)).toBe(true);
+    expect(providerPriced(0, 100)).toBe(false);
+    expect(providerPeriod(4.2, 3_400_000)).toBe("3.4M tokens, $4.20");
+    expect(providerPeriod(0, 950)).toBe("950 tokens, no price");
+    expect(providerPeriod(0, 0)).toBe("0 tokens, $0");
+    expect(providerTitle({provider: "gateway", day: 0, week: 4.2, dayTokens: 0, weekTokens: 3_400_000})).toBe(
+      "0 tokens ($0) in the last 24 hours, 3.4M tokens ($4.20) in the last 7 days (API-equivalent, at list prices)",
+    );
+    expect(providerTitle({provider: "gateway", day: 0, week: 0, dayTokens: 950, weekTokens: 1200})).toBe(
+      "950 tokens (no known price) in the last 24 hours, 1.2k tokens (no known price) in the last 7 days (API-equivalent, at list prices)",
+    );
   });
 
 });

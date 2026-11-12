@@ -2,6 +2,7 @@
 
 import {useEffect, useMemo, useRef, useState} from "react";
 import {
+  Activity,
   Bot,
   Check,
   ChevronRight,
@@ -24,7 +25,8 @@ import {
 import {toast} from "sonner";
 import {Button} from "@/components/ui/button";
 import {Kbd} from "@/components/ui/kbd";
-import {createHubAPI, hubErrorText} from "@/lib/hub-api";
+import type {HubInstance} from "@/lib/hub";
+import {createHubAPI, HubAPIError, hubErrorText} from "@/lib/hub-api";
 import {
   changeOf,
   checkFailureText,
@@ -43,7 +45,9 @@ import {
   type ProviderChange,
   type ProviderDraft,
   type ProviderModel,
+  type ProviderSnapshot,
 } from "@/lib/hub-providers";
+import {providerPeriod, providerTitle, providerTotals, type ProviderTotal} from "@/lib/hub-spend";
 import {cn} from "@/lib/utils";
 import {fieldClass} from "./styles";
 
@@ -56,27 +60,34 @@ type Editing = {id: string | null};
 // the whole list (PUT /api/providers); the list shows the hub's answer, and
 // a refused change keeps the editor open with a toast. editor tells the
 // dialog whether the editor is open, and closes it: Escape closes the
-// editor first, and a click outside doesn't lose what it holds.
+// editor first, and a click outside doesn't lose what it holds. Each
+// provider says what the instances' agents used it for, once some report it.
 export function ProvidersSettings({
   root,
+  instances,
   editor,
   headingRef,
 }: {
   root: string;
+  instances?: HubInstance[];
   editor: React.RefObject<{open: boolean; cancel: () => void} | null>;
   headingRef?: React.Ref<HTMLHeadingElement>;
 }) {
   const api = useMemo(() => createHubAPI(root), [root]);
-  const [providers, setProviders] = useState<Provider[] | undefined>(undefined);
+  const usage = useMemo(() => providerTotals(instances ?? []), [instances]);
+  const [snapshot, setSnapshot] = useState<ProviderSnapshot | undefined>(undefined);
   const [loadError, setLoadError] = useState("");
   const [editing, setEditing] = useState<Editing | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // A save may close only the operation that started it, not an editor or
+  // confirmation opened while its request was under way.
+  const operation = useRef(0);
 
   useEffect(() => {
     let current = true;
     api.getProviders().then(
-      (list) => current && setProviders(list),
+      (answer) => current && setSnapshot(answer),
       (error: unknown) => current && setLoadError(hubErrorText(error)),
     );
     return () => {
@@ -95,42 +106,61 @@ export function ProvidersSettings({
     editor.current = {
       open: editing !== null || deleting !== null,
       cancel: () => {
+        operation.current++;
         setEditing(null);
         setDeleting(null);
       },
     };
   });
 
-  // save sends the whole list, and reports whether the hub kept it.
+  // save sends the whole list at the revision last read. A conflict gets the
+  // current list without touching the editor, whose draft may still be useful.
   const save = async (next: ProviderChange[]): Promise<boolean> => {
+    if (!snapshot) return false;
     setSaving(true);
     try {
-      setProviders(await api.setProviders(next));
+      setSnapshot(await api.setProviders(snapshot.revision, next));
       return true;
     } catch (error) {
-      toast.error("Couldn't save the providers", {description: hubErrorText(error)});
+      if (error instanceof HubAPIError && error.status === 409) {
+        toast.error("The providers changed elsewhere", {description: "Your draft is still open. Review the latest list before saving again."});
+        try {
+          setSnapshot(await api.getProviders());
+        } catch (refreshError) {
+          toast.error("Couldn't read the latest providers", {description: hubErrorText(refreshError)});
+        }
+      } else {
+        toast.error("Couldn't save the providers", {description: hubErrorText(error)});
+      }
       return false;
     } finally {
       setSaving(false);
     }
   };
 
-  const list = providers ?? [];
+  const list = snapshot?.providers ?? [];
   // commit saves draft in place of previous, or after the others.
   const commit = async (draft: ProviderDraft, previous: Provider | undefined) => {
+    const started = operation.current;
     const change = changeOf(draft, previous);
     const next = previous ? list.map((each) => (each.id === previous.id ? change : keptChange(each))) : [...list.map(keptChange), change];
-    if (await save(next)) setEditing(null);
+    if ((await save(next)) && operation.current === started) setEditing(null);
   };
   const remove = async (provider: Provider) => {
-    if (await save(list.filter((each) => each.id !== provider.id).map(keptChange))) setDeleting(null);
+    const started = operation.current;
+    if ((await save(list.filter((each) => each.id !== provider.id).map(keptChange))) && operation.current === started) setDeleting(null);
   };
 
   const full = list.length >= maxProviders;
   const adding = editing?.id === null;
   const startAdding = () => {
+    operation.current++;
     setDeleting(null);
     setEditing({id: null});
+  };
+  const cancelEditing = () => {
+    operation.current++;
+    setEditing(null);
   };
   return (
     <section aria-labelledby="hub-settings-providers" className="space-y-4">
@@ -163,7 +193,7 @@ export function ProvidersSettings({
         )}
       </div>
 
-      {providers === undefined &&
+      {snapshot === undefined &&
         (loadError ? (
           <p role="alert" className="text-sm text-destructive">
             Couldn&apos;t read the providers: {loadError}
@@ -176,7 +206,7 @@ export function ProvidersSettings({
           </div>
         ))}
 
-      {providers !== undefined && list.length === 0 && !adding && (
+      {snapshot !== undefined && list.length === 0 && !adding && (
         <div className="relative overflow-hidden rounded-2xl border border-dashed px-6 py-9 text-center">
           <div aria-hidden="true" className="mx-auto mb-4 flex w-fit items-center gap-2 text-muted-foreground">
             <span className="grid size-9 place-items-center rounded-xl border bg-card shadow-xs">
@@ -212,7 +242,7 @@ export function ProvidersSettings({
                   others={list.filter((each) => each.id !== provider.id).map((each) => each.id)}
                   saving={saving}
                   onSave={(draft) => void commit(draft, provider)}
-                  onCancel={() => setEditing(null)}
+                  onCancel={cancelEditing}
                 />
               </li>
             ) : deleting === provider.id ? (
@@ -227,7 +257,16 @@ export function ProvidersSettings({
                   Delete <span className="font-medium">{providerName(provider)}</span>
                   {provider.has_key && " and its key"}? Sessions on it go back to their own provider when they start again.
                 </p>
-                <Button type="button" variant="ghost" size="sm" className="h-8 shrink-0" onClick={() => setDeleting(null)}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 shrink-0"
+                  onClick={() => {
+                    operation.current++;
+                    setDeleting(null);
+                  }}
+                >
                   Cancel
                 </Button>
                 <Button autoFocus type="button" variant="destructive" size="sm" className="h-8 shrink-0" disabled={saving} onClick={() => void remove(provider)}>
@@ -239,11 +278,16 @@ export function ProvidersSettings({
               <ProviderRow
                 key={provider.id}
                 provider={provider}
+                usage={usage.counted > 0 ? (usage.providers.find((total) => total.provider === provider.id) ?? null) : undefined}
                 onEdit={() => {
+                  operation.current++;
                   setDeleting(null);
                   setEditing({id: provider.id});
                 }}
-                onDelete={() => setDeleting(provider.id)}
+                onDelete={() => {
+                  operation.current++;
+                  setDeleting(provider.id);
+                }}
               />
             ),
           )}
@@ -252,7 +296,7 @@ export function ProvidersSettings({
 
       {adding && (
         <div className="rounded-2xl border bg-card p-4 shadow-xs ring-1 ring-ring/10">
-          <ProviderEditor api={api} others={list.map((each) => each.id)} saving={saving} onSave={(draft) => void commit(draft, undefined)} onCancel={() => setEditing(null)} />
+          <ProviderEditor api={api} others={list.map((each) => each.id)} saving={saving} onSave={(draft) => void commit(draft, undefined)} onCancel={cancelEditing} />
         </div>
       )}
 
@@ -289,9 +333,21 @@ function ProviderTile({provider, className}: {provider: {id: string; name?: stri
 }
 
 // ProviderRow is a provider in the list: who it is, where it runs, its
-// models and whether it has a key. Its buttons show on hover and focus
-// where there is a pointer, always on a touch screen.
-function ProviderRow({provider, onEdit, onDelete}: {provider: Provider; onEdit: () => void; onDelete: () => void}) {
+// models, whether it has a key, and what the agents used it for (usage:
+// null for nothing in the last 7 days, none while no agent reports it).
+// Its buttons show on hover and focus where there is a pointer, always on a
+// touch screen.
+function ProviderRow({
+  provider,
+  usage,
+  onEdit,
+  onDelete,
+}: {
+  provider: Provider;
+  usage?: ProviderTotal | null;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
   const models = provider.models ?? [];
   const shown = models.slice(0, 3);
   return (
@@ -335,6 +391,7 @@ function ProviderRow({provider, onEdit, onDelete}: {provider: Provider; onEdit: 
             </>
           )}
         </div>
+        {usage !== undefined && <ProviderUsage usage={usage} />}
       </div>
       <div className="flex shrink-0 items-center transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-focus-within:opacity-100 [@media(hover:hover)]:group-hover:opacity-100">
         <IconButton label={`Edit ${providerName(provider)}`} onClick={onEdit}>
@@ -345,6 +402,19 @@ function ProviderRow({provider, onEdit, onDelete}: {provider: Provider; onEdit: 
         </IconButton>
       </div>
     </li>
+  );
+}
+
+// ProviderUsage is a provider's tokens and their cost in the last 24 hours
+// and 7 days, of the agents that report them, each scope once.
+function ProviderUsage({usage}: {usage: ProviderTotal | null}) {
+  return (
+    <p className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground tabular-nums" title={usage ? providerTitle(usage) : undefined} data-provider-usage>
+      <Activity className="size-3 shrink-0" aria-hidden="true" />
+      <span className="truncate">
+        {usage ? `24h ${providerPeriod(usage.day, usage.dayTokens)} · 7d ${providerPeriod(usage.week, usage.weekTokens)}` : "No calls in the last 7 days"}
+      </span>
+    </p>
   );
 }
 
@@ -403,18 +473,27 @@ function ProviderEditor({
 }) {
   const [draft, setDraft] = useState(() => draftOf(provider));
   const [check, setCheck] = useState<Check | null>(null);
+  const checkGeneration = useRef(0);
   const [showKey, setShowKey] = useState(false);
   const [advanced, setAdvanced] = useState(() => !!provider?.anthropic_base_url);
-  // A change of the URL or the key makes the last check stale.
+  // A change of the URL or the key makes the last check stale, including one
+  // whose request has not answered yet.
   const set = (change: Partial<ProviderDraft>) => {
     setDraft((current) => ({...current, ...change}));
-    if ("baseURL" in change || "key" in change || "removeKey" in change) setCheck(null);
+    if ("baseURL" in change || "anthropicBaseURL" in change || "key" in change || "removeKey" in change) {
+      checkGeneration.current++;
+      setCheck(null);
+    }
   };
   // A problem shows once the user tried to save.
   const [tried, setTried] = useState(false);
   const form = useRef<HTMLFormElement>(null);
   useEffect(() => {
+    const checks = checkGeneration;
     form.current?.scrollIntoView({block: "nearest"});
+    return () => {
+      checks.current++;
+    };
   }, []);
   const problem = draftProblem(draft, others);
   const submit = () => {
@@ -423,18 +502,21 @@ function ProviderEditor({
     onSave(draft);
   };
   const runCheck = async () => {
+    const generation = ++checkGeneration.current;
     setCheck({state: "checking"});
     const key = draft.removeKey ? "" : draft.key.trim();
     try {
       const result = await api.checkProvider({
         id: provider?.id ?? draft.id.trim(),
         base_url: draft.baseURL.trim(),
-        // Without a key typed, the hub checks with the one it keeps.
+        anthropic_base_url: draft.anthropicBaseURL.trim(),
+        // Without a key typed, the hub checks with the one it keeps only at
+        // unchanged endpoints.
         ...(key || draft.removeKey || !provider?.has_key ? {api_key: key} : {}),
       });
-      setCheck({state: "ok", models: result.models, latency: result.latency_ms});
+      if (checkGeneration.current === generation) setCheck({state: "ok", models: result.models, latency: result.latency_ms});
     } catch (error) {
-      setCheck({state: "failed", reason: hubErrorText(error)});
+      if (checkGeneration.current === generation) setCheck({state: "failed", reason: hubErrorText(error)});
     }
   };
   const picked = new Set(parseModelIDs(draft.models));
@@ -640,7 +722,15 @@ function ProviderEditor({
             saves
           </span>
         </span>
-        <Button type="button" variant="ghost" className="h-9" onClick={onCancel}>
+        <Button
+          type="button"
+          variant="ghost"
+          className="h-9"
+          onClick={() => {
+            checkGeneration.current++;
+            onCancel();
+          }}
+        >
           Cancel
         </Button>
         <Button type="submit" className="h-9 min-w-20" disabled={saving || (tried && !!problem)}>

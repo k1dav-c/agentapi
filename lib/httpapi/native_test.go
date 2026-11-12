@@ -30,6 +30,7 @@ import (
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/nativetest"
 	"github.com/coder/agentapi/lib/provider"
+	"github.com/coder/agentapi/lib/providerlog"
 	"github.com/coder/agentapi/lib/transcript"
 )
 
@@ -474,8 +475,8 @@ func TestNative_RefusedMessageIsTakenBack(t *testing.T) {
 	}
 
 	// The client reconnects with the epoch it had and gets the full state,
-	// the agent's message and its rich message: only the replay's last
-	// event carries an id, the replay's seq.
+	// the status first, then the agent's message and its rich message:
+	// only the replay's last event carries an id, the replay's seq.
 	events = openEvents(t, n.url+"/events?sync=1&since=3&epoch="+epoch)
 	sync := nextEvent(t, events)
 	require.Equal(t, "session_sync", sync.event)
@@ -491,7 +492,7 @@ func TestNative_RefusedMessageIsTakenBack(t *testing.T) {
 			break
 		}
 	}
-	assert.Equal(t, []string{"message_update", "status_change", "rich_message_update"}, replay)
+	assert.Equal(t, []string{"status_change", "message_update", "rich_message_update"}, replay)
 }
 
 // sseEvent is an event read from an event stream.
@@ -959,4 +960,34 @@ func TestStopBeforeStart(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("Start served after Stop")
 	}
+}
+
+// The server records in the provider ledger which provider the agent's
+// session runs on: when it started, and after a switch.
+func TestNative_ProviderLedger(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	factory := &nativetest.Factory{Providers: true, Configure: func(a *nativetest.Adapter) {
+		configurableAdapter(a)
+		a.Ref = "s1"
+	}}
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte("providers:\n  - {id: kimi, name: Kimi, base_url: https://gw.example.com/v1, api_key: sk-1, models: [Kimi-K3]}\n"), 0o600))
+	ledger := providerlog.Open(filepath.Join(dir, providerlog.FileName), providerlog.Options{})
+	n := newNativeServerConfig(t, nil, func(config *httpapi.ServerConfig) {
+		config.Native.Factory = factory.New
+		config.Native.Providers = provider.NewSource(configPath, nil)
+		config.Native.ProviderLedger = ledger
+	})
+	require.Equal(t, http.StatusOK, n.do(http.MethodPut, "/settings", map[string]any{"provider": "kimi"}, nil))
+	providers := func() []string {
+		marks, _ := ledger.Sessions("claude")
+		var out []string
+		for _, m := range marks["s1"] {
+			out = append(out, m.Provider)
+		}
+		return out
+	}
+	require.Eventually(t, func() bool { return len(providers()) == 2 }, 5*time.Second, 5*time.Millisecond)
+	assert.Equal(t, []string{"", "kimi"}, providers(), "the agent's own, then kimi")
 }

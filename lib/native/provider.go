@@ -17,6 +17,77 @@ import (
 // it with another agent.
 var ErrProviderRelaunch = errors.New("the switch of providers starts the agent again")
 
+// ProviderRelaunch prepares the replacement for a provider switch. It runs
+// inside ApplySettingsAndRelaunch's mutation sequence.
+type ProviderRelaunch func() (*Replacement, error)
+
+// ApplySettingsAndRelaunch applies change and, when that requires another
+// process, runs relaunch with the replacement's prepare step in the same
+// mutation sequence. No second settings request can modify the old adapter
+// in between. A recovery relaunch runs on RelaunchError.Recovery, then still
+// returns the original switch failure after a successful start.
+func (c *Conversation) ApplySettingsAndRelaunch(ctx context.Context, change agentstate.Settings, relaunch func(ProviderRelaunch) error) error {
+	c.settingsMu.Lock()
+	defer c.settingsMu.Unlock()
+	err := c.applySettings(ctx, change)
+	var switchErr *RelaunchError
+	if !errors.Is(err, ErrProviderRelaunch) || !errors.As(err, &switchErr) || relaunch == nil {
+		return err
+	}
+	target := change
+	if switchErr.Recovery != nil {
+		target = *switchErr.Recovery
+	}
+	begin := func() (*Replacement, error) {
+		return c.beginProviderSwitch(ctx, target, switchErr.Carry)
+	}
+	if switchErr.Recovery == nil {
+		return relaunch(begin)
+	}
+	if relaunchErr := relaunch(begin); relaunchErr != nil {
+		// The server couldn't replace the agent now (a turn runs, it
+		// restarts, the previous provider is gone). The conversation
+		// recovers by itself, at once or when the turn ends.
+		c.mu.Lock()
+		deferred := c.providerUnsafe && c.started && c.adapter != nil
+		c.recoverProviderLocked()
+		c.mu.Unlock()
+		if deferred {
+			return err
+		}
+		return relaunchErr
+	}
+	return err
+}
+
+// recoverProviderLocked replaces an agent whose provider/model a failed
+// switch left unknown with one on c.chosen, the last known configuration,
+// in the same session, once no turn runs or compaction is under way. It is
+// what recovers when the server can't relaunch the agent itself. c.mu is
+// held.
+func (c *Conversation) recoverProviderLocked() {
+	if !c.providerUnsafe || !c.started || c.adapter == nil || c.turnActive || c.compacting {
+		return
+	}
+	c.cfg.Logger.Warn("Starting the agent again on its previous provider after a failed switch", "provider", c.chosen.Provider)
+	c.cfg.Emitter.EmitError("The provider switch failed; AgentAPI starts the agent again on its previous provider and model.", conv.ErrorLevelWarning)
+	ctx, resume := c.ctx, c.resumeLocked()
+	r := c.replaceLocked(resume)
+	gen := r.gen
+	c.cfg.Emitter.EmitStatus(conv.StatusInitializing)
+	go func() {
+		// Closed first, as Replacement.Start does: the new agent opens the
+		// same session.
+		r.CloseOld()
+		if !c.current(gen) {
+			return
+		}
+		if err := c.launch(ctx, gen, resume); err != nil {
+			c.failStart(gen, err, true)
+		}
+	}()
+}
+
 // launchProviderLocked is the provider the next agent starts on: the one
 // chosen, nil for the agent's own. A chosen provider no longer defined is
 // dropped, with a warning: the agent starts on its own. One the hub may
@@ -52,6 +123,23 @@ func (c *Conversation) startedOnLocked(adapter Adapter, run *ProviderRun) {
 	if run != nil {
 		c.provider = run.Provider.ID
 	}
+	c.providerSince = c.cfg.Clock.Now()
+}
+
+// reportProviderLocked tells Config.ProviderUsed the provider the session
+// runs on, for an agent that started and can switch providers, once its
+// session is known: not the session a fork copies, whose own the agent
+// reports later. The same report again is left out.
+func (c *Conversation) reportProviderLocked() {
+	if c.cfg.ProviderUsed == nil || !c.started || !c.providerCap || c.sessionRef == "" || c.forking {
+		return
+	}
+	use := ProviderUse{At: c.providerSince, Session: c.sessionRef, Provider: c.provider}
+	if use == c.providerReported {
+		return
+	}
+	c.providerReported = use
+	c.cfg.ProviderUsed(use)
 }
 
 // withProviderLocked is settings with the provider the agent runs on, for
@@ -136,6 +224,23 @@ func (c *Conversation) switchProvider(ctx context.Context, gen int, runner Provi
 	err = runner.SwitchProvider(ctx, to, model)
 	var relaunch *RelaunchError
 	if errors.As(err, &relaunch) {
+		c.mu.Lock()
+		if gen != c.generation {
+			c.mu.Unlock()
+			return ErrNotStarted
+		}
+		if relaunch.Recovery != nil {
+			// The old process may be on the requested provider, the previous
+			// one, or a mixture. No turn runs until a new process has a known
+			// one, and every start from here (a recovery, a restart, an exit)
+			// is on the previous configuration.
+			c.providerUnsafe = true
+			chosen := c.chosen
+			chosen.Provider, chosen.Model = relaunch.Recovery.Provider, relaunch.Recovery.Model
+			c.chooseLocked(chosen)
+			c.cfg.Emitter.EmitStatus(c.statusLocked())
+		}
+		c.mu.Unlock()
 		return fmt.Errorf("%w: %w", ErrProviderRelaunch, err)
 	}
 	if err != nil {
@@ -149,11 +254,13 @@ func (c *Conversation) switchProvider(ctx context.Context, gen int, runner Provi
 	}
 	c.leaveOwnLocked(change.Provider)
 	c.provider = change.Provider
+	c.providerSince = c.cfg.Clock.Now()
 	chosen := c.chosen
 	chosen.Provider = change.Provider
 	chosen.Model = settings.Model
 	c.chosen = chosen
 	c.setSettingsLocked(settings)
+	c.reportProviderLocked()
 	c.mu.Unlock()
 	// The rest applies on the new provider.
 	rest := change
@@ -161,7 +268,7 @@ func (c *Conversation) switchProvider(ctx context.Context, gen int, runner Provi
 	if rest.IsZero() {
 		return nil
 	}
-	return c.ApplySettings(ctx, rest)
+	return c.applySettings(ctx, rest)
 }
 
 // BeginProviderSwitch starts the switch of providers ApplySettings
@@ -173,12 +280,22 @@ func (c *Conversation) switchProvider(ctx context.Context, gen int, runner Provi
 // ErrTurnActive while the agent works on a turn or compacts its context,
 // and an ErrInvalidSetting for a change it can't make.
 func (c *Conversation) BeginProviderSwitch(ctx context.Context, change agentstate.Settings, carry bool) (*Replacement, error) {
+	c.settingsMu.Lock()
+	defer c.settingsMu.Unlock()
+	return c.beginProviderSwitch(ctx, change, carry)
+}
+
+// beginProviderSwitch is BeginProviderSwitch with settingsMu held.
+func (c *Conversation) beginProviderSwitch(ctx context.Context, change agentstate.Settings, carry bool) (*Replacement, error) {
 	_, model, err := c.providerTarget(ctx, change)
 	if err != nil {
 		return nil, err
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if !c.started || c.adapter == nil {
+		return nil, ErrNotStarted
+	}
 	if c.turnActive || c.compacting {
 		return nil, ErrTurnActive
 	}

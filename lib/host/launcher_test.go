@@ -130,7 +130,7 @@ func fakeServer() {
 		}
 	}
 	mux.HandleFunc("GET /status", auth(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = io.WriteString(w, `{"lifecycle":"ready"}`)
+		_ = json.NewEncoder(w).Encode(map[string]string{"lifecycle": "ready", "server_id": "server-" + strconv.Itoa(os.Getpid())})
 	}))
 	// What git in the job gets: run below the job's AgentAPI, as the
 	// agent's git is.
@@ -325,6 +325,7 @@ func TestLauncherStartMessageStop(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, created)
 	assert.Equal(t, JobRunning, job.State)
+	assert.Equal(t, "server-"+strconv.Itoa(job.PID), job.ServerID, "the child's status names this process")
 	assert.Equal(t, "native-demo", job.Agent)
 	assert.Equal(t, 1, job.Run)
 	assert.Equal(t, "main", job.DefaultBranch)
@@ -614,6 +615,8 @@ func TestLauncherRestartsAFailedJob(t *testing.T) {
 	assert.False(t, alive(job.PID, job.InstanceID), "the old AgentAPI is stopped")
 	assert.NotEqual(t, job.PID, again.PID)
 	assert.Equal(t, "claude", again.Agent)
+	assert.NotEmpty(t, again.ServerID)
+	assert.NotEqual(t, job.ServerID, again.ServerID, "the replacement process has a new identity")
 	assert.Equal(t, 2, again.Run)
 	assert.Equal(t, JobRunning, again.State)
 
@@ -640,6 +643,86 @@ func TestLauncherStartFailsFast(t *testing.T) {
 	assert.Contains(t, err.Error(), "refusing to serve")
 	assert.Less(t, time.Since(began), 10*time.Second)
 	assert.Equal(t, JobFailed, e.launcher.Jobs()[0].State)
+}
+
+// If the first save with a new child's PID fails, Start can't claim success
+// and leave that child running untracked. A later check persists the failed
+// record once the state path works again.
+func TestLauncherStartSaveFailureStopsChild(t *testing.T) {
+	e := newTestEnv(t)
+	l := e.launcher
+	badPath := filepath.Join(e.root, "jobs-state-is-a-directory")
+	require.NoError(t, os.MkdirAll(badPath, 0o700))
+	l.mu.Lock()
+	goodPath := l.store.path
+	l.store.path = badPath
+	l.mu.Unlock()
+
+	_, _, err := l.Start(context.Background(), StartRequest{Repo: "acme/widget", Issue: 31})
+	require.Error(t, err)
+	jobs := l.Jobs()
+	require.Len(t, jobs, 1)
+	job := jobs[0]
+	assert.Equal(t, JobFailed, job.State)
+	require.Positive(t, job.PID, "launch assigned the child that had to be stopped")
+	waitFor(t, func() bool { return !alive(job.PID, job.InstanceID) })
+	l.mu.Lock()
+	assert.True(t, l.saveDirty)
+	l.store.path = goodPath
+	l.mu.Unlock()
+
+	l.check(context.Background())
+	l.mu.Lock()
+	assert.False(t, l.saveDirty, "the periodic check retried the failed save")
+	l.mu.Unlock()
+	saved, err := loadStore(goodPath)
+	require.NoError(t, err)
+	require.Len(t, saved.jobs, 1)
+	assert.Equal(t, JobFailed, saved.jobs[0].State)
+	assert.Equal(t, job.PID, saved.jobs[0].PID)
+}
+
+// Restart has the same guarantee when the replacement child's first save
+// fails: neither the old nor the new AgentAPI is left running untracked.
+func TestLauncherRestartSaveFailureStopsChild(t *testing.T) {
+	e := newTestEnv(t)
+	ctx := context.Background()
+	l := e.launcher
+	before, _, err := l.Start(ctx, StartRequest{Repo: "acme/widget", Issue: 32})
+	require.NoError(t, err)
+	l.mu.Lock()
+	l.store.get(before.Key).State = JobFailed
+	badPath := filepath.Join(e.root, "jobs-state-is-a-directory")
+	require.NoError(t, os.MkdirAll(badPath, 0o700))
+	goodPath := l.store.path
+	l.store.path = badPath
+	l.mu.Unlock()
+
+	_, _, err = l.Start(ctx, StartRequest{Repo: "acme/widget", Issue: 32})
+	require.Error(t, err)
+	jobs := l.Jobs()
+	require.Len(t, jobs, 1)
+	after := jobs[0]
+	assert.Equal(t, JobFailed, after.State)
+	require.Positive(t, after.PID)
+	require.NotEqual(t, before.PID, after.PID, "the replacement was launched before the save failed")
+	waitFor(t, func() bool {
+		return !alive(before.PID, before.InstanceID) && !alive(after.PID, after.InstanceID)
+	})
+
+	l.mu.Lock()
+	assert.True(t, l.saveDirty)
+	l.store.path = goodPath
+	l.mu.Unlock()
+	l.check(ctx)
+	l.mu.Lock()
+	assert.False(t, l.saveDirty)
+	l.mu.Unlock()
+	saved, err := loadStore(goodPath)
+	require.NoError(t, err)
+	require.Len(t, saved.jobs, 1)
+	assert.Equal(t, JobFailed, saved.jobs[0].State)
+	assert.Equal(t, after.PID, saved.jobs[0].PID)
 }
 
 func TestRunsMatchesTheWholeArgument(t *testing.T) {

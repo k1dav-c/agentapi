@@ -2,10 +2,12 @@ package claude
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
 
+	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/provider"
 )
@@ -72,16 +74,26 @@ func (a *Adapter) SwitchProvider(ctx context.Context, to *provider.Provider, mod
 	from, fromModel := a.provider, a.model
 	a.mu.Unlock()
 	if err := a.applyEnv(ctx, providerEnv(*to, model)); err != nil {
-		return fmt.Errorf("switch to %s: %w", to.DisplayName(), err)
+		failure := fmt.Errorf("switch to %s: %w", to.DisplayName(), err)
+		if errors.Is(err, native.ErrUnconfirmed) {
+			// apply_flag_settings may have changed any of the variables. Only
+			// a new process is known to have the complete previous environment.
+			return providerRecovery(from, fromModel, failure)
+		}
+		return failure
 	}
 	// Claude Code checks the model with the provider before it switches.
 	if _, err := a.request(ctx, "set_model", map[string]any{"model": model}, nil); err != nil {
-		if from != nil {
-			_ = a.applyEnv(ctx, providerEnv(*from, fromModel))
-			return fmt.Errorf("%s didn't take model %s: %w", to.DisplayName(), model, err)
+		failure := fmt.Errorf("%s didn't take model %s: %w", to.DisplayName(), model, err)
+		if from == nil || errors.Is(err, native.ErrUnconfirmed) {
+			// The original process environment can't be reconstructed, and an
+			// unconfirmed set_model may have taken effect. Restore in a new one.
+			return providerRecovery(from, fromModel, failure)
 		}
-		// The environment of its own provider is that of a new process.
-		return fmt.Errorf("%s didn't take model %s (%w); the agent starts again on its own provider", to.DisplayName(), model, err)
+		if rollbackErr := a.applyEnv(ctx, providerEnv(*from, fromModel)); rollbackErr != nil {
+			return providerRecovery(from, fromModel, fmt.Errorf("%v; restore %s: %w", failure, from.DisplayName(), rollbackErr))
+		}
+		return failure
 	}
 	a.mu.Lock()
 	p := *to
@@ -89,6 +101,17 @@ func (a *Adapter) SwitchProvider(ctx context.Context, to *provider.Provider, mod
 	a.model = model
 	a.mu.Unlock()
 	return nil
+}
+
+// providerRecovery asks the conversation to replace the process, whose
+// provider/model is no longer known, with one on the complete last known
+// configuration. The replacement must never use the failed switch's target.
+func providerRecovery(from *provider.Provider, fromModel string, cause error) error {
+	change := agentstate.Settings{Provider: provider.Default, Model: fromModel}
+	if from != nil {
+		change.Provider = from.ID
+	}
+	return &native.RelaunchError{Recovery: &change, Cause: cause}
 }
 
 // applyEnv sets Claude Code's environment variables in env.

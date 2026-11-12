@@ -9,6 +9,7 @@ import {fromFrame, messageFromHub, openFromFrame, type FrameInstance} from "@/li
 import {cn} from "@/lib/utils";
 import {HubClock} from "./clock";
 import {setFrameFavorites} from "./frame-favorites";
+import {setFrameShown} from "./frame-shown";
 import {MachineSwitch} from "./machine-tabs";
 import {StatusGlyph, stateTone} from "./status-glyph";
 import {UpdateStatus} from "./update-chip";
@@ -18,7 +19,8 @@ import {VersionTag} from "./version-tag";
 // what the instance is and does (the hub tells it), the other agents of its
 // machine, which the hub opens in its place, and the chat's own actions in
 // the same bar, so a phone keeps its height for the conversation. It takes
-// the favorites the hub sends for the composer too (useFrameFavorites).
+// the favorites the hub sends for the composer too (useFrameFavorites), and
+// whether the hub shows it (frame-shown.ts).
 export function FrameBar() {
   const [instance, setInstance] = useState<FrameInstance>();
   useEffect(() => {
@@ -26,6 +28,7 @@ export function FrameBar() {
       const message = messageFromHub(event, window.parent);
       if (message?.type === "instance") setInstance(message.instance);
       else if (message?.type === "favorites") setFrameFavorites(message.favorites);
+      else if (message?.type === "shown") setFrameShown(message.shown);
     };
     window.addEventListener("message", onMessage);
     // On every load of the chat, a reload too: the hub answers each.

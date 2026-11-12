@@ -146,7 +146,7 @@ agentapi server
   - `PATH=~/.agentapi/jobs/<key>/bin:$PATH`（放 `gh` shim）
 - （e2e 測過：繼承 `AGENTAPI_PID_FILE` 會蓋掉別的 instance 的 PID 檔；`--api-token <值>` 用空白分隔時會被當成 agent 指令。）
 - run 從 1 起算，每換一次 agent 加 1（取第一個還沒有 state db 的編號），所以不同 agent 的對話不會混在同一個 db。
-- 子行程用 `setsid` 脫離 launcher；launcher 重啟後依 `jobs.json` 記下的 PID 接回（某個參數必須完全等於 instance ID，才算是這個 job 的 AgentAPI；`--pid-file` 只是讓同一個 job 不會跑兩個 server），行程已不在的 job 以同樣參數重啟（`--state-db` 會接回對話，initial prompt 不會重送）。
+- 子行程用 `setsid` 脫離 launcher；launcher 重啟後依 `jobs.json` 記下的 PID 接回（某個參數必須完全等於 instance ID，才算是這個 job 的 AgentAPI；`--pid-file` 只是讓同一個 job 不會跑兩個 server），行程已不在的 job 以同樣參數重啟（`--state-db` 會接回對話，initial prompt 不會重送）。啟動後如果初始的 job metadata 保存失敗，launcher 會停掉新 process 並回報失敗，不讓不受 `jobs.json` 管理的 process 隨成功結果留下。
 - launcher 每 5 秒檢查一次。AgentAPI 自己結束（或 60 秒內沒開始服務而被停掉）時，job 進入 `restarting`，依最近 30 分鐘內已重啟的次數等 5 秒、15 秒、45 秒、2 分鐘、5 分鐘後再啟動；重啟 5 次後又結束，job 就標為 `failed`（約 8 分鐘內反覆當掉才會失敗，30 分鐘前的重啟不再計入）。重啟時間與下一次的時間記在 `jobs.json`（`restarts`、`restart_at`），launcher 重啟後照樣等待、累計。launcher 自己重啟時接回已停的 job 不算一次重啟。
 - 工作目錄是 worktree。webhook 設定沿用 `config.yaml`，所以 instance 會自動出現在 hub。
 
@@ -246,7 +246,7 @@ hub 畫面的 **+**（加入主機）同時列出這三行。
   "hosts": [{"hostname": "...", "url": "...", "token": "...", "repos": [], "agents": [], "last_seen": "...", "max_jobs": 4}],
   "jobs":  [{"key": "owner/repo#12", "host": "...", "agent": "claude", "instance_id": "...", "state": "working",
              "issue_url": "...", "pr_url": "", "created_at": "...", "updated_at": "...",
-             "runs": [{"agent": "claude", "host": "...", "instance_id": "...", "started_at": "...", "ended_at": "...",
+             "runs": [{"agent": "claude", "host": "...", "instance_id": "...", "server_id": "...", "started_at": "...", "ended_at": "...",
                        "end_reason": "replaced | stopped | failed",
                        "cost": {"usd": 1.23, "tokens": {"input": 0, "output": 0, "cache_write": 0, "cache_read": 0},
                                 "calls": 42, "tasks": 3, "work_seconds": 1800}}],
@@ -288,7 +288,7 @@ GitHub App 另外存在 `~/.agentapi/hub/github-app.json`（0600，不併入 `in
 - 新增 `--dispatch-token`（`AGENTAPI_HUB_DISPATCH_TOKEN`）：只能呼叫 `/api/dispatch`。
 - `/api/github/token`：簽章以 secret 驗證，並以簽章本身去重（delivery ID 不在簽章內）；另須帶該主機的 host token。只發給在該主機上進行中（不含 failed）、用 hub 憑證的 job。
 - `host.*` 事件：主機名稱綁定第一次帶來的 host token（§11）；token 不同或沒帶 token 的事件一律拒絕，不論主機是否在線、事件是不是 `host.stopped`。重灌而換了 token 的主機，要先以 `DELETE /api/hosts/{name}`（Issues 頁離線主機的 **×**）移除。
-- dispatch.json 在背景寫入（不在鎖內做磁碟 I/O），hub 結束時寫完。
+- dispatch.json 在背景寫入（不在鎖內做磁碟 I/O），hub 結束時再寫一次。寫入失敗時保留 pending snapshot，即使沒有新變更也會在一秒後重試，不會被較舊的失敗 snapshot 蓋掉；hub 結束時最後一次寫入仍失敗就記錄錯誤並結束，不無限重試。
 - `/github/callback`、`/github/setup` 是瀏覽器跳轉，需要已登入 hub；沒登入時先登入再跳回。
 
 ### 5.3 派工規則
@@ -386,7 +386,7 @@ job 已結束（`done`）時：視為新的一輪開發。遠端與本機分支�
 ### 5.8 花費彙總
 
 - job 每次「重新開一輪」（done 之後再開工）`round` 加 1；花費留言只列本輪的 run，之前幾輪另列一行合計。
-- hub 收到 instance 的 `task.completed` / `task.failed` 時，把 `data.cost` 累加到這個 instance 所屬的 run（以 `instance.id` 對應 job）；`work_seconds` 取任務的 `duration_seconds` 總和。
+- hub 收到 instance 的 `task.completed` / `task.failed` 時，把 `data.cost` 累加到這個 instance 所屬的 run（以 `instance.id` 與 `server_id` 對應 job 和 process generation）；`work_seconds` 取任務的 `duration_seconds` 總和。換 agent 後舊 process 重試送來的延遲事件與目前 run 的 `server_id` 不同，不會改到新 run 的狀態或花費。run 或事件沒有 `server_id`（舊版 launcher 啟動的 run）時不採計，不猜測歸屬；launcher 需與 hub 一起升級，升級後的 launcher 接手 job 時會從 `/status` 取得 `server_id`，下一次回報時由 hub 補上。
 - 金額是 AgentAPI 換算的 **API 等價價格**；以訂閱方案登入的 agent 實際不會被收這筆錢，留言內要註明。
 - job 結束（`stop`）時，hub 以 App 身分在 PR 留言（沒有 PR 時在 issue），一個 job 只留一則，之後重做時更新同一則（`cost_comment_id`）：
 

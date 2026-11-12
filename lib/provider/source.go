@@ -3,12 +3,15 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -291,6 +294,26 @@ func (s *Source) list(ctx context.Context, p Provider, key string, previous []Mo
 	return entry.models
 }
 
+func sameOrigin(a, b *url.URL) bool {
+	if !strings.EqualFold(a.Scheme, b.Scheme) || !strings.EqualFold(a.Hostname(), b.Hostname()) {
+		return false
+	}
+	port := func(u *url.URL) string {
+		if p := u.Port(); p != "" {
+			return p
+		}
+		switch strings.ToLower(u.Scheme) {
+		case "http":
+			return "80"
+		case "https":
+			return "443"
+		default:
+			return ""
+		}
+	}
+	return port(a) == port(b)
+}
+
 // ListModels asks p's API for its models (GET <base_url>/models, OpenAI's
 // format), with client (nil: one that gives up after 10 seconds).
 func ListModels(ctx context.Context, client *http.Client, p Provider) ([]Model, error) {
@@ -307,7 +330,26 @@ func ListModels(ctx context.Context, client *http.Client, p Provider) ([]Model, 
 		req.Header.Set("Authorization", "Bearer "+p.APIKey)
 		req.Header.Set("x-api-key", p.APIKey)
 	}
-	resp, err := client.Do(req)
+	// Work on a copy so the caller's client and redirect hook stay unchanged.
+	redirectClient := *client
+	checkRedirect := client.CheckRedirect
+	redirectClient.CheckRedirect = func(next *http.Request, via []*http.Request) error {
+		switch {
+		case checkRedirect != nil:
+			if err := checkRedirect(next, via); err != nil {
+				return err
+			}
+		case len(via) >= 10:
+			// A custom hook otherwise replaces net/http's default limit.
+			return errors.New("stopped after 10 redirects")
+		}
+		if len(via) > 0 && !sameOrigin(next.URL, via[0].URL) {
+			next.Header.Del("Authorization")
+			next.Header.Del("x-api-key")
+		}
+		return nil
+	}
+	resp, err := redirectClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

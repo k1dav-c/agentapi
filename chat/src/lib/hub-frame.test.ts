@@ -1,7 +1,7 @@
 import {describe, expect, test} from "bun:test";
 import type {HubInstance} from "./hub";
 import {hubInstance} from "./hub-fixtures";
-import {favoritesToFrame, frameInstance, fromFrame, messageFromFrame, messageFromHub, openFromFrame, parseFromFrame, parseToFrame, readyAgain, toFrame, type FrameInstance} from "./hub-frame";
+import {favoritesToFrame, frameInstance, fromFrame, messageFromFrame, messageFromHub, openFromFrame, parseFromFrame, parseToFrame, shownToFrame, toFrame, type FrameInstance} from "./hub-frame";
 
 const ORIGIN = "http://hub.test";
 
@@ -33,19 +33,6 @@ describe("the chat's messages to the hub", () => {
 });
 
 describe("the hub's side", () => {
-  test("each ready of the same chat counts, so the hub tells it the instance again", () => {
-    const first = readyAgain(undefined, "a");
-    expect(first).toEqual({instance: "a", ready: 1});
-    // The chat reloaded: a new state, which the hub posts its info again for.
-    const again = readyAgain(first, "a");
-    expect(again).toEqual({instance: "a", ready: 2});
-    expect(again).not.toBe(first);
-  });
-
-  test("another instance's chat starts over", () => {
-    expect(readyAgain({instance: "a", ready: 3}, "b")).toEqual({instance: "b", ready: 1});
-  });
-
   test("the info it posts", () => {
     expect(frameInstance(instance, {hubVersion: "2.2.0", agent: "Claude Code", tab: "/chat/?url=x"})).toEqual({
       id: "dev-1:3284",
@@ -140,5 +127,17 @@ describe("favorites", () => {
     expect(from(told, {})).toBeUndefined();
     expect(from(told, parent, "http://evil.test")).toBeUndefined();
     expect(from({source: "agentapi.hub", type: "favorites", favorites: "x"})).toBeUndefined();
+  });
+});
+
+describe("shown", () => {
+  const parent = {};
+  const from = (data: unknown, source: unknown = parent) => messageFromHub({origin: ORIGIN, data, source: source as MessageEventSource}, parent, ORIGIN);
+
+  test("the chat learns whether the hub shows it, from the page that frames it only", () => {
+    expect(from(shownToFrame(false))).toEqual({source: "agentapi.hub", type: "shown", shown: false});
+    expect(from(shownToFrame(true))).toEqual({source: "agentapi.hub", type: "shown", shown: true});
+    expect(from(shownToFrame(false), {})).toBeUndefined();
+    for (const shown of ["false", 0, null, undefined]) expect(from({source: "agentapi.hub", type: "shown", shown})).toBeUndefined();
   });
 });

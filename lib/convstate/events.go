@@ -1,9 +1,12 @@
 package convstate
 
 import (
+	"cmp"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"maps"
+	"math"
 	"slices"
 	"sync"
 	"time"
@@ -516,7 +519,9 @@ func (e *EventEmitter) Reset() {
 // current state for a new subscriber. With a matching epoch, only messages,
 // rich messages and requests changed after since are included; otherwise
 // the full state is, of the recent tasks only (see DefaultRecentTasks):
-// the earlier ones are read a page at a time. Caller holds e.mu.
+// the earlier ones are read a page at a time. A full replay that starts
+// with a session_sync holds the tasks the newest first
+// (newestTaskFirstLocked). Caller holds e.mu.
 func (e *EventEmitter) currentStateAsEvents(since uint64, epoch string, wants func(EventType) bool) []Event {
 	// since 0 asks for everything: the client must replace its state rather
 	// than merge into what it holds. So does a client that resumes from
@@ -536,18 +541,50 @@ func (e *EventEmitter) currentStateAsEvents(since uint64, epoch string, wants fu
 		events = append(events, Event{Type: EventTypeSessionSync})
 	}
 	replaySeq := since
+	var messages, rich []Event
+	// richTasks has the task of each rich message, for
+	// newestTaskFirstLocked.
+	var richTasks []int
 	if wants(EventTypeMessageUpdate) {
-		events = slices.Grow(events, len(e.messages)+3)
+		messages = make([]Event, 0, len(e.messages))
 		for i, msg := range e.messages {
 			if e.messageSeq[i] <= since || full && !recent.holdsMessage(msg.Id) {
 				continue
 			}
 			replaySeq = max(replaySeq, e.messageSeq[i])
-			events = append(events, Event{
+			messages = append(messages, Event{
 				Type:    EventTypeMessageUpdate,
 				Payload: MessageUpdateBody{Id: msg.Id, Role: msg.Role, Message: msg.Message, Time: msg.Time, Seq: e.messageSeq[i]},
 			})
 		}
+	}
+	if wants(EventTypeRichMessageUpdate) {
+		// The rich messages come by task: one without a TaskID goes with
+		// the one before it.
+		task := beforeTasks
+		for i, msg := range e.richMessages {
+			if msg.TaskID != nil {
+				task = *msg.TaskID
+			}
+			if e.richSeq[i] <= since || full && !recent.HoldsRich(msg.TaskID) {
+				continue
+			}
+			replaySeq = max(replaySeq, e.richSeq[i])
+			richTasks = append(richTasks, task)
+			rich = append(rich, Event{
+				Type:    EventTypeRichMessageUpdate,
+				Payload: RichMessageUpdateBody{RichMessage: msg, Seq: e.richSeq[i]},
+			})
+		}
+	}
+	// A client that wants session_sync gets the status first, then the
+	// tasks of a full replay the newest first, each with its rich
+	// messages: the one it looks at is whole before the earlier ones
+	// arrive. Other clients get the order they always had.
+	newestFirst := full && sync
+	events = slices.Grow(events, len(messages)+len(rich)+len(e.errors)+len(e.requests)+len(e.tasks.tasks)+4)
+	if !newestFirst {
+		events = append(events, messages...)
 	}
 	if wants(EventTypeStatusChange) {
 		events = append(events, Event{
@@ -555,8 +592,6 @@ func (e *EventEmitter) currentStateAsEvents(since uint64, epoch string, wants fu
 			Payload: e.statusChangeBody(),
 		})
 	}
-
-	// Include all error events
 	if wants(EventTypeError) {
 		for _, err := range e.errors {
 			events = append(events, Event{
@@ -565,19 +600,10 @@ func (e *EventEmitter) currentStateAsEvents(since uint64, epoch string, wants fu
 			})
 		}
 	}
-
-	// Include rich message events for late subscriber replay
-	if wants(EventTypeRichMessageUpdate) {
-		for i, msg := range e.richMessages {
-			if e.richSeq[i] <= since || full && !recent.HoldsRich(msg.TaskID) {
-				continue
-			}
-			replaySeq = max(replaySeq, e.richSeq[i])
-			events = append(events, Event{
-				Type:    EventTypeRichMessageUpdate,
-				Payload: RichMessageUpdateBody{RichMessage: msg, Seq: e.richSeq[i]},
-			})
-		}
+	if newestFirst {
+		events = append(events, e.newestTaskFirstLocked(messages, rich, richTasks)...)
+	} else {
+		events = append(events, rich...)
 	}
 
 	if wants(EventTypeRequestUpdate) {
@@ -627,6 +653,60 @@ func (e *EventEmitter) currentStateAsEvents(since uint64, epoch string, wants fu
 		events[0].Payload = SessionSyncBody{Epoch: e.epoch, Full: full, Seq: replaySeq}
 	}
 	return events
+}
+
+// beforeTasks is the block, in a replay, of what came before the first task.
+const beforeTasks = math.MinInt
+
+// newestTaskFirstLocked orders the message and rich message events of a
+// full replay by task, the newest task first, and what came before the
+// first task last. Within a task the messages come in ascending order,
+// then its rich messages in the order they have. A message belongs to the
+// task with the greatest ID not above its own; a rich message to
+// richTasks' task at its index. Caller holds e.mu.
+func (e *EventEmitter) newestTaskFirstLocked(messages, rich []Event, richTasks []int) []Event {
+	starts := make([]int, len(e.tasks.tasks))
+	for i, task := range e.tasks.tasks {
+		starts[i] = task.ID
+	}
+	slices.Sort(starts)
+	type block struct{ messages, rich []Event }
+	blocks := map[int]*block{}
+	at := func(task int) *block {
+		b := blocks[task]
+		if b == nil {
+			b = &block{}
+			blocks[task] = b
+		}
+		return b
+	}
+	for _, event := range messages {
+		id := event.Payload.(MessageUpdateBody).Id
+		task := beforeTasks
+		if i, found := slices.BinarySearch(starts, id); found {
+			task = starts[i]
+		} else if i > 0 {
+			task = starts[i-1]
+		}
+		b := at(task)
+		b.messages = append(b.messages, event)
+	}
+	for i, event := range rich {
+		b := at(richTasks[i])
+		b.rich = append(b.rich, event)
+	}
+	tasks := slices.Sorted(maps.Keys(blocks))
+	slices.Reverse(tasks)
+	out := make([]Event, 0, len(messages)+len(rich))
+	for _, task := range tasks {
+		b := blocks[task]
+		slices.SortStableFunc(b.messages, func(x, y Event) int {
+			return cmp.Compare(x.Payload.(MessageUpdateBody).Id, y.Payload.(MessageUpdateBody).Id)
+		})
+		out = append(out, b.messages...)
+		out = append(out, b.rich...)
+	}
+	return out
 }
 
 // Subscribe returns:

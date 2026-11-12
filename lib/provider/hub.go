@@ -6,6 +6,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/hkdf"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -41,9 +42,13 @@ type SyncRequest struct {
 
 // SyncResponse is the answer to a sync request: the providers, keys
 // included, sealed with the hub's secret (Seal), so that they don't cross
-// a network in the clear when the hub is reached over plain HTTP.
+// a network in the clear when the hub is reached over plain HTTP. Nonce and
+// Proof authenticate Sealed for this request; old clients ignore them, while
+// the plaintext shape old clients decrypt is unchanged.
 type SyncResponse struct {
 	Sealed string `json:"sealed"`
+	Nonce  string `json:"nonce,omitempty"`
+	Proof  string `json:"proof,omitempty"`
 }
 
 // wireProvider is a provider with its key, as Seal seals it.
@@ -230,7 +235,8 @@ func (h *HubSync) Sync(ctx context.Context) error {
 	}
 	nonce := make([]byte, 16)
 	_, _ = rand.Read(nonce)
-	body, _ := json.Marshal(SyncRequest{Nonce: hex.EncodeToString(nonce)})
+	requestNonce := hex.EncodeToString(nonce)
+	body, _ := json.Marshal(SyncRequest{Nonce: requestNonce})
 	base := strings.TrimSuffix(strings.TrimSuffix(url, "/"), "/hooks")
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+SyncPath, bytes.NewReader(body))
 	if err != nil {
@@ -261,6 +267,15 @@ func (h *HubSync) Sync(ctx context.Context) error {
 	var sync SyncResponse
 	if err := json.Unmarshal(data, &sync); err != nil {
 		return fmt.Errorf("read the hub's answer: %w", err)
+	}
+	expectedProof := instanceapi.Sign(secret, requestNonce, []byte(sync.Sealed))
+	switch {
+	case sync.Nonce == "" || sync.Proof == "":
+		return errors.New("the hub's answer has no sync proof; upgrade the hub")
+	case sync.Nonce != requestNonce:
+		return errors.New("the hub's answer is for a different sync request")
+	case !hmac.Equal([]byte(sync.Proof), []byte(expectedProof)):
+		return errors.New("the hub's answer has an invalid sync proof")
 	}
 	providers, err := Open(secret, sync.Sealed)
 	if err != nil {

@@ -11,8 +11,13 @@ import {hubLimits} from "./hub-schema";
 export type Provider = HubWire["ProviderView"];
 
 // A provider as PUT /api/providers takes it: without api_key the hub keeps
-// the key the provider with the ID has, "" removes it.
+// the key only at unchanged endpoints, "" removes it.
 export type ProviderChange = HubWire["ProviderChange"];
+
+// The list's optimistic-concurrency token. The wire keeps it opaque: the
+// client sends back exactly what the hub answered.
+export type ProviderRevision = string | number;
+export type ProviderSnapshot = {revision: ProviderRevision; providers: Provider[]};
 
 export type ProviderModel = HubWire["Model"];
 

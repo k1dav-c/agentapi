@@ -218,12 +218,15 @@ func (j *Job) current() *Run {
 // Run is one agent's work on a job.
 type Run struct {
 	// Round is the job's round the run is of.
-	Round      int       `json:"round"`
-	Agent      string    `json:"agent"`
-	Host       string    `json:"host"`
-	InstanceID string    `json:"instance_id"`
-	StartedAt  time.Time `json:"started_at"`
-	EndedAt    time.Time `json:"ended_at,omitzero"`
+	Round      int    `json:"round"`
+	Agent      string `json:"agent"`
+	Host       string `json:"host"`
+	InstanceID string `json:"instance_id"`
+	// ServerID is this AgentAPI process's random run identity. Empty in a
+	// run kept by an older hub means task events are refused, not guessed at.
+	ServerID  string    `json:"server_id,omitempty"`
+	StartedAt time.Time `json:"started_at"`
+	EndedAt   time.Time `json:"ended_at,omitzero"`
 	// EndReason is replaced (another agent took over), stopped or failed.
 	EndReason string `json:"end_reason,omitempty"`
 	Cost      Cost   `json:"cost"`

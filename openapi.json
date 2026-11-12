@@ -864,6 +864,10 @@
             "description": "The model's price is known.",
             "type": "boolean"
           },
+          "provider": {
+            "description": "The AgentAPI model provider the call went to, by its ID (as in GET /settings/options); missing for the agent's own provider (default). Codex's log names it; a Claude Code call goes to the provider AgentAPI last recorded its session on before the call (its provider ledger).",
+            "type": "string"
+          },
           "subagent_id": {
             "description": "The subagent that made the call; missing for the agent's own.",
             "type": "string"
@@ -1023,6 +1027,41 @@
         "required": [
           "expires_at",
           "ttl_seconds"
+        ],
+        "type": "object"
+      },
+      "ProviderCost": {
+        "additionalProperties": false,
+        "properties": {
+          "calls": {
+            "description": "How many calls were made.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "priced": {
+            "description": "The price of every model called is known; when one isn't, its calls count no cost.",
+            "type": "boolean"
+          },
+          "provider": {
+            "description": "The AgentAPI model provider, by its ID; default for the agent's own.",
+            "type": "string"
+          },
+          "tokens": {
+            "$ref": "#/components/schemas/Tokens",
+            "description": "The tokens used."
+          },
+          "usd": {
+            "description": "API-equivalent cost in USD, at the list prices of the models called, whichever provider served them.",
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "calls",
+          "priced",
+          "provider",
+          "tokens",
+          "usd"
         ],
         "type": "object"
       },
@@ -1926,6 +1965,13 @@
             },
             "type": "array"
           },
+          "providers": {
+            "description": "What was spent on each AgentAPI model provider (default for the agent's own), the most expensive first, then the one with the most tokens.",
+            "items": {
+              "$ref": "#/components/schemas/ProviderCost"
+            },
+            "type": "array"
+          },
           "tokens": {
             "$ref": "#/components/schemas/Tokens",
             "description": "The tokens used."
@@ -1940,6 +1986,7 @@
           "calls",
           "hourly",
           "models",
+          "providers",
           "tokens",
           "usd"
         ],
@@ -2619,6 +2666,41 @@
         ],
         "type": "object"
       },
+      "SummaryProviderSpend": {
+        "additionalProperties": false,
+        "properties": {
+          "day_tokens": {
+            "$ref": "#/components/schemas/SummaryTokens",
+            "description": "The tokens of the provider's calls over the last 24 hours."
+          },
+          "day_usd": {
+            "description": "API-equivalent cost in USD of the provider's calls over the last 24 hours, as day_usd: at the list prices of the models called.",
+            "format": "double",
+            "type": "number"
+          },
+          "provider": {
+            "description": "The AgentAPI model provider, by its ID; default for the agent's own. Claude Code's calls go to the provider AgentAPI recorded their session on (its provider ledger); Codex's log names it.",
+            "type": "string"
+          },
+          "week_tokens": {
+            "$ref": "#/components/schemas/SummaryTokens",
+            "description": "The same over the last 7 days."
+          },
+          "week_usd": {
+            "description": "The same over the last 7 days.",
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "day_tokens",
+          "day_usd",
+          "provider",
+          "week_tokens",
+          "week_usd"
+        ],
+        "type": "object"
+      },
       "SummaryRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2664,6 +2746,14 @@
             "description": "What was spent in each hour with calls of the last 25 (UTC, the earliest first), the hour under way included: the hours day_usd adds up and the one before them. An hour's figures grow while it goes on. Sent with the amounts: when they don't change, an hour that left the 25 may stay. Missing from earlier releases.",
             "items": {
               "$ref": "#/components/schemas/SummaryHour"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "providers": {
+            "description": "The amounts and tokens by AgentAPI model provider (default for the agent's own), of the providers with calls in the last 7 days: the most expensive over the week first, then the one with the most tokens. They add up to the totals, but for rounding. Missing from earlier releases and without calls in the last 7 days.",
+            "items": {
+              "$ref": "#/components/schemas/SummaryProviderSpend"
             },
             "nullable": true,
             "type": "array"

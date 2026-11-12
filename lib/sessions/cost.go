@@ -12,6 +12,8 @@ import (
 
 	"github.com/coder/agentapi/lib/agentlog"
 	"github.com/coder/agentapi/lib/pricing"
+	"github.com/coder/agentapi/lib/provider"
+	"github.com/coder/agentapi/lib/providerlog"
 )
 
 // ModelCall is one call a session made to a model, as its log has it.
@@ -28,6 +30,9 @@ type ModelCall struct {
 	// Unitemized marks the tokens Claude Code counted that its log doesn't
 	// list call by call (compacting the context, among others).
 	Unitemized bool `json:"unitemized,omitempty" doc:"Tokens Claude Code counted in its own total but didn't log call by call, such as compacting the context: those up to this point, priced as any call."`
+	// Provider is the AgentAPI model provider the call went to, by its ID;
+	// empty for the agent's own (provider.Default).
+	Provider string `json:"provider,omitempty" doc:"The AgentAPI model provider the call went to, by its ID (as in GET /settings/options); missing for the agent's own provider (default). Codex's log names it; a Claude Code call goes to the provider AgentAPI last recorded its session on before the call (its provider ledger)."`
 	// report is a Claude Code cost-state line: what it counted so far.
 	report map[string]agentlog.ModelReport
 	// key identifies the call across logs: a fork's log copies the calls of
@@ -47,6 +52,32 @@ type ModelCost struct {
 	Priced bool           `json:"priced" doc:"The model's price is known; when it isn't, its calls count no cost."`
 }
 
+// ProviderCost is what a session (or several) spent on one model provider.
+// Priced is false when any of its calls had no price.
+type ProviderCost struct {
+	Provider string         `json:"provider" doc:"The AgentAPI model provider, by its ID; default for the agent's own."`
+	USD      float64        `json:"usd" doc:"API-equivalent cost in USD, at the list prices of the models called, whichever provider served them."`
+	Tokens   pricing.Tokens `json:"tokens" doc:"The tokens used."`
+	Calls    int            `json:"calls" doc:"How many calls were made."`
+	Priced   bool           `json:"priced" doc:"The price of every model called is known; when one isn't, its calls count no cost."`
+	// hourly is what was spent on the provider in each hour with calls,
+	// for the summary's spend by provider.
+	hourly []HourCost
+}
+
+// Hourly is what was spent on the provider in each hour (UTC) with calls,
+// the earliest first. The caller must not change it.
+func (p ProviderCost) Hourly() []HourCost { return p.hourly }
+
+// providerName is the provider a call with provider id went to, as
+// ProviderCost names it.
+func providerName(id string) string {
+	if id == "" {
+		return provider.Default
+	}
+	return id
+}
+
 // HourCost is what was spent in one hour.
 type HourCost struct {
 	Hour   time.Time      `json:"hour" doc:"The start of the hour, in UTC."`
@@ -64,6 +95,8 @@ type SessionCost struct {
 	Models []ModelCost `json:"models" nullable:"false" doc:"What was spent on each model, the most expensive first."`
 	// Hourly are the hours with calls, the earliest first.
 	Hourly []HourCost `json:"hourly" nullable:"false" doc:"What was spent in each hour (UTC) with calls, the earliest first, for totals over days, weeks or months in the reader's time zone."`
+	// Providers are the model providers called, the most expensive first.
+	Providers []ProviderCost `json:"providers" nullable:"false" doc:"What was spent on each AgentAPI model provider (default for the agent's own), the most expensive first, then the one with the most tokens."`
 }
 
 // costSum adds calls up into a SessionCost, finding a call's model and
@@ -71,13 +104,28 @@ type SessionCost struct {
 // hundreds of hours. Calls follow each other in time, mostly of one model:
 // the last model and hour are kept at hand.
 type costSum struct {
-	c      SessionCost
-	models map[string]int
-	hours  map[int64]int
+	c         SessionCost
+	models    map[string]int
+	hours     map[int64]int
+	providers map[string]int
+	// providerHours finds an hour in the hourly of a provider of
+	// c.Providers, by the provider's index and the hour.
+	providerHours map[providerHour]int
 	// model is the index of the last call's model in c.Models, hour of
-	// its hour in c.Hourly, which starts at hourStart (Unix seconds).
-	model, hour int
-	hourStart   int64
+	// its hour in c.Hourly, which starts at hourStart (Unix seconds);
+	// provider of its provider in c.Providers, and providerHour of its
+	// hour in that provider's hourly, which starts at providerStart.
+	model, hour            int
+	hourStart              int64
+	provider, providerHour int
+	providerStart          int64
+}
+
+// providerHour is an hour of a provider's: its index in a sum's providers
+// and the hour's start (Unix seconds).
+type providerHour struct {
+	provider int
+	hour     int64
 }
 
 // add counts call.
@@ -113,6 +161,49 @@ func (s *costSum) add(call ModelCall) {
 	h := &c.Hourly[s.hour]
 	h.USD += call.USD
 	h.Tokens = h.Tokens.Add(call.Tokens)
+	name := providerName(call.Provider)
+	if s.provider < 0 || c.Providers[s.provider].Provider != name {
+		s.provider = s.providerIndex(name, call.Priced)
+		s.providerHour = -1
+	}
+	p := &c.Providers[s.provider]
+	p.Priced = p.Priced && call.Priced
+	p.USD += call.USD
+	p.Tokens = p.Tokens.Add(call.Tokens)
+	p.Calls++
+	if at := call.Time.Unix(); s.providerHour < 0 || at < s.providerStart || at >= s.providerStart+3600 {
+		s.providerHour = s.providerHourIndex(s.provider, call.Time.UTC().Truncate(time.Hour))
+		s.providerStart = p.hourly[s.providerHour].Hour.Unix()
+	}
+	ph := &p.hourly[s.providerHour]
+	ph.USD += call.USD
+	ph.Tokens = ph.Tokens.Add(call.Tokens)
+}
+
+// providerIndex is the index of provider name in s.c.Providers, which it
+// adds to.
+func (s *costSum) providerIndex(name string, priced bool) int {
+	i, ok := s.providers[name]
+	if !ok {
+		s.c.Providers = append(s.c.Providers, ProviderCost{Provider: name, Priced: priced})
+		i = len(s.c.Providers) - 1
+		s.providers[name] = i
+	}
+	return i
+}
+
+// providerHourIndex is the index of hour in the hourly of the provider at
+// index i of s.c.Providers, which it adds to.
+func (s *costSum) providerHourIndex(i int, hour time.Time) int {
+	key := providerHour{provider: i, hour: hour.Unix()}
+	j, ok := s.providerHours[key]
+	if !ok {
+		p := &s.c.Providers[i]
+		p.hourly = append(p.hourly, HourCost{Hour: hour})
+		j = len(p.hourly) - 1
+		s.providerHours[key] = j
+	}
+	return j
 }
 
 // sorted puts the models and hours in order.
@@ -132,8 +223,34 @@ func (c SessionCost) sorted() SessionCost {
 		}
 		return strings.Compare(a.Model, b.Model)
 	})
-	slices.SortFunc(c.Hourly, func(a, b HourCost) int { return a.Hour.Compare(b.Hour) })
+	slices.SortFunc(c.Hourly, byHour)
+	if c.Providers == nil {
+		c.Providers = []ProviderCost{}
+	}
+	slices.SortStableFunc(c.Providers, func(a, b ProviderCost) int {
+		switch {
+		case a.USD > b.USD:
+			return -1
+		case a.USD < b.USD:
+			return 1
+		}
+		if ta, tb := tokenTotal(a.Tokens), tokenTotal(b.Tokens); ta != tb {
+			return tb - ta
+		}
+		return strings.Compare(a.Provider, b.Provider)
+	})
+	for _, p := range c.Providers {
+		slices.SortFunc(p.hourly, byHour)
+	}
 	return c
+}
+
+// byHour orders hours by their start.
+func byHour(a, b HourCost) int { return a.Hour.Compare(b.Hour) }
+
+// tokenTotal is how many tokens t counts, of every kind.
+func tokenTotal(t pricing.Tokens) int {
+	return t.Input + t.CacheRead + t.CacheWrite + t.CacheWrite1h + t.Output
 }
 
 // merge counts what c, a sum of calls, counts.
@@ -165,10 +282,29 @@ func (s *costSum) merge(c SessionCost) {
 		sh.USD += h.USD
 		sh.Tokens = sh.Tokens.Add(h.Tokens)
 	}
+	for _, p := range c.Providers {
+		i := s.providerIndex(p.Provider, p.Priced)
+		sp := &s.c.Providers[i]
+		sp.Priced = sp.Priced && p.Priced
+		sp.USD += p.USD
+		sp.Tokens = sp.Tokens.Add(p.Tokens)
+		sp.Calls += p.Calls
+		for _, h := range p.hourly {
+			j := s.providerHourIndex(i, h.Hour)
+			sh := &s.c.Providers[i].hourly[j]
+			sh.USD += h.USD
+			sh.Tokens = sh.Tokens.Add(h.Tokens)
+		}
+	}
+	s.provider = -1
 }
 
 func newCostSum() costSum {
-	return costSum{models: make(map[string]int), hours: make(map[int64]int), model: -1, hour: -1}
+	return costSum{
+		models: make(map[string]int), hours: make(map[int64]int),
+		providers: make(map[string]int), providerHours: make(map[providerHour]int),
+		model: -1, hour: -1, provider: -1, providerHour: -1,
+	}
 }
 
 // CostOf sums calls.
@@ -223,6 +359,9 @@ type costCache struct {
 	// owner is the session whose log has a call first, by the call's key.
 	owner  map[string]*sessionCost
 	result DirectoryCost
+	// marksVersion is the provider ledger's version the calls were
+	// attributed at.
+	marksVersion uint64
 }
 
 // sessionCost is what the readings of the costs found of a session.
@@ -250,6 +389,11 @@ type sessionCost struct {
 	// own is calls.
 	twice, allOwn bool
 	pos           int
+	// recount says own changed, and cost is to be worked out again; marks
+	// are the provider ledger's marks of the session own was attributed
+	// with.
+	recount bool
+	marks   []providerlog.Mark
 }
 
 // subagentCalls are the calls of a subagent's log.
@@ -306,10 +450,22 @@ func (s *Store) readCosts() (DirectoryCost, error) {
 	})
 	same := c.owner != nil && slices.Equal(sessions, c.order)
 	c.sessions, c.order = byPath, sessions
-	if same && !changed {
+	marks, marksVersion := s.providerMarks()
+	if same && !changed && marksVersion == c.marksVersion {
 		return c.result, nil
 	}
+	c.marksVersion = marksVersion
 	c.count(sessions, same)
+	for _, sc := range sessions {
+		if m := marks[sc.id]; sc.recount || !slices.Equal(m, sc.marks) {
+			if s.src.ledgered {
+				sc.own = attribute(sc.own, m)
+			}
+			sc.marks = m
+			sc.cost = CostOf(sc.own)
+			sc.recount = false
+		}
+	}
 	d := directoryCost(sessions)
 	c.result = d
 	for _, sc := range sessions {
@@ -389,7 +545,7 @@ func (c *costCache) count(sessions []*sessionCost, same bool) {
 			} else {
 				sc.own = sc.ownCalls(c.owner)
 			}
-			sc.cost = CostOf(sc.own)
+			sc.recount = true
 		}
 		return
 	}
@@ -399,8 +555,41 @@ func (c *costCache) count(sessions []*sessionCost, same bool) {
 	}
 	for _, sc := range sessions {
 		sc.own = sc.ownCalls(c.owner)
-		sc.cost = CostOf(sc.own)
+		sc.recount = true
 	}
+}
+
+// providerMarks are the provider ledger's marks of the sessions of an
+// agent whose log doesn't name the provider of a call, by session, and the
+// ledger's version; none without a ledger or for another agent.
+func (s *Store) providerMarks() (map[string][]providerlog.Mark, uint64) {
+	if !s.src.ledgered || s.config.Providers == nil {
+		return nil, 0
+	}
+	return s.config.Providers.Sessions(s.agent)
+}
+
+// attribute returns the calls of a session with the provider marks say it
+// ran on at each one's time (providerlog.At): the agent's own before the
+// first, and with none. They are a copy when any provider changes, so
+// what holds calls (a log's reading, an earlier result) keeps them as
+// they were.
+func attribute(calls []ModelCall, marks []providerlog.Mark) []ModelCall {
+	first := -1
+	for i, call := range calls {
+		if providerlog.At(marks, call.Time) != call.Provider {
+			first = i
+			break
+		}
+	}
+	if first < 0 {
+		return calls
+	}
+	out := slices.Clone(calls)
+	for i := first; i < len(out); i++ {
+		out[i].Provider = providerlog.At(marks, out[i].Time)
+	}
+	return out
 }
 
 // directoryCost is what sessions spent, each and all of them.
@@ -623,7 +812,7 @@ func (s *Store) claudeCostLogs() ([]string, func(id, path string) []Subagent, er
 // model without a price is logged once, the first time a call of it is.
 func (s *Store) price(c agentlog.Call) ModelCall {
 	call := priced(ModelCall{
-		Time: c.Time, Model: s.intern(c.Model), Tokens: c.Tokens,
+		Time: c.Time, Model: s.intern(c.Model), Tokens: c.Tokens, Provider: s.intern(c.Provider),
 		report: c.Report, key: c.Key, cost: c.Cost,
 	}, s.prices)
 	if !call.Priced && call.report == nil && call.Model != "" {
@@ -636,8 +825,12 @@ func (s *Store) price(c agentlog.Call) ModelCall {
 }
 
 // intern returns model, the one copy of the name the store keeps: a long
-// session makes tens of thousands of calls, to a few models.
+// session makes tens of thousands of calls, to a few models (and
+// providers, which it keeps too).
 func (s *Store) intern(model string) string {
+	if model == "" {
+		return ""
+	}
 	s.modelsMu.Lock()
 	defer s.modelsMu.Unlock()
 	if name, ok := s.models[model]; ok {
@@ -779,8 +972,10 @@ func byTime(a, b ModelCall) int { return a.Time.Compare(b.Time) }
 
 // CallsDigest identifies calls, in order, so a client that has them can
 // ask for the ones after them only: FNV-1a over each call's time, model,
-// tokens, cost and subagent, a line each ("%d|%s|%d|%d|%d|%d|%d|%x|%s|%t\n"
-// of them). Empty for none. A chat asks for it on every turn, of sessions
+// tokens, cost, subagent and provider, a line each
+// ("%d|%s|%d|%d|%d|%d|%d|%x|%s|%t\n" of them, with "|%s" of the provider
+// before the newline when it isn't the agent's own: the digests of calls
+// before providers stay theirs). Empty for none. A chat asks for it on every turn, of sessions
 // of tens of thousands of calls: the lines are written into one buffer.
 func CallsDigest(calls []ModelCall) string {
 	if len(calls) == 0 {
@@ -798,6 +993,9 @@ func CallsDigest(calls []ModelCall) string {
 		line = strconv.AppendUint(append(line, '|'), math.Float64bits(call.USD), 16)
 		line = append(append(line, '|'), call.SubagentID...)
 		line = strconv.AppendBool(append(line, '|'), call.Unitemized)
+		if call.Provider != "" {
+			line = append(append(line, '|'), call.Provider...)
+		}
 		_, _ = h.Write(append(line, '\n'))
 	}
 	return strconv.FormatUint(h.Sum64(), 16)

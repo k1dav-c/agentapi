@@ -124,21 +124,30 @@ describe("the hub's API", () => {
     return Object.assign(fake, {calls});
   };
 
-  test("the providers come from /api/providers, and are replaced there", async () => {
-    const answers = fetcher(json(200, {providers: [gateway]}), json(200, {providers: []}));
+  test("the providers and their revision come from /api/providers, and are replaced there", async () => {
+    const answers = fetcher(json(200, {revision: "r1", providers: [gateway]}), json(200, {revision: "r2", providers: []}));
     const api = createHubAPI("/hub", answers);
-    expect(await api.getProviders()).toEqual([gateway]);
-    expect(await api.setProviders([{id: "gw", base_url: "https://gw", api_key: "k"}])).toEqual([]);
+    expect(await api.getProviders()).toEqual({revision: "r1", providers: [gateway]});
+    expect(await api.setProviders("r1", [{id: "gw", base_url: "https://gw", api_key: "k"}])).toEqual({revision: "r2", providers: []});
     expect(answers.calls.map(({url, init}) => [init.method, url, init.body])).toEqual([
       [undefined, "/hub/api/providers", undefined],
-      ["PUT", "/hub/api/providers", '{"providers":[{"id":"gw","base_url":"https://gw","api_key":"k"}]}'],
+      ["PUT", "/hub/api/providers", '{"revision":"r1","providers":[{"id":"gw","base_url":"https://gw","api_key":"k"}]}'],
     ]);
   });
 
-  test("a refusal throws with the hub's message, an answer without providers too", async () => {
+  test("a numeric revision stays numeric when it is sent back", async () => {
+    const answers = fetcher(json(200, {revision: 7, providers: [gateway]}), json(200, {revision: 8, providers: []}));
+    const api = createHubAPI("", answers);
+    const current = await api.getProviders();
+    expect(await api.setProviders(current.revision, [])).toEqual({revision: 8, providers: []});
+    expect(JSON.parse(String(answers.calls[1].init.body)).revision).toBe(7);
+  });
+
+  test("a refusal throws with the hub's message, an incomplete answer too", async () => {
     const message = "invalid provider: id \"GW\" must be lowercase letters, digits, - and _";
-    await expect(createHubAPI("", fetcher(json(400, {code: "invalid", message, error: message}))).setProviders([])).rejects.toMatchObject({message, status: 400});
+    await expect(createHubAPI("", fetcher(json(400, {code: "invalid", message, error: message}))).setProviders("r1", [])).rejects.toMatchObject({message, status: 400});
     await expect(createHubAPI("", fetcher(json(200, {}))).getProviders()).rejects.toMatchObject({message: "The hub's answer has no providers."});
+    await expect(createHubAPI("", fetcher(json(200, {providers: []}))).getProviders()).rejects.toMatchObject({message: "The hub's answer has no providers revision."});
   });
 });
 

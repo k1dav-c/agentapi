@@ -223,6 +223,19 @@ type SummarySpend struct {
 	// Hours are the hours behind the amounts, for a client that keeps a
 	// longer record (the hub's activity); nil from earlier releases.
 	Hours []SummaryHour `json:"hours,omitempty" doc:"What was spent in each hour with calls of the last 25 (UTC, the earliest first), the hour under way included: the hours day_usd adds up and the one before them. An hour's figures grow while it goes on. Sent with the amounts: when they don't change, an hour that left the 25 may stay. Missing from earlier releases."`
+	// Providers split the amounts by model provider; nil from earlier
+	// releases, and without calls in the last 7 days.
+	Providers []SummaryProviderSpend `json:"providers,omitempty" doc:"The amounts and tokens by AgentAPI model provider (default for the agent's own), of the providers with calls in the last 7 days: the most expensive over the week first, then the one with the most tokens. They add up to the totals, but for rounding. Missing from earlier releases and without calls in the last 7 days."`
+}
+
+// SummaryProviderSpend is what the agent's sessions in its working
+// directory spent recently on one model provider.
+type SummaryProviderSpend struct {
+	Provider   string        `json:"provider" doc:"The AgentAPI model provider, by its ID; default for the agent's own. Claude Code's calls go to the provider AgentAPI recorded their session on (its provider ledger); Codex's log names it."`
+	DayUSD     float64       `json:"day_usd" doc:"API-equivalent cost in USD of the provider's calls over the last 24 hours, as day_usd: at the list prices of the models called."`
+	WeekUSD    float64       `json:"week_usd" doc:"The same over the last 7 days."`
+	DayTokens  SummaryTokens `json:"day_tokens" doc:"The tokens of the provider's calls over the last 24 hours."`
+	WeekTokens SummaryTokens `json:"week_tokens" doc:"The same over the last 7 days."`
 }
 
 // SummaryHour is what the agent's sessions in a directory spent in one
@@ -237,6 +250,7 @@ type SummaryHour struct {
 func (s SummarySpend) Clone() SummarySpend {
 	s.DayTokens, s.WeekTokens = cloneTokens(s.DayTokens), cloneTokens(s.WeekTokens)
 	s.Hours = slices.Clone(s.Hours)
+	s.Providers = slices.Clone(s.Providers)
 	return s
 }
 
@@ -245,7 +259,13 @@ func (s SummarySpend) Equal(o SummarySpend) bool {
 	return s.DayUSD == o.DayUSD && s.WeekUSD == o.WeekUSD && s.Scope == o.Scope && s.UpdatedAt.Equal(o.UpdatedAt) &&
 		s.SameTokens(o) && slices.EqualFunc(s.Hours, o.Hours, func(a, b SummaryHour) bool {
 		return a.Hour.Equal(b.Hour) && a.USD == b.USD && a.Tokens == b.Tokens
-	})
+	}) && s.SameProviders(o)
+}
+
+// SameProviders reports whether s and o split the amounts and tokens by
+// provider the same.
+func (s SummarySpend) SameProviders(o SummarySpend) bool {
+	return slices.Equal(s.Providers, o.Providers)
 }
 
 // SameTokens reports whether s and o count the same tokens.

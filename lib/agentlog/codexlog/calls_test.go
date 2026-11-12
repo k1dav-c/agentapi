@@ -77,3 +77,50 @@ func TestCallsAfterTheTotalStartedOver(t *testing.T) {
 		assert.Equal(t, pricing.Tokens{Input: 1000, Output: 10}, calls[2].Tokens, "the change of the new total")
 	}
 }
+
+// A call goes to the thread's provider: its session_meta's, then that of
+// each thread_settings_applied event. AgentAPI's providers are named
+// agentapi-<id>; any other is the agent's own.
+func TestCallsProvider(t *testing.T) {
+	t.Parallel()
+	c := NewCalls(nil)
+	settings := func(provider string) string {
+		return `{"timestamp":"2026-10-20T10:00:00Z","type":"event_msg","payload":{"type":"thread_settings_applied","thread_id":"t1","thread_settings":{"model":"gpt-6.1-sol","model_provider_id":"` + provider + `","approval_policy":"never"}}}`
+	}
+	total := 0
+	call := func() {
+		total += 1000
+		c.Line([]byte(tokenCount("total_token_usage", total, total/100, 1000, 10)))
+	}
+	for _, line := range []string{
+		`{"timestamp":"2026-10-20T10:00:00Z","type":"session_meta","payload":{"id":"t1","cwd":"/work/app","originator":"agentapi","model_provider":"agentapi-gateway","base_instructions":{"text":"no \"thread_settings_applied\" here"}}}`,
+		`{"timestamp":"2026-10-20T10:00:00Z","type":"turn_context","payload":{"model":"gpt-6.1-sol"}}`,
+	} {
+		c.Line([]byte(line))
+	}
+	call()
+	c.Line([]byte(settings("openai")))
+	call()
+	c.Line([]byte(settings("agentapi-local")))
+	call()
+	// Another thread's settings that don't name a provider change none.
+	c.Line([]byte(`{"timestamp":"2026-10-20T10:00:00Z","type":"event_msg","payload":{"type":"thread_settings_applied","thread_settings":{"model":"gpt-6.1-sol"}}}`))
+	call()
+	// A session_meta line of a resumed thread names its provider again.
+	c.Line([]byte(`{"timestamp":"2026-10-20T10:00:00Z","type":"session_meta","payload":{"id":"t1","model_provider":"my-own"}}`))
+	call()
+	_, calls := c.Changed()
+	providers := make([]string, len(calls))
+	for i, call := range calls {
+		providers[i] = call.Provider
+	}
+	assert.Equal(t, []string{"gateway", "", "local", "local", ""}, providers)
+}
+
+func TestProviderID(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, "gw", ProviderID("agentapi-gw"))
+	assert.Equal(t, "", ProviderID("openai"))
+	assert.Equal(t, "", ProviderID(""))
+	assert.Equal(t, "", ProviderID("agentapi"))
+}

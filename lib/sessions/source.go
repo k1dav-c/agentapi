@@ -64,6 +64,9 @@ type source struct {
 	// subagentsUnordered says the subagents costLogs lists are in no order
 	// of their start (Claude Code's, by their files' names).
 	subagentsUnordered bool
+	// ledgered says the logs don't name the model provider of a call
+	// (Claude Code's): the provider ledger (Config.Providers) does.
+	ledgered bool
 }
 
 func sourceFor(agentType string) (source, bool) {
@@ -83,6 +86,7 @@ func sourceFor(agentType string) (source, bool) {
 			subagents:          (*Store).claudeSubagents,
 			costLogs:           (*Store).claudeCostLogs,
 			subagentsUnordered: true,
+			ledgered:           true,
 		}, true
 	case "codex":
 		return source{

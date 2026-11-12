@@ -83,13 +83,15 @@ type Service struct {
 	starts   sync.WaitGroup
 
 	// The state file is written in the background (writeLoop): saveLocked
-	// leaves the latest in pending.
-	pending   []byte
-	writeMu   sync.Mutex
-	nudge     chan struct{}
-	done      chan struct{}
-	stopped   chan struct{}
-	closeOnce sync.Once
+	// leaves the latest in pending. writeState is the package's disk seam;
+	// production uses writeStateFile.
+	pending    []byte
+	writeState func(string, []byte) error
+	writeMu    sync.Mutex
+	nudge      chan struct{}
+	done       chan struct{}
+	stopped    chan struct{}
+	closeOnce  sync.Once
 }
 
 // storedHost is a machine as dispatch.json keeps it: with its launcher's
@@ -137,6 +139,8 @@ const (
 	keepJobs = 30 * 24 * time.Hour
 	// writeDelay gathers the changes of the state file into one write.
 	writeDelay = 200 * time.Millisecond
+	// writeRetryDelay limits repeated logs and disk attempts after a failure.
+	writeRetryDelay = time.Second
 	// missedHeartbeats a machine may miss before it counts as offline.
 	missedHeartbeats = 3
 	// startTimeout bounds a start on a launcher, which clones or fetches
@@ -172,7 +176,8 @@ func New(config Config) (*Service, error) {
 		hosts: map[string]*Host{}, jobs: map[string]*Job{}, deliveries: map[string]time.Time{},
 		states: map[string]time.Time{}, tokenRequests: map[string]time.Time{},
 		subs: map[chan struct{}]struct{}{}, onlineSeen: map[string]bool{},
-		nudge: make(chan struct{}, 1), done: make(chan struct{}), stopped: make(chan struct{}),
+		writeState: writeStateFile,
+		nudge:      make(chan struct{}, 1), done: make(chan struct{}), stopped: make(chan struct{}),
 	}
 	if config.StatePath != "" {
 		data, err := os.ReadFile(config.StatePath)
@@ -292,21 +297,48 @@ func (s *Service) saveLocked() {
 
 func (s *Service) writeLoop() {
 	defer close(s.stopped)
+	retry := false
 	for {
+		if !retry {
+			select {
+			case <-s.nudge:
+			case <-s.done:
+				return
+			}
+		}
+		delay := writeDelay
+		if retry {
+			// A failed snapshot, or one made while the last write ran, must be
+			// tried again even without another state change.
+			delay = writeRetryDelay
+		}
 		select {
-		case <-s.nudge:
+		case <-time.After(delay):
 		case <-s.done:
+			// Close's final Flush tries the pending snapshot once. In particular,
+			// a persistent write failure must not leave this retry path spinning
+			// on a closed done channel instead of letting Close finish.
 			return
 		}
-		select {
-		case <-time.After(writeDelay):
-		case <-s.done:
-		}
 		s.Flush()
+		s.mu.Lock()
+		retry = s.pending != nil
+		s.mu.Unlock()
 	}
 }
 
-// Flush writes the state file now, if a change waits.
+// writeStateFile durably replaces path with data.
+func writeStateFile(path string, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	return atomicfile.Write(path, ".dispatch-*", data)
+}
+
+// Flush writes the state file now, if a change waits. Only writeMu is held
+// during I/O, so a newer snapshot can still be produced. A failure puts a
+// lone snapshot back; a newer pending snapshot already includes the failed
+// one's state and takes its place.
 func (s *Service) Flush() {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
@@ -317,11 +349,12 @@ func (s *Service) Flush() {
 	if data == nil {
 		return
 	}
-	err := os.MkdirAll(filepath.Dir(s.config.StatePath), 0o700)
-	if err == nil {
-		err = atomicfile.Write(s.config.StatePath, ".dispatch-*", data)
-	}
-	if err != nil {
+	if err := s.writeState(s.config.StatePath, data); err != nil {
+		s.mu.Lock()
+		if s.pending == nil {
+			s.pending = data
+		}
+		s.mu.Unlock()
 		s.logger.Error("Couldn't keep the dispatch's machines and jobs", "file", s.config.StatePath, "error", err)
 	}
 }
@@ -576,6 +609,13 @@ func (s *Service) reconcileLocked(h *Host) {
 			continue
 		}
 		lj, ok := reported[job.Key]
+		if ok && lj.ServerID != "" {
+			if run := job.current(); run != nil && run.InstanceID == lj.InstanceID {
+				// A launcher can restart a job's AgentAPI without a hub start.
+				// Its next report adopts that process for this logical run too.
+				run.ServerID = lj.ServerID
+			}
+		}
 		switch {
 		case job.State == JobStopped:
 			if ok {
@@ -652,13 +692,16 @@ type taskEventData struct {
 }
 
 // TaskEvent takes an AgentAPI's task.* event: the job of that AgentAPI
-// works, or waits for review, and its run adds the task's cost.
-func (s *Service) TaskEvent(instanceID, eventType string, data json.RawMessage) {
+// works, or waits for review, and its run adds the task's cost. Only the
+// exact AgentAPI process of the current run counts: an instance ID is reused
+// when AgentAPI restarts. Runs kept before ServerID was recorded, and events
+// without one, are left alone rather than risking another run's cost.
+func (s *Service) TaskEvent(instanceID, serverID, eventType string, data json.RawMessage) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, job := range s.jobs {
 		run := job.current()
-		if run == nil || run.InstanceID != instanceID {
+		if run == nil || run.InstanceID != instanceID || serverID == "" || run.ServerID == "" || run.ServerID != serverID {
 			continue
 		}
 		now := s.config.Now()
@@ -1152,11 +1195,12 @@ func (s *Service) finishStartLocked(job *Job, a *startAttempt, lj host.JobInfo) 
 	now := s.config.Now()
 	delete(s.attempts, job.Key)
 	if run := job.current(); run != nil && run.Agent == a.Agent && a.Previous == "" {
-		// A failed job's AgentAPI started again: the same run goes on.
-		run.Missed = true
+		// A failed job's AgentAPI started again: the same run goes on, under
+		// the new process's identity.
+		run.InstanceID, run.ServerID, run.Missed = lj.InstanceID, lj.ServerID, true
 	} else {
 		s.endRunLocked(job, "replaced")
-		job.Runs = append(job.Runs, Run{Round: job.Round, Agent: a.Agent, Host: a.Host, InstanceID: lj.InstanceID, StartedAt: now})
+		job.Runs = append(job.Runs, Run{Round: job.Round, Agent: a.Agent, Host: a.Host, InstanceID: lj.InstanceID, ServerID: lj.ServerID, StartedAt: now})
 	}
 	job.Host, job.Agent, job.InstanceID = a.Host, a.Agent, lj.InstanceID
 	job.DefaultBranch = lj.DefaultBranch

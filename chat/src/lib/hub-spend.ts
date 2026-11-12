@@ -3,6 +3,7 @@
 
 import type {HubInstance, Summary} from "./hub";
 import {formatTokens, formatUSDShort} from "./format";
+import {providerAmount} from "./provider-usage";
 
 export type Spend = NonNullable<Summary["spend"]>;
 
@@ -117,4 +118,67 @@ export function tokenTotals(instances: Iterable<HubInstance>): TokenTotals {
 // tokensTitle says what a count of tokens is, for a tooltip.
 export function tokensTitle(day: number, week: number): string {
   return `${formatTokens(day)} tokens in the last 24 hours, ${formatTokens(week)} in the last 7 days`;
+}
+
+// What the instances spent on each model provider, as AgentAPIs since this
+// release report it: the agent's own (default) and the AgentAPI providers
+// their agents switched to, each scope once. A summary has only the
+// providers with calls in the last 7 days, and no price to say a model had
+// none: an amount of nothing with tokens is calls without a known price.
+
+export type ProviderSpend = NonNullable<Spend["providers"]>[number];
+
+export interface ProviderTotal {
+  provider: string;
+  day: number;
+  week: number;
+  dayTokens: number;
+  weekTokens: number;
+}
+
+export interface ProviderTotals {
+  // The most spent this week first, then the most tokens.
+  providers: ProviderTotal[];
+  // How many connected instances report their providers; the others
+  // (earlier AgentAPIs, those without calls this week, those the hub
+  // doesn't follow now) don't count.
+  counted: number;
+}
+
+export function providerTotals(instances: Iterable<HubInstance>): ProviderTotals {
+  const reporting = [...instances].filter((instance) => currentSpend(instance)?.providers);
+  const totals = new Map<string, ProviderTotal>();
+  for (const {spend} of countedSpends(reporting)) {
+    for (const each of spend.providers ?? []) {
+      const total = totals.get(each.provider) ?? {provider: each.provider, day: 0, week: 0, dayTokens: 0, weekTokens: 0};
+      total.day += each.day_usd;
+      total.week += each.week_usd;
+      total.dayTokens += each.day_tokens.total;
+      total.weekTokens += each.week_tokens.total;
+      totals.set(each.provider, total);
+    }
+  }
+  const providers = [...totals.values()].sort((a, b) => b.week - a.week || b.weekTokens - a.weekTokens);
+  return {providers, counted: reporting.length};
+}
+
+// providerPriced says whether an amount of a provider is one: calls that
+// cost nothing used no tokens, else their models have no known price.
+export function providerPriced(usd: number, tokens: number): boolean {
+  return usd > 0 || tokens === 0;
+}
+
+// providerTitle says what a provider's figures are, for a tooltip.
+export function providerTitle(total: ProviderTotal): string {
+  const amount = (usd: number, tokens: number) => (providerPriced(usd, tokens) ? formatUSDShort(usd) : "no known price");
+  return (
+    `${formatTokens(total.dayTokens)} tokens (${amount(total.day, total.dayTokens)}) in the last 24 hours, ` +
+    `${formatTokens(total.weekTokens)} tokens (${amount(total.week, total.weekTokens)}) in the last 7 days (API-equivalent, at list prices)`
+  );
+}
+
+// providerPeriod says a provider's figures of a period at a glance: its
+// tokens, and what they cost or that they have no known price.
+export function providerPeriod(usd: number, tokens: number): string {
+  return `${formatTokens(tokens)} tokens, ${providerAmount(usd, providerPriced(usd, tokens), formatUSDShort)}`;
 }

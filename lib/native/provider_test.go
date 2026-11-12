@@ -2,9 +2,13 @@ package native_test
 
 import (
 	"context"
+	"errors"
+	"slices"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/coder/quartz"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -140,6 +144,128 @@ func TestSwitchProviderRelaunchResumes(t *testing.T) {
 	assert.Equal(t, "Kimi-K3", a.Launch.Model)
 }
 
+// A failed switch whose result is unknown recovers in a new process on the
+// previous configuration, not on the incoming target. Until that replacement
+// starts, a turn must not use the process whose provider is unknown.
+func TestSwitchProviderRecovery(t *testing.T) {
+	ctx := context.Background()
+	previous := agentstate.Settings{Provider: "default", Model: "fast"}
+	for _, withRelaunch := range []bool{false, true} {
+		t.Run(map[bool]string{false: "turns wait for recovery", true: "relaunch restores previous"}[withRelaunch], func(t *testing.T) {
+			c, factory, _ := startOnProviders(t, nil, native.Config{
+				ResumeRef:       "session-1",
+				InitialMessages: []conversation.Message{{Id: 0, Role: conversation.RoleUser, Message: "continue"}},
+			})
+			factory.Last().Relaunch = &native.RelaunchError{
+				Recovery: &previous,
+				Cause:    native.Unconfirmed(errors.New("the control answer was lost")),
+			}
+			change := agentstate.Settings{Provider: "kimi", Model: "Kimi-K2"}
+			relaunch := func(begin native.ProviderRelaunch) error {
+				r, err := begin()
+				if err != nil {
+					return err
+				}
+				return r.Start(ctx)
+			}
+			var err error
+			if withRelaunch {
+				err = c.ApplySettingsAndRelaunch(ctx, change, relaunch)
+			} else {
+				err = c.ApplySettings(ctx, change)
+			}
+			assert.ErrorIs(t, err, native.ErrUnconfirmed)
+			if !withRelaunch {
+				assert.ErrorIs(t, c.StartTurn(ctx, native.Input{Text: "must wait"}), conversation.ErrMessageValidationChanging)
+				r, beginErr := c.BeginProviderSwitch(ctx, previous, false)
+				require.NoError(t, beginErr)
+				require.NoError(t, r.Start(ctx))
+			}
+			require.Len(t, factory.Adapters(), 2)
+			assert.Nil(t, factory.Last().Launch, "a new default process has the previous environment")
+			assert.Equal(t, "session-1", factory.Last().ResumeRef)
+			assert.Equal(t, previous.Provider, c.Settings().Provider)
+			assert.Equal(t, previous.Model, c.Settings().Model)
+			require.NoError(t, c.StartTurn(ctx, native.Input{Text: "safe after recovery"}))
+		})
+	}
+}
+
+// A switch whose result is unknown while a turn runs can't relaunch then.
+// The conversation recovers by itself on the previous configuration once the
+// turn ends, rather than staying unable to take turns or settings.
+func TestSwitchProviderRecoveryAfterTurn(t *testing.T) {
+	ctx := context.Background()
+	previous := agentstate.Settings{Provider: "default", Model: "fast"}
+	c, factory, _ := startOnProviders(t, nil, native.Config{
+		ResumeRef:       "session-1",
+		InitialMessages: []conversation.Message{{Id: 0, Role: conversation.RoleUser, Message: "continue"}},
+	})
+	old := factory.Last()
+	require.NoError(t, c.StartTurn(ctx, native.Input{Text: "a long turn"}))
+	old.Relaunch = &native.RelaunchError{Recovery: &previous, Cause: native.Unconfirmed(errors.New("the control answer was lost"))}
+	err := c.ApplySettingsAndRelaunch(ctx, agentstate.Settings{Provider: "kimi", Model: "Kimi-K2"}, func(begin native.ProviderRelaunch) error {
+		_, err := begin()
+		return err
+	})
+	assert.ErrorIs(t, err, native.ErrUnconfirmed, "the switch's own failure, not the turn's refusal")
+	require.Len(t, factory.Adapters(), 1, "no relaunch during the turn")
+
+	old.Sink().TurnCompleted(native.TurnResult{StopReason: native.StopReasonEndTurn})
+	require.Eventually(t, func() bool {
+		return len(factory.Adapters()) == 2 && c.Status() == conversation.StatusStable
+	}, 5*time.Second, 10*time.Millisecond)
+	assert.True(t, old.Closed())
+	assert.Nil(t, factory.Last().Launch, "the new process runs on the agent's own provider")
+	assert.Equal(t, "session-1", factory.Last().ResumeRef)
+	assert.Equal(t, previous.Provider, c.Settings().Provider)
+	assert.Equal(t, previous.Model, c.Settings().Model)
+	require.NoError(t, c.StartTurn(ctx, native.Input{Text: "safe after recovery"}))
+}
+
+// The HTTP path's apply and prepare are one mutation. Another settings call
+// waits for the relaunch rather than modifying the old adapter in between.
+func TestProviderRelaunchSerializesSettings(t *testing.T) {
+	ctx := context.Background()
+	c, factory, _ := startOnProviders(t, nil, native.Config{ResumeRef: "session-1"})
+	old := factory.Last()
+	old.Relaunch = &native.RelaunchError{}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	switched := make(chan error, 1)
+	go func() {
+		switched <- c.ApplySettingsAndRelaunch(ctx, agentstate.Settings{Provider: "kimi"}, func(begin native.ProviderRelaunch) error {
+			close(entered)
+			<-release
+			r, err := begin()
+			if err != nil {
+				return err
+			}
+			return r.Start(ctx)
+		})
+	}()
+	<-entered
+	secondStarted := make(chan struct{})
+	secondDone := make(chan error, 1)
+	go func() {
+		close(secondStarted)
+		secondDone <- c.ApplySettings(ctx, agentstate.Settings{PermissionMode: agentstate.PermissionModeAsk})
+	}()
+	<-secondStarted
+	select {
+	case err := <-secondDone:
+		t.Fatalf("the second mutation crossed the relaunch: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	require.NoError(t, <-switched)
+	require.NoError(t, <-secondDone)
+	require.Len(t, factory.Adapters(), 2)
+	assert.Empty(t, old.Applied(), "the retired adapter took no later mutation")
+	assert.Equal(t, []agentstate.Settings{{Model: "Kimi-K3"}, {PermissionMode: agentstate.PermissionModeAsk}}, factory.Last().Applied())
+	assert.Equal(t, "kimi", c.Settings().Provider)
+}
+
 func TestChosenProviderNoLongerDefined(t *testing.T) {
 	source := testProviders()
 	factory := &nativetest.Factory{Providers: true, Configure: configurable(agentstate.Settings{Model: "fast"})}
@@ -178,4 +304,59 @@ func TestChosenProviderWhileTheHubHasntAnswered(t *testing.T) {
 	require.NoError(t, c.Restart(context.Background()))
 	require.NotNil(t, factory.Last().Launch, "still chosen")
 	assert.Equal(t, "kimi", factory.Last().Launch.Provider.ID)
+}
+
+// providerUses records what Config.ProviderUsed is told.
+type providerUses struct {
+	mu   sync.Mutex
+	uses []native.ProviderUse
+}
+
+func (p *providerUses) add(use native.ProviderUse) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.uses = append(p.uses, use)
+}
+
+func (p *providerUses) get() []native.ProviderUse {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.uses)
+}
+
+// The provider a session runs on is reported from when it started on it
+// or switched to it: once the agent started with its session known, when
+// a session becomes known later, and after each switch in place.
+func TestProviderUsed(t *testing.T) {
+	clock := quartz.NewMock(t)
+	t0 := clock.Now()
+	uses := &providerUses{}
+	c, factory, _ := startOnProviders(t, nil, native.Config{Clock: clock, ProviderUsed: uses.add})
+	ctx := context.Background()
+	require.Eventually(t, func() bool { return len(uses.get()) == 1 }, 5*time.Second, time.Millisecond)
+	assert.Equal(t, []native.ProviderUse{{At: t0, Session: "session-1", Provider: "default"}}, uses.get())
+
+	clock.Advance(time.Minute)
+	require.NoError(t, c.ApplySettings(ctx, agentstate.Settings{Provider: "kimi"}))
+	clock.Advance(time.Minute)
+	require.NoError(t, c.ApplySettings(ctx, agentstate.Settings{Model: "Kimi-K2"}))
+	clock.Advance(time.Minute)
+	require.NoError(t, c.ApplySettings(ctx, agentstate.Settings{Provider: "default"}))
+	// A new session (/clear): on the provider since the switch; the same
+	// session again tells nothing new.
+	clock.Advance(time.Minute)
+	factory.Last().Sink().SessionRef("session-2")
+	factory.Last().Sink().SessionRef("session-2")
+	assert.Equal(t, []native.ProviderUse{
+		{At: t0, Session: "session-1", Provider: "default"},
+		{At: t0.Add(time.Minute), Session: "session-1", Provider: "kimi"},
+		{At: t0.Add(3 * time.Minute), Session: "session-1", Provider: "default"},
+		{At: t0.Add(3 * time.Minute), Session: "session-2", Provider: "default"},
+	}, uses.get())
+
+	// An agent that can't switch providers tells none.
+	none := &providerUses{}
+	plain, _, _ := start(t, func(a *nativetest.Adapter) { a.Ref = "s" }, native.Config{Providers: testProviders(), ProviderUsed: none.add})
+	assert.Equal(t, "s", plain.SessionRef())
+	assert.Empty(t, none.get())
 }

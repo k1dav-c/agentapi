@@ -6,6 +6,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -24,7 +25,8 @@ import (
 // tokens are those of the same calls: each call once, as its cost (a
 // fork's copy of an earlier session's call counts in that one), and the
 // calls Claude Code counted but didn't log (unitemized), whose tokens its
-// own count has, as their cost.
+// own count has, as their cost. The providers split them by model
+// provider (sessions.SessionCost.Providers).
 
 // spendInterval is how often the spend is worked out again.
 const spendInterval = time.Minute
@@ -34,34 +36,75 @@ const spendInterval = time.Minute
 // summary less than hourly misses no hour's final figure.
 const spendHours = 25
 
-// spendOf adds up the hours of hourly that end within the last day and
-// week before now: the cost to the cent, and the tokens. It lists the last
-// spendHours hours with calls too.
-func spendOf(hourly []sessions.HourCost, now time.Time) instanceapi.SummarySpend {
-	day, week := now.Add(-24*time.Hour), now.Add(-7*24*time.Hour)
+// spendOf adds up the hours of cost that end within the last day and week
+// before now: the cost to the cent, and the tokens, in all and by
+// provider. It lists the last spendHours hours with calls too.
+func spendOf(cost sessions.SessionCost, now time.Time) instanceapi.SummarySpend {
 	listed := now.UTC().Truncate(time.Hour).Add(-(spendHours - 1) * time.Hour)
 	var spend instanceapi.SummarySpend
-	var dayTokens, weekTokens pricing.Tokens
-	for _, h := range hourly {
-		end := h.Hour.Add(time.Hour)
-		if end.After(week) {
-			spend.WeekUSD += h.USD
-			weekTokens = weekTokens.Add(h.Tokens)
-		}
-		if end.After(day) {
-			spend.DayUSD += h.USD
-			dayTokens = dayTokens.Add(h.Tokens)
-		}
+	w := windowsOf(cost.Hourly, now)
+	spend.DayUSD, spend.WeekUSD = w.dayUSD, w.weekUSD
+	spend.DayTokens, spend.WeekTokens = summaryTokens(w.dayTokens), summaryTokens(w.weekTokens)
+	for _, h := range cost.Hourly {
 		if !h.Hour.Before(listed) {
 			// To a millionth of a dollar: enough for any sum of them.
 			usd := math.Round(h.USD*1e6) / 1e6
 			spend.Hours = append(spend.Hours, instanceapi.SummaryHour{Hour: h.Hour.UTC(), USD: usd, Tokens: *summaryTokens(h.Tokens)})
 		}
 	}
-	spend.DayUSD = math.Round(spend.DayUSD*100) / 100
-	spend.WeekUSD = math.Round(spend.WeekUSD*100) / 100
-	spend.DayTokens, spend.WeekTokens = summaryTokens(dayTokens), summaryTokens(weekTokens)
+	for _, p := range cost.Providers {
+		w := windowsOf(p.Hourly(), now)
+		if !w.inWeek {
+			continue
+		}
+		spend.Providers = append(spend.Providers, instanceapi.SummaryProviderSpend{
+			Provider: p.Provider, DayUSD: w.dayUSD, WeekUSD: w.weekUSD,
+			DayTokens: *summaryTokens(w.dayTokens), WeekTokens: *summaryTokens(w.weekTokens),
+		})
+	}
+	slices.SortStableFunc(spend.Providers, func(a, b instanceapi.SummaryProviderSpend) int {
+		switch {
+		case a.WeekUSD > b.WeekUSD:
+			return -1
+		case a.WeekUSD < b.WeekUSD:
+			return 1
+		}
+		if a.WeekTokens.Total != b.WeekTokens.Total {
+			return b.WeekTokens.Total - a.WeekTokens.Total
+		}
+		return strings.Compare(a.Provider, b.Provider)
+	})
 	return spend
+}
+
+// spendWindows are the cost (to the cent) and tokens of the hours that end
+// within the last day and week; inWeek says there are any of the week.
+type spendWindows struct {
+	dayUSD, weekUSD       float64
+	dayTokens, weekTokens pricing.Tokens
+	inWeek                bool
+}
+
+// windowsOf adds up the hours of hourly that end within the last day and
+// week before now.
+func windowsOf(hourly []sessions.HourCost, now time.Time) spendWindows {
+	day, week := now.Add(-24*time.Hour), now.Add(-7*24*time.Hour)
+	var w spendWindows
+	for _, h := range hourly {
+		end := h.Hour.Add(time.Hour)
+		if end.After(week) {
+			w.weekUSD += h.USD
+			w.weekTokens = w.weekTokens.Add(h.Tokens)
+			w.inWeek = true
+		}
+		if end.After(day) {
+			w.dayUSD += h.USD
+			w.dayTokens = w.dayTokens.Add(h.Tokens)
+		}
+	}
+	w.dayUSD = math.Round(w.dayUSD*100) / 100
+	w.weekUSD = math.Round(w.weekUSD*100) / 100
+	return w
 }
 
 // summaryTokens are tokens as a summary has them: both of Anthropic's
@@ -93,7 +136,8 @@ func spendScope(store *sessions.Store) string {
 // then: its figures are final.
 func nextSpend(last, spend instanceapi.SummarySpend, scope string, now time.Time) instanceapi.SummarySpend {
 	spend.Scope = scope
-	if last.UpdatedAt.IsZero() || spend.DayUSD != last.DayUSD || spend.WeekUSD != last.WeekUSD || spend.Scope != last.Scope || !spend.SameTokens(last) {
+	if last.UpdatedAt.IsZero() || spend.DayUSD != last.DayUSD || spend.WeekUSD != last.WeekUSD || spend.Scope != last.Scope ||
+		!spend.SameTokens(last) || !spend.SameProviders(last) {
 		spend.UpdatedAt = now.UTC().Truncate(time.Second)
 	} else {
 		spend.UpdatedAt = last.UpdatedAt
@@ -118,7 +162,7 @@ func (s *Server) startSpend() {
 			return
 		}
 		now := time.Now()
-		last = nextSpend(last, spendOf(costs.Total.Hourly, now), scope, now)
+		last = nextSpend(last, spendOf(costs.Total, now), scope, now)
 		s.emitter.SetSpend(last)
 	}
 	go func() {

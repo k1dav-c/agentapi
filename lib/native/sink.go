@@ -63,6 +63,8 @@ func (c *Conversation) turnCompletedLocked(result TurnResult) {
 		c.clearLoginLocked()
 	}
 	c.cfg.Emitter.EmitStatus(c.statusLocked())
+	// A switch that failed during the turn recovers now.
+	c.recoverProviderLocked()
 }
 
 // provesLogin reports whether a turn that ended with result shows that the
@@ -141,6 +143,7 @@ func (s *sink) SessionRef(ref string) {
 		c.sessionRef = ref
 		c.forking = false
 		c.cfg.Observer.SessionRef(ref)
+		c.reportProviderLocked()
 	})
 }
 

@@ -734,6 +734,9 @@
             "format": "int64",
             "type": "integer"
           },
+          "server_id": {
+            "type": "string"
+          },
           "started_at": {
             "format": "date-time",
             "type": "string"
@@ -1250,6 +1253,9 @@
             "format": "int64",
             "type": "integer"
           },
+          "server_id": {
+            "type": "string"
+          },
           "started_at": {
             "format": "date-time",
             "type": "string"
@@ -1356,7 +1362,7 @@
             "type": "string"
           },
           "api_key": {
-            "description": "The provider's API key; missing keeps the one it has, empty removes it.",
+            "description": "The provider's API key; missing keeps it at unchanged endpoints, empty removes it.",
             "type": "string"
           },
           "base_url": {
@@ -1393,7 +1399,7 @@
             "type": "string"
           },
           "api_key": {
-            "description": "The key to check with; missing uses the one the provider with the ID has.",
+            "description": "The key to check with; missing uses the saved one at unchanged endpoints.",
             "type": "string"
           },
           "base_url": {
@@ -1490,9 +1496,14 @@
               "$ref": "#/components/schemas/ProviderView"
             },
             "type": "array"
+          },
+          "revision": {
+            "description": "The hub's opaque optimistic-concurrency token for the provider list.",
+            "type": "string"
           }
         },
         "required": [
+          "revision",
           "providers"
         ],
         "type": "object"
@@ -1505,9 +1516,14 @@
               "$ref": "#/components/schemas/ProviderChange"
             },
             "type": "array"
+          },
+          "revision": {
+            "description": "The revision returned by the client's latest provider-list read.",
+            "type": "string"
           }
         },
         "required": [
+          "revision",
           "providers"
         ],
         "type": "object"

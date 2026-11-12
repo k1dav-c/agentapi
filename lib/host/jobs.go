@@ -54,9 +54,12 @@ type Job struct {
 	// Run counts the agents that worked on the job here: each run has a
 	// state database of its own, since agents can't read each other's
 	// sessions.
-	Run           int      `json:"run"`
-	Port          int      `json:"port"`
-	InstanceID    string   `json:"instance_id"`
+	Run        int    `json:"run"`
+	Port       int    `json:"port"`
+	InstanceID string `json:"instance_id"`
+	// ServerID is the random identity of this AgentAPI process, learned from
+	// /status once it serves. It is empty while a new process starts.
+	ServerID      string   `json:"server_id,omitempty"`
 	Repo          string   `json:"repo"`
 	Worktree      string   `json:"worktree"`
 	Branch        string   `json:"branch"`
@@ -94,6 +97,7 @@ type JobInfo struct {
 	Run           int       `json:"run"`
 	Port          int       `json:"port"`
 	InstanceID    string    `json:"instance_id"`
+	ServerID      string    `json:"server_id,omitempty"`
 	Branch        string    `json:"branch"`
 	DefaultBranch string    `json:"default_branch"`
 	Worktree      string    `json:"worktree"`
@@ -106,7 +110,7 @@ type JobInfo struct {
 
 func (j *Job) info() JobInfo {
 	return JobInfo{
-		Key: j.Key, Agent: j.Agent, Run: j.Run, Port: j.Port, InstanceID: j.InstanceID, Branch: j.Branch,
+		Key: j.Key, Agent: j.Agent, Run: j.Run, Port: j.Port, InstanceID: j.InstanceID, ServerID: j.ServerID, Branch: j.Branch,
 		DefaultBranch: j.DefaultBranch, Worktree: j.Worktree, State: j.State, Error: j.Error,
 		Credentials: j.Credentials, PID: j.PID, StartedAt: j.StartedAt,
 	}

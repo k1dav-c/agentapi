@@ -1,7 +1,7 @@
 "use client";
 
 import React, {useCallback, useEffect, useLayoutEffect, useMemo, useState} from "react";
-import {Search} from "lucide-react";
+import {LoaderCircle, Search} from "lucide-react";
 import {createPortal} from "react-dom";
 import {Button} from "./ui/button";
 import {formatDateLabel} from "@/lib/format-time";
@@ -64,6 +64,9 @@ export default function MessageList({
   // at a time; the numbers of the tasks shown count them.
   const earlierTasks = useChatSelector((chat) => chat.earlierTasks);
   const loadingEarlier = useChatSelector((chat) => chat.loadingEarlier);
+  // A full replay is still arriving: tasks may show their prompt before
+  // their reply (TaskGroup's "Loading the reply…").
+  const replaying = useChatSelector((chat) => chat.replaying);
   const {loadEarlier} = useChatActions();
   // The page's actions render into the header's slot (one top bar); the
   // embed page has no header, so they get their own row there.
@@ -194,6 +197,12 @@ export default function MessageList({
             {/* One reading column, centered: 46rem of text inside the padding.
                 The time rail and thinking notes sit in the margins beside it. */}
             {timeline.prelude.length > 0 && <StartupScreen messages={timeline.prelude} />}
+            {replaying && (
+              <p role="status" className="flex items-center gap-1.5 pt-4 text-xs text-muted-foreground" data-replaying>
+                <LoaderCircle className="size-3.5 motion-safe:animate-spin" />
+                Loading the conversation…
+              </p>
+            )}
             {(hiddenTaskCount > 0 || canLoadEarlier) && (
               <div className="py-4">
                 <Button type="button" variant="outline" size="sm" onClick={showEarlier} disabled={hiddenTaskCount === 0 && loadingEarlier} className="h-8 rounded-full text-xs">
@@ -254,6 +263,7 @@ export default function MessageList({
                   visibleIndex < visibleTasks.length - 1 &&
                   !renderedTaskKeys.has(task.key)
                 }
+                replaying={replaying}
                 waitingForUser={isLatest && waitingFor === "answer"}
               />
               </div>

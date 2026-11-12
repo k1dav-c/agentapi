@@ -105,6 +105,31 @@ describe("conversationReducer", () => {
     expect(apply(initialConversation, {type: "reset"}).synced).toBe(initialConversation.synced);
   });
 
+  test("a full replay's progress says it is replaying; the batch that completes it doesn't", () => {
+    const progress = apply(initialConversation, {type: "batch", batch: batch({replace: true, held: true, messages: [prompt(0, 1)], point: at("e1", 0)})});
+    expect(progress.replaying).toBe(true);
+    const more = apply(progress, {type: "batch", batch: batch({held: true, richMessages: [rich("r1", 2)], point: at("e1", 0)})});
+    expect(more.replaying).toBe(true);
+    // Requests apply apart and leave it.
+    expect(apply(more, {type: "batchRequests", batch: batch({held: true})}).replaying).toBe(true);
+    const done = apply(more, {type: "batch", batch: batch({replaceHeld: true, tasks: [task(0, 3)], point: at("e1", 3)})});
+    expect(done.replaying).toBe(false);
+    // A replay that arrives in one batch never says it.
+    expect(apply(initialConversation, {type: "batch", batch: batch({replace: true, replaceHeld: true, messages: [prompt(0, 1)], point: at("e1", 1)})}).replaying).toBe(false);
+  });
+
+  test("a resumed replay, live updates, a reset and the cache don't leave it replaying", () => {
+    const progress = apply(initialConversation, {type: "batch", batch: batch({replace: true, held: true, messages: [prompt(0, 1)], point: at("e1", 0)})});
+    // What follows a replay: any batch not held.
+    expect(apply(progress, {type: "batch", batch: batch({messages: [message(1, 4)], point: at("e1", 4)})}).replaying).toBe(false);
+    expect(apply(progress, {type: "reset"}).replaying).toBe(false);
+    const cached: CachedSession = {epoch: "e1", seq: 9, messages: [], richMessages: [], requests: [], tasks: []};
+    expect(apply(progress, {type: "restore", cached}).replaying).toBe(false);
+    // Nor does a resumed connection's replay, which is never held.
+    const resumed = apply(initialConversation, {type: "batch", batch: batch({messages: [message(1, 4)], point: at("e1", 4)})});
+    expect(resumed.replaying).toBe(false);
+  });
+
   test("drafts: added, marked failed, dismissed, and restored once", () => {
     const sent = apply(initialConversation, {type: "draftAdded", draft: draft("c1", "hi")});
     const failed = apply(sent, {type: "draftFailed", clientId: "c1", error: "offline"});
@@ -123,6 +148,20 @@ describe("richMessagesAfter", () => {
     expect(richMessagesAfter(previous, batch({richMessages: [updated]}))).toEqual([withoutSeq(updated), previous[1]]);
     expect(richMessagesAfter(previous, batch({replace: true, richMessages: [updated]}))).toEqual([withoutSeq(updated)]);
     expect(richMessagesAfter(previous, batch({}))).toBe(previous);
+  });
+
+  test("a replay that came the newest task first goes by task, the earliest first; what came after it last", () => {
+    const place = (block: number, index: number) => ({block, index});
+    const richOrder = new Map([
+      ["r4\u0000assistant", place(4, 0)],
+      ["r2b\u0000assistant", place(2, 1)],
+      ["r2a\u0000assistant", place(2, 2)],
+    ]);
+    const first = richMessagesAfter([], batch({replace: true, held: true, richOrder, richMessages: [rich("r4", 3), rich("r2b", 2)]}));
+    expect(first.map((m) => m.message_id)).toEqual(["r2b", "r4"]);
+    const next = richMessagesAfter(first, batch({replaceHeld: true, richOrder, richMessages: [rich("live", 9), rich("r2a", 1)]}));
+    expect(next.map((m) => m.message_id)).toEqual(["r2b", "r2a", "r4", "live"]);
+    expect(next[0]).toBe(first[0]);
   });
 });
 
@@ -152,6 +191,20 @@ describe("messagesAfter", () => {
     const next = messagesAfter([prompt(0, 1), failed, sending], batch({replace: true, messages: [message(1, 2), sent(2, "lost", 3)]}));
     expect(next.slice(0, 2)).toEqual([failed, sending]);
     expect(next).toHaveLength(4);
+  });
+});
+
+describe("messagesAfter in a replay that came the newest task first", () => {
+  test("the server's messages go in ID order; the drafts keep their places", () => {
+    const richOrder = new Map();
+    const sending = draft("c1", "on its way");
+    const first = messagesAfter([sending], batch({replace: true, held: true, richOrder, messages: [prompt(4, 5), message(5, 6)]}));
+    expect(first.map((item) => ("clientId" in item ? item.clientId : item.id))).toEqual(["c1", 4, 5]);
+    const next = messagesAfter(first, batch({held: true, richOrder, messages: [prompt(2, 3), message(3, 4)]}));
+    expect(next.map((item) => ("clientId" in item ? item.clientId : item.id))).toEqual(["c1", 2, 3, 4, 5]);
+    expect(next[3]).toBe(first[1]);
+    // Without the order a batch merges as it comes.
+    expect(messagesAfter(first, batch({messages: [prompt(2, 3)]})).map((item) => item.id)).toEqual([undefined, 4, 5, 2]);
   });
 });
 

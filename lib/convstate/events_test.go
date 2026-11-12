@@ -3,6 +3,7 @@ package convstate
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -382,6 +383,138 @@ func TestEventEmitterIncrementalReplay(t *testing.T) {
 	require.Empty(t, kinds(state))
 }
 
+// replayLabels names the replay's events, in order, by kind and ID.
+func replayLabels(events []Event) []string {
+	var out []string
+	for _, ev := range events {
+		switch p := ev.Payload.(type) {
+		case SessionSyncBody:
+			out = append(out, "sync")
+		case StatusChangeBody:
+			out = append(out, "status")
+		case MessageUpdateBody:
+			out = append(out, fmt.Sprintf("message %d", p.Id))
+		case RichMessageUpdateBody:
+			out = append(out, "rich "+p.MessageID)
+		case TaskUpdateBody:
+			out = append(out, fmt.Sprintf("task %d", p.ID))
+		}
+	}
+	return out
+}
+
+// A full replay to a client that wants session_sync holds the newest task
+// first, each with its rich messages, and what came before the first task
+// last; other replays keep the order they always had.
+func TestEventEmitterReplayNewestTaskFirst(t *testing.T) {
+	now := time.Now()
+	task := func(id int) *int { return &id }
+	rich := func(id string, taskID *int) transcript.RichMessage {
+		return transcript.RichMessage{MessageID: id, Role: "assistant", Timestamp: now, Content: []transcript.RichContentBlock{{Type: "text", Text: id}}}
+	}
+	withTask := func(msg transcript.RichMessage, taskID *int) transcript.RichMessage {
+		msg.TaskID = taskID
+		return msg
+	}
+	msgs := []conv.Message{
+		{Id: 0, Role: conv.RoleAgent, Message: "Welcome", Time: now},
+		{Id: 1, Role: conv.RoleUser, Message: "one", Time: now},
+		{Id: 2, Role: conv.RoleAgent, Message: "reply one", Time: now},
+		{Id: 3, Role: conv.RoleUser, Message: "two", Time: now},
+		{Id: 4, Role: conv.RoleAgent, Message: "reply two", Time: now},
+		{Id: 5, Role: conv.RoleAgent, Message: "more of two", Time: now},
+		{Id: 6, Role: conv.RoleUser, Message: "three", Time: now},
+		{Id: 7, Role: conv.RoleAgent, Message: "reply three", Time: now},
+	}
+	richMsgs := []transcript.RichMessage{
+		// Before the first task, then without a TaskID in a resumed
+		// session: it goes with the task before it.
+		withTask(rich("welcome", nil), nil),
+		withTask(rich("r1", nil), task(1)),
+		withTask(rich("r1-resumed", nil), nil),
+		withTask(rich("r3", nil), task(3)),
+		withTask(rich("r6", nil), task(6)),
+		withTask(rich("r6-resumed", nil), nil),
+	}
+	seqs := func(n int, from uint64) []uint64 {
+		out := make([]uint64, n)
+		for i := range out {
+			out[i] = from + uint64(i)
+		}
+		return out
+	}
+	emitter := NewEventEmitter()
+	emitter.Restore(EmitterState{
+		Epoch:        "e1",
+		Seq:          20,
+		Messages:     msgs,
+		MessageSeqs:  seqs(len(msgs), 1),
+		RichMessages: richMsgs,
+		RichSeqs:     seqs(len(richMsgs), 10),
+		Tasks: []instanceapi.Task{
+			{ID: 1, Status: instanceapi.TaskStatusCompleted, StartedAt: now, EndedAt: &now},
+			{ID: 3, Status: instanceapi.TaskStatusCompleted, StartedAt: now, EndedAt: &now},
+			{ID: 6, Status: instanceapi.TaskStatusCompleted, StartedAt: now, EndedAt: &now},
+		},
+		TaskSeqs: seqs(3, 16),
+	})
+
+	_, _, state := emitter.Subscribe()
+	labels := replayLabels(state)
+	require.Equal(t, []string{
+		"sync", "status",
+		"message 6", "message 7", "rich r6", "rich r6-resumed",
+		"message 3", "message 4", "message 5", "rich r3",
+		"message 1", "message 2", "rich r1", "rich r1-resumed",
+		"message 0", "rich welcome",
+		"task 1", "task 3", "task 6",
+	}, labels)
+	sync := state[0].Payload.(SessionSyncBody)
+	require.True(t, sync.Full)
+	maxSeq := uint64(0)
+	for _, ev := range state {
+		switch p := ev.Payload.(type) {
+		case MessageUpdateBody:
+			maxSeq = max(maxSeq, p.Seq)
+		case RichMessageUpdateBody:
+			maxSeq = max(maxSeq, p.Seq)
+		case TaskUpdateBody:
+			maxSeq = max(maxSeq, p.Seq)
+		}
+	}
+	require.Equal(t, maxSeq, sync.Seq, "the session sync waits for the last change, whatever comes last")
+
+	// A client without session_sync gets the same messages and rich
+	// messages in the order it always had.
+	noSync := func(kind EventType) bool { return kind != EventTypeSessionSync }
+	_, _, plain := emitter.SubscribeTo(noSync, 0, "")
+	plainLabels := replayLabels(plain)
+	require.Equal(t, []string{
+		"message 0", "message 1", "message 2", "message 3", "message 4", "message 5", "message 6", "message 7",
+		"status",
+		"rich welcome", "rich r1", "rich r1-resumed", "rich r3", "rich r6", "rich r6-resumed",
+		"task 1", "task 3", "task 6",
+	}, plainLabels)
+	require.ElementsMatch(t, labels[1:], plainLabels, "the same events, in another order")
+	conversation := func(events []Event) []Event {
+		return slices.DeleteFunc(slices.Clone(events), func(ev Event) bool {
+			return ev.Type != EventTypeMessageUpdate && ev.Type != EventTypeRichMessageUpdate
+		})
+	}
+	require.ElementsMatch(t, conversation(state), conversation(plain), "the same payloads, in another order")
+
+	// An incremental replay holds what changed, in the order it always had.
+	emitter.EmitMessages(append(slices.Clone(msgs),
+		conv.Message{Id: 8, Role: conv.RoleUser, Message: "four", Time: now},
+		conv.Message{Id: 9, Role: conv.RoleAgent, Message: "reply four", Time: now},
+	))
+	emitter.EmitRichMessageSnapshot(rich("r8", nil))
+	emitter.EmitRichMessageSnapshot(withTask(rich("r1", nil), task(1)))
+	_, _, state = emitter.SubscribeSince(sync.Seq, sync.Epoch)
+	require.False(t, state[0].Payload.(SessionSyncBody).Full)
+	require.Equal(t, []string{"sync", "message 8", "message 9", "status", "rich r1", "rich r8"}, replayLabels(state)[:6])
+}
+
 // recordingPersister records what an emitter stores.
 type recordingPersister struct {
 	tasks     map[int]string
@@ -557,9 +690,11 @@ func TestEventEmitterResyncLosesNothing(t *testing.T) {
 	var msgs []conv.Message
 	for i := range 6 {
 		msgs = append(msgs, conv.Message{Id: i, Role: conv.RoleUser, Message: fmt.Sprint("m", i), Time: time.Unix(0, 0)})
-		if i < 5 {
-			want = append(want, fmt.Sprintf("message %d", i))
-		}
+	}
+	// Each message starts a task, which the replay holds the newest
+	// first; the rich messages came before the first task, so last.
+	for i := 4; i >= 0; i-- {
+		want = append(want, fmt.Sprintf("message %d", i))
 	}
 	for i := range 5 {
 		emitter.EmitRichMessageSnapshot(transcript.RichMessage{MessageID: fmt.Sprint("r", i), Role: "assistant"})

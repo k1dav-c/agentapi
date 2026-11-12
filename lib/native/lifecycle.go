@@ -112,6 +112,7 @@ func (c *Conversation) launch(ctx context.Context, gen int, resume Resume) error
 func (c *Conversation) markStartedLocked(caps agentstate.Capabilities, settings agentstate.Settings) {
 	c.started = true
 	c.ran = true
+	c.providerUnsafe = false
 	c.caps = caps
 	c.settings = c.withProviderLocked(settings)
 	c.loginWaiting = false
@@ -120,6 +121,7 @@ func (c *Conversation) markStartedLocked(caps agentstate.Capabilities, settings 
 	// One report for all of it, before the agent counts as started.
 	c.stateChangedLocked()
 	c.cfg.Observer.Started()
+	c.reportProviderLocked()
 }
 
 // beginInitialPromptLocked begins the turn of the initial prompt, read as

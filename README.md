@@ -701,7 +701,9 @@ The two agents switch differently:
 
 - **Claude Code** switches while it runs, from its next API call, also during a turn. Going back to
   its own provider starts it again on the same session, which takes a few seconds; during a turn it
-  is refused (409).
+  is refused (409). If a switch fails, AgentAPI restores the previous environment and model. If an
+  answer is unconfirmed or restoration fails, it starts a replacement on the previous known provider
+  instead of allowing another turn with settings that might not match the UI.
 - **Codex** binds a thread to its provider, and an OpenAI thread holds items another provider
   refuses (OpenAI's tool definitions, encrypted reasoning). A switch starts app-server again on the
   other provider, in a new thread that gets the conversation's messages as text, without the tool
@@ -721,7 +723,11 @@ answer, and doesn't ask it again for a minute.
 
 An agent on a provider can read that provider's key: it runs as your user, with the key in its
 environment. Give a provider only a key you would give the agent. Model calls on a provider have no
-known price, so they add tokens but no cost (`--prices` adds prices).
+known price, so they add tokens but no cost (`--prices` adds prices). `GET /sessions`, `GET /cost`
+and the summary's `spend` count each provider's calls, tokens and cost apart (`providers`,
+`default` for the agent's own); for Claude Code, whose log doesn't say which endpoint a call went
+to, AgentAPI records which provider each session ran on from when in
+`~/.agentapi/provider-ledger.jsonl`.
 
 ### Context and rate limits
 
@@ -1354,7 +1360,10 @@ again. Opening a session with more than 256 rich messages ends them too, rather 
 
 The full replay (a new client, another epoch) holds the latest 20 tasks, not the whole
 conversation; the earlier ones are read a page at a time (below). A client that resumes from
-before a change the server no longer holds gets the full replay too.
+before a change the server no longer holds gets the full replay too. With `?sync=1` it comes the
+newest task first: the status and errors, then each task's messages and its rich messages, and
+what came before the first task last. Without `sync` it keeps the order it always had: the
+messages, the status, then the rich messages.
 
 ### Long conversations
 

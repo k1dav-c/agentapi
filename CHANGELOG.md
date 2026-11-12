@@ -2,8 +2,30 @@
 
 ## Unreleased
 
+### Breaking changes
+
+- `PUT /api/providers` on the hub needs the list's `revision`, which `GET /api/providers` and each
+  `PUT` answer; without it the hub answers 400, and with a stale one 409, changing nothing. A script
+  that replaces the providers reads the list first. A provider sent without `api_key` keeps its key
+  only while its URLs stay the same; a changed URL needs its key (400 otherwise).
+- Upgrade the hub before the machines that report to it, and its launchers with it. An upgraded
+  AgentAPI refuses a provider sync answer without the nonce proof of an older hub (it keeps using the
+  providers it kept). An upgraded hub counts a job's task events only from the AgentAPI process the
+  launcher reported (`server_id`), so the jobs of an older launcher keep their state and cost until
+  it is upgraded too; an upgraded launcher reports the jobs it takes over on its next report.
+
 ### Features
 
+- Usage by model provider: each model call counts toward the provider it went to, `default` for the
+  agent's own. `GET /cost` gives each call its `provider`, `GET /sessions` and `GET /cost` split a
+  cost into `providers` (calls, tokens, cost), and the summary's `spend.providers` has each
+  provider's last 24 hours and 7 days. Codex's session log names the provider; for Claude Code,
+  AgentAPI records which provider each session ran on from when in
+  `~/.agentapi/provider-ledger.jsonl` (entries kept 90 days), so its calls before AgentAPI kept the
+  ledger count as the agent's own. The chat's Session tab lists what the sessions spent on each
+  provider once the agent used one besides its own, the hub's overview has a **Providers** card
+  (each provider's 24 hours and 7 days, each scope once), and the hub's Providers settings show each
+  provider's use; calls to models without a known price show their tokens and "no price".
 - Claude Code and Codex switch to another model provider while they run, and back: an endpoint that
   speaks the Anthropic Messages API or the OpenAI Responses API, such as a LiteLLM gateway. Define
   providers under `providers:` in `~/.agentapi/config.yaml` (ID, base URL, key, and optionally the
@@ -26,12 +48,40 @@
   reached.
 - A provider's models are kept for 10 minutes and then listed again in the background; one that
   doesn't answer holds the model menu up for 3 seconds at most, and isn't asked again for a minute.
+- A Markdown table wider than its column has a button that opens it in a popup as wide as the window
+  (always shown on a touch screen), and a shade at the right edge while it scrolls sideways.
+- The hub keeps the last agents you opened loaded (4, 2 on a phone), so going back to one shows it at
+  once instead of loading its chat and conversation again. A hidden chat doesn't mark its tasks seen
+  or alert you.
 
 ### Fixes
 
+- A full replay of a conversation (`/events?sync=1` with nothing to resume from) sends the newest task
+  first, each task with its rich messages, so the end of the transcript, which the chat shows, is whole
+  first; the chat puts the tasks back in order. Other clients, and a resumed replay, get the order they
+  had.
+- While the chat loads a conversation's history, a task whose reply hasn't arrived yet says
+  **Loading the reply…** under its prompt, and the transcript says **Loading the conversation…** at
+  the top, instead of showing each task as its prompt alone until the rest came.
 - Dialogs float up into place, fading in as they rise a little and grow, instead of flying in from the
   top-left corner of the page (the slide of the old dialog animation added to its centering). They
   close faster, sinking back a little.
+- The hub no longer reuses a provider's saved key after its endpoint changes: checking or saving the new
+  endpoint requires its key. Model-list redirects don't forward provider credentials to another origin,
+  and provider sync answers are bound to the nonce of their signed request so an old answer can't be
+  replayed. Provider edits use a revision: a stale tab gets a conflict instead of replacing another
+  tab's changes, and a late connection-check answer no longer describes fields edited since it started.
+- A Claude Code provider switch that fails or has an unknown outcome restores its previous provider and
+  model, or starts a replacement in that known state before any more turns; a switch that fails during
+  a turn starts that replacement by itself when the turn ends. Settings mutations of one
+  adapter no longer overlap. Stored-state version 2 carries the provider/model pair, and this AgentAPI
+  leaves any stored-state envelope it can't read unchanged rather than overwriting it on the next
+  status change.
+- Dispatch retries a state write that failed instead of dropping the only pending snapshot, and the
+  host launcher doesn't report a successful start when it couldn't keep the job's initial metadata.
+  Task events carry the AgentAPI server identity, so a delayed event from an old run can't change the
+  new run's state or cost. In the chat, saving one provider draft no longer closes a draft opened
+  later, and an old settings read can't replace options from a completed update.
 
 ### Documentation
 

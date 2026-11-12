@@ -99,6 +99,21 @@ type Config struct {
 	// Providers are the model providers an agent that can run on one (a
 	// ProviderRunner) can switch to; nil offers none.
 	Providers *provider.Source
+	// ProviderUsed, if set, is told the provider the session of an agent
+	// that can switch providers runs on, and from when: once the agent
+	// started and its session is known (not the one a fork copies), when
+	// the session becomes known after that, and after a switch in place.
+	// It is called with the conversation's lock held, and must not block
+	// or call back into the conversation.
+	ProviderUsed func(ProviderUse)
+}
+
+// ProviderUse says that from At on, the agent's session Session runs on
+// Provider (provider.Default for the agent's own).
+type ProviderUse struct {
+	At       time.Time
+	Session  string
+	Provider string
 }
 
 const (
@@ -116,6 +131,10 @@ const (
 type Conversation struct {
 	cfg Config
 
+	// settingsMu serializes mutations of one adapter, including the prepare
+	// step of a provider relaunch. It is taken outside mu, so adapter I/O
+	// never holds the conversation lock.
+	settingsMu sync.Mutex
 	// mu guards the fields below. It is never held while the adapter is
 	// called (see Sink).
 	mu sync.Mutex
@@ -176,6 +195,13 @@ type Conversation struct {
 	// for its own).
 	providerCap bool
 	provider    string
+	// providerSince is when the agent started on provider, or switched
+	// to it; providerReported what ProviderUsed was last told.
+	providerSince    time.Time
+	providerReported ProviderUse
+	// providerUnsafe blocks turns after a failed switch left the adapter's
+	// provider/model unknown, until a new agent starts on a known configuration.
+	providerUnsafe bool
 	// ownModel is the model the agent ran on its own provider before it
 	// switched to another, which it goes back to.
 	ownModel string
@@ -283,6 +309,7 @@ func (c *Conversation) Compact(ctx context.Context) error {
 	if gen == c.generation {
 		c.compacting = false
 		c.cfg.Emitter.EmitStatus(c.statusLocked())
+		c.recoverProviderLocked()
 	}
 	c.mu.Unlock()
 	return err
@@ -333,7 +360,7 @@ func (c *Conversation) stateChangedLocked() {
 func (c *Conversation) configurable() (Configurable, int, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if !c.started || c.adapter == nil {
+	if !c.started || c.adapter == nil || c.providerUnsafe {
 		return nil, 0, ErrNotStarted
 	}
 	configurable, ok := c.adapter.(Configurable)
@@ -370,6 +397,13 @@ func (c *Conversation) SettingOptions(ctx context.Context) (SettingOptions, erro
 // ApplySettings changes the settings that are set in s. The agents that
 // replace this one (a restart, a new login) get them too.
 func (c *Conversation) ApplySettings(ctx context.Context, s agentstate.Settings) error {
+	c.settingsMu.Lock()
+	defer c.settingsMu.Unlock()
+	return c.applySettings(ctx, s)
+}
+
+// applySettings is ApplySettings with settingsMu held.
+func (c *Conversation) applySettings(ctx context.Context, s agentstate.Settings) error {
 	configurable, gen, err := c.configurable()
 	if err != nil {
 		return err
@@ -523,7 +557,7 @@ func (c *Conversation) statusLocked() conv.Status {
 	if !c.started {
 		return conv.StatusInitializing
 	}
-	if c.compacting {
+	if c.compacting || c.providerUnsafe {
 		return conv.StatusChanging
 	}
 	if !c.turnActive || c.requests.waitingOnUser() {
@@ -566,7 +600,7 @@ func (c *Conversation) beginTurnLocked(input Input, continues hold) (pendingTurn
 	if text == "" {
 		return pendingTurn{}, conv.ErrMessageValidationEmpty
 	}
-	if !c.started || c.turnActive || c.compacting || c.adapter == nil {
+	if !c.started || c.turnActive || c.compacting || c.providerUnsafe || c.adapter == nil {
 		return pendingTurn{}, conv.ErrMessageValidationChanging
 	}
 	c.turnActive = true
@@ -613,6 +647,7 @@ func (c *Conversation) deliverTurn(ctx context.Context, turn pendingTurn) error 
 		c.messages.remove(turn.msg)
 		c.cfg.Emitter.EmitMessages(c.messages.snapshot())
 		c.cfg.Emitter.EmitStatus(c.statusLocked())
+		c.recoverProviderLocked()
 	}
 	c.mu.Unlock()
 	if errors.Is(err, ErrTurnActive) {

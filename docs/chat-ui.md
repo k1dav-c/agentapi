@@ -95,8 +95,10 @@ On narrow screens, thinking collapses into a "Thinking · *title*" line within t
 ### Messages and long tasks
 
 Each agent message has buttons to show it as raw text instead of Markdown (each message on its own),
-to search inside it, and to copy it; your prompt has a copy button. A task with many steps shows its
-latest 40; **Show *n* earlier steps** brings back the rest.
+to search inside it, and to copy it; your prompt has a copy button. A table wider than the column
+scrolls sideways, with a shade at the right edge while there is more; its button at the top right
+(always shown on a touch screen) opens it in a popup as wide as the window. A task with many steps
+shows its latest 40; **Show *n* earlier steps** brings back the rest.
 
 ### Long conversations
 
@@ -106,6 +108,11 @@ conversation of months opens as fast as a new one. Scroll to the top, or click *
 tasks**, and the chat reads the 20 before them; what you were reading stays where it was. The task
 numbers are the server's, so they count the tasks not loaded yet. A server older than AgentAPI 4.3
 sends every task at once.
+
+A long conversation arrives in parts: the newest tasks first, each with its reply, then the older
+ones above them. Until it is all there, the top of the transcript says **Loading the
+conversation…**, and a task whose reply hasn't come yet says **Loading the reply…** under its
+prompt. An older server sends all the prompts first and the replies after them.
 
 ### The task menu
 
@@ -407,6 +414,11 @@ For Claude Code, Codex and Pi, this tab lists sessions in the working directory 
 agent's logs, with names, first messages, message counts, last-change times and costs. A card above
 the list totals session and subagent costs for today, the last 7 and 30 days (including today, in
 your time zone), and all time. These are API-equivalent costs at list prices; hover for tokens.
+Once the agent has used a [model provider](../README.md#model-providers) besides its own, the card
+lists **By provider** what the sessions spent on each, the agent's own as **Own provider** and the
+others by ID: calls, tokens and cost. A gateway's models often have no known price: a provider
+whose calls have none says **no price** rather than `$0.00`, and one whose calls only partly have
+one ends its cost with `+`. Hover a row for its tokens by kind.
 
 **Open** restarts the agent on a session and displays its conversation. **Start a copy** opens a
 copy under a new id, leaving the original session unchanged. Both replace the current conversation
@@ -529,7 +541,7 @@ watches. Its list puts the agents you pin on top, then what needs you first by g
 change first; By machine puts each machine's agents in one card, a tab each, in either order. Each state has a glyph of its own, and each row says what the agent waits for (the
 approval's command, the question) or does; search and chips (state, agent) filter the list. On a desktop, an
 overview counts each state, shows what needs you, works or finished since you looked, and totals the
-spend, tokens and work time of the last 24 hours and 7 days, by group and by machine. Picking an agent opens it in this chat
+spend, tokens and work time of the last 24 hours and 7 days, by group and by machine, and what went to each model provider. Picking an agent opens it in this chat
 beside the list (or instead of it on a phone, with a back button), under one bar: the hub's, with
 the chat's own buttons in it, and a button for each other agent of its machine, which opens it in
 place. It opens through the hub, which sends the instance's token.
