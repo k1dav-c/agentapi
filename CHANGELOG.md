@@ -196,8 +196,8 @@
   delivery uses the same connection, where each delivery with an answer opened a new one.
 - The pipe of an agent's output is closed when the output ends, where each start of the agent
   again left one open until AgentAPI exited.
-- An interrupt that Claude Code or Codex accepts after `POST /interrupt` stopped waiting for the
-  answer still ends the turn within 10 seconds when the agent doesn't, where the turn could stay
+- When Claude Code or Codex accepts an interrupt after `POST /interrupt` stopped waiting for the
+  answer, the turn still ends within 10 seconds if the agent doesn't end it, where it could stay
   running.
 
 ### Internal
@@ -252,7 +252,7 @@
   the chat showed 999,600 tokens as "1000k", where the hub showed "1M"; an amount just under $1,000
   as "$1000.00", and the hub one just under $10 as "$10.00".
 - Adding an AgentAPI by its URL on the hub says why the hub refused it, whatever the shape of its
-  answer; signing in to the hub says a refusal other than a wrong token as the hub said it, not as
+  answer; signing in to the hub shows a refusal other than a wrong token in the hub's words, not as
   a hub that didn't answer.
 
 ### Performance
@@ -293,7 +293,7 @@
 
 ### Features
 
-- The machines in Issues have **×** on an offline one, which forgets it after a dialog, as
+- In Issues, an offline machine has **×**, which forgets it after a dialog, as
   `DELETE /api/hosts/{name}` does: a launcher set up again, with a new token, can then join under
   its name. It is off, with the reason, while one of the machine's jobs still works.
 
@@ -389,7 +389,7 @@
 - A job's AgentAPI that exits starts again after 5 s, 15 s, 45 s, 2 min, then 5 min, rather than
   at the next 5-second check, and the job fails when it exits again after 5 restarts in 30 minutes
   (it failed after 5 exits in about 30 seconds). The restarts are kept in `jobs.json`, so a
-  restarted launcher counts on.
+  restarted launcher keeps counting.
 
 ## v3.14.0
 
@@ -431,7 +431,7 @@
 ### Features
 
 - The hub's Issues dialog is a page now, in the overview's place (◎ in the header, or `i`). Its
-  board puts the issues by stage, with what needs you first: a failed job, an agent that waits on
+  board sorts the issues by stage, with what needs you first: a failed job, an agent that waits on
   you, a pull request to review; then the agents at work, the issues to do and those done. A bar
   counts the stages, and the machines show their room and agents. **Assign** hands an issue to the
   agent and machine the button shows, one tap; its arrow lists the others, with why a machine
@@ -446,7 +446,7 @@
   this one, it still does. ◎ counts the issues that need you, and the list's row of an agent that
   works on an issue shows the issue and its pull request, which open it in Issues.
 - The board shows the issues of the 20 repositories pushed to or changed last
-  (`GET /api/github/repos` lists them so, with `pushed_at` and `updated_at`); its menu finds any
+  (`GET /api/github/repos` lists them in that order, with `pushed_at` and `updated_at`); its menu finds any
   other.
 
 ## v3.11.0
@@ -1836,7 +1836,7 @@
   mode and images load too. The token stays in the URL fragment, which never reaches the server, a
   proxy or a log, and is removed from the address bar. The sign-in dialog names the server that asks
   and warns when it isn't the page's own origin, says so when the browser didn't keep the cookie,
-  and comes back on Reconnect now after Cancel.
+  and now comes back on Reconnect after Cancel.
 - `POST /auth/session` (with `Authorization: Bearer <token>`) sets an HttpOnly, SameSite=Strict
   session cookie that authenticates later requests, Secure over HTTPS or behind a proxy that sends
   `X-Forwarded-Proto: https`. It holds an HMAC of the token, not the token, so changing the token
@@ -1929,7 +1929,7 @@
 
 ### Fixes
 
-- Claude Code: messages ending with an attachment (`@"<path>"`) are now submitted correctly.
+- Claude Code: messages ending with an attachment (`@"<path>"`) are now submitted.
   Previously, the trailing mention opened file suggestions, and Enter selected a suggestion instead
   of sending the message.
 
