@@ -89,12 +89,12 @@ bypass. Every turn reports simulated context and rate-limit usage that grows wit
 `/compact` empties the context. The terminal button opens a real shell in the working directory, as
 for any agent.
 
+Steering appends to the reply, and Stop ends the turn as interrupted. The adapter lives in
+`lib/native/demo`.
+
 The demo has no [model providers](../README.md#model-providers), even posing as Claude Code: the
 model menu's provider groups need a real Claude Code or Codex. The hub's Providers tab works with
 the hub above.
-
-Steering appends to the reply, and Stop ends the turn as interrupted. The adapter lives in
-`lib/native/demo`.
 
 ## Code layout
 
@@ -123,7 +123,7 @@ Run `bun run typecheck`, `bun lint` and `bun test` before a change goes in.
 
 The chat stores one conversation per server in IndexedDB. Reopening shows the cached transcript
 immediately, then fetches changes; saves write only changed messages. Caches expire after 14 days
-without use, and beyond 100 servers or 50,000 records in all the least recently used go; a hub
+without use, and beyond 100 servers or 50,000 records in all, the least recently used go; a hub
 opens each instance as a server of its own.
 
 Drafts, failed messages and dismissed notices stay in localStorage. If the chat crashes, the error
