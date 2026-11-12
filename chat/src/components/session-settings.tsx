@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { Brain, ChevronDown, ClipboardList, Hand, LoaderCircle, Shield, ShieldCheck, Zap } from "lucide-react";
+import { Brain, ChevronDown, ClipboardList, Cloud, Hand, LoaderCircle, Shield, ShieldCheck, Zap } from "lucide-react";
 import { toast } from "sonner";
 import {useChatActions, useChatSelector} from "./chat-provider";
 import { Button } from "./ui/button";
@@ -17,7 +17,7 @@ import {
 } from "./ui/dropdown-menu";
 import type { AgentSettings, PermissionMode } from "@/lib/chat-api";
 import { getErrorMessage } from "@/lib/error-utils";
-import { modeMeta, modelLabel, effortsOf } from "@/lib/session-settings";
+import { modeMeta, modelChange, modelGroups, modelLabel, modelValue, effortsOf, providerLabel } from "@/lib/session-settings";
 import { OPEN_SETTINGS_EVENT, type SettingsMenu } from "@/lib/slash-commands";
 import { cn } from "@/lib/utils";
 import {useLoaded} from "@/lib/use-loaded";
@@ -31,7 +31,9 @@ const MODE_ICONS: Record<PermissionMode, ReactNode> = {
 
 // The agent's permission mode, model and reasoning effort in the composer's
 // toolbar (native agents with the settings capability). Each opens a menu
-// that switches it; the values come from GET /settings when it opens.
+// that switches it; the values come from GET /settings when it opens. The
+// model menu has the agent's own models, then those of the model providers
+// it can switch to (Claude Code, Codex).
 export function SessionSettings({ className }: { className?: string }) {
   const features = useChatSelector((chat) => chat.features);
   const agentSettings = useChatSelector((chat) => chat.agentSettings);
@@ -89,7 +91,11 @@ export function SessionSettings({ className }: { className?: string }) {
   const meta = modeMeta(mode);
   // Pi has no permission modes: its trigger shows once the options say so.
   const showMode = mode !== undefined || (options?.permission_modes.length ?? 0) > 0;
-  const efforts = effortsOf(options, agentSettings.model);
+  const provider = agentSettings.provider;
+  const efforts = effortsOf(options, agentSettings.model, provider);
+  // The name of the provider the agent runs on, empty on its own.
+  const onProvider = providerLabel(options, provider);
+  const groups = modelGroups(options);
   const status = (
     <>
       {loading && !options && <DropdownMenuItem disabled><LoaderCircle className="animate-spin" />Loading…</DropdownMenuItem>}
@@ -155,11 +161,11 @@ export function SessionSettings({ className }: { className?: string }) {
               size="sm"
               disabled={saving}
               className="h-9 min-w-0 shrink gap-1 rounded-full px-2.5 text-xs text-muted-foreground hover:text-foreground"
-              title="Model and reasoning effort"
+              title={onProvider ? `Model on ${onProvider}, and reasoning effort` : "Model and reasoning effort"}
             >
-              <Brain />
+              {onProvider ? <Cloud /> : <Brain />}
               <span className="min-w-0 truncate">
-                {modelLabel(options, agentSettings.model)}
+                {modelLabel(options, agentSettings.model, provider)}
                 {agentSettings.effort && <span className="opacity-70"> · {agentSettings.effort}</span>}
               </span>
               <ChevronDown className="size-3 shrink-0 opacity-60" />
@@ -169,16 +175,38 @@ export function SessionSettings({ className }: { className?: string }) {
             <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">Model</DropdownMenuLabel>
             {status}
             {options && (
-              <DropdownMenuRadioGroup value={agentSettings.model} onValueChange={(value) => void apply({ model: value })}>
-                {options.models.map((model) => (
-                  <DropdownMenuRadioItem key={model.id} value={model.id} className="min-h-11 items-start">
-                    <span className="grid min-w-0">
-                      <span className="truncate">{model.name || model.id}</span>
-                      {model.description && <span className="text-[11px] text-muted-foreground">{model.description}</span>}
-                    </span>
-                  </DropdownMenuRadioItem>
+              <DropdownMenuRadioGroup
+                value={modelValue(provider, agentSettings.model)}
+                onValueChange={(value) => void apply(modelChange(value, provider))}
+              >
+                {groups.map((group) => (
+                  <div key={group.provider} role="group" aria-label={group.label || "The agent's own models"}>
+                    {group.label && (
+                      <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuLabel className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                          <Cloud className="size-3.5" />
+                          <span className="min-w-0 truncate">{group.label}</span>
+                          {group.origin === "hub" && <span className="ml-auto rounded bg-muted px-1 text-[10px]">hub</span>}
+                        </DropdownMenuLabel>
+                      </>
+                    )}
+                    {group.models.map((model) => (
+                      <DropdownMenuRadioItem key={model.id} value={modelValue(group.provider, model.id)} className="min-h-11 items-start">
+                        <span className="grid min-w-0">
+                          <span className="truncate">{model.name || model.id}</span>
+                          {model.description && <span className="text-[11px] text-muted-foreground">{model.description}</span>}
+                        </span>
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </div>
                 ))}
               </DropdownMenuRadioGroup>
+            )}
+            {groups.length > 1 && (
+              <p className="px-2 py-1.5 text-[11px] text-muted-foreground">
+                Another provider keeps the conversation; Codex starts a new thread with its text, and Claude Code goes back to its own provider by starting again.
+              </p>
             )}
             {efforts.length > 0 && (
               <>

@@ -1449,6 +1449,19 @@ export interface components {
              */
             ttl_seconds: number;
         };
+        ProviderOption: {
+            /** @description Value of the provider setting that picks the provider. */
+            id: string;
+            /** @description Models the provider offers; empty when it defines none and its API listed none, then any model ID goes. */
+            models: components["schemas"]["ModelOption"][];
+            /** @description Name to show. */
+            name: string;
+            /**
+             * @description Where the provider is defined: config, the machine's ~/.agentapi/config.yaml; hub, the hub this AgentAPI reports to.
+             * @enum {string}
+             */
+            origin: "config" | "hub";
+        };
         Question: {
             /** @description An answer other than the options is allowed. */
             free_text?: boolean;
@@ -1948,10 +1961,12 @@ export interface components {
             total_cost: components["schemas"]["SessionCost"];
         };
         SettingOptions: {
-            /** @description Models the agent can switch to. */
+            /** @description Models the agent can switch to on its own provider. */
             models: components["schemas"]["ModelOption"][];
             /** @description Permission modes the agent can switch to; empty when it has none (Pi). */
             permission_modes: components["schemas"]["PermissionMode"][];
+            /** @description Model providers the agent can switch to besides its own (default), from ~/.agentapi/config.yaml and the hub; missing for an agent that can't switch providers (Pi). */
+            providers?: components["schemas"]["ProviderOption"][];
         };
         Settings: {
             /**
@@ -1966,6 +1981,8 @@ export interface components {
             model?: string;
             /** @description bypass: tools run without asking; auto: the agent's own review decides what may run; ask: tool calls that need approval come as requests; plan: the agent proposes a plan before it changes anything. Missing while the agent runs in a mode of its own, e.g. Claude Code's acceptEdits. */
             permission_mode?: components["schemas"]["PermissionMode"];
+            /** @description Model provider the agent runs on: default for its own (Claude Code's Anthropic login or key, Codex's OpenAI login or config), else the id of one of the providers GET /settings lists. Missing for an agent that can't switch providers (Pi). */
+            provider?: string;
         };
         SettingsResponseBody: {
             /**

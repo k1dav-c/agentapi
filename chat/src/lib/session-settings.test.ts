@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { effortsOf, modeMeta, modelLabel } from "./session-settings";
+import { effortsOf, modeMeta, modelChange, modelGroups, modelLabel, modelValue, providerLabel } from "./session-settings";
 import type { SettingOptions } from "./chat-api";
 
 const options: SettingOptions = {
@@ -7,6 +7,10 @@ const options: SettingOptions = {
   models: [
     { id: "default", name: "Default (recommended)", efforts: ["low", "high"] },
     { id: "haiku", name: "Haiku" },
+  ],
+  providers: [
+    { id: "kimi", name: "Kimi", origin: "config", models: [{ id: "Kimi-K3", name: "Kimi K3" }] },
+    { id: "empty", name: "Empty", origin: "hub", models: [] },
   ],
 };
 
@@ -30,5 +34,25 @@ describe("session settings", () => {
     expect(effortsOf(options, "custom")).toEqual([]);
     expect(effortsOf(null, "default")).toEqual([]);
     expect(effortsOf(options, undefined)).toEqual([]);
+  });
+
+  test("providers", () => {
+    expect(modelLabel(options, "Kimi-K3", "kimi")).toBe("Kimi K3");
+    expect(modelLabel(options, "Kimi-K3", "default")).toBe("Kimi-K3");
+    expect(providerLabel(options, "kimi")).toBe("Kimi");
+    expect(providerLabel(options, "default")).toBe("");
+    expect(providerLabel(options, undefined)).toBe("");
+    // A provider without models can't be picked from the menu.
+    expect(modelGroups(options).map((g) => g.provider)).toEqual(["default", "kimi"]);
+    expect(modelGroups(null)).toEqual([]);
+  });
+
+  test("model changes", () => {
+    // Another model of the same provider changes only the model.
+    expect(modelChange(modelValue("default", "haiku"), undefined)).toEqual({ model: "haiku" });
+    expect(modelChange(modelValue("kimi", "Kimi-K3"), "kimi")).toEqual({ model: "Kimi-K3" });
+    // Another provider's switches it too.
+    expect(modelChange(modelValue("kimi", "Kimi-K3"), "default")).toEqual({ provider: "kimi", model: "Kimi-K3" });
+    expect(modelChange(modelValue(undefined, "default"), "kimi")).toEqual({ provider: "default", model: "default" });
   });
 });
