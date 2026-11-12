@@ -2,12 +2,17 @@ import {describe, expect, test} from "bun:test";
 import {createHubAPI} from "./hub-api";
 import {
   changeOf,
+  checkFailureText,
   draftOf,
   draftProblem,
   keptChange,
   parseModelIDs,
   parseProviders,
+  providerEndpoint,
+  providerHue,
   providerModelsText,
+  providerMonogram,
+  toggleModel,
   providerName,
   type Provider,
   type ProviderDraft,
@@ -135,4 +140,37 @@ describe("the hub's API", () => {
     await expect(createHubAPI("", fetcher(json(400, {code: "invalid", message, error: message}))).setProviders([])).rejects.toMatchObject({message, status: 400});
     await expect(createHubAPI("", fetcher(json(200, {}))).getProviders()).rejects.toMatchObject({message: "The hub's answer has no providers."});
   });
+});
+
+describe("provider looks", () => {
+  test("endpoint", () => {
+    expect(providerEndpoint("https://gateway.example.com/v1/")).toBe("gateway.example.com/v1");
+    expect(providerEndpoint("http://10.0.0.12:8000/v1")).toBe("10.0.0.12:8000/v1");
+    expect(providerEndpoint("not a url")).toBe("not a url");
+  });
+  test("monogram", () => {
+    expect(providerMonogram("LiteLLM gateway")).toBe("LG");
+    expect(providerMonogram("kimi")).toBe("KI");
+    expect(providerMonogram("Local vLLM")).toBe("LV");
+    expect(providerMonogram("—")).toBe("?");
+  });
+  test("hue", () => {
+    expect(providerHue("gateway")).toBe(providerHue("gateway"));
+    expect(providerHue("gateway")).toBeGreaterThanOrEqual(0);
+    expect(providerHue("gateway")).toBeLessThan(360);
+  });
+  test("toggle a model", () => {
+    expect(toggleModel("a\nb", "c")).toBe("a\nb\nc");
+    expect(toggleModel("a, b", "a")).toBe("b");
+    expect(toggleModel("", "a")).toBe("a");
+  });
+});
+
+test("check failures in words", () => {
+  expect(checkFailureText("GET /models answered 401 Unauthorized")).toBe("The provider refused the key.");
+  expect(checkFailureText("GET /models answered 404 Not Found")).toContain("/v1");
+  expect(checkFailureText("GET /models answered 500 Internal Server Error")).toBe("The provider answered 500.");
+  expect(checkFailureText('Get "https://x/v1/models": dial tcp: lookup x: no such host')).toBe("The hub couldn't reach the provider.");
+  expect(checkFailureText("read the models: invalid character")).toContain("not with a list");
+  expect(checkFailureText("something else")).toBe("something else");
 });

@@ -9,8 +9,8 @@ const options: SettingOptions = {
     { id: "haiku", name: "Haiku" },
   ],
   providers: [
-    { id: "kimi", name: "Kimi", origin: "config", models: [{ id: "Kimi-K3", name: "Kimi K3" }] },
-    { id: "empty", name: "Empty", origin: "hub", models: [] },
+    { id: "kimi", name: "Kimi", host: "gw.example.com", origin: "config", models: [{ id: "Kimi-K3", name: "Kimi K3" }] },
+    { id: "empty", name: "Empty", host: "gw.example.com", origin: "hub", models: [] },
   ],
 };
 

@@ -142,3 +142,51 @@ function httpURL(text: string): boolean {
     return false;
   }
 }
+
+// providerEndpoint is a provider's base URL as a list shows it: the host
+// and path, without the scheme or the trailing slash.
+export function providerEndpoint(baseURL: string): string {
+  try {
+    const url = new URL(baseURL);
+    return url.host + url.pathname.replace(/\/+$/, "");
+  } catch {
+    return baseURL;
+  }
+}
+
+// providerMonogram is the one or two letters of a provider's tile: the
+// initials of its first two words, else its first two letters.
+export function providerMonogram(name: string): string {
+  const words = name.match(/[\p{L}\p{N}]+/gu) ?? [];
+  if (words.length === 0) return "?";
+  const [first, second] = words as [string, ...string[]];
+  const letters = second ? first.charAt(0) + second.charAt(0) : first.slice(0, 2);
+  return letters.toUpperCase();
+}
+
+// providerHue is the hue of a provider's tile, the same for an ID
+// wherever it shows.
+export function providerHue(id: string): number {
+  let hash = 0;
+  for (const char of id) hash = (hash * 31 + char.codePointAt(0)!) >>> 0;
+  return hash % 360;
+}
+
+// toggleModel adds the model id to the models' text, or takes it out.
+export function toggleModel(text: string, id: string): string {
+  const ids = parseModelIDs(text);
+  return (ids.includes(id) ? ids.filter((each) => each !== id) : [...ids, id]).join("\n");
+}
+
+// checkFailureText says in words why a connection check failed, from the
+// hub's reason: a refused key, a URL without the API, a provider out of
+// reach; else the reason itself.
+export function checkFailureText(reason: string): string {
+  const status = /answered (\d{3})/.exec(reason)?.[1];
+  if (status === "401" || status === "403") return "The provider refused the key.";
+  if (status === "404") return "No API at this URL: check that it ends with /v1.";
+  if (status) return `The provider answered ${status}.`;
+  if (/no such host|connection refused|i\/o timeout|deadline exceeded|unreachable|Client\.Timeout/i.test(reason)) return "The hub couldn't reach the provider.";
+  if (/read the models/i.test(reason)) return "The URL answered, but not with a list of models.";
+  return reason;
+}

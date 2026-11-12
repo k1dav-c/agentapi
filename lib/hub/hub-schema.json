@@ -1385,6 +1385,65 @@
         ],
         "type": "object"
       },
+      "ProviderCheck": {
+        "additionalProperties": false,
+        "properties": {
+          "anthropic_base_url": {
+            "description": "Base URL for Claude Code when it isn't base_url without /v1.",
+            "type": "string"
+          },
+          "api_key": {
+            "description": "The key to check with; missing uses the one the provider with the ID has.",
+            "type": "string"
+          },
+          "base_url": {
+            "description": "Base URL of the provider's API, e.g. https://gateway.example.com/v1. Codex calls \u003cbase_url\u003e/responses; Claude Code calls the same URL without /v1, plus /v1/messages.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Identifies the provider: lowercase letters, digits, - and _.",
+            "type": "string"
+          },
+          "models": {
+            "description": "Models to offer; when empty, those the provider lists at \u003cbase_url\u003e/models.",
+            "items": {
+              "$ref": "#/components/schemas/Model"
+            },
+            "type": "array"
+          },
+          "name": {
+            "description": "Name to show; the ID when empty.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "base_url"
+        ],
+        "type": "object"
+      },
+      "ProviderCheckResult": {
+        "additionalProperties": false,
+        "properties": {
+          "latency_ms": {
+            "description": "How long the provider took to answer, in milliseconds.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "models": {
+            "description": "The models the provider lists at \u003cbase_url\u003e/models.",
+            "items": {
+              "$ref": "#/components/schemas/Model"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "models",
+          "latency_ms"
+        ],
+        "type": "object"
+      },
       "ProviderView": {
         "additionalProperties": false,
         "properties": {

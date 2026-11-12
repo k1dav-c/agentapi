@@ -242,6 +242,7 @@ func (h *Hub) routes(r chi.Router) {
 		r.Put("/api/favorites", h.setFavorites)
 		r.Get("/api/providers", h.getProviders)
 		r.Put("/api/providers", h.setProviders)
+		r.Post("/api/providers/check", h.checkProvider)
 		r.Get("/api/events", h.streamEvents)
 		r.Get("/api/join", h.getJoin)
 		r.Get("/api/activity", h.getActivity)

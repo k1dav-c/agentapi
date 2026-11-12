@@ -42,6 +42,8 @@ var wireTypes = []reflect.Type{
 	reflect.TypeFor[favoritesBody](),
 	reflect.TypeFor[providersBody](),
 	reflect.TypeFor[providersChange](),
+	reflect.TypeFor[providerCheck](),
+	reflect.TypeFor[providerCheckResult](),
 	reflect.TypeFor[instanceChange](),
 	reflect.TypeFor[addInstanceBody](),
 	reflect.TypeFor[pinsBody](),

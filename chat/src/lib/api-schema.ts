@@ -1450,6 +1450,8 @@ export interface components {
             ttl_seconds: number;
         };
         ProviderOption: {
+            /** @description The host of the provider's API, to show where it runs. */
+            host: string;
             /** @description Value of the provider setting that picks the provider. */
             id: string;
             /** @description Models the provider offers; empty when it defines none and its API listed none, then any model ID goes. */

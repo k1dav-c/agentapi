@@ -427,6 +427,29 @@ export interface components {
             /** @description Name to show; the ID when empty. */
             name?: string;
         };
+        ProviderCheck: {
+            /** @description Base URL for Claude Code when it isn't base_url without /v1. */
+            anthropic_base_url?: string;
+            /** @description The key to check with; missing uses the one the provider with the ID has. */
+            api_key?: string;
+            /** @description Base URL of the provider's API, e.g. https://gateway.example.com/v1. Codex calls <base_url>/responses; Claude Code calls the same URL without /v1, plus /v1/messages. */
+            base_url: string;
+            /** @description Identifies the provider: lowercase letters, digits, - and _. */
+            id: string;
+            /** @description Models to offer; when empty, those the provider lists at <base_url>/models. */
+            models?: components["schemas"]["Model"][];
+            /** @description Name to show; the ID when empty. */
+            name?: string;
+        };
+        ProviderCheckResult: {
+            /**
+             * Format: int64
+             * @description How long the provider took to answer, in milliseconds.
+             */
+            latency_ms: number;
+            /** @description The models the provider lists at <base_url>/models. */
+            models: components["schemas"]["Model"][];
+        };
         ProviderView: {
             /** @description Base URL for Claude Code when it isn't base_url without /v1. */
             anthropic_base_url?: string;

@@ -60,7 +60,7 @@ func (c *Conversation) withProviderLocked(settings agentstate.Settings) agentsta
 func (c *Conversation) providerOptions(ctx context.Context) []ProviderOption {
 	options := []ProviderOption{}
 	for _, listed := range c.cfg.Providers.List() {
-		option := ProviderOption{ID: listed.ID, Name: listed.DisplayName(), Origin: listed.Origin, Models: []ModelOption{}}
+		option := ProviderOption{ID: listed.ID, Name: listed.DisplayName(), Host: listed.Host(), Origin: listed.Origin, Models: []ModelOption{}}
 		for _, m := range c.cfg.Providers.Models(ctx, listed.Provider) {
 			option.Models = append(option.Models, ModelOption{ID: m.ID, Name: m.DisplayName()})
 		}

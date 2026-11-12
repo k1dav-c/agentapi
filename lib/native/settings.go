@@ -26,6 +26,7 @@ type SettingOptions struct {
 type ProviderOption struct {
 	ID     string          `json:"id" doc:"Value of the provider setting that picks the provider."`
 	Name   string          `json:"name" doc:"Name to show."`
+	Host   string          `json:"host" doc:"The host of the provider's API, to show where it runs."`
 	Origin provider.Origin `json:"origin" enum:"config,hub" doc:"Where the provider is defined: config, the machine's ~/.agentapi/config.yaml; hub, the hub this AgentAPI reports to."`
 	Models []ModelOption   `json:"models" nullable:"false" doc:"Models the provider offers; empty when it defines none and its API listed none, then any model ID goes."`
 }

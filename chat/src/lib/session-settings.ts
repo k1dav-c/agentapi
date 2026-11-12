@@ -28,6 +28,7 @@ export interface ModelGroup {
   provider: string;
   // Empty for the agent's own.
   label: string;
+  host?: string;
   origin?: string;
   models: ModelOption[];
 }
@@ -64,7 +65,7 @@ export function modelGroups(options: SettingOptions | null): ModelGroup[] {
   if (!options) return [];
   const groups: ModelGroup[] = [{ provider: DEFAULT_PROVIDER, label: "", models: options.models }];
   for (const p of options.providers ?? []) {
-    if (p.models.length > 0) groups.push({ provider: p.id, label: p.name || p.id, origin: p.origin, models: p.models });
+    if (p.models.length > 0) groups.push({ provider: p.id, label: p.name || p.id, host: p.host, origin: p.origin, models: p.models });
   }
   return groups;
 }
@@ -81,4 +82,18 @@ export function modelChange(value: string, currentProvider: string | undefined):
   const [provider, model] = value.split("\n", 2) as [string, string];
   if (provider === (currentProvider || DEFAULT_PROVIDER)) return { model };
   return { provider, model };
+}
+
+// providerSwitchHint says, in a line, what switching providers does with
+// the agent: Claude Code switches at once and starts again to go back to
+// its own; Codex starts a new thread with the conversation.
+export function providerSwitchHint(agentType: string): string {
+  switch (agentType) {
+    case "codex":
+      return "Switching provider starts a new Codex thread with this conversation.";
+    case "claude":
+      return "Switches at once; back to Anthropic, Claude Code restarts on this session.";
+    default:
+      return "Switching provider keeps this conversation.";
+  }
 }

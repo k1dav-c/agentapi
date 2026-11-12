@@ -211,3 +211,50 @@ func (h *Hub) syncProviders(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, provider.SyncResponse{Sealed: sealed})
 }
+
+// providerCheck is the body of POST /api/providers/check: a provider as
+// the editor has it, whose key, when it sends none, is the one the
+// provider with the ID has.
+type providerCheck struct {
+	provider.Provider
+	APIKey *string `json:"api_key,omitempty" doc:"The key to check with; missing uses the one the provider with the ID has."`
+}
+
+// providerCheckResult is the answer of POST /api/providers/check.
+type providerCheckResult struct {
+	Models    []provider.Model `json:"models" nullable:"false" doc:"The models the provider lists at <base_url>/models."`
+	LatencyMS int64            `json:"latency_ms" doc:"How long the provider took to answer, in milliseconds."`
+}
+
+// checkProvider asks a provider for its models from the hub (POST
+// /api/providers/check), so the page can tell whether its URL and key
+// work before it saves them. A provider that doesn't answer with its
+// models is 502, with the reason.
+func (h *Hub) checkProvider(w http.ResponseWriter, r *http.Request) {
+	var body providerCheck
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, `send {"base_url": ..., "api_key": ...}`)
+		return
+	}
+	p := body.Provider
+	if body.APIKey != nil {
+		p.APIKey = *body.APIKey
+	} else if i := slices.IndexFunc(h.providers.get(), func(o provider.Provider) bool { return o.ID == p.ID }); i >= 0 {
+		p.APIKey = h.providers.get()[i].APIKey
+	}
+	if p.ID == "" {
+		// The URL is what is checked; a new provider may have no ID yet.
+		p.ID = "check"
+	}
+	if err := p.Validate(); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	started := h.clock.Now()
+	models, err := provider.ListModels(r.Context(), nil, p)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, providerCheckResult{Models: models, LatencyMS: h.clock.Since(started).Milliseconds()})
+}

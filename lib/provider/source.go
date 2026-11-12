@@ -191,7 +191,7 @@ func (s *Source) Models(ctx context.Context, p Provider) []Model {
 	if ok && cached.key == key && time.Since(cached.at) < modelsTTL {
 		return cached.models
 	}
-	models, err := s.list(ctx, p)
+	models, err := ListModels(ctx, s.client, p)
 	if err != nil {
 		s.logger.Warn("Failed to list a model provider's models", "provider", p.ID, "error", err)
 		if ok && cached.key == key {
@@ -205,8 +205,12 @@ func (s *Source) Models(ctx context.Context, p Provider) []Model {
 	return models
 }
 
-// list asks p's API for its models (GET /models, OpenAI's format).
-func (s *Source) list(ctx context.Context, p Provider) ([]Model, error) {
+// ListModels asks p's API for its models (GET <base_url>/models, OpenAI's
+// format), with client (nil: one that gives up after 10 seconds).
+func ListModels(ctx context.Context, client *http.Client, p Provider) ([]Model, error) {
+	if client == nil {
+		client = &http.Client{Timeout: listTimeout}
+	}
 	ctx, cancel := context.WithTimeout(ctx, listTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.OpenAIBaseURL()+"/models", nil)
@@ -217,7 +221,7 @@ func (s *Source) list(ctx context.Context, p Provider) ([]Model, error) {
 		req.Header.Set("Authorization", "Bearer "+p.APIKey)
 		req.Header.Set("x-api-key", p.APIKey)
 	}
-	resp, err := s.client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}

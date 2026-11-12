@@ -91,8 +91,19 @@ export function createHubAPI(root: string, fetcher: Fetcher = (url, init) => fet
     // the hub keeps them.
     setProviders: async (providers: ProviderChange[]): Promise<Provider[]> =>
       providersOf(await call("/api/providers", json("PUT", {providers} satisfies HubWire["ProvidersChange"]))),
+    // Asks a provider for its models from the hub (POST
+    // /api/providers/check): without api_key, with the key the provider
+    // with the ID has. A provider that doesn't answer throws its reason.
+    checkProvider: async (check: HubWire["ProviderCheck"]): Promise<ProviderCheckResult> => {
+      const response = await call("/api/providers/check", json("POST", check));
+      const body = (await response.json().catch(() => null)) as Partial<ProviderCheckResult> | null;
+      if (!Array.isArray(body?.models)) throw new HubAPIError("The hub's answer has no models.", response.status);
+      return {models: body.models.filter((m) => typeof m?.id === "string"), latency_ms: Number(body.latency_ms) || 0};
+    },
   };
 }
+
+export type ProviderCheckResult = HubWire["ProviderCheckResult"];
 
 // providersOf reads the providers of an answer, or throws.
 async function providersOf(response: Response): Promise<Provider[]> {

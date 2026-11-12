@@ -46,7 +46,7 @@ func TestProviderOptions(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, testOptions.Models, options.Models)
 	assert.Equal(t, []native.ProviderOption{{
-		ID: "kimi", Name: "Kimi", Origin: provider.OriginHub,
+		ID: "kimi", Name: "Kimi", Host: "gw.example.com", Origin: provider.OriginHub,
 		Models: []native.ModelOption{{ID: "Kimi-K3", Name: "Kimi-K3"}, {ID: "Kimi-K2", Name: "Kimi K2"}},
 	}}, options.Providers)
 

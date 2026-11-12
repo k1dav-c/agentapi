@@ -138,3 +138,12 @@ func (p Provider) Redacted() (Provider, bool) {
 	p.APIKey = ""
 	return p, hasKey
 }
+
+// Host is the host (and port) of the provider's API, to show.
+func (p Provider) Host() string {
+	u, err := url.Parse(p.BaseURL)
+	if err != nil {
+		return ""
+	}
+	return u.Host
+}

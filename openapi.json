@@ -1029,6 +1029,10 @@
       "ProviderOption": {
         "additionalProperties": false,
         "properties": {
+          "host": {
+            "description": "The host of the provider's API, to show where it runs.",
+            "type": "string"
+          },
           "id": {
             "description": "Value of the provider setting that picks the provider.",
             "type": "string"
@@ -1054,6 +1058,7 @@
           }
         },
         "required": [
+          "host",
           "id",
           "models",
           "name",

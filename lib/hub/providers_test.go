@@ -3,9 +3,12 @@ package hub_test
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -122,4 +125,42 @@ func TestHubProviders(t *testing.T) {
 	// The browser's list needs a session.
 	var body json.RawMessage
 	assert.Equal(t, http.StatusUnauthorized, request(t, http.MethodGet, hubURL+"/api/providers", "", nil, &body))
+}
+
+// POST /api/providers/check asks a provider for its models from the hub,
+// with the key sent or the one the provider with the ID has.
+func TestHubProviderCheck(t *testing.T) {
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer sk-1" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":[{"id":"Kimi-K3"},{"id":"GLM-5"}]}`))
+	}))
+	t.Cleanup(gateway.Close)
+	hubURL := startHubWith(t, hub.Config{StatePath: filepath.Join(t.TempDir(), "instances.json")}, false).URL
+	code, _ := putProviders(t, hubURL, []map[string]any{{"id": "gw", "base_url": gateway.URL + "/v1", "api_key": "sk-1"}})
+	require.Equal(t, http.StatusOK, code)
+
+	var result struct {
+		Models []provider.Model `json:"models"`
+	}
+	// The kept key.
+	require.Equal(t, http.StatusOK, request(t, http.MethodPost, hubURL+"/api/providers/check", hubToken, map[string]any{"id": "gw", "base_url": gateway.URL + "/v1"}, &result))
+	assert.Equal(t, []provider.Model{{ID: "Kimi-K3"}, {ID: "GLM-5"}}, result.Models)
+	// A new provider, with the key typed.
+	require.Equal(t, http.StatusOK, request(t, http.MethodPost, hubURL+"/api/providers/check", hubToken, map[string]any{"base_url": gateway.URL, "api_key": "sk-1"}, &result))
+	assert.Len(t, result.Models, 2)
+	// A wrong key: the provider's answer.
+	req, err := http.NewRequest(http.MethodPost, hubURL+"/api/providers/check", strings.NewReader(`{"base_url": "`+gateway.URL+`", "api_key": "nope"}`))
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer "+hubToken)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	refused, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	assert.Equal(t, http.StatusBadGateway, resp.StatusCode)
+	assert.Contains(t, string(refused), "401")
+	assert.Equal(t, http.StatusBadRequest, request(t, http.MethodPost, hubURL+"/api/providers/check", hubToken, map[string]any{"base_url": "gateway"}, nil))
+	assert.Equal(t, http.StatusUnauthorized, request(t, http.MethodPost, hubURL+"/api/providers/check", "", map[string]any{"base_url": gateway.URL}, nil))
 }
