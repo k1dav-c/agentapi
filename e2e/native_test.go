@@ -159,6 +159,13 @@ type nativeServer struct {
 // the test.
 func startNative(ctx context.Context, t *testing.T, flags ...string) *nativeServer {
 	t.Helper()
+	return startNativeWith(ctx, t, "", flags...)
+}
+
+// startNativeWith is startNative with config as the server's config file
+// (none when empty).
+func startNativeWith(ctx context.Context, t *testing.T, config string, flags ...string) *nativeServer {
+	t.Helper()
 	binaryPath := agentapiBinary(ctx, t)
 	cwd, err := os.Getwd()
 	require.NoError(t, err)
@@ -173,6 +180,9 @@ func startNative(ctx context.Context, t *testing.T, flags ...string) *nativeServ
 	work := filepath.Join(tmp, "work")
 	require.NoError(t, os.MkdirAll(home, 0o700))
 	require.NoError(t, os.MkdirAll(work, 0o700))
+	if config != "" {
+		require.NoError(t, os.WriteFile(filepath.Join(tmp, "config.yaml"), []byte(config), 0o600))
+	}
 	port, err := getFreePort()
 	require.NoError(t, err)
 
