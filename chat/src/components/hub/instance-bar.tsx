@@ -7,7 +7,7 @@ import {Button} from "@/components/ui/button";
 import {chatURL, displayName, instanceState, stateLabel, type HubInstance} from "@/lib/hub";
 import {instanceVersion} from "@/lib/hub-version";
 import type {Favorite} from "@/lib/hub-favorites";
-import {favoritesToFrame, frameInstance, toFrame, type MachineAgent} from "@/lib/hub-frame";
+import {favoritesToFrame, frameInstance, shownToFrame, toFrame, type MachineAgent} from "@/lib/hub-frame";
 import {shownUpdate} from "@/lib/hub-update";
 import {cn} from "@/lib/utils";
 import {agentName} from "./instance-row";
@@ -20,9 +20,17 @@ import {VersionTag} from "./version-tag";
 // Where the chat is served, below the hub.
 export const basePath = (process.env.NEXT_PUBLIC_BASE_PATH ?? "/chat").replace(/\/$/, "");
 
-// FrameInfo tells the open instance's chat what its bar shows, whenever
-// that changes and whenever the chat says it is ready (ready counts it):
-// machine is the agents of its machine, for the bar's switch.
+// usePostToFrame posts message (JSON) to the chat in frame whenever it
+// changes and whenever the chat says it is ready (ready counts it).
+function usePostToFrame(frame: React.RefObject<HTMLIFrameElement | null>, message: string, ready: number) {
+  useEffect(() => {
+    frame.current?.contentWindow?.postMessage(JSON.parse(message), window.location.origin);
+  }, [frame, message, ready]);
+}
+
+// FrameInfo tells a kept instance's chat what its bar shows, whenever that
+// changes and whenever the chat says it is ready (ready counts it): machine
+// is the agents of its machine, for the bar's switch.
 export function FrameInfo({
   frame,
   ready,
@@ -38,20 +46,21 @@ export function FrameInfo({
   hubVersion: string;
   root: string;
 }) {
-  const info = JSON.stringify(toFrame(frameInstance(instance, {hubVersion, agent: agentName(instance), tab: chatURL(basePath, root, instance.id), machine})));
-  useEffect(() => {
-    frame.current?.contentWindow?.postMessage(JSON.parse(info), window.location.origin);
-  }, [frame, info, ready]);
+  usePostToFrame(frame, JSON.stringify(toFrame(frameInstance(instance, {hubVersion, agent: agentName(instance), tab: chatURL(basePath, root, instance.id), machine}))), ready);
   return null;
 }
 
-// FrameFavorites tells the open instance's chat the favorites for its
+// FrameFavorites tells a kept instance's chat the favorites for its
 // composer, whenever they change and whenever the chat says it is ready.
 export function FrameFavorites({frame, ready, favorites}: {frame: React.RefObject<HTMLIFrameElement | null>; ready: number; favorites: Favorite[]}) {
-  const info = JSON.stringify(favoritesToFrame(favorites));
-  useEffect(() => {
-    frame.current?.contentWindow?.postMessage(JSON.parse(info), window.location.origin);
-  }, [frame, info, ready]);
+  usePostToFrame(frame, JSON.stringify(favoritesToFrame(favorites)), ready);
+  return null;
+}
+
+// FrameShown tells a kept instance's chat whether the hub shows it,
+// whenever that changes and whenever the chat says it is ready.
+export function FrameShown({frame, ready, shown}: {frame: React.RefObject<HTMLIFrameElement | null>; ready: number; shown: boolean}) {
+  usePostToFrame(frame, JSON.stringify(shownToFrame(shown)), ready);
   return null;
 }
 

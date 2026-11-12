@@ -6,13 +6,15 @@ import {agentDisplayName} from "@/lib/agents";
 import { loginTitle } from "@/lib/login";
 import { alertForTransition, faviconDataUrl, notificationsEnabled, type FaviconBadge } from "@/lib/background-alerts";
 import { awayFromPage, playChime } from "@/lib/alert-sound";
+import {frameHidden} from "./hub/frame-shown";
 
 // Lets people who aren't looking at the tab know what the agent is doing:
 // a state dot on the tab icon, and (if they turned it on) a browser
 // notification when the agent needs them or finishes while the tab is in
 // the background, and (with the sound on) a chime while they look away.
 // In the hub's frame the hub chimes for an agent that needs you, so the
-// chat chimes only when it finishes.
+// chat chimes only when it finishes; a chat the hub keeps loaded out of
+// sight, behind another agent's, doesn't alert at all, as one it closed.
 export function BackgroundAlerts() {
   const kind = useChatSelector((chat) => chat.agentState);
   const loginRequired = useChatSelector((chat) => chat.loginRequired);
@@ -36,6 +38,7 @@ export function BackgroundAlerts() {
   useEffect(() => {
     const alert = alertForTransition(previous.current, kind);
     previous.current = kind;
+    if (frameHidden()) return;
     if (alert && awayFromPage() && !(alert === "needs-you" && inFrame())) playChime(alert);
     if (!alert || !document.hidden) return;
     if (alert === "finished") setUnseenFinish(true);

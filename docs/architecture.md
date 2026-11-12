@@ -1123,7 +1123,11 @@ check each message's origin, window and `source: "agentapi.hub"`. The hub sends 
 the chat says `ready` and when they change; the chat asks for `back`, `cancel-update`, `open` (another
 agent of the machine) and `manage-favorites`, which opens the hub's settings. Each side ignores a
 message it doesn't know, so a chat and a hub of different versions get along: without `favorites`
-the composer shows no ☆.
+the composer shows no ☆. The hub keeps the frames of the last agents opened (4, 2 on a phone;
+`components/hub/hub-frames.tsx`, `lib/hub-frames.ts`), hidden and inert, in a DOM order that never
+changes, since a browser reloads a moved frame. It sends each kept frame `shown`, so a hidden chat
+neither marks its tasks seen nor alerts (`components/hub/frame-shown.ts`), and takes the user's
+requests (`back`, `open`, …) only from the frame shown.
 
 `/chat/hub/` is the hub's page (`components/hub-view.tsx`, its parts and hooks in `components/hub/`, the rows' shared
 props in `HubListContext`; its logic in `lib/hub.ts`, the instance, its state and the stream's

@@ -837,7 +837,10 @@ AgentAPI 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
 `instance` 和 `favorites`（全部的我的最愛，給輸入框的 ☆ 用，見 `components/message-input/favorites-menu.tsx`）；
 聊天介面則送出 `back`、`cancel-update`、`open`（開啟同一台主機的另一個 agent）和 `manage-favorites`
 （開啟 hub 的設定）。雙方都會略過不認得的訊息，所以版本不同的聊天介面和 hub 也能搭配：沒收到
-`favorites` 時，輸入框就不顯示 ☆。`/chat/hub/`
+`favorites` 時，輸入框就不顯示 ☆。hub 會保留最近開過的 agent 的框架（4 個，手機上 2 個；
+`components/hub/hub-frames.tsx`、`lib/hub-frames.ts`），隱藏且不可操作，在 DOM 中的順序固定不變，因為瀏覽器會
+重新載入被搬動的框架。hub 會對每個保留的框架送出 `shown`，讓隱藏中的聊天介面不把任務標成已讀、也不發提醒
+（`components/hub/frame-shown.ts`），而使用者的操作（`back`、`open` 等）只接受目前顯示的框架送來的。`/chat/hub/`
 是 hub 的頁面（`components/hub-view.tsx`，各部分與 hook 在 `components/hub/`，各列共用的 props 在
 `HubListContext`；邏輯在 `lib/hub.ts`，也就是實例、它的狀態和串流的事件，旁邊還有 `lib/hub-groups.ts`、
 `hub-machines.ts`、`hub-filter.ts`、`hub-format.ts`、`hub-spend.ts`、`hub-work.ts`、`hub-version.ts`

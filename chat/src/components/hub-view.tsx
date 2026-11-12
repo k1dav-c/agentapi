@@ -2,7 +2,7 @@
 
 import {useMemo, useRef, useState} from "react";
 import {Button} from "@/components/ui/button";
-import {chatURL, displayName, hubRoot, type HubInstance} from "@/lib/hub";
+import {hubRoot, type HubInstance} from "@/lib/hub";
 import {active, rowJobs, type RowJob} from "@/lib/hub-dispatch";
 import {stoppedOf} from "@/lib/hub-filter";
 import {needsYou} from "@/lib/hub-issues";
@@ -17,11 +17,11 @@ import {AddInstance, ForgetStopped, GroupName, type Naming} from "./hub/dialogs"
 import {HubClock} from "./hub/clock";
 import {HubList} from "./hub/hub-list";
 import {IssuesView} from "./hub/issues/issues-view";
-import {basePath, FrameFavorites, FrameInfo, InstanceBar} from "./hub/instance-bar";
+import {basePath} from "./hub/instance-bar";
+import {HubFrames} from "./hub/hub-frames";
 import {HubListContext, type HubList as HubListShared, type RowActions} from "./hub/list-context";
 import {ListEdge, useListWidth} from "./hub/list-edge";
 import {HubListHeader} from "./hub/list-header";
-import {machineAgents} from "./hub/machine-tabs";
 import {useListView} from "./hub/list-order";
 import {Overview} from "./hub/overview";
 import {HubSettings, type SettingsSection} from "./hub/settings";
@@ -30,7 +30,6 @@ import {useHubTab} from "./hub/tab-icon";
 import {cancelFromHub} from "./hub/update";
 import {useCollapsedGroups} from "./hub/use-collapsed-groups";
 import {useHubActions} from "./hub/use-hub-actions";
-import {useHubFrame} from "./hub/use-hub-frame";
 import {useHubKeys} from "./hub/use-hub-keys";
 import {useHubRoute} from "./hub/use-hub-route";
 import {useHubStream} from "./hub/use-hub-stream";
@@ -86,21 +85,8 @@ export function HubView() {
   // The pinned rows the list shows, which Move up and Move down step past.
   const shownPins = sections[0]?.pinned ? sections[0].instances.map((instance) => instance.id) : [];
 
-  // The agent open beside the list, and the agents of its machine, for the
-  // bar's switch.
+  // The agent open beside the list.
   const current = selected ? instances.get(selected) : undefined;
-  const machine = useMemo(() => (current ? machineAgents(all, current) : []), [all, current]);
-  const {frame, framed} = useHubFrame({
-    onBack: () => select(undefined),
-    onHome: route.home,
-    onCancelUpdate: (id) => void cancelFromHub(root, id),
-    // Another agent of the open one's machine, from the bar's switch.
-    onOpen: (id) => {
-      if (instances.has(id)) select(id);
-    },
-    // From the chat's menu of favorites.
-    onManageFavorites: () => setSettings("favorites"),
-  });
 
   // Tell people who aren't looking: a screen reader, the tab, a notification.
   const announcement = useNeedsYou(all, notify, select);
@@ -246,27 +232,24 @@ export function HubView() {
           <ListEdge controls="hub-list" {...listWidth} />
         </aside>
 
-        <section className={cn("min-w-0 flex-1 flex-col bg-[color-mix(in_oklch,var(--muted)_45%,var(--background))]", current || route.issues ? "flex" : "hidden md:flex")}>
-          {current ? (
-            <>
-              {framed?.instance === current.id ? (
-                <>
-                  <FrameInfo frame={frame} ready={framed.ready} instance={current} machine={machine} hubVersion={hubVersion} root={root} />
-                  {favorites && <FrameFavorites frame={frame} ready={framed.ready} favorites={favorites} />}
-                </>
-              ) : (
-                <InstanceBar instance={current} machine={machine} hubVersion={hubVersion} root={root} onBack={() => select(undefined)} onHome={route.home} onOpen={select} />
-              )}
-              <iframe
-                ref={frame}
-                key={current.id}
-                data-instance={current.id}
-                title={`${displayName(current)} chat`}
-                src={chatURL(basePath, root, current.id, true)}
-                className={cn("min-h-0 w-full flex-1 border-0 bg-background", framed?.instance === current.id && "pt-[env(safe-area-inset-top)]")}
-              />
-            </>
-          ) : route.issues ? null : (
+        <section className={cn("relative min-w-0 flex-1 flex-col bg-[color-mix(in_oklch,var(--muted)_45%,var(--background))]", current || route.issues ? "flex" : "hidden md:flex")}>
+          <HubFrames
+            current={current}
+            instances={instances}
+            hubVersion={hubVersion}
+            root={root}
+            favorites={favorites}
+            onBack={() => select(undefined)}
+            onHome={route.home}
+            // Another agent of the open one's machine, from the bar's switch.
+            onOpen={(id) => {
+              if (instances.has(id)) select(id);
+            }}
+            onCancelUpdate={(id) => void cancelFromHub(root, id)}
+            // From the chat's menu of favorites.
+            onManageFavorites={() => setSettings("favorites")}
+          />
+          {current || route.issues ? null : (
             <Overview
               root={root}
               instances={all}

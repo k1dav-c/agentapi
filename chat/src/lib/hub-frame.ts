@@ -7,7 +7,9 @@ import {shownUpdate} from "./hub-update";
 // window messages. The chat draws the bar above itself (one bar, with its
 // own actions in it, instead of the hub's bar and a row of the chat's), the
 // hub tells it what to show there and the favorites for its composer, and
-// the chat asks the hub to go back, to cancel the instance's update, to
+// hub tells it whether it shows (it keeps the chats of the agents opened
+// last loaded behind the open one, lib/hub-frames.ts), and the chat asks
+// the hub to go back, to cancel the instance's update, to
 // open another agent of its machine, or to open the favorites in the hub's
 // settings.
 
@@ -53,7 +55,11 @@ export type MachineAgent = {
 // 3.5 ignores it, and a hub before it never sends it.
 type InstanceToFrame = {source: "agentapi.hub"; type: "instance"; instance: FrameInstance};
 type FavoritesToFrame = {source: "agentapi.hub"; type: "favorites"; favorites: Favorite[]};
-export type ToFrame = InstanceToFrame | FavoritesToFrame;
+// shown: false while the hub keeps the chat loaded behind another agent's
+// (or the overview), true again when it shows it; a chat shows until told
+// otherwise. A chat before 4.5 ignores it.
+type ShownToFrame = {source: "agentapi.hub"; type: "shown"; shown: boolean};
+export type ToFrame = InstanceToFrame | FavoritesToFrame | ShownToFrame;
 export type FrameAsk = "ready" | "back" | "home" | "cancel-update" | "manage-favorites";
 export type FromFrame = {source: "agentapi.hub"; type: FrameAsk} | {source: "agentapi.hub"; type: "open"; id: string};
 
@@ -66,6 +72,11 @@ export function toFrame(instance: FrameInstance): InstanceToFrame {
 // favoritesToFrame tells the chat the favorites for its composer.
 export function favoritesToFrame(favorites: Favorite[]): FavoritesToFrame {
   return {source: SOURCE, type: "favorites", favorites};
+}
+
+// shownToFrame tells the chat whether the hub shows it.
+export function shownToFrame(shown: boolean): ShownToFrame {
+  return {source: SOURCE, type: "shown", shown};
 }
 
 export function fromFrame(type: FrameAsk): FromFrame {
@@ -190,6 +201,8 @@ export function parseToFrame(data: unknown): ToFrame | undefined {
       const favorites = parseFavorites(message.favorites);
       return favorites && favoritesToFrame(favorites);
     }
+    case "shown":
+      return typeof message.shown === "boolean" ? shownToFrame(message.shown) : undefined;
     default:
       return undefined;
   }
@@ -220,15 +233,4 @@ export function messageFromHub(event: Pick<MessageEvent, "origin" | "data" | "so
 // posted to the hub, of the same origin.
 export function messageFromFrame(event: Pick<MessageEvent, "origin" | "data" | "source">, frame: unknown, origin = window.location.origin): FromFrame | undefined {
   return !!frame && event.source === frame && event.origin === origin ? parseFromFrame(event.data) : undefined;
-}
-
-// Framed is the chat the hub's frame shows, once it said it is ready, and
-// how many times it did: a chat that loads again (a reload, a restarted
-// server) says it again, and the hub tells it the instance again.
-export type Framed = {instance: string; ready: number};
-
-// readyAgain is the frame's state after the chat that shows instance says
-// it is ready: another ready of the same chat, or the first of another.
-export function readyAgain(framed: Framed | undefined, instance: string): Framed {
-  return {instance, ready: framed?.instance === instance ? framed.ready + 1 : 1};
 }

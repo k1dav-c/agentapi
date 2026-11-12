@@ -609,6 +609,8 @@ version, with the chat's own search, terminal and Explorer buttons. When the mac
 agents the hub watches, the bar has a button for each of them too, in any list order: their marks
 with the same state dots as the [By machine](#by-machine) tabs, the open one marked. A click opens
 another in its place, so you switch between Claude Code and Codex on one machine without the list.
+The hub keeps the last few agents you opened loaded (four, two on a phone), so going back to one
+shows it at once instead of loading its chat again.
 **New tab** opens the chat on its own, and **×** goes back to the overview, past Issues too when you
 opened the agent from there; **Esc** steps back one level (from an agent opened from Issues, to
 Issues). The hub's mark at the top of the list also goes back to the overview from anywhere. Each

@@ -50,6 +50,9 @@
   doesn't answer holds the model menu up for 3 seconds at most, and isn't asked again for a minute.
 - A Markdown table wider than its column has a button that opens it in a popup as wide as the window
   (always shown on a touch screen), and a shade at the right edge while it scrolls sideways.
+- The hub keeps the last agents you opened loaded (4, 2 on a phone), so going back to one shows it at
+  once instead of loading its chat and conversation again. A hidden chat doesn't mark its tasks seen
+  or alert you.
 
 ### Fixes
 
