@@ -227,7 +227,7 @@ Pi has no permission modes, so its toolbar has no mode menu.
 The menu lists the agent's models with their descriptions, and the reasoning efforts the chosen
 model supports. Codex takes a new model or effort with its next turn.
 
-![The model menu of Claude Code: its own models, then the models of a provider from the hub, LiteLLM gateway](screenshots/model-providers.png)
+![The model menu of Claude Code: its own models, then those of two providers from the hub, each under its name and host](screenshots/model-providers.png)
 
 For Claude Code and Codex, the menu then lists the models of each
 [model provider](../README.md#model-providers), under the provider's name with a cloud; a provider

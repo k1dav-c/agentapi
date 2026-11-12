@@ -702,7 +702,7 @@ Without `model`, the agent takes the provider's first model; back on its own pro
 it had before. On a provider, `{"model": ...}` picks among that provider's models. In the chat, the
 model menu lists the agent's own models, then each provider's.
 
-![The model menu of Claude Code: its own models, then the models of a provider from the hub, LiteLLM gateway](docs/screenshots/model-providers.png)
+![The model menu of Claude Code: its own models, then those of two providers from the hub, each under its name and host](docs/screenshots/model-providers.png)
 
 The two agents switch differently:
 

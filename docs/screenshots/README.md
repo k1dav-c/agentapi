@@ -50,10 +50,11 @@ his), with the accounts' pictures drawn locally in place of GitHub's. Since the 
 has tabs, `hub-settings-favorites.png` was taken the same way, with the favorites
 `capture-docs.mjs` puts on its hub; the script takes it again as before.
 
-`model-providers.png` and `hub-settings-providers.png` came from a development build of the
-`feat/custom-providers` branch, with a hub that keeps one provider, `gateway` (LiteLLM gateway, two
-models). They aren't part of `capture-docs.mjs`, and unlike the others they are in the dark theme,
-at 2200 × 1800.
+`model-providers.png`, `hub-settings-providers.png` and `hub-settings-provider-check.png` came from
+a development build of the `feat/custom-providers` branch, with a hub that keeps two providers,
+`gateway` (LiteLLM gateway, three models, a key) and `local` (Local vLLM, one model), and a fake
+provider that lists six models for the check. They aren't part of `capture-docs.mjs`; like the
+others they are in the light theme, at 2200 × 1800.
 
 ## Gallery
 
@@ -108,7 +109,8 @@ device scale factor of 1.
 | [hub-list.png](hub-list.png) | The hub's list: two pinned agents, then two groups and Ungrouped, with every state's glyph: approval, question, login, usage limit, working, finished, idle, unreachable, stopped; and each agent's AgentAPI version, one older than the hub |
 | [hub-add.png](hub-add.png) | The Add dialog: joining a machine (the hub's address, updates from the hub, the command and a prompt for an agent, the secret masked), or adding an instance by its URL and token |
 | [hub-settings-favorites.png](hub-settings-favorites.png) | Hub settings at its Favorites tab: the favorites, each with its buttons to move, edit and delete it |
-| [hub-settings-providers.png](hub-settings-providers.png) | Hub settings at its Providers tab: a LiteLLM gateway with its base URL, its model count, a sign that it has a key, and its buttons to edit and delete it |
+| [hub-settings-providers.png](hub-settings-providers.png) | Hub settings at its Providers tab: two providers, each with its monogram, ID and endpoint, its models and whether it has a key |
+| [hub-settings-provider-check.png](hub-settings-provider-check.png) | A new provider's editor after Check connection: reached in 184 ms with six models, two of them picked to offer |
 | [hub-settings-github.png](hub-settings-github.png) | Hub settings at its GitHub tab: the hub's GitHub App, the accounts it is installed on with their repositories, and Choose repositories, App settings on GitHub, Reconnect and Disconnect |
 | [hub-recent.png](hub-recent.png) | The hub's list by the agents' latest changes: the pinned agents, then one list without group headers, the most recent first, and each row's group where it has room |
 | [hub-machines.png](hub-machines.png) | The hub's list By machine in the groups: the pinned agents, then each group with a card per machine: the machine with its version and spend once, a tab per agent with its state's dot, and the picked agent below, one older than the hub |

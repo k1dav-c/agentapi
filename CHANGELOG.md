@@ -19,6 +19,8 @@
   `providers.json`) for every machine that reports to it. Each AgentAPI gets them with their keys
   when it starts and every minute after (`POST /api/providers/sync`, signed with the hub's secret,
   answered encrypted with it). A machine's own provider with the same ID wins.
+  **Check connection** in the editor asks the provider for its models from the hub
+  (`POST /api/providers/check`) and lets you pick which to offer.
 
 ### Documentation
 

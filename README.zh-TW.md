@@ -598,7 +598,7 @@ curl -X PUT localhost:3284/settings -d '{"provider": "default"}'
 在供應商上，`{"model": ...}` 只能從該供應商的模型中挑選。在聊天介面中，模型選單先列出 agent 自己的
 模型，再列出每個供應商的模型。
 
-![Claude Code 的模型選單：先是它自己的模型，接著是來自 hub 的供應商 LiteLLM gateway 的模型](docs/screenshots/model-providers.png)
+![Claude Code 的模型選單：先是它自己的模型，接著是來自 hub 的兩個供應商，各自標出名稱和主機](docs/screenshots/model-providers.png)
 
 兩個 agent 的切換方式不同：
 

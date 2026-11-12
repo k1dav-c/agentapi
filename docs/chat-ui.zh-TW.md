@@ -206,7 +206,7 @@ Pi 沒有權限模式，所以它的工具列沒有模式選單。
 選單會列出 agent 的模型及說明，以及所選模型支援的推理強度。Codex 會在下一個回合才採用
 新的模型或推理強度。
 
-![Claude Code 的模型選單：先是它自己的模型，接著是來自 hub 的供應商 LiteLLM gateway 的模型](screenshots/model-providers.png)
+![Claude Code 的模型選單：先是它自己的模型，接著是來自 hub 的兩個供應商，各自標出名稱和主機](screenshots/model-providers.png)
 
 Claude Code 和 Codex 的選單接著會列出每個[模型供應商](../README.zh-TW.md#模型供應商)的模型，放在
 附雲朵圖示的供應商名稱下；hub 保存的供應商會標上 **hub**。選其中一個模型，agent 就換到那個供應商；

@@ -534,7 +534,7 @@ AgentAPI 正在更新時，上方那一列也會顯示進度，還在等任務�
 
 ### 模型供應商
 
-![Hub settings：Providers 分頁，列出一個有金鑰的 LiteLLM gateway](screenshots/hub-settings-providers.png)
+![Hub settings：Providers 分頁，列出兩個供應商和它們的端點、模型與金鑰狀態](screenshots/hub-settings-providers.png)
 
 hub 會替每台向它回報的主機保存[模型供應商](../README.zh-TW.md#模型供應商)：Claude Code 和 Codex
 的工作階段可以換用的端點，例如 LiteLLM gateway。**Hub settings** 的 **Providers** 分頁列出所有
@@ -542,6 +542,12 @@ hub 會替每台向它回報的主機保存[模型供應商](../README.zh-TW.md#
 base URL、可省略的 Anthropic base URL、API 金鑰，以及它提供的模型；沒有填模型時，各 AgentAPI 會向
 供應商的 `<base_url>/models` 查詢。hub 最多保存 50 個。金鑰只能寫入：頁面只顯示供應商有沒有金鑰，
 編輯時金鑰欄留空就保留原本的金鑰，勾選 **Remove the key** 則移除。ID 新增後就不能更改。
+
+![按下 Check connection 之後的編輯器：供應商回了六個模型，其中兩個已選取](screenshots/hub-settings-provider-check.png)
+
+編輯器裡的 **Check connection** 會由 hub 向供應商查詢模型，用你輸入的金鑰，沒輸入就用 hub 保存的金鑰；
+結果會顯示花了多久、列出幾個模型，失敗時則說明原因（金鑰被拒、網址底下沒有 API、hub 連不到供應商）。
+點選模型就只提供選取的那些；一個都沒選時提供全部。
 
 每個向 hub 回報的 AgentAPI 會在啟動時和之後每分鐘向 hub 取得供應商，請求以 hub 的 secret 簽章；
 回應含有金鑰，以從 secret 衍生的金鑰加密（AES-256-GCM），所以即使透過一般 HTTP 連線，金鑰也不會以
@@ -932,6 +938,7 @@ launcher token（`~/.agentapi/host.token`）：重灌過、或 token 檔被刪�
 | `PUT /api/favorites` | `{"favorites": […]}` 依這個順序整份取代。最多 100 項；標題最多 100 字、只能一行；內容不能空白，最多 20,000 字；ID 為 1 到 64 個英文字母、數字、`-` 或 `_`，不能重複。沒有 ID 的項目由 hub 指定一個；回應是 hub 保存後的清單。hub 不接受的清單回 400，什麼都不改 |
 | `GET /api/providers` | [模型供應商](#模型供應商)，不含金鑰：`{"providers": [{"id", "name", "base_url", "anthropic_base_url", "models": [{"id", "name"}], "has_key"}, …]}` |
 | `PUT /api/providers` | `{"providers": […]}` 整份取代。供應商的 `api_key` 設定它的金鑰；沒有這個欄位時，保留同一 ID 的供應商原本的金鑰，`""` 則移除金鑰。最多 50 個；ID 不能重複，也不能是 `default`；網址必須是 http 或 https。回應是 `GET` 格式的清單。hub 不接受的清單回 400，什麼都不改 |
+| `POST /api/providers/check` | `{"id", "base_url", "api_key"}` 由 hub 向 `base_url` 的供應商查詢模型（`GET <base_url>/models`）：`{"models": [{"id", "name"}], "latency_ms"}`。沒有 `api_key` 時，用 ID 為 `id` 的供應商保存的金鑰。供應商沒有回傳模型時回 502，並附上原因 |
 | `POST /api/providers/sync` | AgentAPI 取得含金鑰的供應商，以 hub 的 secret 加密（`{"sealed": …}`）；請求和事件一樣以 `--secret` 簽章，不需要 session |
 | `GET /api/events` | Server-sent events：先送 `instances`（全部實例和 `hub_version`，格式同 `GET /api/instances`）和 `favorites`（格式同 `GET /api/favorites`），再送 `instance`（某個實例有頁面看得到的變動，或工作時間變動滿一分鐘；最後聯絡時間只在它離線時才算）、`removed`（`{"id"}`）、`favorites`（有變動時送出全部）、`dispatch`（[issue 派工](#issues)的主機和 job，格式同 `GET /api/hosts` 和 `GET /api/jobs`，一開始和每次變動時送出），以及每 15 秒一次的 `heartbeat`。瀏覽器 30 秒都沒收下事件，就會失去串流 |
 | `GET /api/hosts` | 有 launcher 回報的主機：能跑的 agent、有的 repo、job 與上限，以及是否在線（`online`） |

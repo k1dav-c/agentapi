@@ -622,7 +622,7 @@ in a new tab or at its AgentAPI's URL, has no ☆.
 
 ### Model providers
 
-![Hub settings: the Providers tab, with a LiteLLM gateway that has a key](screenshots/hub-settings-providers.png)
+![Hub settings: the Providers tab, with two providers, their endpoints, models and keys](screenshots/hub-settings-providers.png)
 
 The hub keeps [model providers](../README.md#model-providers) for every machine that reports to it:
 endpoints such as a LiteLLM gateway that Claude Code and Codex sessions can switch to. The
@@ -632,6 +632,13 @@ URL, an API key and the models it offers; without models, each AgentAPI asks the
 provider's `<base_url>/models`. The hub keeps up to 50. The key is write-only: the page shows
 whether a provider has one, a key left empty in the editor keeps it, and **Remove the key** removes
 it. An ID can't change once added.
+
+![The editor after Check connection: the provider answered with six models, two of them picked](screenshots/hub-settings-provider-check.png)
+
+**Check connection** in the editor asks the provider for its models from the hub, with the key typed
+or the one the hub keeps, and says how long it took and how many it listed, or why it failed (a
+refused key, a URL without the API, a provider the hub can't reach). Tap the models to offer only
+those; none picked offers all of them.
 
 Each AgentAPI that reports to the hub asks it for the providers when it starts and every minute
 after, in a request signed with the hub's secret. The answer has their keys, encrypted with a key
@@ -1079,6 +1086,7 @@ running AgentAPIs, which then no longer follow their conversation for the webhoo
 | `PUT /api/favorites` | `{"favorites": […]}` replaces them, in that order. At most 100; a title has at most 100 characters, on one line; a text isn't blank and has at most 20,000; an ID has 1 to 64 letters, digits, `-` or `_`, once. A favorite sent without an ID gets one; the answer is the list as the hub keeps it. 400, changing nothing, for a list it refuses |
 | `GET /api/providers` | The [model providers](#model-providers), without their keys: `{"providers": [{"id", "name", "base_url", "anthropic_base_url", "models": [{"id", "name"}], "has_key"}, …]}` |
 | `PUT /api/providers` | `{"providers": […]}` replaces them. A provider's `api_key` sets its key; missing keeps the key the provider with its ID had, `""` removes it. At most 50; an ID once, not `default`; the URLs http or https. The answer is the list as `GET` has it. 400, changing nothing, for a list it refuses |
+| `POST /api/providers/check` | `{"id", "base_url", "api_key"}` asks the provider at `base_url` for its models (`GET <base_url>/models`) from the hub: `{"models": [{"id", "name"}], "latency_ms"}`. Without `api_key`, with the key the provider with `id` has. 502 with the reason when the provider doesn't answer with its models |
 | `POST /api/providers/sync` | An AgentAPI gets the providers with their keys, sealed with the hub's secret (`{"sealed": …}`); signed with `--secret` as events are, no session needed |
 | `GET /api/events` | Server-sent events: `instances` (all of them and `hub_version`, as `GET /api/instances` has them) and `favorites` (as `GET /api/favorites` has them), then `instance` (one changed what the page shows, or its work time moved by a minute; when it was last heard of counts only while it is offline), `removed` (`{"id"}`), `favorites` (all of them, after a change), `dispatch` (the [issue dispatch's](#issues) machines and jobs, as `GET /api/hosts` and `GET /api/jobs` have them, at first and after each change) and a `heartbeat` every 15 s. A browser that takes no event for 30 s loses the stream |
 | `GET /api/hosts` | The machines whose launchers report: their agents, repositories, jobs and room, and whether each is `online` |
