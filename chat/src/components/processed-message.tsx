@@ -10,6 +10,7 @@ import {linkify, remarkLinkify} from "@/lib/markdown/remark-linkify";
 import {useCopy} from "@/lib/use-copy";
 import {fileLinkRef, parseFilePathRef, type FilePathRef} from "@/lib/file-refs";
 import {FilePathCode, inlineCodeClass} from "./file-path";
+import {MarkdownTable} from "./markdown-table";
 import {useFileViewer} from "./file-viewer-context";
 
 // Set inside a link, where code that names a file stays plain: a click
@@ -179,13 +180,7 @@ function markdownComponents(linkFilePaths: boolean): Components {
         {children}
       </InlineCode>
     ),
-    table: ({children}) => (
-      <div className="my-3 max-w-full overflow-x-auto rounded-lg border">
-        <table className="w-full border-collapse text-left text-sm">
-          {children}
-        </table>
-      </div>
-    ),
+    table: ({children}) => <MarkdownTable>{children}</MarkdownTable>,
     thead: ({children}) => (
       <thead className="bg-muted/70">{children}</thead>
     ),

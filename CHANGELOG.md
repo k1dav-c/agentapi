@@ -38,6 +38,8 @@
   reached.
 - A provider's models are kept for 10 minutes and then listed again in the background; one that
   doesn't answer holds the model menu up for 3 seconds at most, and isn't asked again for a minute.
+- A Markdown table wider than its column has a button that opens it in a popup as wide as the window
+  (always shown on a touch screen), and a shade at the right edge while it scrolls sideways.
 
 ### Fixes
 

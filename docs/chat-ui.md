@@ -95,8 +95,10 @@ On narrow screens, thinking collapses into a "Thinking · *title*" line within t
 ### Messages and long tasks
 
 Each agent message has buttons to show it as raw text instead of Markdown (each message on its own),
-to search inside it, and to copy it; your prompt has a copy button. A task with many steps shows its
-latest 40; **Show *n* earlier steps** brings back the rest.
+to search inside it, and to copy it; your prompt has a copy button. A table wider than the column
+scrolls sideways, with a shade at the right edge while there is more; its button at the top right
+(always shown on a touch screen) opens it in a popup as wide as the window. A task with many steps
+shows its latest 40; **Show *n* earlier steps** brings back the rest.
 
 ### Long conversations
 
