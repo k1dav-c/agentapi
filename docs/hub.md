@@ -1119,6 +1119,7 @@ failed request answers `{"code": …, "message": …, "error": …}`: `code` is 
 | `~/.agentapi/hub/dispatch.json` | `agentapi hub serve` | The [issue dispatch's](#issues) machines with their launchers' tokens, and the jobs: their runs, costs and last 50 messages |
 | `~/.agentapi/hub/github-app.json` | `agentapi hub serve` | The hub's GitHub App and its private key |
 | `~/.agentapi/hub/providers.json` | `agentapi hub serve` | The [model providers](#model-providers) and their keys (0600) |
+| `~/.agentapi/hub-providers.json` | `agentapi server` | On each machine, beside its config file: the providers the hub last answered, sealed with the hub's secret, which stand in at the next start until the hub answers |
 
 `instances.json` is `{"version": 1, "instances": [...]}`. Hubs of 2.2 and earlier wrote, and read,
 only the array: the hub reads that too, but such a hub sets the newer file aside as damaged and

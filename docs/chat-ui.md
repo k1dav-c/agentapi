@@ -230,13 +230,15 @@ model supports. Codex takes a new model or effort with its next turn.
 ![The model menu of Claude Code: its own models, then those of two providers from the hub, each under its name and host](screenshots/model-providers.png)
 
 For Claude Code and Codex, the menu then lists the models of each
-[model provider](../README.md#model-providers), under the provider's name with a cloud; a provider
-the hub keeps is marked **hub**. Picking one switches the agent to that provider, and picking one of
-the agent's own models switches it back. The conversation goes on: Claude Code switches from its
-next API call, and starts again on its session to go back; Codex starts again in a new thread that
-gets the conversation's messages as text. A switch that starts the agent again can't be made during
-a turn. On a provider, the button shows a cloud in place of the brain. A provider that lists no
-models isn't in the menu.
+[model provider](../README.md#model-providers), under the provider's monogram, name and host; a
+provider the hub keeps is marked **hub**. A line under them says what a switch does with this
+agent. Picking a provider's model switches the agent to that provider, and picking one of the
+agent's own models switches it back. The conversation goes on: Claude Code switches from its next
+API call, and starts again on its session to go back; Codex starts again in a new thread that gets
+the conversation's messages as text. While a switch runs, the button says **Switching to …**, and a
+toast says which model the agent is on once it is done. A switch that starts the agent again can't
+be made during a turn. On a provider, the button shows a cloud in place of the brain, and the
+provider's name after the model. A provider that lists no models isn't in the menu.
 
 ### Context and usage limits
 

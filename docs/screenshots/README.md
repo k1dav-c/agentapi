@@ -48,13 +48,16 @@ and the list beside it kept from the first.
 organization installed on `acme` (24 selected repositories) and on a user, `dave` (all three of
 his), with the accounts' pictures drawn locally in place of GitHub's. Since the settings dialog
 has tabs, `hub-settings-favorites.png` was taken the same way, with the favorites
-`capture-docs.mjs` puts on its hub; the script takes it again as before.
+`capture-docs.mjs` puts on its hub; the script takes it again as before. Both were taken again once
+the dialog had a third tab, Providers, from a build of the `feat/custom-providers` branch with the
+same fixtures.
 
 `model-providers.png`, `hub-settings-providers.png` and `hub-settings-provider-check.png` came from
 a development build of the `feat/custom-providers` branch, with a hub that keeps two providers,
 `gateway` (LiteLLM gateway, three models, a key) and `local` (Local vLLM, one model), and a fake
-provider that lists six models for the check. They aren't part of `capture-docs.mjs`; like the
-others they are in the light theme, at 2200 × 1800.
+provider that lists six models for the check. They aren't part of `capture-docs.mjs`, but are taken
+as it takes the others: in the light theme at 1x, the model menu with the composer as
+`model-settings.png`, and the settings dialog as `hub-settings-favorites.png`.
 
 ## Gallery
 
