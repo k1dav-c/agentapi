@@ -409,6 +409,11 @@ For Claude Code, Codex and Pi, this tab lists sessions in the working directory 
 agent's logs, with names, first messages, message counts, last-change times and costs. A card above
 the list totals session and subagent costs for today, the last 7 and 30 days (including today, in
 your time zone), and all time. These are API-equivalent costs at list prices; hover for tokens.
+Once the agent has used a [model provider](../README.md#model-providers) besides its own, the card
+lists **By provider** what the sessions spent on each, the agent's own as **Own provider** and the
+others by ID: calls, tokens and cost. A gateway's models often have no known price: a provider
+whose calls have none says **no price** rather than `$0.00`, and one whose calls only partly have
+one ends its cost with `+`. Hover a row for its tokens by kind.
 
 **Open** restarts the agent on a session and displays its conversation. **Start a copy** opens a
 copy under a new id, leaving the original session unchanged. Both replace the current conversation
@@ -531,7 +536,7 @@ watches. Its list puts the agents you pin on top, then what needs you first by g
 change first; By machine puts each machine's agents in one card, a tab each, in either order. Each state has a glyph of its own, and each row says what the agent waits for (the
 approval's command, the question) or does; search and chips (state, agent) filter the list. On a desktop, an
 overview counts each state, shows what needs you, works or finished since you looked, and totals the
-spend, tokens and work time of the last 24 hours and 7 days, by group and by machine. Picking an agent opens it in this chat
+spend, tokens and work time of the last 24 hours and 7 days, by group and by machine, and what went to each model provider. Picking an agent opens it in this chat
 beside the list (or instead of it on a phone, with a back button), under one bar: the hub's, with
 the chat's own buttons in it, and a button for each other agent of its machine, which opens it in
 place. It opens through the hub, which sends the instance's token.

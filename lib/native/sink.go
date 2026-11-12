@@ -143,6 +143,7 @@ func (s *sink) SessionRef(ref string) {
 		c.sessionRef = ref
 		c.forking = false
 		c.cfg.Observer.SessionRef(ref)
+		c.reportProviderLocked()
 	})
 }
 

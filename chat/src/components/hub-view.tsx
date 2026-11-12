@@ -308,6 +308,7 @@ export function HubView() {
           favorites={favorites}
           onFavoritesSaved={setFavorites}
           activeJobs={activeJobs}
+          instances={all}
         />
         <ForgetStopped instances={forgetting} onClose={() => setForgetting(null)} onForget={forgetStopped} />
         <GroupName

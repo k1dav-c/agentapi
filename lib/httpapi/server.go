@@ -29,6 +29,7 @@ import (
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/pricing"
 	"github.com/coder/agentapi/lib/provider"
+	"github.com/coder/agentapi/lib/providerlog"
 	"github.com/coder/agentapi/lib/sessions"
 	"github.com/coder/agentapi/lib/shellterm"
 	"github.com/coder/agentapi/lib/statedb"
@@ -57,6 +58,7 @@ type Server struct {
 	logger     *slog.Logger
 	native     *native.Conversation
 	sessions   *sessions.Store // the agent's sessions; nil unless it keeps logs
+	ledger     *ledgerWriter   // appends to the provider ledger
 	stateDB    *statedb.DB     // nil unless the conversation is kept
 	// queueStoreMu guards what storeQueue last stored in stateDB: the
 	// queue, its last ID and the version of the queue they are.
@@ -162,6 +164,11 @@ type NativeConfig struct {
 	// Providers are the model providers the agent can switch to (Claude
 	// Code, Codex); nil offers none.
 	Providers *provider.Source
+	// ProviderLedger records which provider each of the agent's sessions
+	// runs on, from when, which attributes Claude Code's calls to their
+	// provider (sessions.Config.Providers); nil records none, and every
+	// Claude Code call is the agent's own.
+	ProviderLedger *providerlog.Ledger
 	// Policy is the conversation's: whether it continues a turn a usage
 	// limit stopped, and how long it waits before it tries a failed turn
 	// again or starts an agent that exited again.
@@ -257,6 +264,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 			Prices:       config.Native.Prices,
 			PiSessionDir: config.Native.PiSessionDir,
 			Logger:       logger,
+			Providers:    config.Native.ProviderLedger,
 		})
 		if err != nil {
 			return nil, err
@@ -267,6 +275,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	}
 
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
+	ledger := newLedgerWriter(config.Native.ProviderLedger, string(config.AgentType), logger)
 
 	s := &Server{
 		router:       router,
@@ -274,7 +283,8 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		port:         config.Port,
 		bind:         bind,
 		auth:         auth,
-		native:       newNativeConversation(config, restored, emitter, uploads, logger),
+		native:       newNativeConversation(config, restored, emitter, uploads, ledger, logger),
+		ledger:       ledger,
 		logger:       logger,
 		agentType:    config.AgentType,
 		emitter:      emitter,
@@ -449,7 +459,7 @@ func newRouter(config ServerConfig, logger *slog.Logger, allowedHosts, allowedOr
 
 // newNativeConversation returns the conversation of a native agent, which
 // continues the restored one.
-func newNativeConversation(config ServerConfig, restored restoredState, emitter *convstate.EventEmitter, uploads *uploadStore, logger *slog.Logger) *native.Conversation {
+func newNativeConversation(config ServerConfig, restored restoredState, emitter *convstate.EventEmitter, uploads *uploadStore, ledger *ledgerWriter, logger *slog.Logger) *native.Conversation {
 	return native.NewConversation(native.Config{
 		Factory:           config.Native.Factory,
 		ResumeRef:         restored.resumeRef,
@@ -461,6 +471,7 @@ func newNativeConversation(config ServerConfig, restored restoredState, emitter 
 		InitialPromptSent: config.InitialPromptSent,
 		Emitter:           emitter,
 		Observer:          &nativeObserver{emitter: emitter},
+		ProviderUsed:      ledger.record,
 		Logger:            logger,
 		Clock:             config.Clock,
 		PrepareRichMessage: func(msg *transcript.RichMessage) {
@@ -563,6 +574,8 @@ func (s *Server) Stop(ctx context.Context) error {
 		if s.terminal != nil {
 			_ = s.terminal.Close()
 		}
+		// The provider ledger has what the agent reported.
+		s.ledger.wait()
 		s.persistQueue()
 		if s.uploadPruneDone != nil {
 			<-s.uploadPruneDone

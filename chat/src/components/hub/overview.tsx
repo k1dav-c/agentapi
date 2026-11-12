@@ -1,13 +1,18 @@
 "use client";
 
+import {useEffect, useState} from "react";
 import {ArrowRight, CircleCheck, ClipboardList, Gauge, KeyRound, MessageCircleQuestion, ShieldQuestion} from "lucide-react";
 import {AgentMark} from "@/components/agent-mark";
 import {displayName, instanceState, type HubInstance, type InstanceState} from "@/lib/hub";
 import type {HubFilter} from "@/lib/hub-filter";
 import {formatAge} from "@/lib/format";
+import {createHubAPI} from "@/lib/hub-api";
 import {activity, formatElapsed} from "@/lib/hub-format";
 import {instanceVersion} from "@/lib/hub-version";
+import {providerName} from "@/lib/hub-providers";
 import {useHubSetting} from "@/lib/hub-settings";
+import {currentSpend} from "@/lib/hub-spend";
+import {usesOtherProviders} from "@/lib/provider-usage";
 import {cn} from "@/lib/utils";
 import {ActivityCard} from "./activity-card";
 import {useHubTime} from "./clock";
@@ -15,7 +20,7 @@ import {Constellation} from "./brand";
 import {StatusGlyph} from "./status-glyph";
 import {agentName} from "./instance-row";
 import {JoinMachine} from "./join-machine";
-import {SpendCard, TokensCard, VersionsCard, WorkCard, type Fold} from "./overview-cards";
+import {ProvidersCard, SpendCard, TokensCard, VersionsCard, WorkCard, type Fold} from "./overview-cards";
 import {VersionTag} from "./version-tag";
 
 // What a waiting instance asks for: its icon and the word for it.
@@ -163,6 +168,27 @@ function FinishedCard({instance, hubVersion, onOpen}: {instance: HubInstance; hu
   );
 }
 
+// useProviderNames is the names of the hub's model providers by their IDs,
+// for the Providers card: read when wanted (an agent used a provider besides
+// its own). Until the hub answers, or if it doesn't, the card shows IDs.
+function useProviderNames(root: string, wanted: boolean): ReadonlyMap<string, string> | undefined {
+  const [names, setNames] = useState<ReadonlyMap<string, string> | undefined>(undefined);
+  useEffect(() => {
+    if (!wanted) return;
+    let current = true;
+    createHubAPI(root)
+      .getProviders()
+      .then(
+        ({providers}) => current && setNames(new Map(providers.map((provider) => [provider.id, providerName(provider)]))),
+        () => {},
+      );
+    return () => {
+      current = false;
+    };
+  }, [root, wanted]);
+  return names;
+}
+
 const stats: {filter: HubFilter; label: string; tone: string; tint: string; glyph: InstanceState}[] = [
   {filter: "needs-you", label: "Need you", tone: "text-state-needs", tint: "bg-state-needs/6 border-state-needs/30", glyph: "needs-you"},
   {filter: "working", label: "Working", tone: "text-state-working", tint: "bg-state-working/5 border-state-working/25", glyph: "working"},
@@ -205,6 +231,7 @@ export function Overview({
         return next;
       }),
   });
+  const providerNames = useProviderNames(root, instances.some((instance) => usesOtherProviders(currentSpend(instance)?.providers)));
   const by = (state: string) => instances.filter((instance) => instanceState(instance) === state);
   const needs = by("needs-you");
   const working = by("working").sort((a, b) => (a.summary?.task?.started_at ?? "").localeCompare(b.summary?.task?.started_at ?? ""));
@@ -281,6 +308,7 @@ export function Overview({
 
         <SpendCard instances={instances} onOpen={onOpen} fold={fold("spend")} />
         <TokensCard instances={instances} onOpen={onOpen} fold={fold("tokens")} />
+        <ProvidersCard instances={instances} names={providerNames} fold={fold("providers")} />
         <WorkCard instances={instances} onOpen={onOpen} fold={fold("work")} />
         <ActivityCard root={root} fold={fold("activity")} />
 

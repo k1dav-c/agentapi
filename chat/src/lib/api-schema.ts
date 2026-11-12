@@ -1369,6 +1369,8 @@ export interface components {
             model: string;
             /** @description The model's price is known. */
             priced: boolean;
+            /** @description The AgentAPI model provider the call went to, by its ID (as in GET /settings/options); missing for the agent's own provider (default). Codex's log names it; a Claude Code call goes to the provider AgentAPI last recorded its session on before the call (its provider ledger). */
+            provider?: string;
             /** @description The subagent that made the call; missing for the agent's own. */
             subagent_id?: string;
             /**
@@ -1448,6 +1450,24 @@ export interface components {
              * @description How long the cache is kept after its last use: 300 (5 minutes) or 3600 (an hour).
              */
             ttl_seconds: number;
+        };
+        ProviderCost: {
+            /**
+             * Format: int64
+             * @description How many calls were made.
+             */
+            calls: number;
+            /** @description The price of every model called is known; when one isn't, its calls count no cost. */
+            priced: boolean;
+            /** @description The AgentAPI model provider, by its ID; default for the agent's own. */
+            provider: string;
+            /** @description The tokens used. */
+            tokens: components["schemas"]["Tokens"];
+            /**
+             * Format: double
+             * @description API-equivalent cost in USD, at the list prices of the models called, whichever provider served them.
+             */
+            usd: number;
         };
         ProviderOption: {
             /** @description The host of the provider's API, to show where it runs. */
@@ -1872,6 +1892,8 @@ export interface components {
             hourly: components["schemas"]["HourCost"][];
             /** @description What was spent on each model, the most expensive first. */
             models: components["schemas"]["ModelCost"][];
+            /** @description What was spent on each AgentAPI model provider (default for the agent's own), the most expensive first, then the one with the most tokens. */
+            providers: components["schemas"]["ProviderCost"][];
             /** @description The tokens used. */
             tokens: components["schemas"]["Tokens"];
             /**
@@ -2216,6 +2238,24 @@ export interface components {
              */
             usd: number;
         };
+        SummaryProviderSpend: {
+            /** @description The tokens of the provider's calls over the last 24 hours. */
+            day_tokens: components["schemas"]["SummaryTokens"];
+            /**
+             * Format: double
+             * @description API-equivalent cost in USD of the provider's calls over the last 24 hours, as day_usd: at the list prices of the models called.
+             */
+            day_usd: number;
+            /** @description The AgentAPI model provider, by its ID; default for the agent's own. Claude Code's calls go to the provider AgentAPI recorded their session on (its provider ledger); Codex's log names it. */
+            provider: string;
+            /** @description The same over the last 7 days. */
+            week_tokens: components["schemas"]["SummaryTokens"];
+            /**
+             * Format: double
+             * @description The same over the last 7 days.
+             */
+            week_usd: number;
+        };
         SummaryRequest: {
             /**
              * Format: date-time
@@ -2239,6 +2279,8 @@ export interface components {
             day_usd: number;
             /** @description What was spent in each hour with calls of the last 25 (UTC, the earliest first), the hour under way included: the hours day_usd adds up and the one before them. An hour's figures grow while it goes on. Sent with the amounts: when they don't change, an hour that left the 25 may stay. Missing from earlier releases. */
             hours?: components["schemas"]["SummaryHour"][] | null;
+            /** @description The amounts and tokens by AgentAPI model provider (default for the agent's own), of the providers with calls in the last 7 days: the most expensive over the week first, then the one with the most tokens. They add up to the totals, but for rounding. Missing from earlier releases and without calls in the last 7 days. */
+            providers?: components["schemas"]["SummaryProviderSpend"][] | null;
             /** @description Identifies the sessions the amounts add up: those of one agent in one directory, as the session logs of one machine hold them (a hash of the machine's host name and ID, the agent, the directory's real path and where the agent keeps its logs). AgentAPIs that report the same scope report the same sessions; a client that adds up many counts each scope once. */
             scope: string;
             /**

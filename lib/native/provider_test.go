@@ -3,9 +3,12 @@ package native_test
 import (
 	"context"
 	"errors"
+	"slices"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/coder/quartz"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -301,4 +304,59 @@ func TestChosenProviderWhileTheHubHasntAnswered(t *testing.T) {
 	require.NoError(t, c.Restart(context.Background()))
 	require.NotNil(t, factory.Last().Launch, "still chosen")
 	assert.Equal(t, "kimi", factory.Last().Launch.Provider.ID)
+}
+
+// providerUses records what Config.ProviderUsed is told.
+type providerUses struct {
+	mu   sync.Mutex
+	uses []native.ProviderUse
+}
+
+func (p *providerUses) add(use native.ProviderUse) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.uses = append(p.uses, use)
+}
+
+func (p *providerUses) get() []native.ProviderUse {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.uses)
+}
+
+// The provider a session runs on is reported from when it started on it
+// or switched to it: once the agent started with its session known, when
+// a session becomes known later, and after each switch in place.
+func TestProviderUsed(t *testing.T) {
+	clock := quartz.NewMock(t)
+	t0 := clock.Now()
+	uses := &providerUses{}
+	c, factory, _ := startOnProviders(t, nil, native.Config{Clock: clock, ProviderUsed: uses.add})
+	ctx := context.Background()
+	require.Eventually(t, func() bool { return len(uses.get()) == 1 }, 5*time.Second, time.Millisecond)
+	assert.Equal(t, []native.ProviderUse{{At: t0, Session: "session-1", Provider: "default"}}, uses.get())
+
+	clock.Advance(time.Minute)
+	require.NoError(t, c.ApplySettings(ctx, agentstate.Settings{Provider: "kimi"}))
+	clock.Advance(time.Minute)
+	require.NoError(t, c.ApplySettings(ctx, agentstate.Settings{Model: "Kimi-K2"}))
+	clock.Advance(time.Minute)
+	require.NoError(t, c.ApplySettings(ctx, agentstate.Settings{Provider: "default"}))
+	// A new session (/clear): on the provider since the switch; the same
+	// session again tells nothing new.
+	clock.Advance(time.Minute)
+	factory.Last().Sink().SessionRef("session-2")
+	factory.Last().Sink().SessionRef("session-2")
+	assert.Equal(t, []native.ProviderUse{
+		{At: t0, Session: "session-1", Provider: "default"},
+		{At: t0.Add(time.Minute), Session: "session-1", Provider: "kimi"},
+		{At: t0.Add(3 * time.Minute), Session: "session-1", Provider: "default"},
+		{At: t0.Add(3 * time.Minute), Session: "session-2", Provider: "default"},
+	}, uses.get())
+
+	// An agent that can't switch providers tells none.
+	none := &providerUses{}
+	plain, _, _ := start(t, func(a *nativetest.Adapter) { a.Ref = "s" }, native.Config{Providers: testProviders(), ProviderUsed: none.add})
+	assert.Equal(t, "s", plain.SessionRef())
+	assert.Empty(t, none.get())
 }

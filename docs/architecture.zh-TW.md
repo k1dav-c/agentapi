@@ -76,6 +76,7 @@ flowchart TB
 | `lib/agentstate/` | Native agent 回報、API 提供的值：功能、登入、設定、用量、請求、用量限制停止與重試等待，以及 `ConversationState`（observer 整份收到的對話狀態），連同重新啟動後保留的 `StoredState`。它是末端套件（只用 huma 和 `lib/util`），提供這些值的套件因此不必依賴 `lib/native` |
 | `lib/native/claude`、`codex`、`pi` | 每種 agent 協定各一個 adapter |
 | `lib/provider/` | agent 可以用來取代自己供應商的[模型供應商](#模型供應商)：`Provider` 和它的檢查、`Source`（設定檔的 `providers` 區段，有變動就重新讀取，接著是 hub 的；供應商列出的模型保留 10 分鐘），以及 `HubSync`：每分鐘向 hub 取得供應商，以 hub 的 secret 加密（`Seal`、`Open`） |
+| `lib/providerlog/` | 供應商帳本，設定檔旁的 `provider-ledger.jsonl`：記錄每個 Claude Code 或 Codex 工作階段從什麼時候起用哪個[模型供應商](#模型供應商)，Claude Code 的呼叫靠它歸到供應商 |
 | `lib/native/agentio` | 這些 adapter 執行 agent 時共用的部分：行程與它的迴圈（`Host`）、寫入 stdin、把回應對應到等待中的請求、agent 請求的回答進度（`Answer`）、寬鬆解碼與協定變動警告、快照節流 |
 | `lib/native/demo` | `native-demo`，開發聊天介面用的模擬 agent |
 | `lib/native/nativetest` | 測試用、可以寫腳本控制的假 adapter |
@@ -309,7 +310,9 @@ type Factory func(resume Resume) (Adapter, error)
   （`GET /sessions`、`GET /cost`）：Claude Code 的 assistant 訊息（每個 message id 一次）、Codex 的
   token 計數、Pi 回報的金額。`lib/pricing` 為每次呼叫計價；Claude Code 的 `cost-state` 紀錄會把
   紀錄檔沒有列出的 token（壓縮）以同樣的價格補成未逐筆列出的呼叫；token 相同而金額不同時不補，
-  只為每個模型記錄一次。分支複製的呼叫只算一次，算在最先建立的
+  只為每個模型記錄一次。每個呼叫都有它的模型供應商（見[各供應商的用量](#模型供應商)）：Codex 的來自
+  紀錄檔，Claude Code 的來自供應商帳本；每次計算只讀帳本新增的部分，帳本有變動時也只重新歸屬紀錄有變的
+  工作階段。分支複製的呼叫只算一次，算在最先建立的
   工作階段，依紀錄檔的建立時間判斷（Linux 用 statx，macOS 用 stat；其他系統用第一行的時間）。
   Store 索引每個紀錄檔的大小、讀取位置、讀取器狀態和已計價的呼叫：只讀取新增的完整行，也只替
   這些行新增或補完的呼叫計價；檔案縮小或被替換時重新讀取。如果沒有任何紀錄檔的呼叫改變，
@@ -439,6 +442,17 @@ flowchart LR
   項目（additional tools、加密的推理內容）：app-server 以 `-c model_providers.agentapi-<id>={…}`
   （Responses API，金鑰在 `AGENTAPI_PROVIDER_API_KEY`）和 `-c model_provider="agentapi-<id>"` 啟動，
   新的 thread 透過 `thread/inject_items` 以文字拿到訊息，只取放得進 200,000 字元的最近訊息。
+- **各供應商的用量。** 每個模型呼叫都算在它送往的供應商（`ModelCall.provider`、`SessionCost.providers`、
+  摘要的 `spend.providers`）。Codex 的紀錄檔會寫出供應商：`session_meta` 有 thread 的 `model_provider`，
+  每個 `thread_settings_applied` 事件有改用的供應商；`agentapi-<id>` 就是供應商 `<id>`
+  （`codexlog.ProviderID`），其他的都算 agent 自己的。Claude Code 的端點來自環境變數，紀錄檔裡沒有，
+  所以由 AgentAPI 自己記在供應商帳本（`lib/providerlog`，見[持久保存](#持久保存)）。
+  `native.Config.ProviderUsed` 回報 `ProviderUse`（工作階段、供應商、從什麼時候起）：能切換供應商的
+  agent 啟動且已知工作階段時、啟動後才得知工作階段時（時間記為啟動時，新工作階段最早的呼叫也算得到），
+  以及原地切換之後；分支複製來源的工作階段不回報。`lib/httpapi`（`provider_ledger.go`）在背景依序把
+  每筆回報附加到帳本，因為對話是在持有鎖的情況下回報。`sessions.Store` 把 Claude Code 工作階段的每個
+  呼叫（含 sub agent 的；分支複製的較早呼叫算在原本的工作階段）歸到該工作階段在呼叫當下或之前的最後
+  一筆紀錄的供應商；在第一筆之前或沒有紀錄時，算 agent 自己的。Pi 沒有供應商，呼叫都算它自己的。
 
 ## 事件與對話狀態
 
@@ -488,7 +502,8 @@ flowchart LR
 - agent 有 session log 可讀時，伺服器每分鐘計算一次摘要的 `spend`（`spend.go`）：
   `sessions.Store.Costs` 以增量方式讀取 log，再把總計中結束於最近 24 小時和 7 天內的各小時加總，
   金額和 token 都算（`SessionCost` 的每個小時兩者都記，所以一個呼叫的 token 只算一次，和金額算在
-  同一處）。`EventEmitter.SetSpend` 只在金額或 token 改變時才送出摘要，`updated_at` 記錄改變的時間。`scope` 是主機的
+  同一處）。各供應商的小時（`ProviderCost.Hourly`）以同樣方式加總成 `providers`，只列出最近 7 天有呼叫的
+  供應商。`EventEmitter.SetSpend` 只在金額、token 或各供應商的數字改變時才送出摘要，`updated_at` 記錄改變的時間。`scope` 是主機的
   主機名稱和 ID 加上 `sessions.Store.Scope`（agent、目錄的實際路徑、agent 存放 log 的位置）算出的
   雜湊值，讓 hub 對讀同一批 log 的兩個 AgentAPI 只算一次。
 - emitter 也記錄用戶端上次顯示對話的時間（`POST /tasks/seen`，聊天介面顯示對話時會呼叫）：
@@ -619,6 +634,15 @@ webhook 事件的 delivery ID 也以同樣方式寫入 `instances.deliveries.jso
 啟動時從實例的區段補算，或請求時加上進行中的區段，都不會重複。摘要還可能列出的 48 小時內，每個 scope
 的花費分開保存（`recent`），寫入時取代舊值，不累加；超過 48 小時就併入各小時的合計。無法解析或版本
 不同的檔案會移到一旁，重新開始記錄：裡面是統計數字，不是 hub 執行時需要的資料。
+
+供應商帳本（`lib/providerlog`）是設定檔旁的 `provider-ledger.jsonl`（預設為
+`~/.agentapi/provider-ledger.jsonl`），權限 0600，同一台主機上這位使用者的所有 AgentAPI 共用。每一行是一筆紀錄，
+`{"at": "<RFC 3339>", "agent": "claude", "session": "<agent 的工作階段 ID>", "provider": "<ID 或 default>"}`，
+以 `O_APPEND` 一次寫入。AgentAPI 在第一次附加時、之後最多一天一次，丟掉超過 90 天的紀錄；只有真的有這麼舊的
+紀錄時，才透過 `atomicfile` 重寫檔案。附加和重寫輪流取得 `provider-ledger.jsonl.lock`（`lib/filelock`），
+不會因此遺失紀錄。讀取時只讀上次之後新增的部分；檔案變小，或上次讀到的最後一行已經不在原處（被重寫）時，
+從頭重新讀取。工作階段的紀錄被丟掉後，它的呼叫算 agent 自己的；agent 每次啟動都會記一筆新的，所以只有
+在同一個供應商上連續跑了 90 天、中間沒有重新啟動或切換的工作階段，才會失去它的紀錄。
 
 SIGUSR1 會把排隊中的變更寫入狀態資料庫。`--state-file` 是 1.0 之前 PTY transport 的保存機制
 （關閉時寫出 JSON），AgentAPI 3 會把它匯入旁邊的狀態資料庫；AgentAPI 4 已移除。

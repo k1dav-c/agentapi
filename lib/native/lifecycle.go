@@ -121,6 +121,7 @@ func (c *Conversation) markStartedLocked(caps agentstate.Capabilities, settings 
 	// One report for all of it, before the agent counts as started.
 	c.stateChangedLocked()
 	c.cfg.Observer.Started()
+	c.reportProviderLocked()
 }
 
 // beginInitialPromptLocked begins the turn of the initial prompt, read as

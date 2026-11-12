@@ -1,7 +1,8 @@
 "use client";
 
 // The overview's cards of the agents in all: what they spent, the tokens
-// they used, how long they worked, and the AgentAPI versions they run.
+// they used, on which model providers, how long they worked, and the
+// AgentAPI versions they run.
 
 import {ChevronRight} from "lucide-react";
 import {Fragment} from "react";
@@ -10,7 +11,20 @@ import {displayName, type HubInstance} from "@/lib/hub";
 import {groupSubtotals, type GroupSubtotal} from "@/lib/hub-groups";
 import {machineOf, machineSubtotals, type MachineSubtotal} from "@/lib/hub-machines";
 import {formatTokens, formatUSDShort} from "@/lib/format";
-import {countedSpends, countedTokens, spendTitle, spendTotals, tokenKinds, tokensTitle, tokenTotals} from "@/lib/hub-spend";
+import {
+  countedSpends,
+  countedTokens,
+  providerPriced,
+  providerTitle,
+  providerTotals,
+  spendTitle,
+  spendTotals,
+  tokenKinds,
+  tokensTitle,
+  tokenTotals,
+} from "@/lib/hub-spend";
+import {providerAmount, providerUsageLabel} from "@/lib/provider-usage";
+import {DEFAULT_PROVIDER} from "@/lib/session-settings";
 import {parseVersion, versionTotals, type VersionRelation} from "@/lib/hub-version";
 import {formatWork, workSeconds, workTitle, workTotals} from "@/lib/hub-work";
 import {olderUpdates} from "@/lib/hub-update";
@@ -155,7 +169,7 @@ function PeriodTable({first, children}: {first: string; children: React.ReactNod
 
 // PeriodRow is a row of a PeriodTable: what it counts (cell, its first
 // cell) and its figures; title says them in full.
-function PeriodRow({cell, day, week, title}: {cell: React.ReactNode; day: string; week: string; title: string}) {
+function PeriodRow({cell, day, week, title}: {cell: React.ReactNode; day: React.ReactNode; week: React.ReactNode; title: string}) {
   return (
     <tr className="border-t" title={title}>
       {cell}
@@ -351,6 +365,66 @@ export function TokensCard({instances, onOpen, fold}: {instances: HubInstance[];
         </PeriodTable>
         <GroupTable groups={groupRows(groups, formatTokens, tokensTitle)} />
         <MachineTable machines={machineRows(machines, formatTokens, tokensTitle)} />
+      </div>
+    </PeriodCard>
+  );
+}
+
+// ProviderFigure is a provider's figure of a period in a PeriodRow: what
+// its calls cost, or that their models have no known price, over their
+// tokens.
+function ProviderFigure({usd, tokens}: {usd: number; tokens: number}) {
+  const priced = providerPriced(usd, tokens);
+  return (
+    <>
+      <span className={cn("block", !priced && "text-muted-foreground")}>{providerAmount(usd, priced, formatUSDShort)}</span>
+      <span className="block text-xs text-muted-foreground">{formatTokens(tokens)} tokens</span>
+    </>
+  );
+}
+
+// ProvidersCard is what the instances spent on each model provider in the
+// last 24 hours and 7 days, the agents' own and those they switched to,
+// once some went to another; names are the hub's providers' names, by ID.
+// Its figures are the tokens of the other providers, which have a price or
+// not.
+export function ProvidersCard({instances, names, fold}: {instances: HubInstance[]; names?: ReadonlyMap<string, string>; fold?: Fold}) {
+  const totals = providerTotals(instances);
+  const elsewhere = totals.providers.filter((total) => total.provider !== DEFAULT_PROVIDER && total.weekTokens > 0);
+  if (elsewhere.length === 0) return null;
+  const day = elsewhere.reduce((sum, total) => sum + total.dayTokens, 0);
+  const week = elsewhere.reduce((sum, total) => sum + total.weekTokens, 0);
+  return (
+    <PeriodCard
+      id="hub-providers"
+      title="Providers"
+      note="Each provider's calls, from the agents that report them"
+      day={<Figure label="Other providers, 24 hours" value={formatTokens(day)} title={`${day.toLocaleString()} tokens on providers other than the agents' own`} />}
+      week={<Figure label="Other providers, 7 days" value={formatTokens(week)} title={`${week.toLocaleString()} tokens on providers other than the agents' own`} />}
+      headline={`${formatTokens(week)} tokens on other providers`}
+      fold={fold}
+      counted={
+        <>
+          {totals.counted} of {instances.length} agents report it
+        </>
+      }
+    >
+      <div className="min-w-0">
+        <PeriodTable first="By provider">
+          {totals.providers.map((total) => (
+            <PeriodRow
+              key={total.provider}
+              cell={
+                <td className={cn("max-w-0 truncate py-2 pr-3", total.provider === DEFAULT_PROVIDER ? "text-muted-foreground" : "font-medium")} data-provider={total.provider}>
+                  {providerUsageLabel(total.provider, names)}
+                </td>
+              }
+              day={<ProviderFigure usd={total.day} tokens={total.dayTokens} />}
+              week={<ProviderFigure usd={total.week} tokens={total.weekTokens} />}
+              title={providerTitle(total)}
+            />
+          ))}
+        </PeriodTable>
       </div>
     </PeriodCard>
   );

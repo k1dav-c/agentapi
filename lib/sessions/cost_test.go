@@ -602,8 +602,12 @@ func TestCallsDigestAsFormatted(t *testing.T) {
 		h := fnv.New64a()
 		for _, call := range calls {
 			tk := call.Tokens
-			_, _ = fmt.Fprintf(h, "%d|%s|%d|%d|%d|%d|%d|%x|%s|%t\n", call.Time.UnixNano(), call.Model,
+			_, _ = fmt.Fprintf(h, "%d|%s|%d|%d|%d|%d|%d|%x|%s|%t", call.Time.UnixNano(), call.Model,
 				tk.Input, tk.CacheRead, tk.CacheWrite, tk.CacheWrite1h, tk.Output, math.Float64bits(call.USD), call.SubagentID, call.Unitemized)
+			if call.Provider != "" {
+				_, _ = fmt.Fprintf(h, "|%s", call.Provider)
+			}
+			_, _ = fmt.Fprint(h, "\n")
 		}
 		return strconv.FormatUint(h.Sum64(), 16)
 	}
@@ -614,6 +618,7 @@ func TestCallsDigestAsFormatted(t *testing.T) {
 			Model:  []string{"claude-opus-5-5", "gpt-6.1-sol", "", "ünïcode"}[rng.IntN(4)],
 			Tokens: pricing.Tokens{Input: rng.IntN(1e6), CacheRead: rng.IntN(1e6), CacheWrite: -rng.IntN(3), CacheWrite1h: rng.IntN(9), Output: rng.IntN(1e5)},
 			USD:    rng.NormFloat64(), SubagentID: []string{"", "a1"}[rng.IntN(2)], Unitemized: i%7 == 0,
+			Provider: []string{"", "", "gw"}[rng.IntN(3)],
 		})
 		require.Equal(t, formatted(calls), CallsDigest(calls))
 	}

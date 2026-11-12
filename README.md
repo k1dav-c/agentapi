@@ -723,7 +723,11 @@ answer, and doesn't ask it again for a minute.
 
 An agent on a provider can read that provider's key: it runs as your user, with the key in its
 environment. Give a provider only a key you would give the agent. Model calls on a provider have no
-known price, so they add tokens but no cost (`--prices` adds prices).
+known price, so they add tokens but no cost (`--prices` adds prices). `GET /sessions`, `GET /cost`
+and the summary's `spend` count each provider's calls, tokens and cost apart (`providers`,
+`default` for the agent's own); for Claude Code, whose log doesn't say which endpoint a call went
+to, AgentAPI records which provider each session ran on from when in
+`~/.agentapi/provider-ledger.jsonl`.
 
 ### Context and rate limits
 

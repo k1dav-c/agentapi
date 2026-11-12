@@ -1,6 +1,8 @@
 import {afterEach, describe, expect, mock, spyOn, test} from "bun:test";
 import {act} from "react";
 import {toast} from "sonner";
+import type {HubInstance} from "@/lib/hub";
+import {idleInstance, summary} from "@/lib/hub-fixtures";
 import type {Provider} from "@/lib/hub-providers";
 import {withDOM} from "@/test/dom";
 import {json, restoreFetch, routeFetch, type Call} from "@/test/fetch";
@@ -188,5 +190,44 @@ describe("ProvidersSettings connection checks", () => {
     expect(status()).toBe("");
     expect(form.querySelector("[aria-label=\"The provider's models\"]")).toBeNull();
     expect(models.value).toBe("kept-model\nb-new");
+  });
+});
+
+describe("ProvidersSettings usage", () => {
+  // n tokens and day dollars in the last 24 hours, seven times both in the
+  // last 7 days.
+  const onProvider = (provider: string, day: number, n: number) => ({
+    provider,
+    day_usd: day,
+    week_usd: 7 * day,
+    day_tokens: {input: n, output: 0, cache_write: 0, cache_read: 0, total: n},
+    week_tokens: {input: 7 * n, output: 0, cache_write: 0, cache_read: 0, total: 7 * n},
+  });
+  const reporting = (id: string, scope: string, providers: ReturnType<typeof onProvider>[]): HubInstance =>
+    idleInstance(id, {summary: summary({spend: {day_usd: 0, week_usd: 0, scope, updated_at: "2026-11-03T11:00:00Z", providers}})});
+  const usage = (container: HTMLElement, id: string) => container.querySelector(`[data-provider="${id}"] [data-provider-usage]`)?.textContent;
+
+  test("each provider says what the agents used it for, priced or not", async () => {
+    routeFetch({"/hub/api/providers": () => json({revision: "r1", providers: [alpha, bravo]})});
+    const instances = [
+      reporting("a", "s1", [onProvider("default", 2, 1000), onProvider("alpha", 1.5, 2000)]),
+      // The same sessions as a: counted once.
+      reporting("b", "s1", [onProvider("default", 2, 1000), onProvider("alpha", 1.5, 2000)]),
+    ];
+    view = await mount(<ProvidersSettings root="/hub" instances={instances} editor={{current: null}} />);
+    await settle();
+    expect(usage(view.container, "alpha")).toBe("24h 2k tokens, $1.50 · 7d 14k tokens, $11");
+    expect(usage(view.container, "bravo")).toBe("No calls in the last 7 days");
+
+    await view.rerender(<ProvidersSettings root="/hub" instances={[reporting("c", "s2", [onProvider("bravo", 0, 500)])]} editor={{current: null}} />);
+    expect(usage(view.container, "bravo")).toBe("24h 500 tokens, no price · 7d 3.5k tokens, no price");
+  });
+
+  test("no line while no agent reports its providers", async () => {
+    routeFetch({"/hub/api/providers": () => json({revision: "r1", providers: [alpha]})});
+    view = await mount(<ProvidersSettings root="/hub" instances={[idleInstance("a")]} editor={{current: null}} />);
+    await settle();
+    expect(view.container.querySelector("[data-provider=alpha]")).not.toBeNull();
+    expect(view.container.querySelector("[data-provider-usage]")).toBeNull();
   });
 });

@@ -16,6 +16,10 @@ type Call struct {
 	Key string
 	// Cost is what the agent itself said the call cost (Pi), or -1.
 	Cost float64
+	// Provider is the AgentAPI model provider the call went to, by its ID,
+	// when the log says (Codex's); empty for the agent's own provider and
+	// where the log doesn't say (Claude Code's, Pi's).
+	Provider string
 	// Report, when set, makes this not a call but a Claude Code cost-state
 	// record: what Claude Code counted so far for each model of the
 	// session, its subagents' included.

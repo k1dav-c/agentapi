@@ -77,6 +77,7 @@ emitter. Handlers call the conversation and read state from the emitter.
 | `lib/agentstate/` | The values a native agent reports and the API serves: capabilities, login, settings, usage, requests, the limit stop and the retry wait, and `ConversationState`, the conversation's state the observer gets whole, with the `StoredState` that survives a restart. A leaf package (huma and `lib/util` only), so the packages that serve them don't depend on `lib/native` |
 | `lib/native/claude`, `codex`, `pi` | One adapter per agent protocol |
 | `lib/provider/` | The [model providers](#model-providers) an agent can run on instead of its own: `Provider` and its checks, `Source` (the config file's `providers` section, read again when it changes, then the hub's; the models a provider lists, kept 10 minutes) and `HubSync`, which gets the hub's every minute, sealed with the hub's secret (`Seal`, `Open`) |
+| `lib/providerlog/` | The provider ledger, `provider-ledger.jsonl` beside the config file: which [model provider](#model-providers) each Claude Code or Codex session ran on, from when, which attributes Claude Code's calls to their provider |
 | `lib/native/agentio` | What those adapters share to run their agent: the process and its loop (`Host`), writing to its stdin, matching its responses to the requests waiting for them, where the answer to one of its requests stands (`Answer`), lenient decoding with drift warnings, the snapshot throttle |
 | `lib/native/demo` | `native-demo`, a simulated agent for working on the chat |
 | `lib/native/nativetest` | A scriptable fake adapter for tests |
@@ -377,7 +378,10 @@ type Factory func(resume Resume) (Adapter, error)
   token counts, Pi's reported costs. `lib/pricing` prices each call; Claude
   Code's `cost-state` records add the tokens its log doesn't list
   (compaction) as unitemized calls at the same prices; a cost that differs
-  for the same tokens adds nothing and is logged once per model. Calls copied by a fork count once, in the earliest
+  for the same tokens adds nothing and is logged once per model. Each call has its model provider
+  ([Usage by provider](#model-providers)): Codex's from its log, Claude Code's from the provider
+  ledger, which the reading asks for what was appended since (a ledger that changed attributes
+  again only the sessions whose entries did). Calls copied by a fork count once, in the earliest
   session, by the logs' creation times (statx on Linux, stat on macOS;
   elsewhere their first lines'). The Store indexes each log's size, read
   offset and reader state, with its calls priced. It reads only complete new
@@ -559,6 +563,20 @@ flowchart LR
   its key in `AGENTAPI_PROVIDER_API_KEY`) and `-c model_provider="agentapi-<id>"`, and the new
   thread gets the messages as text through `thread/inject_items`, the latest that fit in 200,000
   characters.
+- **Usage by provider.** Each model call counts toward the provider it went to (`ModelCall.provider`,
+  `SessionCost.providers`, the summary's `spend.providers`). Codex's log names it: `session_meta`
+  has the thread's `model_provider` and each `thread_settings_applied` event the one it changed to;
+  `agentapi-<id>` is provider `<id>` (`codexlog.ProviderID`), any other is the agent's own. Claude
+  Code's log doesn't, as its endpoint comes from the environment, so AgentAPI records it in the
+  provider ledger (`lib/providerlog`, see [Persistence](#persistence)). `native.Config.ProviderUsed`
+  reports `ProviderUse` (the session, the provider, since when) once an agent that can switch
+  providers started and its session is known, when the session becomes known later (dated from
+  the start, so a new session's first calls count), and after a switch in place; never the session
+  a fork copies. `lib/httpapi` (`provider_ledger.go`) appends each report in the background, in
+  order, as the conversation reports it with its lock held. `sessions.Store` gives each call of a
+  Claude Code session (its subagents' included; a fork's copy of an earlier call counts in that
+  session) the provider of the session's latest entry at or before the call, and the agent's own
+  before the first entry or without one. Pi has no providers: its calls are its own.
 
 ## Events and the conversation state
 
@@ -637,8 +655,10 @@ usage limit stop, a retry wait, login).
   incrementally, and the hours of its total that end within the last 24 hours
   and 7 days are added up, their cost and their tokens (each hour of a
   `SessionCost` keeps both, so a call's tokens count once, where its cost
-  does). `EventEmitter.SetSpend` sends the summary only when the amounts or
-  tokens change; `updated_at` says when they did. Its `scope` hashes the
+  does). Each provider's hours (`ProviderCost.Hourly`) are added up the same
+  way into `providers`, for the providers with calls in the last 7 days.
+  `EventEmitter.SetSpend` sends the summary only when the amounts, tokens or
+  providers change; `updated_at` says when they did. Its `scope` hashes the
   machine's host name and ID with `sessions.Store.Scope` (the agent, the
   directory's real path, where the agent keeps its logs), so a hub counts two
   AgentAPIs that read the same logs once.
@@ -827,6 +847,18 @@ that adds the spans going on. A scope's spend stays apart (`recent`) while summa
 its hours (48 hours), and is set rather than added; past that, it folds into the hours' totals. A
 file that doesn't parse, or of another version, is moved aside and a new one starts: it holds
 statistics, not what the hub needs to run.
+
+The provider ledger (`lib/providerlog`) is `provider-ledger.jsonl` beside the config file
+(`~/.agentapi/provider-ledger.jsonl` by default), mode 0600, shared by every AgentAPI of the user on
+the machine. Each line is an entry,
+`{"at": "<RFC 3339>", "agent": "claude", "session": "<the agent's session ID>", "provider": "<ID or default>"}`,
+appended with `O_APPEND` in one write. An AgentAPI drops the entries older than 90 days at its first
+append, then at most once a day, rewriting the file through `atomicfile` only when one is that old;
+appends and the rewrite take `provider-ledger.jsonl.lock` (`lib/filelock`) in turn, so none is lost
+to it. A reader reads only what was appended since it last read, and reads the file again from the
+start when it shrank or the line where it stopped is gone (a rewrite). A call whose session's entry
+was dropped counts as the agent's own; each start of the agent records a new entry, so only a
+session that ran on a provider for 90 days without a restart or switch loses its entry.
 
 SIGUSR1 flushes the state database. `--state-file`, the PTY transport's persistence before 1.0
 (JSON written on shutdown), which AgentAPI 3 imported into a state database next to it, is gone

@@ -2,6 +2,7 @@
 
 import {useEffect, useMemo, useRef, useState} from "react";
 import {
+  Activity,
   Bot,
   Check,
   ChevronRight,
@@ -24,6 +25,7 @@ import {
 import {toast} from "sonner";
 import {Button} from "@/components/ui/button";
 import {Kbd} from "@/components/ui/kbd";
+import type {HubInstance} from "@/lib/hub";
 import {createHubAPI, HubAPIError, hubErrorText} from "@/lib/hub-api";
 import {
   changeOf,
@@ -45,6 +47,7 @@ import {
   type ProviderModel,
   type ProviderSnapshot,
 } from "@/lib/hub-providers";
+import {providerPeriod, providerTitle, providerTotals, type ProviderTotal} from "@/lib/hub-spend";
 import {cn} from "@/lib/utils";
 import {fieldClass} from "./styles";
 
@@ -57,17 +60,21 @@ type Editing = {id: string | null};
 // the whole list (PUT /api/providers); the list shows the hub's answer, and
 // a refused change keeps the editor open with a toast. editor tells the
 // dialog whether the editor is open, and closes it: Escape closes the
-// editor first, and a click outside doesn't lose what it holds.
+// editor first, and a click outside doesn't lose what it holds. Each
+// provider says what the instances' agents used it for, once some report it.
 export function ProvidersSettings({
   root,
+  instances,
   editor,
   headingRef,
 }: {
   root: string;
+  instances?: HubInstance[];
   editor: React.RefObject<{open: boolean; cancel: () => void} | null>;
   headingRef?: React.Ref<HTMLHeadingElement>;
 }) {
   const api = useMemo(() => createHubAPI(root), [root]);
+  const usage = useMemo(() => providerTotals(instances ?? []), [instances]);
   const [snapshot, setSnapshot] = useState<ProviderSnapshot | undefined>(undefined);
   const [loadError, setLoadError] = useState("");
   const [editing, setEditing] = useState<Editing | null>(null);
@@ -271,6 +278,7 @@ export function ProvidersSettings({
               <ProviderRow
                 key={provider.id}
                 provider={provider}
+                usage={usage.counted > 0 ? (usage.providers.find((total) => total.provider === provider.id) ?? null) : undefined}
                 onEdit={() => {
                   operation.current++;
                   setDeleting(null);
@@ -325,9 +333,21 @@ function ProviderTile({provider, className}: {provider: {id: string; name?: stri
 }
 
 // ProviderRow is a provider in the list: who it is, where it runs, its
-// models and whether it has a key. Its buttons show on hover and focus
-// where there is a pointer, always on a touch screen.
-function ProviderRow({provider, onEdit, onDelete}: {provider: Provider; onEdit: () => void; onDelete: () => void}) {
+// models, whether it has a key, and what the agents used it for (usage:
+// null for nothing in the last 7 days, none while no agent reports it).
+// Its buttons show on hover and focus where there is a pointer, always on a
+// touch screen.
+function ProviderRow({
+  provider,
+  usage,
+  onEdit,
+  onDelete,
+}: {
+  provider: Provider;
+  usage?: ProviderTotal | null;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
   const models = provider.models ?? [];
   const shown = models.slice(0, 3);
   return (
@@ -371,6 +391,7 @@ function ProviderRow({provider, onEdit, onDelete}: {provider: Provider; onEdit: 
             </>
           )}
         </div>
+        {usage !== undefined && <ProviderUsage usage={usage} />}
       </div>
       <div className="flex shrink-0 items-center transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-focus-within:opacity-100 [@media(hover:hover)]:group-hover:opacity-100">
         <IconButton label={`Edit ${providerName(provider)}`} onClick={onEdit}>
@@ -381,6 +402,19 @@ function ProviderRow({provider, onEdit, onDelete}: {provider: Provider; onEdit: 
         </IconButton>
       </div>
     </li>
+  );
+}
+
+// ProviderUsage is a provider's tokens and their cost in the last 24 hours
+// and 7 days, of the agents that report them, each scope once.
+function ProviderUsage({usage}: {usage: ProviderTotal | null}) {
+  return (
+    <p className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground tabular-nums" title={usage ? providerTitle(usage) : undefined} data-provider-usage>
+      <Activity className="size-3 shrink-0" aria-hidden="true" />
+      <span className="truncate">
+        {usage ? `24h ${providerPeriod(usage.day, usage.dayTokens)} · 7d ${providerPeriod(usage.week, usage.weekTokens)}` : "No calls in the last 7 days"}
+      </span>
+    </p>
   );
 }
 

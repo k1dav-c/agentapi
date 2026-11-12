@@ -2,6 +2,7 @@ package codexlog
 
 import (
 	"bytes"
+	"strings"
 	"time"
 
 	"github.com/coder/agentapi/lib/agentlog"
@@ -9,16 +10,35 @@ import (
 	"github.com/coder/agentapi/lib/transcript"
 )
 
+// ProviderPrefix starts the name of the model_providers entry AgentAPI
+// defines for one of its model providers: "agentapi-" and the provider's
+// ID.
+const ProviderPrefix = "agentapi-"
+
+// ProviderID is the AgentAPI model provider a Codex model provider name
+// stands for: the ID after ProviderPrefix, and "" for any other (the
+// agent's own: "openai", or one of the user's config).
+func ProviderID(name string) string {
+	id, ok := strings.CutPrefix(name, ProviderPrefix)
+	if !ok {
+		return ""
+	}
+	return id
+}
+
 // Calls reads Codex's token counts: the change of the thread's running
-// total since the last count is a call's usage. The model is the turn's.
+// total since the last count is a call's usage. The model is the turn's,
+// the provider the thread's: its session_meta's, then that of the thread
+// settings applied since.
 type Calls struct {
 	// calls are the calls read since Changed last returned, taken how
 	// many it returned.
-	calls []agentlog.Call
-	taken int
-	model string
-	last  *Totals
-	drift *agentlog.Drift
+	calls    []agentlog.Call
+	taken    int
+	model    string
+	provider string
+	last     *Totals
+	drift    *agentlog.Drift
 }
 
 // NewCalls returns a Calls that counts the records it can't read into
@@ -29,6 +49,7 @@ func NewCalls(drift *agentlog.Drift) *Calls {
 
 // Line reads a line of the log.
 func (c *Calls) Line(line []byte) {
+	c.providerLine(line)
 	switch {
 	case bytes.Contains(line, []byte(`"turn_context"`)):
 		var entry struct {
@@ -89,7 +110,39 @@ func (c *Calls) Line(line []byte) {
 			c.drift.Call(agentlog.NoModelOrUsage)
 		}
 		at, _ := time.Parse(time.RFC3339Nano, entry.Timestamp)
-		c.calls = append(c.calls, agentlog.Call{Time: at, Model: c.model, Tokens: used.Tokens(), Cost: -1})
+		c.calls = append(c.calls, agentlog.Call{Time: at, Model: c.model, Tokens: used.Tokens(), Cost: -1, Provider: c.provider})
+	}
+}
+
+// providerLine follows the thread's model provider: a session_meta line
+// names the one it started (or resumed) on, a thread_settings_applied
+// event the one a change of its settings put it on.
+func (c *Calls) providerLine(line []byte) {
+	switch {
+	case bytes.Contains(line, []byte(`"session_meta"`)) && bytes.Contains(line, []byte(`"model_provider"`)):
+		var entry struct {
+			Type    string `json:"type"`
+			Payload struct {
+				ModelProvider *string `json:"model_provider"`
+			} `json:"payload"`
+		}
+		if agentlog.Unmarshal(line, &entry) == nil && entry.Type == "session_meta" && entry.Payload.ModelProvider != nil {
+			c.provider = ProviderID(*entry.Payload.ModelProvider)
+		}
+	case bytes.Contains(line, []byte(`"thread_settings_applied"`)) && bytes.Contains(line, []byte(`"model_provider_id"`)):
+		var entry struct {
+			Type    string `json:"type"`
+			Payload struct {
+				Type     string `json:"type"`
+				Settings struct {
+					ModelProviderID *string `json:"model_provider_id"`
+				} `json:"thread_settings"`
+			} `json:"payload"`
+		}
+		if agentlog.Unmarshal(line, &entry) == nil && entry.Type == "event_msg" && entry.Payload.Type == "thread_settings_applied" &&
+			entry.Payload.Settings.ModelProviderID != nil {
+			c.provider = ProviderID(*entry.Payload.Settings.ModelProviderID)
+		}
 	}
 }
 

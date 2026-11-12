@@ -14,6 +14,7 @@ import (
 	"github.com/coder/agentapi/lib/agentlog"
 	"github.com/coder/agentapi/lib/agentlog/codexlog"
 	"github.com/coder/agentapi/lib/pricing"
+	"github.com/coder/agentapi/lib/providerlog"
 )
 
 // Store reads the sessions an agent had in a working directory from the
@@ -78,6 +79,11 @@ type Config struct {
 	// Logger reports logs whose format the Store doesn't know all of; nil
 	// is slog's default.
 	Logger *slog.Logger
+	// Providers is AgentAPI's provider ledger, which attributes the calls
+	// of Claude Code, whose log doesn't name their provider, to the
+	// provider each session last ran on before them; nil attributes them
+	// all to the agent's own.
+	Providers *providerlog.Ledger
 }
 
 // The bounds of what a Store keeps of the logs it read: past them, it

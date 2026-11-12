@@ -123,6 +123,23 @@ func (c *Conversation) startedOnLocked(adapter Adapter, run *ProviderRun) {
 	if run != nil {
 		c.provider = run.Provider.ID
 	}
+	c.providerSince = c.cfg.Clock.Now()
+}
+
+// reportProviderLocked tells Config.ProviderUsed the provider the session
+// runs on, for an agent that started and can switch providers, once its
+// session is known: not the session a fork copies, whose own the agent
+// reports later. The same report again is left out.
+func (c *Conversation) reportProviderLocked() {
+	if c.cfg.ProviderUsed == nil || !c.started || !c.providerCap || c.sessionRef == "" || c.forking {
+		return
+	}
+	use := ProviderUse{At: c.providerSince, Session: c.sessionRef, Provider: c.provider}
+	if use == c.providerReported {
+		return
+	}
+	c.providerReported = use
+	c.cfg.ProviderUsed(use)
 }
 
 // withProviderLocked is settings with the provider the agent runs on, for
@@ -237,11 +254,13 @@ func (c *Conversation) switchProvider(ctx context.Context, gen int, runner Provi
 	}
 	c.leaveOwnLocked(change.Provider)
 	c.provider = change.Provider
+	c.providerSince = c.cfg.Clock.Now()
 	chosen := c.chosen
 	chosen.Provider = change.Provider
 	chosen.Model = settings.Model
 	c.chosen = chosen
 	c.setSettingsLocked(settings)
+	c.reportProviderLocked()
 	c.mu.Unlock()
 	// The rest applies on the new provider.
 	rest := change

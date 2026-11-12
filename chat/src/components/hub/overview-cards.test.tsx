@@ -3,7 +3,7 @@ import {renderToStaticMarkup} from "react-dom/server";
 import type {HubInstance, InstanceUpdate} from "@/lib/hub";
 import {hubInstance, summary, update} from "@/lib/hub-fixtures";
 import {FixedHubClock} from "./clock";
-import {SpendCard, TokensCard, VersionsCard, WorkCard} from "./overview-cards";
+import {ProvidersCard, SpendCard, TokensCard, VersionsCard, WorkCard} from "./overview-cards";
 
 const running = (id: string, version: string, hostname: string, overrides: Partial<HubInstance> = {}): HubInstance =>
   hubInstance(id, {server_id: "s", hostname, agentapi_version: version, ...overrides});
@@ -215,5 +215,51 @@ describe("SpendCard", () => {
     expect(shown).toContain("Last 24 hours $12 Last 7 days $115");
     expect(shown).toContain("Spent the most this week 24 hours 7 days home dev-2 $5.00 $50 home dev-1 $4.00 $40 home dev-1 $2.00 $20 dev-3 $0.50 $5.00");
     expect(shown).toContain("By machine 24 hours 7 days dev-1 $6.00 $60 dev-2 $5.00 $50 dev-3 $0.50 $5.00");
+  });
+});
+
+describe("ProvidersCard", () => {
+  // A provider's figures: day dollars and n tokens today, seven times both
+  // this week.
+  const onProvider = (provider: string, day: number, n: number) => ({
+    provider,
+    day_usd: day,
+    week_usd: 7 * day,
+    day_tokens: {input: n, output: 0, cache_write: 0, cache_read: 0, total: n},
+    week_tokens: {input: 7 * n, output: 0, cache_write: 0, cache_read: 0, total: 7 * n},
+  });
+  const reporting = (id: string, scope: string, providers: ReturnType<typeof onProvider>[], updated_at = "2026-11-03T11:00:00Z"): HubInstance =>
+    running(id, "4.5.0", "dev-1", {
+      summary: summary({
+        instance: {id, server_id: "s", agent_type: "claude", transport: "native", agentapi_version: "4.5.0"},
+        spend: {day_usd: 0, week_usd: 0, scope, updated_at, providers},
+      }),
+    });
+  const card = (instances: HubInstance[], names?: ReadonlyMap<string, string>) =>
+    text(renderToStaticMarkup(<ProvidersCard instances={instances} names={names} />));
+
+  test("each provider's totals, each scope once, an unpriced one by its tokens", () => {
+    const shown = card(
+      [
+        reporting("a", "s1", [onProvider("default", 2, 200_000), onProvider("gateway", 0, 50_000)]),
+        // The same sessions as a, figured a minute earlier: not counted.
+        reporting("b", "s1", [onProvider("default", 99, 9_000_000)], "2026-11-03T10:59:00Z"),
+        reporting("c", "s2", [onProvider("vllm", 3, 1000), onProvider("gateway", 0, 10_000)]),
+        running("d", "4.4.0", "dev-2"),
+      ],
+      new Map([["gateway", "Team gateway"]]),
+    );
+    expect(shown).toContain("Each provider's calls, from the agents that report them");
+    // The figures: the tokens of the providers other than the agents' own.
+    expect(shown).toContain("Other providers, 24 hours 61k Other providers, 7 days 427k");
+    expect(shown).toContain("3 of 4 agents report it");
+    expect(shown).toContain(
+      "By provider 24 hours 7 days vllm $3.00 1k tokens $21 7k tokens Own provider $2.00 200k tokens $14 1.4M tokens Team gateway no price 60k tokens no price 420k tokens",
+    );
+  });
+
+  test("nothing while every call went to the agents' own provider", () => {
+    expect(card([reporting("a", "s1", [onProvider("default", 2, 200_000)])])).toBe("");
+    expect(card([running("d", "4.4.0", "dev-2")])).toBe("");
   });
 });

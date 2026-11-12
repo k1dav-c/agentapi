@@ -16,6 +16,16 @@
 
 ### Features
 
+- Usage by model provider: each model call counts toward the provider it went to, `default` for the
+  agent's own. `GET /cost` gives each call its `provider`, `GET /sessions` and `GET /cost` split a
+  cost into `providers` (calls, tokens, cost), and the summary's `spend.providers` has each
+  provider's last 24 hours and 7 days. Codex's session log names the provider; for Claude Code,
+  AgentAPI records which provider each session ran on from when in
+  `~/.agentapi/provider-ledger.jsonl` (entries kept 90 days), so its calls before AgentAPI kept the
+  ledger count as the agent's own. The chat's Session tab lists what the sessions spent on each
+  provider once the agent used one besides its own, the hub's overview has a **Providers** card
+  (each provider's 24 hours and 7 days, each scope once), and the hub's Providers settings show each
+  provider's use; calls to models without a known price show their tokens and "no price".
 - Claude Code and Codex switch to another model provider while they run, and back: an endpoint that
   speaks the Anthropic Messages API or the OpenAI Responses API, such as a LiteLLM gateway. Define
   providers under `providers:` in `~/.agentapi/config.yaml` (ID, base URL, key, and optionally the

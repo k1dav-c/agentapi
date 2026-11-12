@@ -27,6 +27,7 @@ import (
 	"github.com/coder/agentapi/lib/native/demo"
 	"github.com/coder/agentapi/lib/pricing"
 	"github.com/coder/agentapi/lib/provider"
+	"github.com/coder/agentapi/lib/providerlog"
 	"github.com/coder/agentapi/lib/statedb"
 )
 
@@ -314,7 +315,12 @@ func serverConfig(opts serverOptions, agent *runningAgent, stateDB *statedb.DB, 
 			Prices:      prices,
 		}
 		if opts.agentType == instanceapi.AgentTypeClaude || opts.agentType == instanceapi.AgentTypeCodex {
-			config.Native.Providers = provider.NewSource(userConfigPath(viper.GetViper()), nil)
+			configPath := userConfigPath(viper.GetViper())
+			config.Native.Providers = provider.NewSource(configPath, nil)
+			if configPath != "" {
+				// Beside the config file, as the hub's providers are.
+				config.Native.ProviderLedger = providerlog.Open(filepath.Join(filepath.Dir(configPath), providerlog.FileName), providerlog.Options{})
+			}
 		}
 		if opts.agentType == instanceapi.AgentTypePi {
 			config.Native.PiSessionDir = piSessionDir(opts.agentArgs)

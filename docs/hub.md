@@ -226,8 +226,8 @@ keeping the agents picked ([below](#the-list)). Below, a card per
 agent that needs you names what it waits for (the approval's command, the question, the login, the
 usage limit) and since when, with **Answer** or **Open**. Running agents show their prompt and how
 long they've run; finished ones you haven't seen show their title. Between the tiles and these cards
-are the [Spend](#spend), [Tokens](#token-usage), [Work time](#work-time) and [Activity](#activity)
-cards; at the bottom, the [Versions](#versions) card counts the AgentAPI versions the agents run.
+are the [Spend](#spend), [Tokens](#token-usage), [Providers](#provider-usage), [Work time](#work-time)
+and [Activity](#activity) cards; at the bottom, the [Versions](#versions) card counts the AgentAPI versions the agents run.
 The chevron before a card's title folds the card to its title and its 7 days' figure (Activity's:
 the year's); the browser remembers which cards you folded.
 
@@ -272,12 +272,30 @@ its cost does: a fork's copy of an earlier session's call counts in that session
 without a known price count their tokens and no cost. What Claude Code counted but didn't log call
 by call (compacting the context) counts with the tokens its own count gives it.
 
+`spend.providers` splits the same calls by [model provider](../README.md#model-providers): for each
+provider with calls in the last 7 days, its `provider` (`default` for the agent's own), `day_usd`,
+`week_usd`, `day_tokens` and `week_tokens`, the most expensive this week first. A Codex call counts
+toward the provider its log names; a Claude Code call toward the provider AgentAPI last recorded
+its session on (`~/.agentapi/provider-ledger.jsonl`). Earlier releases don't send it.
+
 Below Spend, the overview's **Tokens** card has the 24 hours and 7 days of every agent that reports
 them, by kind, the five that used the most this week, each group's when there are groups, and each
 machine's when there are several. They add up as the spend does: each scope once, connected agents only. AgentAPI 2.4.0 and older send
 their spend without tokens; the card says how many agents report them. Counts are short (`950`,
 `12k`, `3.4M`, `1.2B`); hover a total for the exact number. Rows have no room for another figure:
 hover a row's spend for its last 24 hours of tokens.
+
+### Provider usage
+
+Below Tokens, once some agent has used a [model provider](#model-providers) besides its own in the
+last 7 days, the overview's **Providers** card has each provider's 24 hours and 7 days, from
+`spend.providers`: the agents' own as **Own provider**, the others by the name the hub keeps for
+them, else by ID (one defined only in a machine's config file). Each figure is the cost over the
+tokens; a gateway's models often have no known price, so a provider whose calls cost nothing but
+used tokens says **no price** rather than `$0`. The most spent this week comes first, then the most
+tokens. The card's totals are the tokens that went to providers other than the agents' own; it
+counts each scope once, connected agents only, and says how many agents report it. AgentAPIs
+before this release, and those without calls in the last 7 days, don't.
 
 ### Work time
 
@@ -291,7 +309,7 @@ drops ends the count at the last event it sent; a hub that stops ends it then. T
 again from its next summary.
 
 A row shows its agent's last 24 hours after the spend, with a timer (`2.3h`), unless it shows a
-usage limit; hover for the 7 days too. Below Tokens, the overview's **Work time** card has the 24
+usage limit; hover for the 7 days too. Below Tokens and Providers, the overview's **Work time** card has the 24
 hours and 7 days of all the agents, the five that worked the most this week, each group's when there
 are groups, and each machine's when there are several. Figures are rounded down: minutes under an hour (`45m`), tenths of an hour under
 ten (`2.3h`), then hours (`31h`). Unlike spend, every agent counts, stopped ones too: the time is
@@ -651,6 +669,10 @@ HTTP. A separate proof binds that answer to the request's nonce, so an observer 
 provider list. New AgentAPIs refuse an unbound answer; upgrade the hub before the machines reporting
 to it. A change reaches the chats within a minute. On a machine, a provider of its own config file
 wins over the hub's with the same ID.
+
+Once some agent reports its providers, each provider in the tab has a line of what the agents used
+it for: its tokens and their cost (or **no price**) in the last 24 hours and 7 days, counted as the
+[Providers card](#provider-usage) counts them, or **No calls in the last 7 days**.
 
 Every machine that joined the hub gets the keys: anyone with the hub's secret can. Give the hub only
 keys you would give each of those machines, and each agent that runs on the provider.

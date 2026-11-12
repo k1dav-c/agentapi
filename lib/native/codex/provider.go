@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"slices"
 
+	"github.com/coder/agentapi/lib/agentlog/codexlog"
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/provider"
@@ -18,9 +19,10 @@ var _ native.ProviderRunner = (*Adapter)(nil)
 const providerKeyEnv = "AGENTAPI_PROVIDER_API_KEY"
 
 // providerName is the model_providers entry of p: AgentAPI's own, so it
-// doesn't replace one of the user's config.
+// doesn't replace one of the user's config. The session log records it,
+// which attributes the calls to p (codexlog.ProviderID).
 func providerName(p provider.Provider) string {
-	return "agentapi-" + p.ID
+	return codexlog.ProviderPrefix + p.ID
 }
 
 // providerArgs are the app-server flags that define p and run on it,

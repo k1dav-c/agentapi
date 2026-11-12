@@ -99,6 +99,21 @@ type Config struct {
 	// Providers are the model providers an agent that can run on one (a
 	// ProviderRunner) can switch to; nil offers none.
 	Providers *provider.Source
+	// ProviderUsed, if set, is told the provider the session of an agent
+	// that can switch providers runs on, and from when: once the agent
+	// started and its session is known (not the one a fork copies), when
+	// the session becomes known after that, and after a switch in place.
+	// It is called with the conversation's lock held, and must not block
+	// or call back into the conversation.
+	ProviderUsed func(ProviderUse)
+}
+
+// ProviderUse says that from At on, the agent's session Session runs on
+// Provider (provider.Default for the agent's own).
+type ProviderUse struct {
+	At       time.Time
+	Session  string
+	Provider string
 }
 
 const (
@@ -180,6 +195,10 @@ type Conversation struct {
 	// for its own).
 	providerCap bool
 	provider    string
+	// providerSince is when the agent started on provider, or switched
+	// to it; providerReported what ProviderUsed was last told.
+	providerSince    time.Time
+	providerReported ProviderUse
 	// providerUnsafe blocks turns after a failed switch left the adapter's
 	// provider/model unknown, until a new agent starts on a known configuration.
 	providerUnsafe bool

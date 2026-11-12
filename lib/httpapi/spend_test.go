@@ -20,14 +20,14 @@ func TestSpendOf(t *testing.T) {
 	hour := func(ago time.Duration, usd float64, tokens pricing.Tokens) sessions.HourCost {
 		return sessions.HourCost{Hour: now.Add(-ago).Truncate(time.Hour), USD: usd, Tokens: tokens}
 	}
-	spend := spendOf([]sessions.HourCost{
+	spend := spendOf(sessions.SessionCost{Hourly: []sessions.HourCost{
 		hour(8*24*time.Hour, 100, pricing.Tokens{Input: 1e6}),                // more than a week ago
 		hour(3*24*time.Hour, 20.004, pricing.Tokens{Input: 100, Output: 50}), // this week
 		hour(25*time.Hour, 5, pricing.Tokens{CacheRead: 9000}),               // ends 24h30m ago: this week only
 		hour(23*time.Hour+59*time.Minute, 1.5, pricing.Tokens{CacheWrite: 300, CacheWrite1h: 200}),
 		hour(0, 0.25, pricing.Tokens{Input: 7, CacheRead: 1000, Output: 3}), // the hour under way
 		hour(time.Hour, 0, pricing.Tokens{Output: 40}),                      // a model without a price
-	}, now)
+	}}, now)
 	assert.Equal(t, instanceapi.SummarySpend{
 		DayUSD: 1.75, WeekUSD: 26.75,
 		DayTokens:  &instanceapi.SummaryTokens{Input: 7, Output: 43, CacheWrite: 500, CacheRead: 1000, Total: 1550},
@@ -41,7 +41,55 @@ func TestSpendOf(t *testing.T) {
 		},
 	}, spend)
 	zero := &instanceapi.SummaryTokens{}
-	assert.Equal(t, instanceapi.SummarySpend{DayTokens: zero, WeekTokens: zero}, spendOf(nil, now), "none: zero, not missing")
+	assert.Equal(t, instanceapi.SummarySpend{DayTokens: zero, WeekTokens: zero}, spendOf(sessions.SessionCost{}, now), "none: zero, not missing")
+}
+
+// The spend by provider adds up each provider's hours as the totals do,
+// of the providers with calls in the week: the most expensive first.
+func TestSpendOfProviders(t *testing.T) {
+	now := time.Date(2026, 10, 27, 12, 30, 0, 0, time.UTC)
+	call := func(ago time.Duration, usd float64, tokens pricing.Tokens, provider string) sessions.ModelCall {
+		return sessions.ModelCall{Time: now.Add(-ago), Model: "m", Tokens: tokens, USD: usd, Priced: true, Provider: provider}
+	}
+	cost := sessions.CostOf([]sessions.ModelCall{
+		call(8*24*time.Hour, 100, pricing.Tokens{Input: 1e6}, "old"), // more than a week ago only
+		call(3*24*time.Hour, 20.004, pricing.Tokens{Input: 100, Output: 50}, "gw"),
+		call(time.Hour, 1.5, pricing.Tokens{CacheWrite: 300, CacheWrite1h: 200}, "gw"),
+		call(0, 0.25, pricing.Tokens{Input: 7, Output: 3}, ""),
+		call(2*time.Hour, 0.004, pricing.Tokens{Output: 40}, "local"),
+	})
+	spend := spendOf(cost, now)
+	assert.InDelta(t, 1.75, spend.DayUSD, 1e-9)
+	assert.InDelta(t, 21.76, spend.WeekUSD, 1e-9, "rounded once: not the sum of the providers' rounded amounts")
+	assert.Equal(t, []instanceapi.SummaryProviderSpend{
+		{
+			Provider: "gw", DayUSD: 1.5, WeekUSD: 21.5,
+			DayTokens:  instanceapi.SummaryTokens{CacheWrite: 500, Total: 500},
+			WeekTokens: instanceapi.SummaryTokens{Input: 100, Output: 50, CacheWrite: 500, Total: 650},
+		},
+		{
+			Provider: "default", DayUSD: 0.25, WeekUSD: 0.25,
+			DayTokens:  instanceapi.SummaryTokens{Input: 7, Output: 3, Total: 10},
+			WeekTokens: instanceapi.SummaryTokens{Input: 7, Output: 3, Total: 10},
+		},
+		{
+			// Less than a cent: 0, after the provider that cost more.
+			Provider:   "local",
+			DayTokens:  instanceapi.SummaryTokens{Output: 40, Total: 40},
+			WeekTokens: instanceapi.SummaryTokens{Output: 40, Total: 40},
+		},
+	}, spend.Providers)
+
+	// A change of the providers alone is a change of the spend.
+	at := now.Add(time.Minute)
+	first := nextSpend(instanceapi.SummarySpend{}, spend, "s1", now)
+	same := nextSpend(first, spendOf(cost, now), "s1", at)
+	assert.Equal(t, first.UpdatedAt, same.UpdatedAt)
+	moved := spend.Clone()
+	moved.Providers[0].Provider = "gw2"
+	assert.Equal(t, "gw", spend.Providers[0].Provider, "a copy")
+	assert.Equal(t, at.Truncate(time.Second), nextSpend(first, moved, "s1", at).UpdatedAt)
+	assert.False(t, first.Equal(nextSpend(first, moved, "s1", at)))
 }
 
 // The summary's spend as JSON: the tokens of each window next to its cost.
@@ -63,11 +111,27 @@ func TestSpendJSON(t *testing.T) {
 		"week_tokens": map[string]any{"input": 10.0, "output": 20.0, "cache_write": 30.0, "cache_read": 40.0, "total": 100.0},
 	}, body.Spend)
 
+	// With providers: each one's amounts and tokens.
+	spend.Providers = []instanceapi.SummaryProviderSpend{{
+		Provider: "default", DayUSD: 1.5, WeekUSD: 9,
+		DayTokens: instanceapi.SummaryTokens{Input: 1, Total: 1}, WeekTokens: instanceapi.SummaryTokens{Input: 10, Total: 10},
+	}}
+	data, err = json.Marshal(instanceapi.SummaryBody{Spend: &spend})
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(data, &body))
+	tokens := func(n float64) map[string]any {
+		return map[string]any{"input": n, "output": 0.0, "cache_write": 0.0, "cache_read": 0.0, "total": n}
+	}
+	assert.Equal(t, []any{map[string]any{
+		"provider": "default", "day_usd": 1.5, "week_usd": 9.0, "day_tokens": tokens(1), "week_tokens": tokens(10),
+	}}, body.Spend["providers"])
+
 	// An earlier release's spend has no tokens.
 	old, err := json.Marshal(instanceapi.SummarySpend{DayUSD: 1})
 	require.NoError(t, err)
 	assert.NotContains(t, string(old), "tokens")
 	assert.NotContains(t, string(old), "hours")
+	assert.NotContains(t, string(old), "providers")
 }
 
 // The summary carries the latest spend; the same spend again changes

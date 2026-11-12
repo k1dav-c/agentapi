@@ -4,6 +4,7 @@ import {useRef, useState} from "react";
 import * as TabsPrimitive from "@radix-ui/react-tabs";
 import {Cloud, Github, Star} from "lucide-react";
 import {Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle} from "@/components/ui/dialog";
+import type {HubInstance} from "@/lib/hub";
 import type {Favorite} from "@/lib/hub-favorites";
 import {FavoritesSettings} from "./favorites-settings";
 import {GitHubSettings} from "./github-settings";
@@ -26,7 +27,8 @@ type Editor = {open: boolean; cancel: () => void};
 // browser signed in to it shares: the favorites, the model providers the
 // AgentAPIs that report to it get, and the hub's GitHub App. section is the
 // one it opens at; null is closed. activeJobs is how many jobs at work push
-// with the app's tokens.
+// with the app's tokens; instances, the agents whose use of each provider
+// the Providers section shows.
 export function HubSettings({
   root,
   section,
@@ -34,6 +36,7 @@ export function HubSettings({
   favorites,
   onFavoritesSaved,
   activeJobs,
+  instances,
 }: {
   root: string;
   section: SettingsSection | null;
@@ -41,6 +44,7 @@ export function HubSettings({
   favorites: Favorite[] | undefined;
   onFavoritesSaved: (favorites: Favorite[]) => void;
   activeJobs?: number;
+  instances?: HubInstance[];
 }) {
   // The favorites' and the providers' editors: Escape closes the one of the
   // section shown.
@@ -119,6 +123,7 @@ export function HubSettings({
             {seen.has("providers") && (
               <ProvidersSettings
                 root={root}
+                instances={instances}
                 editor={editors.providers}
                 headingRef={(heading) => {
                   headings.current.providers = heading;

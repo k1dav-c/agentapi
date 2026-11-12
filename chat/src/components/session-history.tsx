@@ -6,12 +6,14 @@ import {toast} from "sonner";
 import {useChatActions, useChatSelector} from "./chat-provider";
 import {Button} from "./ui/button";
 import type {SessionCost, SessionSummary} from "@/lib/chat-api";
-import {costDetails, periodTotals} from "@/lib/cost";
-import {formatUSD} from "@/lib/format";
+import {costDetails, inputTokens, periodTotals} from "@/lib/cost";
+import {formatTokens, formatUSD} from "@/lib/format";
+import {providerAmount, providerUsageLabel, usesOtherProviders} from "@/lib/provider-usage";
 import {agentDisplayName} from "@/lib/agents";
 import {getErrorMessage} from "@/lib/error-utils";
 import {formatMessageTime} from "@/lib/format-time";
 import {useLoaded} from "@/lib/use-loaded";
+import {cn} from "@/lib/utils";
 
 // An action on a session that asks for a second click: it replaces the
 // conversation.
@@ -156,8 +158,9 @@ export function SessionHistory({active, onOpened}: {active: boolean; onOpened: (
 }
 
 // What the sessions in the directory spent over time, subagents included,
-// in the viewer's days.
-function SpendCard({total, sessions}: {total: SessionCost; sessions: number}) {
+// in the viewer's days, and on each model provider once the agent used one
+// besides its own.
+export function SpendCard({total, sessions}: {total: SessionCost; sessions: number}) {
   const periods = periodTotals(total.hourly);
   const cells: [string, number][] = [
     ["Today", periods.today],
@@ -175,12 +178,38 @@ function SpendCard({total, sessions}: {total: SessionCost; sessions: number}) {
           </div>
         ))}
       </div>
+      {usesOtherProviders(total.providers) && <ProviderList providers={total.providers} />}
       <p className="mt-2 text-[11px] text-muted-foreground" title={costDetails(total, unpriced(total))}>
         API-equivalent cost of {sessions} {sessions === 1 ? "session" : "sessions"} and their subagents at list prices; a
         subscription doesn&apos;t charge it.
         {unpriced(total) && " Models without a known price count tokens only."}
       </p>
     </section>
+  );
+}
+
+// ProviderList is what the sessions spent on each model provider, the most
+// expensive first: the calls, their tokens and their cost, or that their
+// models have no known price. Providers go by their IDs: the names are the
+// settings' options, which this list doesn't read.
+function ProviderList({providers}: {providers: SessionCost["providers"]}) {
+  return (
+    <div className="mt-3 border-t pt-2" data-provider-spend>
+      <p className="text-[11px] text-muted-foreground">By provider</p>
+      <ul className="mt-1 space-y-0.5">
+        {providers.map((cost) => (
+          <li key={cost.provider} className="flex items-baseline gap-2 text-xs" title={costDetails(cost, !cost.priced)} data-provider={cost.provider}>
+            <span className="min-w-0 flex-1 truncate font-medium">{providerUsageLabel(cost.provider)}</span>
+            <span className="shrink-0 text-muted-foreground tabular-nums">
+              {cost.calls} {cost.calls === 1 ? "call" : "calls"} · {formatTokens(inputTokens(cost.tokens) + cost.tokens.output)} tokens
+            </span>
+            <span className={cn("w-16 shrink-0 text-right tabular-nums", cost.priced || cost.usd > 0 ? "font-semibold" : "text-muted-foreground")}>
+              {providerAmount(cost.usd, cost.priced)}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
