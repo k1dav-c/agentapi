@@ -124,3 +124,4 @@ value, update every switch and map literal over that type to pass lint.
 - The chat UI build output goes to `lib/httpmw/chat/` with a base-path placeholder that gets replaced at runtime
 - AgentAPI-specific environment variables use the `AGENTAPI_` prefix (e.g., `AGENTAPI_ALLOWED_HOSTS`)
 - Server defaults: port 3284, chat at `/chat`, docs at `/docs`
+- User docs: `README.md` is the overview (features, quickstart, agents, an index of the guides); the guides are in `docs/`: `chat-ui.md`, `agents.md` (the native transport and each agent), `providers.md`, `api.md` (the conversation API, integrations and the endpoint reference), `security.md`, `cli.md`, `hub.md` and `architecture.md`. Each has a `.zh-TW.md` twin that mirrors it section by section: change both together, and keep headings, which other pages link to by anchor

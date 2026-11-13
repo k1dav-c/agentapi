@@ -133,6 +133,7 @@ The `exhaustive` linter checks every switch and map over `AgentType`.
 
 ## Project structure
 
+- User docs: `README.md` is the overview (features, quickstart, agents, an index of the guides); the guides are in `docs/`: `chat-ui.md`, `agents.md` (the native transport and each agent), `providers.md`, `api.md` (the conversation API, integrations and the endpoint reference), `security.md`, `cli.md`, `hub.md` and `architecture.md`. Each has a `.zh-TW.md` twin that mirrors it section by section: change both together, and keep headings, which other pages link to by anchor
 - Chat UI in `chat/` directory (Next.js + TypeScript)
 - OpenAPI schema auto-generated to `openapi.json`
 - Release versions determined by `next-version.sh`; builds stamp the binary version, and `version.sh` synchronizes generated metadata
