@@ -29,7 +29,7 @@ AgentAPI 可以用來：
 整合上游變更前，應先驗證 native transports、聊天介面與 hub；上游與此 fork 的版本號分開管理。
 
 此 fork 以上游 v0.12.2 為基礎。從 3.0 起只透過 Claude Code、Codex 和 Pi 自己的協定
-（[native transport](docs/architecture.zh-TW.md#native-transport)）驅動這三個 agent；給其他 agent 用的終端機模擬方式（PTY transport）到 v2.5.1
+（[native transport](docs/agents.zh-TW.md)）驅動這三個 agent；給其他 agent 用的終端機模擬方式（PTY transport）到 v2.5.1
 為止（見 [Agent](#agent)）。工作階段管理與聊天功能可用來處理長時間執行的任務；
 [webhook](docs/api.zh-TW.md#webhook) 會把任務狀態回報給中控平台。[CHANGELOG.md](CHANGELOG.md) 列出變更，
 [docs/architecture.zh-TW.md](docs/architecture.zh-TW.md) 說明架構，
@@ -51,14 +51,14 @@ AgentAPI 可以用來：
 
 **透過 HTTP 驅動 coding agent**
 
-- 透過 Claude Code、Codex 和 Pi 自己的協定（[native transport](docs/architecture.zh-TW.md#native-transport)）驅動
+- 透過 Claude Code、Codex 和 Pi 自己的協定（[native transport](docs/agents.zh-TW.md)）驅動
   這三個 agent。
 - 從 `GET /rich-messages` 和 `GET /timeline` 讀取結構化的活動：思考內容、工具呼叫與結果、
   token 用量。
 - agent 工作中時送出的訊息會在可以編輯、重新排序的[佇列](docs/api.zh-TW.md#訊息佇列)中等待；也可以把訊息 [steer 進執行中的回合或中斷它](docs/agents.zh-TW.md#steerinterrupt-與佇列)。
 - 你的每則訊息和 agent 處理它的回合都是伺服器追蹤的[任務](docs/api.zh-TW.md#任務)：執行中、已完成、失敗，
   或因用量限制而停止。
-- 透過 [server-sent events](docs/api.zh-TW.md#事件與增量同步) 即時追蹤一切，有 heartbeat，重新連線後只重播
+- 透過 [server-sent events](docs/api.zh-TW.md#事件與增量同步) 即時追蹤一切，有心跳，重新連線後只重播
   有變動的部分。
 - 跑了好幾個月的對話也不會越來越重：用戶端先拿到最近的任務，較早的再一頁一頁讀；有
   `--state-db` 時，伺服器只把最近的任務放在記憶體（[長對話](docs/api.zh-TW.md#長對話)）。
@@ -73,11 +73,11 @@ AgentAPI 可以用來：
   gateway，也能換回來，對話照常接續。供應商可以在每台主機各自設定，也可以在 hub 設定一次。
 - 查看 [context 與用量限制](docs/agents.zh-TW.md#context-與用量限制)用了多少，並[壓縮](docs/agents.zh-TW.md#斜線指令與壓縮) context；
   Claude Code 的 prompt cache 過期後，聊天介面會建議先壓縮。
-- 回合因為[達到用量限制](docs/agents.zh-TW.md#達到用量限制時)而停下時，佇列會等到限制重置，也可以在重置後自動
-  繼續。
+- 回合因為[達到用量限制](docs/agents.zh-TW.md#達到用量限制時)而停下時，佇列會等到限制重置，回合也可以在重置後
+  自動繼續。
 - 回合因[暫時性的 API 錯誤](docs/agents.zh-TW.md#暫時性的-api-錯誤)失敗時（例如 gateway 回 502、API 過載），
   AgentAPI 會在 30 秒、1 分鐘、2 分鐘後再試，之後每 5 分鐘再試，共 15 次，之後才輪到佇列。
-- 缺少或過期的[登入](docs/agents.zh-TW.md#登入)會附上要執行的指令回報，登入之後 agent 會自己啟動。
+- AgentAPI 會回報缺少或過期的[登入](docs/agents.zh-TW.md#登入)並附上要執行的指令，登入之後會自己啟動 agent。
 - agent 工作目錄中共用的[終端機](docs/agents.zh-TW.md#終端機)，方便登入和執行簡單的指令。
 - [持久保存的工作階段](docs/agents.zh-TW.md#持久保存的工作階段)：使用 `--state-db` 時，對話在 AgentAPI 重新啟動後
   會保留，agent 也會接續它自己的工作階段。
@@ -143,7 +143,7 @@ AgentAPI 可以用來：
 
    > 如果出現 `claude` 不在 `PATH` 中的錯誤，但你在 shell 裡可以執行它，請用 `which claude` 取得完整路徑，改用完整路徑執行。
 
-   這會透過 Claude Code 自己的協定驅動它，也就是 [native transport](docs/architecture.zh-TW.md#native-transport)：
+   這會透過 Claude Code 自己的協定驅動它，也就是 [native transport](docs/agents.zh-TW.md)：
    核准會以結構化的請求送來、設定可以切換、聊天介面裡有終端機。
 
 1. 傳送訊息給 agent：
@@ -165,7 +165,7 @@ AgentAPI 可以用來：
 ## Agent
 
 從 3.0 起，AgentAPI 透過 Claude Code、Codex 和 Pi 自己的協定驅動它們，也就是
-[native transport](docs/architecture.zh-TW.md#native-transport)：
+[native transport](docs/agents.zh-TW.md)：
 
 | Agent | 類型 | 協定 |
 | --- | --- | --- |

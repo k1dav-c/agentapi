@@ -22,7 +22,7 @@ version gets `/v1` for Codex. AgentAPI reads the file again when it changes. Kee
 you only (`chmod 600`): it holds the keys, and AgentAPI warns when others can read it.
 
 A hub keeps providers for every machine that reports to it (see
-[Running a hub](api.md#running-a-hub)). On a machine, a provider of its config file wins over the hub's
+[Running a hub](api.md#running-a-hub)). On a machine, a provider in its config file wins over the hub's
 with the same `id`.
 
 `GET /settings` lists the providers under `options.providers`, with their models, and the setting
@@ -65,9 +65,10 @@ again in the background. `GET /settings` waits 3 seconds at most for a provider 
 answer, and doesn't ask it again for a minute.
 
 An agent on a provider can read that provider's key: it runs as your user, with the key in its
-environment. Give a provider only a key you would give the agent. Model calls on a provider have no
-known price, so they add tokens but no cost (`--prices` adds prices). `GET /sessions`, `GET /cost`
-and the summary's `spend` count each provider's calls, tokens and cost apart (`providers`,
-`default` for the agent's own); for Claude Code, whose log doesn't say which endpoint a call went
-to, AgentAPI records which provider each session ran on from when in
-`~/.agentapi/provider-ledger.jsonl`.
+environment. Give a provider only a key you would give the agent.
+
+Model calls on a provider have no known price, so they add tokens but no cost (`--prices` adds
+prices). `GET /sessions`, `GET /cost` and the summary's `spend` count each provider's calls, tokens
+and cost apart (`providers`, `default` for the agent's own). Claude Code's log doesn't say which
+endpoint a call went to, so AgentAPI records in `~/.agentapi/provider-ledger.jsonl` which provider
+each session ran on, and from when.

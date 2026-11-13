@@ -2,6 +2,9 @@
 
 English | [繁體中文](agents.zh-TW.md)
 
+This guide covers how AgentAPI runs Claude Code, Codex and Pi, from logging in to each agent's
+own details; [model providers](providers.md) have a guide of their own.
+
 Native transport uses the agent's structured protocol to receive replies, tool
 calls, and usage, and to handle approvals, questions, and plans in the chat UI.
 
@@ -157,7 +160,7 @@ Pi extensions) and plan approvals (Claude's `ExitPlanMode`) arrive as requests:
 - Each request has a `status` (`pending`, `resolved`, `withdrawn`, `expired`)
   and a `response_capability`: `live` (the agent is waiting), `message` (the
   agent stopped waiting; answer with a new message) or `not_resumable` (it
-  can't be answered any more: the agent that asked exited or was restarted,
+  can't be answered anymore: the agent that asked exited or was restarted,
   or stopped waiting for an approval or plan). When the agent stops waiting
   for a request (it withdraws it, or the turn ends), questions become
   `message` and approvals and plans `not_resumable`. An answer already on its
@@ -339,7 +342,7 @@ A usage limit (see [Usage limits](#usage-limits)) and a missing login come first
 when known, when the turn failed, which retry comes next (`attempt` of `attempts`) and `retry_at`.
 The failure shows as a warning ("… AgentAPI tries again in 30s (1 of 15)."), and the queued messages
 wait. At `retry_at` AgentAPI sends "Continue from where you left off.", so the agent goes on without
-your message twice. A retry that fails the same way waits the next delay; after the last, the
+getting your message twice. A retry that fails the same way waits the next delay; after the last, the
 failure is an error and the queue goes on. A turn that works, or a message you send yourself,
 starts the count again.
 
@@ -626,7 +629,7 @@ Command line and environment:
   Everything else (`--model`, `--allowedTools`, `--mcp-config`,
   `--append-system-prompt`, ...) is passed through.
 - Besides removing a parent agent session's variables (see
-  [Native transport](agents.md)), AgentAPI sets
+  [Child process environment](architecture.md#child-process-environment)), AgentAPI sets
   `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1` and
   `CLAUDE_CODE_ENTRYPOINT=sdk-cli`.
 
@@ -749,7 +752,7 @@ AgentAPI runs Pi in its RPC mode (`pi --mode rpc`, JSON over stdin and stdout).
   only from the `--state-db` file.
 - **Shutdown.** Stopping AgentAPI (or a restart) aborts a running turn first,
   so the session log doesn't end in a tool call without result, then stops Pi
-  as described in [Native transport](agents.md).
+  as described at the [start of this guide](#agents-and-the-native-transport).
 - **Settings.** Pi has no permission modes. Its model (`set_model`, from the
   models it has a provider for) and thinking level (`set_thinking_level`,
   with the levels each model supports) can change; Pi fits the level to a new

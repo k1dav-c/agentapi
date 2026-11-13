@@ -237,7 +237,7 @@ an error.
   settings, limits, the terminal, sessions and their costs, and what Claude Code, Codex and Pi each
   do.
 - [Model providers](docs/providers.md): Claude Code and Codex on another endpoint, such as a
-  LiteLLM gateway, and what each provider was used for.
+  LiteLLM gateway, and each provider's usage.
 - [HTTP API](docs/api.md): the conversation API, watching many instances, webhooks, the human-reply
   API and the endpoint reference.
 - [Security](docs/security.md): the API token, the bind address, allowed hosts and origins, and what

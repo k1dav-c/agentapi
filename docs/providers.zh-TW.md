@@ -58,7 +58,9 @@ hub 的供應商會存在設定檔旁邊（`hub-providers.json`，以 hub 的 se
 `GET /settings` 最多等 3 秒，一分鐘內也不會再問。
 
 用供應商的 agent 讀得到該供應商的金鑰：agent 以你的使用者身分執行，金鑰就在它的環境變數裡。
-只把你願意交給 agent 的金鑰設給供應商。供應商上的模型呼叫沒有已知的價格，只計 token、不計花費
+只把你願意交給 agent 的金鑰設給供應商。
+
+供應商上的模型呼叫沒有已知的價格，只計 token、不計花費
 （可以用 `--prices` 加上價格）。`GET /sessions`、`GET /cost` 和摘要的 `spend` 會依供應商分開計算呼叫次數、
-token 和花費（`providers`，agent 自己的是 `default`）；Claude Code 的 log 不會寫出呼叫送往哪個端點，所以
+token 和花費（`providers`，agent 自己的是 `default`）。Claude Code 的 log 不會寫出呼叫送往哪個端點，所以
 AgentAPI 在 `~/.agentapi/provider-ledger.jsonl` 記錄每個工作階段從什麼時候起用哪個供應商。

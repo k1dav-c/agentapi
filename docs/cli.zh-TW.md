@@ -2,6 +2,9 @@
 
 [English](cli.md) | 繁體中文
 
+這一頁列出 `agentapi` 的各個指令和旗標；最後的[資源用量](#資源用量)說明執行中的 AgentAPI 要用掉多少
+記憶體和 CPU。
+
 ## `agentapi server`
 
 啟動 HTTP 伺服器以控制 agent。若要為 agent 加上啟動參數，請將完整指令放在 `--` 分隔符號之後。
@@ -27,7 +30,7 @@ agentapi server -- pi
 記下並略過，agent 仍會啟動。[`agentapi hub join`](#agentapi-hub) 會寫入這個檔案；含有 secret 時
 請只讓擁有者讀取（`chmod 600`）。檔案或目錄設定開頭的 `~` 代表家目錄，不論設定來自哪裡。
 `state-db` 和 `pid-file` 指的檔案只能給一個伺服器使用，所以寫在設定檔時，路徑中都要有 `{port}`
-（`{hostname}` 也會被填入）；沒有的話，每個伺服器都會略過這個設定並記下警告，旗標或環境變數則照常
+（`{hostname}` 也會填入）；沒有的話，每個伺服器都會略過這個設定並記下警告，旗標或環境變數則照常
 有效。
 
 ```yaml
@@ -43,7 +46,7 @@ state-db: ~/.agentapi/state/{port}.db
 | `-t`, `--type` | 由 agent 指令判斷 | agent 類型：`claude`、`codex`、`pi` 或 `native-demo`；見 [Agent](../README.zh-TW.md#agent) |
 | `-p`, `--port` | `3284` | 監聽的連接埠 |
 | `--bind` | 所有網路介面 | 監聽的位址；見[監聽位址](security.zh-TW.md#監聽位址) |
-| `--state-db` | | 保存對話、並接續 agent 工作階段的 SQLite 檔案；`{port}` 和 `{hostname}` 會被填入；見[持久保存的工作階段](agents.zh-TW.md#持久保存的工作階段) |
+| `--state-db` | | 保存對話、並接續 agent 工作階段的 SQLite 檔案；`{port}` 和 `{hostname}` 會填入；見[持久保存的工作階段](agents.zh-TW.md#持久保存的工作階段) |
 | `--terminal` | `true` | 給聊天介面使用、位於 agent 工作目錄的 shell；見[終端機](agents.zh-TW.md#終端機) |
 | `--auto-continue` | `false` | 回合因用量限制停下時，在限制重置後繼續；見[達到用量限制時](agents.zh-TW.md#達到用量限制時) |
 | `--retry-delays` | `30s,1m,2m,5m*12` | 回合因暫時性的 API 錯誤失敗後，每次重試前等多久（`5m*12`：重複 12 次）；`off` 關閉重試；見[暫時性的 API 錯誤](agents.zh-TW.md#暫時性的-api-錯誤) |
@@ -61,14 +64,14 @@ state-db: ~/.agentapi/state/{port}.db
 | `--name` | 工作目錄的名稱 | 監看多個 AgentAPI 的用戶端顯示的名稱 |
 | `--registry` | `true` | 執行期間在登記目錄保留登記檔；見[監看多個實例](api.zh-TW.md#監看多個實例) |
 | `--registry-dir` | `~/.agentapi/instances` | 登記目錄 |
-| `--public-url` | | 可以連到這個 AgentAPI 的網址，會放在 `GET /summary` 和每個 webhook 事件中；`{port}` 和 `{hostname}` 會被填入，`{ip}` 則填入這台主機通往 webhook 網址那條路由上的 IPv4 位址（沒有 webhook 網址時，取第一個私有網路位址，其次是 CGNAT 位址），執行期間最多每 30 秒重新查詢一次；查不到時沿用上一個位址。`{ip}` 代表的位址一律是允許的主機 |
+| `--public-url` | | 可以連到這個 AgentAPI 的網址，會放在 `GET /summary` 和每個 webhook 事件中；`{port}` 和 `{hostname}` 會填入，`{ip}` 則填入這台主機通往 webhook 網址那條路由上的 IPv4 位址（沒有 webhook 網址時，取第一個私有網路位址，其次是 CGNAT 位址），執行期間最多每 30 秒重新查詢一次；查不到時沿用上一個位址。`{ip}` 代表的位址一律是允許的主機 |
 | `--config` | `~/.agentapi/config.yaml` | 設定檔：以旗標名稱設定，優先順序低於旗標和環境變數 |
 | `--allow-update` | `false` | 讓 API 用戶端（例如 hub）把 AgentAPI 更新到最新發行版，再原地重新啟動；見[透過 API 更新](api.zh-TW.md#透過-api-更新) |
 | `--webhook-timeout` | `10s` | 每次傳送的逾時時間 |
 | `--webhook-max-attempts` | `3` | 傳送的嘗試次數 |
 | `--webhook-payload-template` | | POST 內容的 Go `text/template` 範本 |
 | `-c`, `--chat-base-path` | `/chat` | 聊天介面的基礎路徑 |
-| `--pid-file` | | 寫入伺服器行程 ID 的檔案，給關閉腳本使用；`{port}` 和 `{hostname}` 會被填入 |
+| `--pid-file` | | 寫入伺服器行程 ID 的檔案，給關閉腳本使用；`{port}` 和 `{hostname}` 會填入 |
 | `--log-level` | `info` | 記錄的最低層級：`debug`、`info`、`warn` 或 `error` |
 | `-P`, `--print-openapi` | | 印出 OpenAPI schema 後結束 |
 
@@ -105,7 +108,7 @@ agentapi update --restart --allow-update  # 之後也讓 hub 可以更新它們
 執行 `sudo` 那位使用者的 `~/.agentapi/config.yaml`，檔案擁有者仍是該使用者），重新啟動後的
 AgentAPI 從此就能由 [hub](hub.zh-TW.md#從-hub-更新) 更新。設定檔裡的其他設定都會保留，
 和 `agentapi hub join --allow-update` 一樣。搭配 `--check` 時不會寫入任何東西。舊版的 `agentapi`
-沒有這個參數：先自己把這一行加進設定檔，再執行 `agentapi update --restart`。
+沒有這個旗標：先自己把這一行加進設定檔，再執行 `agentapi update --restart`。
 
 ## `agentapi restart`
 
@@ -203,7 +206,7 @@ agentapi host install --now
 agentapi host status
 ```
 
-| 指令 | 參數 | 作用 |
+| 指令 | 旗標 | 作用 |
 | --- | --- | --- |
 | `serve` | `--config`、`--log-level`（`info`） | 在前景執行 launcher |
 | `status` | `--config` | 顯示 launcher、它的 hub、agent、repo 和 job |
@@ -214,7 +217,7 @@ service 設了 `KillMode=process`：重新啟動或停止 launcher 時，job 的
 launcher 接手。`install` 需要 systemd user instance；登出後 user service 會停止時，它會提醒你，
 用 `sudo loginctl enable-linger <user>` 讓它們繼續執行。
 
-沒有 systemd 的環境（容器，例如 Coder 工作區）裡，`install` 會停在 `no systemd user instance`。
+沒有 systemd 的環境（容器，例如 Coder workspace）裡，`install` 會停在 `no systemd user instance`。
 這時照這台主機啟動其他程式的方式，用你自己的身分執行 `agentapi host serve`，不要加 `sudo`
 （launcher 讀的是你的 `~/.agentapi/config.yaml`，token 也存在你的 `~/.agentapi`）：
 
@@ -222,7 +225,7 @@ launcher 接手。`install` 需要 systemd user instance；登出後 user servic
 nohup agentapi host serve >~/.agentapi/host.log 2>&1 &
 ```
 
-這樣只會維持到工作區停止。Coder 工作區可以寫進範本，每次啟動都會執行：
+這樣只會維持到 workspace 停止。Coder workspace 可以寫進範本，每次啟動都會執行：
 
 ```hcl
 resource "coder_script" "agentapi_host" {

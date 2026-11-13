@@ -2,9 +2,10 @@
 
 [English](api.md) | 繁體中文
 
-## 對話 API
+這一頁說明[對話 API](#對話-api)、[整合](#整合)（監看多個 AgentAPI、hub、webhook 和人工回覆 API），
+以及所有端點的[參考](#http-api-參考)。
 
-[HTTP API 參考](#http-api-參考)列出了全部的端點。
+## 對話 API
 
 ### 訊息與狀態
 
@@ -179,7 +180,7 @@ AgentAPI，用[人工回覆 API](#人工回覆-api)讓機器人代為回覆 agen
 
 #### 執行 hub
 
-hub 監看它連得到的任何主機上的多個 AgentAPI：把它放在會一直開著的地方（例如常開的
+hub 監看連得到的任何主機上的多個 AgentAPI：把它放在會一直開著的地方（例如常開的
 workspace），並透過私有網路（例如你自己的 VPN）連到它和各個 AgentAPI。一步步的架設方式、每種
 狀態、各個 token、疑難排解和 hub 的 API，見 [hub 指南](hub.zh-TW.md)。
 
@@ -211,7 +212,7 @@ agentapi hub serve --token "$HUB_TOKEN" --secret "$HUB_SECRET" --instance-token 
   [`agentapi host`](cli.zh-TW.md#agentapi-host) 才能接 issue。
 - hub 透過自己開啟實例（`/i/<id>/...`），以實例的 API token（`--instance-token`，或加入時給的）
   取代你的憑證。瀏覽器不會拿到實例的 token，也不會直接連到實例，所以實例不必為它設定 CORS。
-- 只接受以 `--secret` 簽章、不超過 10 分鐘而且帶有 delivery ID 的事件，已處理過的傳送會被忽略：
+- 只接受以 `--secret` 簽章、不超過 10 分鐘而且帶有 delivery ID 的事件，已處理過的傳送一律忽略：
   事件裡的網址就是 hub 送出實例 token 的地方。hub 正在追蹤的實例和手動加入的實例，事件都改不了
   它們的網址；事件能做什麼，見 [hub 指南](hub.zh-TW.md#token-與安全性)。
 - hub 連不到、又錯過三次 heartbeat（預設 3 分鐘）的實例，例如 workspace 被強制關掉的，視為已停止；
@@ -223,7 +224,7 @@ agentapi hub serve --token "$HUB_TOKEN" --secret "$HUB_SECRET" --instance-token 
 - `--port`（預設 3290）和 `--bind`（例如 VPN 位址）設定監聽位置。請用 HTTPS 提供，或只開在私有
   網路上：登入時會送出 token。登入的有效期限是 30 天。若 VPN 用戶端以 userspace 模式執行，
   把 `ALL_PROXY` 設成它的 SOCKS5 proxy，hub 才連得到實例。
-- hub 提供的是它自己版本的聊天介面：hub 和實例請使用相同的 AgentAPI 版本。比 hub 舊的實例會在清單上
+- hub 提供的是自己版本的聊天介面：hub 和實例請使用相同的 AgentAPI 版本。比 hub 舊的實例會在清單上
   標出來，總覽也會依版本統計，並說明怎麼更新。
 
 #### 加入 hub
@@ -440,7 +441,7 @@ webhook，也能在這裡設定。
 
 ## HTTP API 參考
 
-伺服器以 OpenAPI 描述它的 API：儲存庫中的 [openapi.json](../openapi.json)、執行中伺服器的
+伺服器以 OpenAPI 描述自己的 API：儲存庫中的 [openapi.json](../openapi.json)、執行中伺服器的
 `/openapi.json`，以及 `/docs` 的文件介面。伺服器預設在 3284 連接埠執行。
 
 ### 對話

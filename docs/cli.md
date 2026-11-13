@@ -2,6 +2,9 @@
 
 English | [繁體中文](cli.zh-TW.md)
 
+This page lists the `agentapi` commands and their flags; [Resource usage](#resource-usage) at the
+end gives what a running AgentAPI costs in memory and CPU.
+
 ## `agentapi server`
 
 Start an HTTP server to control an agent. To pass startup arguments to the agent, place the full
@@ -186,7 +189,7 @@ agentapi hub leave
 `serve` runs the hub: `--token` (or `AGENTAPI_HUB_TOKEN`) is what you sign in with (`--no-token`
 instead skips signing in, for a hub behind a sign-in of its own such as a Coder workspace app),
 `--secret` (or `AGENTAPI_HUB_SECRET`) checks the AgentAPIs' events, `--instance-token` (or
-`AGENTAPI_HUB_INSTANCE_TOKEN`, else `AGENTAPI_API_TOKEN`) is sent to them, `--state` keeps the
+`AGENTAPI_HUB_INSTANCE_TOKEN`, else `AGENTAPI_API_TOKEN`) is sent to them. `--state` keeps the
 instances, `--port` and `--bind` set where it listens, `--allowed-hosts` the names browsers may
 open it by (any without it), and `--log-level` (or
 `AGENTAPI_HUB_LOG_LEVEL`) how much it logs. For the [issue dispatch](hub.md#issues),
@@ -200,7 +203,7 @@ AgentAPIs running now. `--secret` (or `AGENTAPI_HUB_SECRET`) signs the events, `
 is where the hub reaches them (`{ip}` follows the machine's address; the config file and the
 AgentAPIs newer than 2.1.2 keep it, older ones get the address now), `--api-token` (or `AGENTAPI_API_TOKEN`) is sent to the ones that need
 a token, and `--config` and `--registry-dir` name other files. An AgentAPI that `join` can't
-update now applies the file when it restarts. `--allow-update` also writes `allow-update: true`, so
+change now applies the file when it restarts. `--allow-update` also writes `allow-update: true`, so
 the hub can [update the AgentAPIs through their API](api.md#updating-through-the-api) once they restart;
 `leave` keeps it.
 

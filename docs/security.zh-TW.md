@@ -5,7 +5,7 @@
 AgentAPI 沒有使用者或角色的概念：連得到 API 的人，就能做 agent 能做的任何事。預設不需要
 token，在所有網路介面上監聽，只要 `Host` 標頭指向本機（`localhost`、`127.0.0.1`、
 `[::1]`）就接受連線。主機檢查能防止網頁透過 DNS rebinding 呼叫它，但擋不住網路上的程式，
-因為它們可以送出任何 `Host` 標頭。在其他人連得到這個埠之前，請先把伺服器保護好。
+因為它們可以送出任何 `Host` 標頭。在其他人連得到這個連接埠之前，請先把伺服器保護好。
 沒有設定 token、又監聽其他主機連得到的位址時，AgentAPI 會在啟動時記錄一則警告。
 
 ## API token 驗證
@@ -44,12 +44,12 @@ cookie 來登入：
 帶著 `Authorization: Bearer <token>` 呼叫 `POST /auth/session` 會設定 cookie
 （`agentapi_session_<hash>`，HttpOnly、SameSite=Strict、`Path=/`，透過 HTTPS 或經由送出
 `X-Forwarded-Proto: https` 的 proxy 連線時加上 Secure）。cookie 裡存的是 token 的
-HMAC 而不是 token 本身，所以更換 token 會讓所有瀏覽器登出；cookie 名稱也由 token 而來，所以
+HMAC 而不是 token 本身，所以更換 token 會讓所有瀏覽器登出。cookie 名稱也由 token 而來，所以
 同一台主機上使用不同 token 的伺服器，各自維持獨立的登入狀態。`DELETE /auth/session` 登出，
 `GET /auth/session`（不需要憑證）回報 `auth_required` 與 `authenticated`。cookie 是
 SameSite=Strict，其他網站的頁面無法帶著它發出請求。從其他 origin 提供的聊天介面（例如在
 3000 連接埠執行的 `bun run dev`）需要把該 origin 加進 `--allowed-origins`；
-`--allowed-origins '*'` 不允許帶 cookie 的請求。不同的埠不算不同的網站，而預設允許的來源
+`--allowed-origins '*'` 不允許帶 cookie 的請求。不同的連接埠不算不同的網站，而預設允許的來源
 包含給聊天介面開發用的 `http://localhost:3000` 和 `http://localhost:3001`：在共用的主機上，
 請把 `--allowed-origins` 設成你實際使用的來源，讓已登入瀏覽器的 cookie 只對它們有效。
 
@@ -70,7 +70,7 @@ AGENTAPI_BIND=127.0.0.1 agentapi server -- claude
 
 ## 允許的主機
 
-伺服器預設只接受 `Host` 標頭為 `localhost`、`127.0.0.1` 或 `[::1]` 的請求。如果想在其他地方架設 AgentAPI，可以透過 `AGENTAPI_ALLOWED_HOSTS` 環境變數或 `--allowed-hosts` 旗標修改。主機只能填主機名稱（不含連接埠）；伺服器授權時會忽略請求中的連接埠。這只檢查 `Host` 標頭；若要讓伺服器完全不對網路開放，請再用 `--bind 127.0.0.1` 只監聽 loopback（見[監聽位址](#監聽位址)）。
+伺服器預設只接受 `Host` 標頭為 `localhost`、`127.0.0.1` 或 `[::1]` 的請求。要在其他地方架設 AgentAPI，請設定 `AGENTAPI_ALLOWED_HOSTS` 環境變數或 `--allowed-hosts` 旗標。主機只能填主機名稱（不含連接埠）；伺服器授權時會忽略請求中的連接埠。這只檢查 `Host` 標頭；若要讓伺服器完全不對網路開放，請再用 `--bind 127.0.0.1` 只監聽 loopback（見[監聽位址](#監聽位址)）。
 
 要允許來自任何主機的請求，請用 `*` 作為允許的主機。
 
@@ -94,7 +94,7 @@ AGENTAPI_ALLOWED_HOSTS='example.com example.org' agentapi server -- claude
 
 ## 允許的來源
 
-伺服器預設允許來自 `http://localhost:3284`、`http://localhost:3000` 和 `http://localhost:3001` 的 CORS 請求。如果想更改哪些來源可以對 AgentAPI 發出跨來源請求，可以透過 `AGENTAPI_ALLOWED_ORIGINS` 環境變數或 `--allowed-origins` 旗標修改。
+伺服器預設允許來自 `http://localhost:3284`、`http://localhost:3000` 和 `http://localhost:3001` 的 CORS 請求。要更改哪些來源可以發出跨來源請求，請設定 `AGENTAPI_ALLOWED_ORIGINS` 環境變數或 `--allowed-origins` 旗標。
 
 要允許來自任何來源的請求，請用 `*` 作為允許的來源：
 
@@ -131,10 +131,10 @@ AGENTAPI_ALLOWED_ORIGINS='https://example.com http://localhost:3000' agentapi se
   `~/.codex/config.toml` 裡的政策。
 - 在[終端機](agents.zh-TW.md#終端機)裡執行指令（預設開啟；`--terminal=false` 可以關閉）。
 - 透過檔案檢視器的端點讀取 agent 工作目錄中的檔案；工作目錄以外的路徑（包括透過 symlink）
-  會被拒絕，diff 也只會讀取 git 儲存庫。HTML 預覽的腳本在 sandbox 中執行，無法存取聊天介面或
+  一律拒絕，diff 也只會讀取 git 儲存庫。HTML 預覽的腳本在沙箱中執行，無法存取聊天介面或
   API。`GET /files/find` 會列出工作目錄底下路徑結尾相符的檔案路徑。
-- 從 agent 自己的紀錄（`~/.claude`、`~/.codex`、`~/.pi`）讀取它在工作目錄中先前工作階段的對話，
-  它執行過的 sub agent 的步驟，以及它們的花費，並開啟其中任何一個工作階段。
+- 從 agent 自己的紀錄（`~/.claude`、`~/.codex`、`~/.pi`）讀取它在工作目錄中先前工作階段的對話、
+  sub agent 的步驟和花費，並開啟其中任何一個工作階段。
 - 上傳最大 100 MB 的檔案；只有圖片會回傳。
 - 修改 webhook，以及重新啟動 agent。webhook 可以把對話（`message.created`、
   `tool.completed`）送到任何網址；`GET /webhook` 不會回傳它的 secret。

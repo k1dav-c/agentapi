@@ -2,9 +2,11 @@
 
 English | [繁體中文](api.zh-TW.md)
 
-## Conversation API
+This page covers the [conversation API](#conversation-api), the [integrations](#integrations)
+(watching many AgentAPIs, the hub, webhooks and the human-reply API) and the
+[reference](#http-api-reference) of every endpoint.
 
-The [HTTP API reference](#http-api-reference) lists all the endpoints.
+## Conversation API
 
 ### Messages and status
 
@@ -172,8 +174,8 @@ instance:
   `server_id`, host, port, directory, agent and `url`), `status`, `lifecycle` and a `title` from the
   session name or the start of the latest prompt. It also includes the latest [task](#tasks), task
   count, `pending_requests`, the oldest pending `request` (its kind, title and when the agent
-  asked), `queued_messages`, `login_required`, `limit_stop`, `retry_wait`, `usage` (context window and account
-  limits) and, for Claude Code, Codex and Pi, `spend`: the API-equivalent cost of the agent's
+  asked), `queued_messages`, `login_required`, `limit_stop`, `retry_wait` and `usage` (context window and
+  account limits). For Claude Code, Codex and Pi it also has `spend`: the API-equivalent cost of the agent's
   sessions in the working directory over the last 24 hours (`day_usd`) and 7 days (`week_usd`),
   worked out from its logs once a minute, the tokens of the same calls (`day_tokens` and
   `week_tokens`: `input`, `output`, `cache_write`, `cache_read` and their `total`), when the amounts
@@ -243,8 +245,8 @@ one to open it in the chat. On a phone the list and the chat take turns.
   menu pins the instance to the top, puts it in a group of your own, mutes what it waits for until
   that changes (a login you won't do), or forgets a stopped or unreachable one. The Offline tile
   and filter forget every stopped one at once.
-- The gear opens the hub's settings. There you keep [favorite prompts](hub.md#favorites),
-  which ☆ in the composer of a chat the hub opens inserts in the message, keep the
+- The gear opens the hub's settings. There you keep [favorite prompts](hub.md#favorites)
+  (☆ in the composer of a chat the hub opens inserts one), keep the
   [model providers](hub.md#model-providers) every machine's sessions can switch to, and
   connect the hub's [GitHub App](hub.md#github-settings).
 - ◎ (or `i`) opens [Issues](hub.md#issues), the issue dispatch: the open issues of your
@@ -294,7 +296,7 @@ the file. `--public-url` is where the hub reaches them; `{port}` and `{hostname}
 each, and `{ip}` with the machine's IPv4 address on the route to the hub, which each AgentAPI looks
 up again while it runs: when DHCP gives the machine another address, the next heartbeat names it and
 the hub follows. AgentAPIs that started before 1.2 aren't registered: restart them once. `agentapi hub status`
-shows the hub and where each running AgentAPI reports; `agentapi hub leave` removes it. With
+shows the hub and where each running AgentAPI reports; `agentapi hub leave` removes the hub. With
 `--allow-update`, the hub can also [update them](#updating-through-the-api). `join`
 first sends the hub a signed test event and stops if the hub doesn't take it (not reached, a sign-in
 page in front of it, or another secret); `--no-check` skips that for a hub that doesn't run yet. The

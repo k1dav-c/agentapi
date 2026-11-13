@@ -2,6 +2,9 @@
 
 [English](agents.md) | 繁體中文
 
+這份指南說明 AgentAPI 如何執行 Claude Code、Codex 和 Pi，從登入到各個 agent 的細節；
+模型供應商另有[專屬指南](providers.zh-TW.md)。
+
 Native transport 讓 AgentAPI 直接使用 agent 的結構化協定，取得回覆、工具呼叫與用量，
 並在聊天介面中處理核准、提問和計畫。
 
@@ -14,13 +17,13 @@ agentapi server -- pi --provider openai-codex --model gpt-5.6-luna --thinking lo
 ```
 
 - AgentAPI 依指令名稱選擇對應的 adapter；使用包裝腳本時，請用 `--type` 指定類型。
-- 開發聊天介面時，可用 `agentapi server -- native-demo` 執行模擬 agent，詳見[開發指南](../chat/README.md)。改用 `--type claude`、`codex` 或 `pi` 時，demo 會扮演那個 agent：AgentAPI 會替它讀取那個 agent 的紀錄，用於先前的工作階段和 sub agent。
+- 開發聊天介面時，可用 `agentapi server -- native-demo` 執行模擬 agent，詳見[開發指南](../chat/README.md)。改用 `--type claude`、`codex` 或 `pi` 時，demo 會扮演那個 agent，AgentAPI 也會從那個 agent 的紀錄讀取先前的工作階段和 sub agent。
 
 **使用時會看到什麼**
 
 - 回覆、工具結果和思考內容會隨回合進行即時更新。
 - 需要你核准或回答時，輸入框上方會顯示決策卡片，詳見[請求處理](#請求核准提問與計畫)。
-- 關閉或重新啟動 agent 時，若它在輸入關閉後 3 秒內沒有自行結束，AgentAPI 會向它的整個行程
+- 關閉或重新啟動 agent 時，若它在輸入關閉後 3 秒內沒有自行結束，AgentAPI 會向整個行程
   群組送出訊號，它啟動的 MCP 伺服器和指令也會一併停止。agent 結束後（不論如何結束），它啟動
   而仍在執行的行程會收到 SIGTERM，2 秒後再收到 SIGKILL。
 - agent 自行結束或啟動失敗時，AgentAPI 會在 2、10、30 秒後接續原工作階段重新啟動。每次嘗試
@@ -44,7 +47,7 @@ AgentAPI 會清除上層 agent 工作階段留下的環境標記與機密資訊�
 | Pi | `pi --mode rpc` | 隨 Pi 的輸出串流顯示 |
 
 訊息直接來自協定。串流期間，每次更新會取代整則
-rich message；每則訊息每秒最多送出 10 次快照，串流暫停後的最新狀態會在 100 毫秒內送達。
+結構化訊息；每則訊息每秒最多送出 10 次快照，串流暫停後的最新狀態會在 100 毫秒內送達。
 
 **API 狀態**
 
@@ -254,7 +257,7 @@ Claude Code 也會回報 `prompt_cache`：`ttl_seconds` 是模型供應商在最
   之後送出。
 - `DELETE /limit/continue` 取消排定的繼續；佇列仍會等到重置。
 - `DELETE /limit` 忽略這次停止，讓排隊中的訊息在 agent 能接收時就送出。
-- `--auto-continue` 會為每次有重置時間的停止排定繼續。繼續的回合又被限制停下時，會再排定
+- `--auto-continue` 會為每次有重置時間的停止排定繼續。繼續的回合又因用量限制停下時，會再排定
   一次。
 
 使用 `--state-db` 時停止狀態會保留，所以 AgentAPI 重新啟動後，排定的繼續仍會送出。在聊天介面中，
@@ -422,7 +425,7 @@ AgentAPI 讀取 Claude Code、Codex 和 Pi 的紀錄，列出並開啟工作目�
 
 ## 工作階段花費
 
-AgentAPI 從 agent 的工作階段紀錄讀出每次模型呼叫用掉的 tokens，以模型供應商的牌價換算成
+AgentAPI 從 agent 的工作階段紀錄讀出每次模型呼叫用掉的 token，以模型供應商的牌價換算成
 美元金額。這是 API 等價金額：Claude 或 ChatGPT 訂閱不按 token 計費，所以它代表的是改用 API
 key 做同樣的工作要花多少錢。
 
@@ -440,7 +443,7 @@ agent 可能改了紀錄格式，例如把欄位改了名。
 
 分支（fork）從另一個工作階段複製來的呼叫，算在原本的工作階段，所以加總時不會重複計算。內建
 價格涵蓋 Anthropic 和 OpenAI 的模型；`--prices <檔案>` 可以新增模型或取代它們的價格，單位是
-每百萬 tokens 的美元：
+每百萬 token 的美元：
 
 ```json
 {
@@ -454,7 +457,7 @@ agent 可能改了紀錄格式，例如把欄位改了名。
 套用該級距（tier）的價格。比對模型 ID 時不分大小寫，並忽略供應商前綴（`anthropic/`）、
 context 後綴（`[1m]`）和發布日期；找不到時取最長的已知前綴（`claude-opus-5-5-x` 以
 `claude-opus-5-5` 計價），但不跨過 `-mini`、`-nano` 或 `-pro` 這類變體（`gpt-5.1-codex-mini`
-不算 `gpt-5.1`）。沒有價格的模型只計 tokens、不計金額（`priced: false`），伺服器的 log 會對
+不算 `gpt-5.1`）。沒有價格的模型只計 token、不計金額（`priced: false`），伺服器的 log 會對
 每個這種模型警告一次。`scripts/prices.mjs` 會比對內建價格和 Pi 的模型清單。
 
 - `GET /sessions` 為每個工作階段提供 `cost`：`usd`、`tokens`、`calls`、每個模型的花費
@@ -465,7 +468,7 @@ context 後綴（`[1m]`）和發布日期；找不到時取最長的已知前綴
   回應的 `total_calls` 和 `digest` 就是下次要帶的值。若那些呼叫有變動，則會拿到全部，`from` 為 0。
 
 在聊天介面中，每個任務的開始時間和耗時下方會顯示它的花費（窄螢幕上在任務標頭），滑鼠移上去
-可以看到 tokens；回合結束時會重新讀取，回合執行中則每 15 秒讀取一次。Explorer 的 Session 分頁
+可以看到 token 數；回合結束時會重新讀取，回合執行中則每 15 秒讀取一次。Explorer 的 Session 分頁
 會顯示每個工作階段的花費，以及全部工作階段今天、最近 7 天、30 天和全部的花費（依你的時區）。
 
 ![任務的時間軸：開始時間、耗時和花費](screenshots/task-cost.png)
@@ -520,7 +523,7 @@ Claude Code 支援 `steer`（steer 的訊息會在 Claude 的下一步加入正�
   你自己傳入的 `--verbose`、`--include-partial-messages` 和 `--replay-user-messages` 會移除。
   其他參數（`--model`、`--allowedTools`、`--mcp-config`、`--append-system-prompt` 等）都會原樣
   傳遞。
-- 除了移除上層 agent 工作階段的環境變數（見 [Native transport](architecture.zh-TW.md#native-transport)），
+- 除了移除上層 agent 工作階段的環境變數（見[子行程環境](architecture.zh-TW.md#子行程環境)），
   AgentAPI 還會設定 `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1` 和
   `CLAUDE_CODE_ENTRYPOINT=sdk-cli`。
 
@@ -604,7 +607,7 @@ AgentAPI 會以 RPC 模式執行 Pi（`pi --mode rpc`，經由 stdin 與 stdout 
   在工具執行中中止時多加的「This operation was aborted」錯誤；Pi 在 10 秒內沒有結束回合時，
   AgentAPI 會結束它）、resume，以及圖片（附加的圖片會以 base64 的 `images` 交給 Pi；除非 Pi
   表示它的模型不接受圖片，否則都會回報這項能力）。
-- **訊息。** 文字與思考內容會在抵達時串流進 rich messages，bash 的輸出會串流進工具結果，
+- **訊息。** 文字與思考內容會在抵達時串流進結構化訊息，bash 的輸出會串流進工具結果，
   最終訊息的格式和從 Pi 工作階段紀錄檔解析出來的相同。工具結果中的圖片（Pi 讀取的圖片檔）
   也會保留。
 - **請求。** 原版 Pi 沒有工具核准。擴充功能開啟的對話框（`select`、`confirm`、`input`、
@@ -619,7 +622,7 @@ AgentAPI 會以 RPC 模式執行 Pi（`pi --mode rpc`，經由 stdin 與 stdout 
   （請維持相同的目錄與 `--session-dir`），所以 Pi 會保留 context；Pi 不會重播先前的訊息，所以
   聊天介面只能從 `--state-db` 檔案顯示它們。
 - **關閉。** 停止 AgentAPI（或重新啟動）時會先中止正在執行的回合，這樣工作階段紀錄檔就不會
-  停在一個沒有結果的工具呼叫上，接著依 [Native transport](architecture.zh-TW.md#native-transport) 所述停止 Pi。
+  停在一個沒有結果的工具呼叫上，接著依[本指南開頭](#agent-與-native-transport)所述停止 Pi。
 - **設定。** Pi 沒有權限模式。模型（`set_model`，可選有供應商的模型）和思考等級
   （`set_thinking_level`，各模型支援的等級）可以切換；換模型時 Pi 會自己調整等級。
 - **命令。** 無法使用 Pi 的 TUI 命令（`/settings`、`/login` 等）；`/model`、`/compact` 以及
