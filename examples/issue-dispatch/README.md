@@ -48,7 +48,7 @@ host:
 只有要接 issue 的主機才需要 launcher；只想在 hub 上監看的主機，`agentapi hub join` 就夠了。沒有
 systemd 的主機（容器、Coder 工作區）上 `agentapi host install` 會失敗，改用
 `nohup agentapi host serve >~/.agentapi/host.log 2>&1 &`，或從 Coder 範本的 `coder_script` 啟動，見
-[`agentapi host`](../../README.zh-TW.md#agentapi-host)。
+[`agentapi host`](../../docs/cli.zh-TW.md#agentapi-host)。
 
 ## 3. GitHub App
 

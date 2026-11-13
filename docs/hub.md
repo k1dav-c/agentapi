@@ -8,7 +8,7 @@ same binary: `agentapi hub serve`.
 
 ![The hub: its instances, what needs you first, and one open in the chat](screenshots/hub-desktop.png)
 
-The [README](../README.md#running-a-hub) has the short version.
+The [HTTP API guide](api.md#running-a-hub) has the short version.
 
 ## Contents
 
@@ -121,7 +121,7 @@ WantedBy=default.target
 
 After an update, restart the hub this way too (`systemctl --user restart agentapi-hub`). The
 AgentAPIs restart in place with `agentapi update --restart` or
-[`agentapi restart`](../README.md#agentapi-restart); the hub isn't one of them. The overview's
+[`agentapi restart`](cli.md#agentapi-restart); the hub isn't one of them. The overview's
 [Versions](#versions) card shows the AgentAPIs still on an older version, and updates those whose
 machine allows it.
 
@@ -153,7 +153,7 @@ for an agent on the machine: [Joining a machine from the page](#joining-a-machin
   always resolves, such as `http://dev-1.vpn:{port}`, works too.
 - The same file can keep each AgentAPI's conversation when it restarts (an update, a reboot): add
   `state-db: ~/.agentapi/state/{port}.db` to it; see
-  [Persistent sessions](../README.md#persistent-sessions).
+  [Persistent sessions](agents.md#persistent-sessions).
 - Add `--allow-update` to let the hub update this machine's AgentAPIs
   ([Updating from the hub](#updating-from-the-hub)).
 - AgentAPIs that are running now get the change at once and appear in the hub within a second.
@@ -272,7 +272,7 @@ its cost does: a fork's copy of an earlier session's call counts in that session
 without a known price count their tokens and no cost. What Claude Code counted but didn't log call
 by call (compacting the context) counts with the tokens its own count gives it.
 
-`spend.providers` splits the same calls by [model provider](../README.md#model-providers): for each
+`spend.providers` splits the same calls by [model provider](providers.md): for each
 provider with calls in the last 7 days, its `provider` (`default` for the agent's own), `day_usd`,
 `week_usd`, `day_tokens` and `week_tokens`, the most expensive this week first. A Codex call counts
 toward the provider its log names; a Claude Code call toward the provider AgentAPI last recorded
@@ -363,7 +363,7 @@ row's **⋯** menu asks you first. By default the update waits until the agent i
 finished, and no approval, question or plan waits for an answer. **Update now** doesn't wait: it
 interrupts the task. The AgentAPI installs the latest official release for its OS and architecture,
 checked against the release's `checksums.txt`, waits as asked, and restarts in place, as
-[`agentapi restart`](../README.md#agentapi-restart) does. The AgentAPIs of one machine share the
+[`agentapi restart`](cli.md#agentapi-restart) does. The AgentAPIs of one machine share the
 binary: the first one replaces it, the others only restart.
 
 Before it restarts, the AgentAPI runs the new program with its own settings under
@@ -645,7 +645,7 @@ in a new tab or at its AgentAPI's URL, has no ☆.
 
 ![Hub settings: the Providers tab, with two providers, their endpoints, models and keys](screenshots/hub-settings-providers.png)
 
-The hub keeps [model providers](../README.md#model-providers) for every machine that reports to it:
+The hub keeps [model providers](providers.md) for every machine that reports to it:
 endpoints such as a LiteLLM gateway that Claude Code and Codex sessions can switch to. The
 **Providers** tab of **Hub settings** lists them, and adds, edits and deletes them. Each has an ID
 (lowercase letters, digits, `-` and `_`), an optional name, a base URL, an optional Anthropic base
@@ -817,7 +817,7 @@ app's repositories, connects another app, or disconnects it. An issue can still 
 above it, with **×** on an offline one, as on the board. Without a launcher on any machine, the page
 shows the command that installs one. A machine that joined the hub needs no launcher for its
 AgentAPIs to show in the list; it needs one only to take issues
-([`agentapi host`](../README.md#agentapi-host), which also covers machines without systemd).
+([`agentapi host`](cli.md#agentapi-host), which also covers machines without systemd).
 
 | The board on a phone | An issue on a phone |
 | --- | --- |
@@ -1064,7 +1064,7 @@ agentapi host status
 ```
 
 The launcher's settings (the `host` section of `~/.agentapi/config.yaml`), its files and
-`agentapi host uninstall` are in the [CLI reference](../README.md#agentapi-host);
+`agentapi host uninstall` are in the [CLI reference](cli.md#agentapi-host);
 [examples/issue-dispatch](../examples/issue-dispatch/README.md) sets up the hub's dispatch token,
 GitHub App and workflow too. The hub pins each machine's name to the launcher token
 (`~/.agentapi/host.token`) it first came with: a machine set up again, or whose token file was

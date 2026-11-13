@@ -3,7 +3,7 @@
 [English](chat-ui.md) | 繁體中文
 
 開啟 `/chat` 即可使用 `agentapi` 執行檔內建的聊天介面。適用於桌面與手機，
-透過 [HTTP API](../README.zh-TW.md#http-api-參考) 與伺服器溝通。
+透過 [HTTP API](api.zh-TW.md#http-api-參考) 與伺服器溝通。
 
 截圖和動畫是 AgentAPI v3.1.0 搭配內建 `native-demo` agent 處理一個小型範例網站的畫面；
 demo 的回覆、工具結果、模型和用量都是模擬的。動畫會
@@ -47,7 +47,7 @@ demo 的回覆、工具結果、模型和用量都是模擬的。動畫會
 你送出的每則訊息都會開始一個任務。任務會先在標示「You」的色塊中顯示你的提示詞，接著依序呈現
 agent 做了什麼：以 Markdown 顯示的回覆、每個工具呼叫各一列，以及思考內容。任務的標頭會
 顯示編號和狀態（Queued、Working、Waiting for you、Done、Failed 或 Limit reached）、工作中時
-的 Stop 按鈕，以及 ⋯ 選單。狀態由伺服器的[任務](../README.zh-TW.md#任務)決定：agent 回報錯誤或
+的 Stop 按鈕，以及 ⋯ 選單。狀態由伺服器的[任務](api.zh-TW.md#任務)決定：agent 回報錯誤或
 結束時顯示 Failed，滑鼠移上去可看第一個錯誤；因用量限制停止時顯示 Limit reached，可看 agent 的訊息。
 工具呼叫與思考內容的任務歸屬也由伺服器指定。
 
@@ -60,7 +60,7 @@ Claude Code、Codex 和 Pi 另會顯示任務執行期間的模型呼叫花費�
 依供應商牌價計算。任務之間的呼叫，例如壓縮，不算入任何任務。
 
 這是 API 等價金額，訂閱方案不按此收費。滑鼠移上去可看呼叫次數與 token。花費會在回合結束時，
-以及執行期間每 15 秒更新。計算與價格設定見[工作階段花費](../README.zh-TW.md#工作階段花費)。
+以及執行期間每 15 秒更新。計算與價格設定見[工作階段花費](agents.zh-TW.md#工作階段花費)。
 
 ![任務的時間軸：開始時間、耗時和花費](screenshots/task-cost.png)
 
@@ -213,7 +213,7 @@ Pi 沒有權限模式，所以它的工具列沒有模式選單。
 
 ![Claude Code 的模型選單：先是它自己的模型，接著是來自 hub 的兩個供應商，各自標出名稱和主機](screenshots/model-providers.png)
 
-Claude Code 和 Codex 的選單接著會列出每個[模型供應商](../README.zh-TW.md#模型供應商)的模型，放在
+Claude Code 和 Codex 的選單接著會列出每個[模型供應商](providers.zh-TW.md)的模型，放在
 供應商的字母圖示、名稱和主機下；hub 保存的供應商會標上 **hub**。這些模型下方有一行說明，告訴你這個
 agent 切換時會怎麼做。選供應商的模型，agent 就換到那個供應商；選回 agent 自己的模型就換回來。對話會
 接續下去：Claude Code 從下一次 API 呼叫起換過去，換回來時則以同一個工作階段重新啟動；Codex 會重新啟動，
@@ -251,7 +251,7 @@ context 滿了時，agent 會自動壓縮；`/compact` 則會立刻壓縮。
 ![API 的 gateway 回 502 而失敗的任務：卡片倒數到 15 次重試中的第一次，附 Retry now 和 Cancel，佇列中有一個被暫停的任務](screenshots/retry-card.png)
 
 回合因可能自行恢復的 API 錯誤失敗時（例如 gateway 回 502，或 API 過載），AgentAPI 會自己再試
-（見[暫時性的 API 錯誤](../README.zh-TW.md#暫時性的-api-錯誤)）。輸入框上方的卡片會說明 API 回了
+（見[暫時性的 API 錯誤](agents.zh-TW.md#暫時性的-api-錯誤)）。輸入框上方的卡片會說明 API 回了
 什麼，附上 agent 的訊息，並倒數到下一次重試：*Retrying in 0:28 (1 of 15)*。排隊中的任務會等著，
 標示 *held until the failed task is tried again*。**Retry now** 立刻再試，**Cancel** 放棄這個任務、
 讓佇列放行。你自己送的任務會直接送出。這段期間 agent 算是工作中，狀態列會顯示它在等著再試失敗的
@@ -373,7 +373,7 @@ Explorer（⌘K / Ctrl+K，或資料夾按鈕）有五個分頁。Index、Files 
 此分頁從 Claude Code、Codex 和 Pi 的紀錄列出工作目錄中的工作階段，包含名稱、第一則
 訊息、訊息數、最後變動時間和花費。上方卡片加總工作階段及 sub agent 今天、最近 7 天和 30 天
 （含今天，依你的時區），以及全部期間的花費。金額以牌價計算，為 API 等價金額；滑鼠移上去可看 token。
-agent 用過自己以外的[模型供應商](../README.zh-TW.md#模型供應商)之後，卡片會以 **By provider** 列出
+agent 用過自己以外的[模型供應商](providers.zh-TW.md)之後，卡片會以 **By provider** 列出
 這些工作階段在每個供應商花了多少：agent 自己的寫成 **Own provider**，其他的以 ID 表示，各有呼叫數、
 token 和金額。gateway 的模型常常沒有已知價格：呼叫全都沒有價格的供應商會寫 **no price**，而不是
 `$0.00`；只有部分呼叫有價格的，金額後面會加上 `+`。滑鼠移到某一列可看各類 token。
@@ -402,7 +402,7 @@ AgentAPI 直接啟動 Codex 和 Pi 的 CLI 時，它們會先更新到最新的�
 **Save** 立即套用設定，維持到 AgentAPI 重新啟動；使用 `--state-db` 時也會跨重新啟動保留，
 除非新的 webhook 參數覆蓋設定。**Send test event** 向已儲存的網址送出 `webhook.test` 並顯示回應；
 **Turn off** 清除網址。透過 `--webhook-events` 單獨選取的事件，例如 `task.completed`，即使未涵蓋
-整個群組，也會列出並保留。事件與格式見 [Webhook](../README.zh-TW.md#webhook)。
+整個群組，也會列出並保留。事件與格式見 [Webhook](api.zh-TW.md#webhook)。
 
 ## Lineage
 
@@ -456,7 +456,7 @@ hub 的位址後，指令會自動帶入。這個 AgentAPI 已經回報給某個
 
 任務在聊天介面顯示時結束，或任務結束後介面再次顯示時，聊天介面會告訴伺服器你已經看過
 （`POST /tasks/seen`），所以監看多個 AgentAPI 的儀表板、`agentapi list` 和其他分頁都不會再把這個
-任務顯示為未讀（見 README 的[監看多個實例](../README.zh-TW.md#監看多個實例)）。
+任務顯示為未讀（見[監看多個實例](api.zh-TW.md#監看多個實例)）。
 
 agent 的警告和錯誤（失敗的回合、它忽略的設定）會以角落的通知顯示，直到你關掉為止。雖然伺服器
 每次連線都會重送最近的通知，關掉的通知在重新載入後也不會再出現；agent 每次啟動都會重複的警告，
@@ -481,7 +481,7 @@ agent 的警告和錯誤（失敗的回合、它忽略的設定）會以角落�
 
 ![手機上的 hub](screenshots/hub-phone.png)
 
-[hub](../README.zh-TW.md#執行-hub)（`agentapi hub serve`）會替它監看的每個 AgentAPI 提供這個聊天
+[hub](api.zh-TW.md#執行-hub)（`agentapi hub serve`）會替它監看的每個 AgentAPI 提供這個聊天
 介面。它的清單把釘選的 agent 排在最上方，其他的則依群組把需要你處理的排前面，也可以改成最近變動的
 排前面。打開 By machine，兩種排序都會把同一台主機的 agent 收進一張卡片，每個 agent 一個分頁。
 每種狀態都有自己的圖示，並寫出每個 agent 在等什麼（核准的指令、提問）或在做什麼。可以用搜尋和標籤

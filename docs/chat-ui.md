@@ -3,7 +3,7 @@
 English | [繁體中文](chat-ui.zh-TW.md)
 
 Open `/chat` to use the chat UI embedded in the `agentapi` binary. It works on desktops and phones,
-and talks to the server through the [HTTP API](../README.md#http-api-reference).
+and talks to the server through the [HTTP API](api.md#http-api-reference).
 
 Screenshots and animations show AgentAPI v3.1.0 running `native-demo` on a sample site. The demo's
 replies, tool results, models and usage are simulated. A blue dot marks the pointer and clicks. To
@@ -53,7 +53,7 @@ Every message you send starts a task. A task shows your prompt in a tinted block
 then what the agent did, in order: its reply in Markdown, a row for each tool call, and its
 thinking. The task's header shows its number and state (Queued, Working, Waiting for you, Done,
 Failed or Limit reached), a Stop button while it works, and its ⋯ menu. The server's
-[task](../README.md#tasks) determines the state. Failed means the agent reported an error or
+[task](api.md#tasks) determines the state. Failed means the agent reported an error or
 exited; hover to see the first error. Limit reached means a usage limit stopped it; hover for the
 agent's message. The server also assigns tool calls and thinking to tasks.
 
@@ -68,7 +68,7 @@ calls made during the task, including subagents, at provider list prices. Calls 
 such as compaction, don't count toward a task.
 
 Subscriptions aren't billed this API-equivalent cost. Hover for calls and tokens. Costs refresh
-at the end of a turn and every 15 seconds during it. See [Session costs](../README.md#session-costs)
+at the end of a turn and every 15 seconds during it. See [Session costs](agents.md#session-costs)
 for the calculation and price configuration.
 
 ![A task's time rail: its start time, duration and cost](screenshots/task-cost.png)
@@ -238,7 +238,7 @@ model supports. Codex takes a new model or effort with its next turn.
 ![The model menu of Claude Code: its own models, then those of two providers from the hub, each under its name and host](screenshots/model-providers.png)
 
 For Claude Code and Codex, the menu then lists the models of each
-[model provider](../README.md#model-providers), under the provider's monogram, name and host; a
+[model provider](providers.md), under the provider's monogram, name and host; a
 provider the hub keeps is marked **hub**. A line under them says what a switch does with this
 agent. Picking a provider's model switches the agent to that provider, and picking one of the
 agent's own models switches it back. The conversation goes on: Claude Code switches from its next
@@ -281,7 +281,7 @@ tab with notifications on shows a notification.
 ![A task the API's gateway failed with a 502: the card counting down to the first of 15 retries, with Retry now and Cancel, and a task held in the queue](screenshots/retry-card.png)
 
 When a turn fails on an API error that may pass, such as a 502 from a gateway or an overloaded API,
-AgentAPI tries it again by itself (see [Transient API errors](../README.md#transient-api-errors)).
+AgentAPI tries it again by itself (see [Transient API errors](agents.md#transient-api-errors)).
 A card above the composer says what the API returned, with the agent's message, and counts down
 to the retry: *Retrying in 0:28 (1 of 15)*. The queued tasks wait, marked *held until the failed task
 is tried again*. **Retry now** tries at once, and **Cancel** gives up on the task and lets the queue
@@ -414,7 +414,7 @@ For Claude Code, Codex and Pi, this tab lists sessions in the working directory 
 agent's logs, with names, first messages, message counts, last-change times and costs. A card above
 the list totals session and subagent costs for today, the last 7 and 30 days (including today, in
 your time zone), and all time. These are API-equivalent costs at list prices; hover for tokens.
-Once the agent has used a [model provider](../README.md#model-providers) besides its own, the card
+Once the agent has used a [model provider](providers.md) besides its own, the card
 lists **By provider** what the sessions spent on each, the agent's own as **Own provider** and the
 others by ID: calls, tokens and cost. A gateway's models often have no known price: a provider
 whose calls have none says **no price** rather than `$0.00`, and one whose calls only partly have
@@ -447,7 +447,7 @@ removed but never read back. **Delivery and payload** contains the timeout, atte
 survive a restart unless new webhook flags override them. **Send test event** sends `webhook.test`
 to the saved URL and shows the response. **Turn off** clears the URL. Individual events selected
 with `--webhook-events`, such as `task.completed` alone, remain listed even if they don't cover a
-whole group. See [Webhooks](../README.md#webhooks) for events and payloads.
+whole group. See [Webhooks](api.md#webhooks) for events and payloads.
 
 ## Lineage
 
@@ -505,8 +505,8 @@ it says which.
 
 When a task ends while the chat is visible, or the chat becomes visible after one ended, the chat tells
 the server you saw it (`POST /tasks/seen`), so a dashboard that watches many AgentAPIs, `agentapi
-list` and other tabs stop showing the task as unread (see the README's
-[Watching many instances](../README.md#watching-many-instances)).
+list` and other tabs stop showing the task as unread (see
+[Watching many instances](api.md#watching-many-instances)).
 
 The agent's warnings and errors (a turn that failed, a setting it ignores) show as notifications in
 the corner that stay until you close them. A closed one stays closed after a reload, although the
@@ -536,7 +536,7 @@ While the keyboard is up, the page ends above it, so the composer and the key ba
 
 ![The hub on a phone](screenshots/hub-phone.png)
 
-A [hub](../README.md#running-a-hub) (`agentapi hub serve`) serves this chat for every AgentAPI it
+A [hub](api.md#running-a-hub) (`agentapi hub serve`) serves this chat for every AgentAPI it
 watches. Its list puts the agents you pin on top, then what needs you first by group or the latest
 change first; By machine puts each machine's agents in one card, a tab each, in either order. Each state has a glyph of its own, and each row says what the agent waits for (the
 approval's command, the question) or does; search and chips (state, agent) filter the list. On a desktop, an

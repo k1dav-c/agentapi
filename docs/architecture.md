@@ -500,7 +500,7 @@ The adapters:
 ### Model providers
 
 Claude Code and Codex can run on another model provider than their own
-([Model providers](../README.md#model-providers)): an endpoint such as a LiteLLM gateway, defined
+([Model providers](providers.md)): an endpoint such as a LiteLLM gateway, defined
 in the config file's `providers` section or on the hub.
 
 ```mermaid

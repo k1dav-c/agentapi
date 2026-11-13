@@ -7,7 +7,7 @@ hub 在一個頁面上監看多台主機的 AgentAPI：列出每個實例，需�
 
 ![hub：所有實例、需要你處理的排最前面，以及在聊天介面中開啟的一個](screenshots/hub-desktop.png)
 
-[README](../README.zh-TW.md#執行-hub) 有精簡版說明。
+[HTTP API 說明](api.zh-TW.md#執行-hub)有精簡版說明。
 
 ## 目錄
 
@@ -109,7 +109,7 @@ WantedBy=default.target
 `agentapi-hub.env` 放三個 `AGENTAPI_HUB_*` 變數；只讓擁有者能讀取。
 
 更新之後，hub 也用同樣的方式重新啟動（`systemctl --user restart agentapi-hub`）。AgentAPI 可以用
-`agentapi update --restart` 或 [`agentapi restart`](../README.zh-TW.md#agentapi-restart) 原地重新
+`agentapi update --restart` 或 [`agentapi restart`](cli.zh-TW.md#agentapi-restart) 原地重新
 啟動，hub 不在其中。哪些 AgentAPI 還停在舊版，總覽的[版本](#版本)卡片會列出來；主機允許的話，
 也能從那裡直接更新。
 
@@ -138,7 +138,7 @@ hub 的頁面已經備好這行指令，填好 hub 的位址和 secret，另附�
   （見[運作方式](#運作方式)）。`{ip}` 需要 2.1.2 之後的 AgentAPI；固定能解析的名稱，例如
   `http://dev-1.vpn:{port}`，也可以用。
 - 同一個檔案也能讓各 AgentAPI 重新啟動（更新、重新開機）後保留對話：加上
-  `state-db: ~/.agentapi/state/{port}.db`，見[持久保存的工作階段](../README.zh-TW.md#持久保存的工作階段)。
+  `state-db: ~/.agentapi/state/{port}.db`，見[持久保存的工作階段](agents.zh-TW.md#持久保存的工作階段)。
 - 想讓 hub 更新這台主機的 AgentAPI，加入時再加上 `--allow-update`（見[從 hub 更新](#從-hub-更新)）。
 - 正在執行的 AgentAPI 會立刻套用，一秒內就出現在 hub 上。1.2 之前啟動的 AgentAPI 沒有在這台主機
   上登記，`join` 找不到它們：重新啟動它們或整個 workspace 一次。
@@ -238,7 +238,7 @@ scope 只算一次，取最新的數字（`updated_at`）。hub 目前沒在追�
 複製自先前 session 的呼叫，算在先前那個 session。沒有已知價格的模型只計 token、不計金額。Claude Code
 自己算了、但沒有逐筆記在 log 裡的部分（壓縮 context 等），token 取自它自己的計數。
 
-`spend.providers` 把同一批呼叫依[模型供應商](../README.zh-TW.md#模型供應商)分開：最近 7 天有呼叫的每個
+`spend.providers` 把同一批呼叫依[模型供應商](providers.zh-TW.md)分開：最近 7 天有呼叫的每個
 供應商各一筆，有它的 `provider`（agent 自己的是 `default`）、`day_usd`、`week_usd`、`day_tokens` 和
 `week_tokens`，這週花最多的排最前面。Codex 的呼叫算在 log 寫明的供應商；Claude Code 的呼叫算在 AgentAPI
 最後記錄該 session 所用的供應商（`~/.agentapi/provider-ledger.jsonl`）。較早的版本不會送出這個欄位。
@@ -316,7 +316,7 @@ hub 舊。
 會先請你確認。預設會等 agent 閒置才更新：手上的任務做完，也沒有核准、提問或計畫在等回覆。
 **Update now** 不等，會直接中斷正在跑的任務。AgentAPI 下載符合主機作業系統和架構的最新正式版，用
 該版的 `checksums.txt` 驗證後安裝，依指定的方式等待，再像
-[`agentapi restart`](../README.zh-TW.md#agentapi-restart) 一樣原地重新啟動。同一台主機上的 AgentAPI
+[`agentapi restart`](cli.zh-TW.md#agentapi-restart) 一樣原地重新啟動。同一台主機上的 AgentAPI
 共用一個 binary：第一個負責替換，其他的只要重新啟動。
 
 重新啟動之前，AgentAPI 會用自己的設定以 `agentapi server --validate` 執行新程式。新程式用這些設定
@@ -553,7 +553,7 @@ AgentAPI 正在更新時，上方那一列也會顯示進度，還在等任務�
 
 ![Hub settings：Providers 分頁，列出兩個供應商和它們的端點、模型與金鑰狀態](screenshots/hub-settings-providers.png)
 
-hub 會替每台向它回報的主機保存[模型供應商](../README.zh-TW.md#模型供應商)：Claude Code 和 Codex
+hub 會替每台向它回報的主機保存[模型供應商](providers.zh-TW.md)：Claude Code 和 Codex
 的工作階段可以換用的端點，例如 LiteLLM gateway。**Hub settings** 的 **Providers** 分頁列出所有
 供應商，可以新增、編輯和刪除。每個供應商有 ID（小寫英文字母、數字、`-` 和 `_`）、可省略的名稱、
 base URL、可省略的 Anthropic base URL、API 金鑰，以及它提供的模型；沒有填模型時，各 AgentAPI 會向
@@ -694,7 +694,7 @@ hub 還沒有 GitHub App 時，Issues 會顯示 **Connect GitHub**，從 manifes
 沒有 App 也能用 issue 的代號（`owner/repo#12` 或 issue 網址）開工，這時主機用自己的 GitHub 登入。
 上方會列出主機，離線的同樣有 **×**。沒有任何主機裝了 launcher 時，頁面會顯示安裝指令。
 加入 hub 的主機不裝 launcher，主機上的 AgentAPI 也會出現在清單上；只有要接 issue 才需要 launcher（見
-[`agentapi host`](../README.zh-TW.md#agentapi-host)，也說明沒有 systemd 的主機怎麼辦）。
+[`agentapi host`](cli.zh-TW.md#agentapi-host)，也說明沒有 systemd 的主機怎麼辦）。
 
 | 手機上的看板 | 手機上的 issue |
 | --- | --- |
@@ -916,7 +916,7 @@ agentapi host status
 ```
 
 launcher 的設定（`~/.agentapi/config.yaml` 的 `host` 區段）、它的檔案和 `agentapi host uninstall`
-見 [CLI 參考](../README.zh-TW.md#agentapi-host)；[examples/issue-dispatch](../examples/issue-dispatch/README.md)
+見 [CLI 參考](cli.zh-TW.md#agentapi-host)；[examples/issue-dispatch](../examples/issue-dispatch/README.md)
 另外說明 hub 的 dispatch token、GitHub App 和 workflow 的架設。hub 會把主機名稱綁定到它第一次帶來的
 launcher token（`~/.agentapi/host.token`）：重灌過、或 token 檔被刪掉的主機，要先
 在 hub 上移除它，才能以原名稱加入：在 [Issues](#issues) 按主機的 **×**，或呼叫 `DELETE /api/hosts/{name}`
