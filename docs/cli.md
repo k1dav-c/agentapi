@@ -287,27 +287,26 @@ host:
 
 ## Resource usage
 
-AgentAPI itself is small: one Go process of about 30 MiB that uses about 0.1% of a CPU core while
-the agent is idle. Most of the cost is the agent CLI it runs, at 100–350 MiB.
+AgentAPI itself is small: one Go process of 31–34 MiB that uses less than 0.1% of a CPU core while
+the agent is idle. Most of the cost is the agent CLI it runs, at 120–285 MiB.
 
-These numbers were measured on 2026-10-18 with AgentAPI v0.24.0 (a 29.5 MiB binary), Claude Code
-2.1.302, codex-cli 0.163.0 and Pi 1.3.0, on Linux with a 4-core Intel Xeon Silver 4210 (2.2 GHz)
-and one chat (an SSE client) connected. Each case had one short turn: a reply of about 200 words,
-without tools. Memory is resident memory (RSS); CPU is a share of one core while idle, and CPU
-seconds for a whole turn.
+These numbers were measured on 2026-11-13 with AgentAPI v5.0.0 (a 33 MiB binary), Claude Code
+2.1.302, codex-cli 0.167.0 and Pi 1.3.0, on Linux with a 4-core Intel Xeon Silver 4210 (2.2 GHz)
+and one chat (an SSE client) connected. Each agent had three short turns: a reply of about 200
+words, without tools. Memory is resident memory (RSS); CPU is a share of one core over an idle
+minute, and CPU seconds for a whole turn, the agent's processes together.
 
-| Transport | Agent | AgentAPI memory | AgentAPI CPU, idle | AgentAPI CPU per turn | Agent memory | Agent CPU per turn |
-| --- | --- | --- | --- | --- | --- | --- |
-| Native | Claude Code | 27–30 MiB | 0.1% | 0.08 s | 230–290 MiB | 1.1 s |
-| Native | Codex | 27–28 MiB | 0.1% | 0.11 s | 205–265 MiB | 0.43 s |
-| Native | Pi | 27–28 MiB | 0.1% | 0.12 s | 100–120 MiB | 0.37 s |
-| Native | `native-demo` (no agent process) | 27 MiB | 0.03% | 0.07 s | | |
+| Agent | AgentAPI memory | AgentAPI CPU, idle | AgentAPI CPU per turn | Agent memory | Agent CPU per turn |
+| --- | --- | --- | --- | --- | --- |
+| Claude Code | 31 MiB | 0.08% | 0.06–0.08 s | 230–285 MiB | 0.5–1.2 s |
+| Codex | 34 MiB | 0.07% | 0.09–0.13 s | 190–265 MiB | 0.3–0.8 s |
+| Pi | 31–32 MiB | 0.05% | 0.11–0.13 s | 120–130 MiB | 0.2–0.3 s |
+| `native-demo` (no agent process) | 31 MiB | 0.05% | 0.01–0.02 s | | |
 
-- An agent's own memory moves during a session: Claude Code grew to 314 MiB about a minute and a
-  half after it started (its own background work, 0.1% CPU idle otherwise), and Codex gave back
-  about 55 MiB after its first turn.
+- An agent's own memory moves during a session: Claude Code went from 230 MiB idle to 265–285 MiB
+  over its turns, and Codex grew to 265 MiB on its first turn, then gave back about 70 MiB.
 - AgentAPI's code (about 17 MiB of its memory) is shared by instances started from the same binary:
-  with four running, each costs about 13–24 MiB (PSS).
+  with four running, each costs about 17–21 MiB (PSS).
 - Not counted: MCP servers the agent starts, the commands it runs, the shell terminal (one shell
   while it is open) and the browser tab.
 
@@ -316,13 +315,16 @@ conversation of 100 KB tasks restored from `--state-db` (`native-demo`, the same
 4.2.0 held all of it, and 4.3.0 holds the latest 100 tasks
 ([Long conversations](api.md#long-conversations)):
 
-| Tasks | State database | Memory, 4.2.0 | Memory, after | First `/events?sync=1` replay, 4.2.0 | After |
+| Tasks | State database | Memory, 4.2.0 | Memory, 4.3.0 | First `/events?sync=1` replay, 4.2.0 | 4.3.0 |
 | --- | --- | --- | --- | --- | --- |
 | 0 | | 38 MiB | 34 MiB | 0.6 KB | 0.6 KB |
 | 250 | 26 MB | 71–86 MiB | 49–52 MiB | 11 MB | 0.9 MB |
 | 1,000 | 105 MB | 193–245 MiB | 55 MiB | 44 MB | 0.9 MB |
 
-The memory that remains grows with the messages and tasks, a few KB a task.
+The memory that remains grows with the messages and tasks, a few KB a task. Messages stay in memory
+whole, so very long prompts count in full: on 2026-11-13, in a conversation of 1,000 tasks made up
+almost entirely of 90 KB prompts (97 MB in its state database), AgentAPI 5.0.0 held 148 MiB (67 MiB
+at 250 tasks), while its first replay, the latest 20 tasks, stayed at 1.8 MB.
 
-To size a machine, plan per session about 30 MiB for AgentAPI plus the agent (about 350 MiB for
+To size a machine, plan per session about 35 MiB for AgentAPI plus the agent (about 350 MiB for
 Claude Code or Codex, 150 MiB for Pi) and whatever its MCP servers and commands need.

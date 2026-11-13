@@ -262,25 +262,26 @@ host:
 
 ## 資源用量
 
-AgentAPI 本身很輕量：一個大約 30 MiB 的 Go 行程，agent 閒置時只用掉約 0.1% 的單一 CPU 核心。
-大部分的成本來自它執行的 agent CLI，約 100–350 MiB。
+AgentAPI 本身很輕量：一個 31–34 MiB 的 Go 行程，agent 閒置時用不到單一 CPU 核心的 0.1%。
+大部分的成本來自它執行的 agent CLI，約 120–285 MiB。
 
-以下數字是 2026-10-18 量測的：AgentAPI v0.24.0（執行檔 29.5 MiB）、Claude Code 2.1.302、
-codex-cli 0.163.0 和 Pi 1.3.0，在 Linux、4 核心的 Intel Xeon Silver 4210（2.2 GHz）上執行，
-並連著一個聊天介面（一個 SSE 用戶端）。每個情境跑一個簡短的回合：回覆約 200 個單字、不使用工具。
-記憶體是常駐記憶體（RSS）；CPU 在閒置時是單一核心的使用比例，回合則是整個回合用掉的 CPU 秒數。
+以下數字是 2026-11-13 量測的：AgentAPI v5.0.0（執行檔 33 MiB）、Claude Code 2.1.302、
+codex-cli 0.167.0 和 Pi 1.3.0，在 Linux、4 核心的 Intel Xeon Silver 4210（2.2 GHz）上執行，
+並連著一個聊天介面（一個 SSE 用戶端）。每個 agent 跑三個簡短的回合：回覆約 200 個單字、不使用工具。
+記憶體是常駐記憶體（RSS）；閒置時的 CPU 是一分鐘內單一核心的使用比例，回合則是整個回合用掉的
+CPU 秒數，agent 的所有行程合計。
 
-| Transport | Agent | AgentAPI 記憶體 | AgentAPI CPU（閒置） | AgentAPI 每回合 CPU | Agent 記憶體 | Agent 每回合 CPU |
-| --- | --- | --- | --- | --- | --- | --- |
-| Native | Claude Code | 27–30 MiB | 0.1% | 0.08 秒 | 230–290 MiB | 1.1 秒 |
-| Native | Codex | 27–28 MiB | 0.1% | 0.11 秒 | 205–265 MiB | 0.43 秒 |
-| Native | Pi | 27–28 MiB | 0.1% | 0.12 秒 | 100–120 MiB | 0.37 秒 |
-| Native | `native-demo`（沒有 agent 行程） | 27 MiB | 0.03% | 0.07 秒 | | |
+| Agent | AgentAPI 記憶體 | AgentAPI CPU（閒置） | AgentAPI 每回合 CPU | Agent 記憶體 | Agent 每回合 CPU |
+| --- | --- | --- | --- | --- | --- |
+| Claude Code | 31 MiB | 0.08% | 0.06–0.08 秒 | 230–285 MiB | 0.5–1.2 秒 |
+| Codex | 34 MiB | 0.07% | 0.09–0.13 秒 | 190–265 MiB | 0.3–0.8 秒 |
+| Pi | 31–32 MiB | 0.05% | 0.11–0.13 秒 | 120–130 MiB | 0.2–0.3 秒 |
+| `native-demo`（沒有 agent 行程） | 31 MiB | 0.05% | 0.01–0.02 秒 | | |
 
-- agent 自己的記憶體會在工作階段中變動：Claude Code 在啟動約一分半後成長到 314 MiB（它自己的
-  背景工作，其餘時間閒置只用 0.1% CPU），Codex 在第一個回合後釋放了約 55 MiB。
+- agent 自己的記憶體會在工作階段中變動：Claude Code 從閒置時的 230 MiB 在幾個回合中增加到
+  265–285 MiB；Codex 在第一個回合增加到 265 MiB，之後釋放了約 70 MiB。
 - AgentAPI 的程式碼（記憶體中約 17 MiB）由同一個執行檔啟動的實例共用：同時執行四個時，
-  每個約占 13–24 MiB（PSS）。
+  每個約占 17–21 MiB（PSS）。
 - 沒有計入：agent 啟動的 MCP 伺服器、它執行的指令、shell 終端機（開啟時有一個 shell）以及
   瀏覽器分頁。
 
@@ -288,13 +289,15 @@ codex-cli 0.163.0 和 Pi 1.3.0，在 Linux、4 核心的 Intel Xeon Silver 4210�
 `--state-db` 還原每個任務 100 KB 的對話。AgentAPI 4.2.0 會把整段對話放在記憶體，4.3.0 起只放最近
 100 個任務（[長對話](api.zh-TW.md#長對話)）：
 
-| 任務數 | 狀態資料庫 | 記憶體，4.2.0 | 記憶體，之後 | 第一次 `/events?sync=1` 重播，4.2.0 | 之後 |
+| 任務數 | 狀態資料庫 | 記憶體，4.2.0 | 記憶體，4.3.0 | 第一次 `/events?sync=1` 重播，4.2.0 | 4.3.0 |
 | --- | --- | --- | --- | --- | --- |
 | 0 | | 38 MiB | 34 MiB | 0.6 KB | 0.6 KB |
 | 250 | 26 MB | 71–86 MiB | 49–52 MiB | 11 MB | 0.9 MB |
 | 1,000 | 105 MB | 193–245 MiB | 55 MiB | 44 MB | 0.9 MB |
 
-剩下會增加的記憶體來自訊息和任務，每個任務幾 KB。
+剩下會增加的記憶體來自訊息和任務，每個任務幾 KB。訊息會完整留在記憶體裡，很長的提示詞也全部
+算在內：2026-11-13 量測一段 1,000 個任務、內容幾乎都是 90 KB 提示詞的對話（狀態資料庫 97 MB），
+AgentAPI 5.0.0 用了 148 MiB（250 個任務時 67 MiB），而第一次重播只有最近 20 個任務，維持在 1.8 MB。
 
-規劃主機時，每個工作階段請預留約 30 MiB 給 AgentAPI，再加上 agent 本身（Claude Code 或 Codex
+規劃主機時，每個工作階段請預留約 35 MiB 給 AgentAPI，再加上 agent 本身（Claude Code 或 Codex
 約 350 MiB，Pi 約 150 MiB），以及它的 MCP 伺服器和指令所需的資源。
