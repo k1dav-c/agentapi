@@ -3,7 +3,7 @@
 English | [繁體中文](chat-ui.zh-TW.md)
 
 Open `/chat` to use the chat UI embedded in the `agentapi` binary. It works on desktops and phones,
-and talks to the server through the [HTTP API](../README.md#http-api-reference).
+and talks to the server through the [HTTP API](api.md#http-api-reference).
 
 Screenshots and animations show AgentAPI v3.1.0 running `native-demo` on a sample site. The demo's
 replies, tool results, models and usage are simulated. A blue dot marks the pointer and clicks. To
@@ -30,7 +30,7 @@ reproduce the captures, use [scripts/capture-docs.mjs](../scripts/capture-docs.m
 
 ![The chat with two finished tasks: prompts, tool calls, thinking notes and the composer](screenshots/chat-desktop.png)
 
-- **Header.** The agent's mark and type, the session name and the AgentAPI version. On the right:
+- **Header.** The agent's mark (the logo of Claude, of OpenAI for Codex, or of Pi; a square for other agents) and type, the session name and the AgentAPI version. On the right:
   the status (Ready, Working with a timer, or Needs you; click it for the
   [session details](#session-details-and-alerts)), the tokens used so far, and buttons for
   [search](#search), the [shell terminal](#shell-terminal), the [Session Explorer](#session-explorer)
@@ -39,7 +39,7 @@ reproduce the captures, use [scripts/capture-docs.mjs](../scripts/capture-docs.m
   and how long it took.
 - **Composer.** The message box and its toolbar: the permission mode, the model and
   reasoning effort, and how full the context is; then the attachment button, more input options
-  and the send button. The line under it lists the keys.
+  and the send button. A strip above it shows what the agent is doing; the line under it lists the keys.
 - The ↑ and ↓ buttons at the bottom right jump to the previous and the next task.
 - At the end of the transcript, the chat follows what arrives. Scrolled up, you stay where you are:
   the agent's reply and queued messages going out don't move you, and the jump-to-end button counts
@@ -50,10 +50,10 @@ reproduce the captures, use [scripts/capture-docs.mjs](../scripts/capture-docs.m
 ## Tasks and the transcript
 
 Every message you send starts a task. A task shows your prompt in a tinted block labelled "You",
-then what the agent did, in order: its reply in Markdown, a row for each tool call, and its
+then the agent's logo and name, and what it did, in order: its reply in Markdown, a row for each tool call, and its
 thinking. The task's header shows its number and state (Queued, Working, Waiting for you, Done,
 Failed or Limit reached), a Stop button while it works, and its ⋯ menu. The server's
-[task](../README.md#tasks) determines the state. Failed means the agent reported an error or
+[task](api.md#tasks) determines the state. Failed means the agent reported an error or
 exited; hover to see the first error. Limit reached means a usage limit stopped it; hover for the
 agent's message. The server also assigns tool calls and thinking to tasks.
 
@@ -68,7 +68,7 @@ calls made during the task, including subagents, at provider list prices. Calls 
 such as compaction, don't count toward a task.
 
 Subscriptions aren't billed this API-equivalent cost. Hover for calls and tokens. Costs refresh
-at the end of a turn and every 15 seconds during it. See [Session costs](../README.md#session-costs)
+at the end of a turn and every 15 seconds during it. See [Session costs](agents.md#session-costs)
 for the calculation and price configuration.
 
 ![A task's time rail: its start time, duration and cost](screenshots/task-cost.png)
@@ -78,9 +78,9 @@ for the calculation and price configuration.
 ![An expanded tool call with its input and its result](screenshots/tool-call.png)
 
 A tool call takes one row: its command (`$ ls`) or the tool's name, its state (waiting for approval,
-an error, a failed command's exit code) and how long it took. Click the row for the tool's input and
+an error, a failed command's exit code), how long it took and a preview of its result. Click the row for the tool's input and
 its whole result. File names on the row, from the tools that read, write or edit files, open the
-[file viewer](#files). An expanded call that changed a file shows the change as a diff, with the raw
+[file viewer](#files). An expanded call lists its files and shows its change as a diff, with the raw
 input a click away. Tool results that are images (Claude Code reading a screenshot, Codex's
 `view_image`) show as thumbnails that open in full size.
 
@@ -144,7 +144,7 @@ earlier tasks to search them too.
 Enter sends; Shift+Enter starts a new line. The paperclip attaches files of up to 100 MB each, and
 pasting an image attaches it too (pasted text stays text); an image over 10 MB reaches the agent as
 its path rather than as an image. Attachments show in the composer, images
-as thumbnails that open in full size, and can be removed before you send.
+as thumbnails that open in full size (in sent messages too), and can be removed before you send.
 
 ![The composer with an image attached](screenshots/attachments.png)
 
@@ -178,7 +178,7 @@ The send menu offers three modes:
 - **Interrupt & send** (⌘/Ctrl+Shift+Enter): stop this turn, then send it.
 
 The red button next to the send button, and the task's Stop button, interrupt the turn. While the
-agent waits for an answer to a request, a new message queues behind it.
+agent waits for an answer to a request, a new message queues behind it, marked *held until you answer the agent*.
 
 ![A long turn: a task queued, another steered into the turn, then Stop](screenshots/demo-queue.gif)
 
@@ -238,7 +238,7 @@ model supports. Codex takes a new model or effort with its next turn.
 ![The model menu of Claude Code: its own models, then those of two providers from the hub, each under its name and host](screenshots/model-providers.png)
 
 For Claude Code and Codex, the menu then lists the models of each
-[model provider](../README.md#model-providers), under the provider's monogram, name and host; a
+[model provider](providers.md), under the provider's monogram, name and host; a
 provider the hub keeps is marked **hub**. A line under them says what a switch does with this
 agent. Picking a provider's model switches the agent to that provider, and picking one of the
 agent's own models switches it back. The conversation goes on: Claude Code switches from its next
@@ -281,7 +281,7 @@ tab with notifications on shows a notification.
 ![A task the API's gateway failed with a 502: the card counting down to the first of 15 retries, with Retry now and Cancel, and a task held in the queue](screenshots/retry-card.png)
 
 When a turn fails on an API error that may pass, such as a 502 from a gateway or an overloaded API,
-AgentAPI tries it again by itself (see [Transient API errors](../README.md#transient-api-errors)).
+AgentAPI tries it again by itself (see [Transient API errors](agents.md#transient-api-errors)).
 A card above the composer says what the API returned, with the agent's message, and counts down
 to the retry: *Retrying in 0:28 (1 of 15)*. The queued tasks wait, marked *held until the failed task
 is tried again*. **Retry now** tries at once, and **Cancel** gives up on the task and lets the queue
@@ -335,7 +335,7 @@ to run (`claude auth login`, `codex login --device-auth`, or Pi's `/login`) and 
 run it as. Codex signs in with a device code: open the link it prints, on any device, and enter its
 one-time code, so no browser has to run where AgentAPI runs. **Run in terminal** runs it in the
 [shell terminal](#shell-terminal); **Check again** checks right away. AgentAPI also tries again
-every 5 seconds, and messages wait in the queue meanwhile. (The screenshot shows `dev-machine` and
+every 5 seconds, and messages wait in the queue meanwhile, marked *held until the agent is logged in*. (The screenshot shows `dev-machine` and
 `dev` in place of the real host and user.)
 
 ## Files
@@ -349,7 +349,8 @@ reloads the file; on a phone the viewer takes the whole screen.
 
 An agent started in a home directory may name files relative to a repository below it, sometimes
 with the wrong case. If that path doesn't resolve in the working directory, the viewer searches
-below it. A single match opens with a note showing the original path; multiple matches are listed
+below it (`GET /files/find`). It leaves out hidden directories, dependencies and Go's module cache
+unless the path goes into them, and stops after 50,000 entries or 2 seconds. A single match opens with a note showing the original path; multiple matches are listed
 for you to choose from.
 
 ![Opening index.html and its preview, then the diff of README.md](screenshots/demo-files.gif)
@@ -358,7 +359,7 @@ for you to choose from.
 
 ![The file viewer on index.html, with line numbers and syntax highlighting](screenshots/file-viewer.png)
 
-**File** shows the file with line numbers and syntax highlighting, up to 1 MiB.
+**File** shows the file with line numbers and syntax highlighting, up to 1 MiB (`GET /files/content`).
 
 ### The preview
 
@@ -367,24 +368,24 @@ HTML, Markdown and SVG files have a **Preview** tab, and an image file shows as 
 ![The preview of index.html: the page with its stylesheet and logo](screenshots/file-preview.png)
 
 An HTML page renders with the stylesheets, scripts, images, fonts and media it refers to by
-relative path inlined (up to 4 MiB each, 16 MiB in all; a note lists what was left out). It runs in
+relative path inlined (`GET /files/preview`; up to 4 MiB each, 16 MiB in all; a note lists what was left out). It runs in
 a sandboxed frame without an origin of its own: its scripts run, but they can't reach the chat, its
 session or the API, and storage and cookies last only while the preview is open. Its
 Content-Security-Policy lets it load what it refers to but send nothing: no requests, sockets or
-form submissions.
+form submissions. Script modules that import other files don't load.
 
 ![The preview of a Markdown file with a heading, an image, a list, a table and code](screenshots/file-markdown.png)
 
 A Markdown file opens on its preview. Relative images load from the working directory, and relative
 links open their file in the viewer (`#L12` at its line). PNG, JPEG, GIF, WebP, BMP, ICO and SVG
-files show as images.
+files show as images (`GET /files/image`).
 
 ### The diff
 
 ![The Diff tab: the uncommitted changes to README.md](screenshots/file-diff.png)
 
 **Diff** shows the change the tool call made (**This change**) and the file's uncommitted changes
-against `HEAD` (**Uncommitted changes**). The diff reads only the git repository: no diff driver,
+against `HEAD` (**Uncommitted changes**), up to 1 MiB (`GET /files/diff`). The diff reads only the git repository: no diff driver,
 textconv or fsmonitor of the repository or the user runs.
 
 ## Session Explorer
@@ -414,7 +415,7 @@ For Claude Code, Codex and Pi, this tab lists sessions in the working directory 
 agent's logs, with names, first messages, message counts, last-change times and costs. A card above
 the list totals session and subagent costs for today, the last 7 and 30 days (including today, in
 your time zone), and all time. These are API-equivalent costs at list prices; hover for tokens.
-Once the agent has used a [model provider](../README.md#model-providers) besides its own, the card
+Once the agent has used a [model provider](providers.md) besides its own, the card
 lists **By provider** what the sessions spent on each, the agent's own as **Own provider** and the
 others by ID: calls, tokens and cost. A gateway's models often have no known price: a provider
 whose calls have none says **no price** rather than `$0.00`, and one whose calls only partly have
@@ -447,7 +448,7 @@ removed but never read back. **Delivery and payload** contains the timeout, atte
 survive a restart unless new webhook flags override them. **Send test event** sends `webhook.test`
 to the saved URL and shows the response. **Turn off** clears the URL. Individual events selected
 with `--webhook-events`, such as `task.completed` alone, remain listed even if they don't cover a
-whole group. See [Webhooks](../README.md#webhooks) for events and payloads.
+whole group. See [Webhooks](api.md#webhooks) for events and payloads.
 
 ## Lineage
 
@@ -458,7 +459,13 @@ there are and how many still work. It opens the Lineage panel, which lists each 
 task, kind, state and time. Choosing one shows what it did the way the transcript shows a task: its
 thinking, tool calls and answer, updated while it works. The **Steps** button on the Agent (or
 spawn_agent) tool call that started a subagent opens it directly. The steps come from the
-subagents' own logs, so a session opened from the Session tab shows its subagents too.
+subagents' own logs (Claude Code keeps them beside the session's log), so a session opened from the
+Session tab shows its subagents too; a copy of a session starts without them. `GET /subagents`
+lists the subagents, and `GET /subagents/{id}` returns one's task and messages.
+
+A Claude Code subagent's state comes from its Agent tool call. Codex's spawn call returns before the
+subagent finishes, so AgentAPI reads its state from the subagent's log. Codex encrypts the task it gives a
+subagent; the panel labels the subagent with its task name and nickname.
 
 ## Shell terminal
 
@@ -494,7 +501,7 @@ While the tab is in the background, its icon shows an amber dot when the agent n
 while it works and a green dot when a task finishes. With notifications on, the browser also shows
 "*Agent* needs you" or "*Agent* finished" (on an https page only). With the sound on (**Play a
 sound**), a chime plays while you look away from the page, rising when the agent needs you and
-falling when it finishes; it works over plain http too. In a chat the hub opens, the hub chimes for
+falling when it finishes; it works over plain http too. The hub's bell offers the same notifications and sound. In a chat the hub opens, the hub chimes for
 an agent that needs you, and the chat only when it finishes.
 
 **Add to an AgentAPI hub…** has the steps to copy: run a hub, join this machine to it, open it.
@@ -505,8 +512,8 @@ it says which.
 
 When a task ends while the chat is visible, or the chat becomes visible after one ended, the chat tells
 the server you saw it (`POST /tasks/seen`), so a dashboard that watches many AgentAPIs, `agentapi
-list` and other tabs stop showing the task as unread (see the README's
-[Watching many instances](../README.md#watching-many-instances)).
+list` and other tabs stop showing the task as unread (see
+[Watching many instances](api.md#watching-many-instances)).
 
 The agent's warnings and errors (a turn that failed, a setting it ignores) show as notifications in
 the corner that stay until you close them. A closed one stays closed after a reload, although the
@@ -536,7 +543,7 @@ While the keyboard is up, the page ends above it, so the composer and the key ba
 
 ![The hub on a phone](screenshots/hub-phone.png)
 
-A [hub](../README.md#running-a-hub) (`agentapi hub serve`) serves this chat for every AgentAPI it
+A [hub](api.md#running-a-hub) (`agentapi hub serve`) serves this chat for every AgentAPI it
 watches. Its list puts the agents you pin on top, then what needs you first by group or the latest
 change first; By machine puts each machine's agents in one card, a tab each, in either order. Each state has a glyph of its own, and each row says what the agent waits for (the
 approval's command, the question) or does; search and chips (state, agent) filter the list. On a desktop, an
@@ -563,7 +570,7 @@ fetches what changed. A stream that ends is opened again at once, without a noti
 including an error page from a proxy in front of AgentAPI, is tried again after 1 s, then up to
 every 30 s; a bar says when, with **Reconnect now**. The server sends a heartbeat every 15 s, and a
 stream silent for 45 s counts as lost even while the tab is in front (a phone that switched
-networks). Going back online or back to the tab reconnects at once. The status and page title show
-the connection state. On reopening, the chat shows the IndexedDB-cached transcript immediately
+networks). Going back online or back to the tab reconnects at once. The page title and the header show
+the current task, the agent's status and the connection state. On reopening, the chat shows the IndexedDB-cached transcript immediately
 (the tasks it had loaded), then fetches changes. The terminal reconnects the same way, and like the chat, a terminal whose
 sign-in ended asks for the token again.

@@ -390,7 +390,7 @@ type Factory func(resume Resume) (Adapter, error)
 
 ### 模型供應商
 
-Claude Code 和 Codex 可以改用自己以外的模型供應商（見[模型供應商](../README.zh-TW.md#模型供應商)）：
+Claude Code 和 Codex 可以改用自己以外的模型供應商（見[模型供應商](providers.zh-TW.md)）：
 例如 LiteLLM gateway 這類端點，定義在設定檔的 `providers` 區段或 hub 上。
 
 ```mermaid

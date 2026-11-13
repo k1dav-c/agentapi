@@ -92,7 +92,7 @@ for any agent.
 Steering appends to the reply, and Stop ends the turn as interrupted. The adapter lives in
 `lib/native/demo`.
 
-The demo has no [model providers](../README.md#model-providers), even posing as Claude Code: the
+The demo has no [model providers](../docs/providers.md), even posing as Claude Code: the
 model menu's provider groups need a real Claude Code or Codex. The hub's Providers tab works with
 the hub above.
 

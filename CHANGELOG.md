@@ -72,7 +72,7 @@
   next API call, and starts again on its session to go back to its own provider; Codex starts again
   on the provider, in a new thread that gets the conversation's messages as text, since an OpenAI
   thread holds items other providers refuse. See
-  [Model providers](README.md#model-providers).
+  [Model providers](docs/providers.md).
 - The hub keeps model providers in its settings (**Providers** tab, `GET`/`PUT /api/providers`,
   `providers.json`) for every machine that reports to it. Each AgentAPI gets them with their keys
   when it starts and every minute after (`POST /api/providers/sync`, signed with the hub's secret,
@@ -2454,7 +2454,7 @@ No changes a user sees: a lint fix of v0.20.3.
 ### Breaking changes
 
 - When running agentapi behind a reverse proxy, you may need to set `--allowed-hosts`.
-  See the [README](./README.md) for configuration.
+  See the [README](README.md) for configuration.
 
 ### New features
 

@@ -21,7 +21,7 @@ The tests take a turn, restart the server in place with `SIGUSR2`, and check tha
 (`server_id`) keeps the conversation, the agent's session and the API token. They need a Unix
 system.
 
-`providers_test.go` gives the server a config file with two [model providers](../README.md#model-providers):
+`providers_test.go` gives the server a config file with two [model providers](../docs/providers.md):
 a gateway the test serves, which lists two models, and one that never answers. `fakeclaude` tracks
 the provider that its environment and `apply_flag_settings` name, and the model that `set_model`
 picks; on a provider, its reply says which: `Echo: <message> [via <base URL> on <model>]`. The test checks
