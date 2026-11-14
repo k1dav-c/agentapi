@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -25,12 +26,17 @@ const maxProviders = 50
 type providerView struct {
 	provider.Provider
 	HasKey bool `json:"has_key" doc:"The provider has an API key, which the hub doesn't show."`
+	// OpenRouter are the price choices kept in providers.json.
+	OpenRouter map[string]string `json:"openrouter,omitempty" doc:"The price picked for a model, by its ID: an OpenRouter model ID, or none for no price. A model without one is matched by name (auto)."`
+	// ModelPrices are what the hub resolved of them (prices.go).
+	ModelPrices []providerModelPrice `json:"model_prices" nullable:"false" doc:"The price of each of the provider's models: those it defines, else those it listed at the last price refresh, then those with a choice."`
 }
 
 // providersBody is GET and PUT /api/providers.
 type providersBody struct {
 	Revision  string         `json:"revision" doc:"The hub's opaque optimistic-concurrency token for the provider list."`
 	Providers []providerView `json:"providers" nullable:"false"`
+	Prices    priceStatus    `json:"prices" doc:"Where the hub's copy of OpenRouter's prices stands."`
 }
 
 // providerChange is a provider of PUT /api/providers.
@@ -38,6 +44,8 @@ type providerChange struct {
 	provider.Provider
 	// APIKey nil keeps the key only while the provider's endpoints are unchanged.
 	APIKey *string `json:"api_key,omitempty" doc:"The provider's API key; missing keeps it at unchanged endpoints, empty removes it."`
+	// OpenRouter nil keeps the provider's choices.
+	OpenRouter map[string]string `json:"openrouter,omitempty" doc:"The price picked for a model, by its ID: an OpenRouter model ID, or none; missing keeps the provider's choices, an empty object removes them."`
 }
 
 // providersChange is the body of PUT /api/providers.
@@ -56,6 +64,8 @@ type providerStore struct {
 	mu       sync.Mutex
 	list     []provider.Provider
 	revision uint64
+	// openrouter are the providers' price choices, by provider ID.
+	openrouter map[string]map[string]string
 }
 
 // newProviderStore reads the providers kept beside statePath.
@@ -88,13 +98,20 @@ func newProviderStore(statePath string) (*providerStore, error) {
 	for _, raw := range stored.Providers {
 		var p struct {
 			provider.Provider
-			APIKey string `json:"api_key"`
+			APIKey     string            `json:"api_key"`
+			OpenRouter map[string]string `json:"openrouter"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("read %s: %w", s.path, err)
 		}
 		p.Provider.APIKey = p.APIKey
 		s.list = append(s.list, p.Provider)
+		if len(p.OpenRouter) > 0 {
+			if s.openrouter == nil {
+				s.openrouter = map[string]map[string]string{}
+			}
+			s.openrouter[p.ID] = p.OpenRouter
+		}
 	}
 	return s, nil
 }
@@ -122,11 +139,12 @@ func providerAPIKey(saved []provider.Provider, p provider.Provider, supplied *st
 	return "", false
 }
 
-// snapshot returns one coherent list/revision pair.
-func (s *providerStore) snapshot() ([]provider.Provider, string) {
+// state returns one coherent list, price choices and revision; the
+// choices' maps aren't changed afterwards, only replaced.
+func (s *providerStore) state() ([]provider.Provider, map[string]map[string]string, string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return slices.Clone(s.list), strconv.FormatUint(s.revision, 10)
+	return slices.Clone(s.list), maps.Clone(s.openrouter), strconv.FormatUint(s.revision, 10)
 }
 
 // replace checks change and keeps it if expected is still current. A missing
@@ -142,6 +160,7 @@ func (s *providerStore) replace(expected string, change []providerChange) (provi
 		return providersBody{}, errProviderRevision
 	}
 	list := make([]provider.Provider, 0, len(change))
+	choices := map[string]map[string]string{}
 	for _, c := range change {
 		p := c.Provider
 		var changed bool
@@ -156,36 +175,48 @@ func (s *providerStore) replace(expected string, change []providerChange) (provi
 			return providersBody{}, fmt.Errorf("%w: %s is listed twice", provider.ErrInvalid, p.ID)
 		}
 		list = append(list, p)
+		chosen := s.openrouter[p.ID]
+		if c.OpenRouter != nil {
+			if err := validChoices(p.ID, c.OpenRouter); err != nil {
+				return providersBody{}, err
+			}
+			chosen = maps.Clone(c.OpenRouter)
+		}
+		if len(chosen) > 0 {
+			choices[p.ID] = chosen
+		}
 	}
 	next := s.revision + 1
 	if next == 0 {
 		return providersBody{}, errors.New("the model-provider revision space is exhausted")
 	}
-	if err := s.save(list, next); err != nil {
+	if err := s.save(list, choices, next); err != nil {
 		return providersBody{}, err
 	}
 	s.list = list
+	s.openrouter = choices
 	s.revision = next
-	body := viewProviders(list)
+	body := viewProviders(list, choices)
 	body.Revision = strconv.FormatUint(next, 10)
 	return body, nil
 }
 
 // save writes list and its next revision, keys included, in one atomic file.
-func (s *providerStore) save(list []provider.Provider, revision uint64) error {
+func (s *providerStore) save(list []provider.Provider, choices map[string]map[string]string, revision uint64) error {
 	if s.path == "" {
 		return nil
 	}
 	type stored struct {
 		provider.Provider
-		APIKey string `json:"api_key,omitempty"`
+		APIKey     string            `json:"api_key,omitempty"`
+		OpenRouter map[string]string `json:"openrouter,omitempty"`
 	}
 	out := struct {
 		Revision  string   `json:"revision"`
 		Providers []stored `json:"providers"`
 	}{Revision: strconv.FormatUint(revision, 10), Providers: []stored{}}
 	for _, p := range list {
-		out.Providers = append(out.Providers, stored{Provider: p, APIKey: p.APIKey})
+		out.Providers = append(out.Providers, stored{Provider: p, APIKey: p.APIKey, OpenRouter: choices[p.ID]})
 	}
 	data, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {
@@ -194,21 +225,22 @@ func (s *providerStore) save(list []provider.Provider, revision uint64) error {
 	return atomicfile.Write(s.path, ".providers.json-*", data)
 }
 
-func viewProviders(list []provider.Provider) providersBody {
+func viewProviders(list []provider.Provider, choices map[string]map[string]string) providersBody {
 	body := providersBody{Providers: []providerView{}}
 	for _, p := range list {
 		redacted, hasKey := p.Redacted()
-		body.Providers = append(body.Providers, providerView{Provider: redacted, HasKey: hasKey})
+		body.Providers = append(body.Providers, providerView{Provider: redacted, HasKey: hasKey, OpenRouter: choices[p.ID]})
 	}
 	return body
 }
 
-// getProviders answers the model providers, without their keys (GET
-// /api/providers).
+// getProviders answers the model providers, without their keys, with
+// their models' prices (GET /api/providers).
 func (h *Hub) getProviders(w http.ResponseWriter, _ *http.Request) {
-	list, revision := h.providers.snapshot()
-	body := viewProviders(list)
+	list, choices, revision := h.providers.state()
+	body := viewProviders(list, choices)
 	body.Revision = revision
+	h.withPrices(&body)
 	writeJSON(w, http.StatusOK, body)
 }
 
@@ -236,13 +268,14 @@ func (h *Hub) setProviders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.logger.Info("The model providers changed", "providers", len(kept.Providers))
+	h.withPrices(&kept)
 	writeJSON(w, http.StatusOK, kept)
 }
 
-// syncProviders answers an AgentAPI the model providers, keys included,
-// sealed with the hub's secret (POST /api/providers/sync). The request is
-// signed with the secret, as webhook events are: every machine that joined
-// the hub gets the keys.
+// syncProviders answers an AgentAPI the model providers, keys and their
+// models' prices included, sealed with the hub's secret (POST
+// /api/providers/sync). The request is signed with the secret, as webhook
+// events are: every machine that joined the hub gets the keys.
 func (h *Hub) syncProviders(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 64<<10))
 	if err != nil {
@@ -262,7 +295,11 @@ func (h *Hub) syncProviders(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, `send {"nonce": ...}`)
 		return
 	}
-	sealed, err := provider.Seal(h.config.Secret, h.providers.get())
+	list, choices, _ := h.providers.state()
+	for i, p := range list {
+		list[i].Prices = h.prices.prices(p, choices[p.ID])
+	}
+	sealed, err := provider.Seal(h.config.Secret, list)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to seal the model providers")
 		return

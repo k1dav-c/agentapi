@@ -75,7 +75,7 @@ flowchart TB
 | `lib/native/` | Native transport：`Conversation`、`Adapter` 與 `Sink` 的約定、請求、設定、用量、登入、暫停佇列的狀態（`hold.go`：用量限制停下的回合或等待重試的失敗回合）、它的 `Policy`（`policy.go`：繼續、重試與重新啟動的間隔）、`ClassifyFailure`（失敗回合的停止原因），以及切換模型供應商（`provider.go`） |
 | `lib/agentstate/` | Native agent 回報、API 提供的值：功能、登入、設定、用量、請求、用量限制停止與重試等待，以及 `ConversationState`（observer 整份收到的對話狀態），連同重新啟動後保留的 `StoredState`。它是末端套件（只用 huma 和 `lib/util`），提供這些值的套件因此不必依賴 `lib/native` |
 | `lib/native/claude`、`codex`、`pi` | 每種 agent 協定各一個 adapter |
-| `lib/provider/` | agent 可以用來取代自己供應商的[模型供應商](#模型供應商)：`Provider` 和它的檢查、`Source`（設定檔的 `providers` 區段，有變動就重新讀取，接著是 hub 的；供應商列出的模型保留 10 分鐘），以及 `HubSync`：每分鐘向 hub 取得供應商，以 hub 的 secret 加密（`Seal`、`Open`） |
+| `lib/provider/` | agent 可以用來取代自己供應商的[模型供應商](#模型供應商)：`Provider` 和它的檢查、模型價格（`prices.go`：`ModelPrice`、`PriceTable`、`Source.Prices`）、`Source`（設定檔的 `providers` 區段，有變動就重新讀取，接著是 hub 的；供應商列出的模型保留 10 分鐘），以及 `HubSync`：每分鐘向 hub 取得供應商，以 hub 的 secret 加密（`Seal`、`Open`） |
 | `lib/providerlog/` | 供應商帳本，設定檔旁的 `provider-ledger.jsonl`：記錄每個 Claude Code 或 Codex 工作階段從什麼時候起用哪個[模型供應商](#模型供應商)，Claude Code 的呼叫靠它歸到供應商 |
 | `lib/native/agentio` | 這些 adapter 執行 agent 時共用的部分：行程與它的迴圈（`Host`）、寫入 stdin、把回應對應到等待中的請求、agent 請求的回答進度（`Answer`）、寬鬆解碼與協定變動警告、快照節流 |
 | `lib/native/demo` | `native-demo`，開發聊天介面用的模擬 agent |
@@ -83,7 +83,7 @@ flowchart TB
 | `lib/native/procutil` | 子行程：行程群組（process group）與正常關閉流程 |
 | `lib/statedb/` | `--state-db` 的 SQLite 持久保存 |
 | `lib/instanceapi/` | AgentAPI 和同時監看多個 AgentAPI 的用戶端之間的約定：它是誰（`WebhookInstance`，出現在 webhook 事件、摘要和登記檔中，含它的 `AgentType`）、它的摘要、webhook 的外層格式和簽章（`Sign`、`Verify`），以及 hub 對每個實例顯示的狀態（`StateOf`）。它只匯入 `lib/agentstate` 和 `lib/util` |
-| `lib/hub/` | `agentapi hub serve`，建立在 `lib/instanceapi` 和 `lib/httpmw` 上，不經過伺服器：實例、頁面上設定的群組和釘選、每個實例這一列顯示的內容最近一次變動的時間，以及 hub 看到它工作的區段（`store.go`、`work.go`，由 `persist.go` 保存在檔案中）、最近一年逐小時的活動（`activity.go`、`activity.json`、`GET /api/activity`：工作時間，以及摘要 `spend.hours` 裡每個 scope 的花費）、我的最愛提示（`favorites.go`，`GET`／`PUT /api/favorites`，屬於 hub 的設定，保存在同一個檔案）、模型供應商（`providers.go`、`providers.json`、`GET`／`PUT /api/providers`、給編輯器 Check connection 用的 `POST /api/providers/check`，以及給 AgentAPI 用的 `POST /api/providers/sync`）、傳輸型別的 schema（`schema.go`、`hub-schema.json`，給頁面的型別用）、有簽章的 webhook 接收端（`webhook.go`）、每個實例的摘要串流（`watch.go`）、登入、瀏覽器的事件串流，以及到實例的代理（`hub.go`、`proxy.go`），還有主機怎麼加入（`join.go`：`GET /api/join` 和啟動 log 列出的位址）；使用說明見 [hub.zh-TW.md](hub.zh-TW.md) |
+| `lib/hub/` | `agentapi hub serve`，建立在 `lib/instanceapi` 和 `lib/httpmw` 上，不經過伺服器：實例、頁面上設定的群組和釘選、每個實例這一列顯示的內容最近一次變動的時間，以及 hub 看到它工作的區段（`store.go`、`work.go`，由 `persist.go` 保存在檔案中）、最近一年逐小時的活動（`activity.go`、`activity.json`、`GET /api/activity`：工作時間，以及摘要 `spend.hours` 裡每個 scope 的花費）、我的最愛提示（`favorites.go`，`GET`／`PUT /api/favorites`，屬於 hub 的設定，保存在同一個檔案）、模型供應商（`providers.go`、`providers.json`、`GET`／`PUT /api/providers`、給編輯器 Check connection 用的 `POST /api/providers/check`，以及給 AgentAPI 用的 `POST /api/providers/sync`）和來自 OpenRouter 的模型價格（`prices.go`、`openrouter.go`、`openrouter.json`、`POST /api/providers/prices`、`GET /api/providers/openrouter`）、傳輸型別的 schema（`schema.go`、`hub-schema.json`，給頁面的型別用）、有簽章的 webhook 接收端（`webhook.go`）、每個實例的摘要串流（`watch.go`）、登入、瀏覽器的事件串流，以及到實例的代理（`hub.go`、`proxy.go`），還有主機怎麼加入（`join.go`：`GET /api/join` 和啟動 log 列出的位址）；使用說明見 [hub.zh-TW.md](hub.zh-TW.md) |
 | `lib/dispatch/` | hub 的 issue 派工，由 `lib/hub` 掛上：有 launcher 回報的主機（`host.*` 事件；主機名稱綁定第一次帶來的 launcher token）、job 與各次 run 的花費（`task.*` 事件）和最近 50 則送給 agent 的訊息（`send`，來自 hub 的頁面、review 或 `/agent` 留言）、`POST /api/dispatch`（`start` 在 job 進入 `starting` 時就回應，hub 在背景呼叫 launcher，並記下這次啟動直到有結果；沒收到回應時從主機下一次回報接回）、GitHub App，保存在 `dispatch.json` 和 `github-app.json`。`Subscribe` 與 `Board` 讓 hub 的串流在每次變動後送出主機和 job（`dispatch` 事件）；規格見 [issue-dispatch.zh-TW.md](specs/issue-dispatch.zh-TW.md) |
 | `lib/host/` | `agentapi host`，每台主機上的 launcher：設定（設定檔的 `host` 區段）、它有或會 clone 的 repo、hub 每啟動一個 job 就建一個 git worktree 和一個 AgentAPI（結束後重新啟動，記在 `jobs.json`）、給 hub 呼叫且需要 token 的 API（`server.go`）、送給 hub 的 `host.*` 事件與 heartbeat（`hub.go`），以及經由 unix socket 交給 job 的 `git`、`gh` 的 GitHub token（`credentials.go`） |
 | `lib/github/` | hub 的 GitHub App，只依賴標準函式庫：以 manifest 註冊、App 的 JWT、限單一 repo（快取到到期前 5 分鐘）或整個安裝的 installation token，以及派工以 App 身分呼叫的 REST API |
@@ -308,7 +308,8 @@ type Factory func(resume Resume) (Adapter, error)
   （`Replacement.Start`）失敗時不會重試：呼叫端會拿到錯誤。
 - **花費。** `sessions.Store.Costs` 從同樣的紀錄讀出目錄中每個工作階段（含 sub agent）的模型呼叫
   （`GET /sessions`、`GET /cost`）：Claude Code 的 assistant 訊息（每個 message id 一次）、Codex 的
-  token 計數、Pi 回報的金額。`lib/pricing` 為每次呼叫計價；Claude Code 的 `cost-state` 紀錄會把
+  token 計數、Pi 回報的金額。`lib/pricing` 為每次呼叫計價，送往供應商、且供應商有該模型價格的呼叫用那個價格
+  （見[價格](#模型供應商)）；Claude Code 的 `cost-state` 紀錄會把
   紀錄檔沒有列出的 token（壓縮）以同樣的價格補成未逐筆列出的呼叫；token 相同而金額不同時不補，
   只為每個模型記錄一次。每個呼叫都有它的模型供應商（見[各供應商的用量](#模型供應商)）：Codex 的來自
   紀錄檔，Claude Code 的來自供應商帳本；每次計算只讀帳本新增的部分，帳本有變動時也只重新歸屬紀錄有變的
@@ -453,6 +454,18 @@ flowchart LR
   每筆回報附加到帳本，因為對話是在持有鎖的情況下回報。`sessions.Store` 把 Claude Code 工作階段的每個
   呼叫（含 sub agent 的；分支複製的較早呼叫算在原本的工作階段）歸到該工作階段在呼叫當下或之前的最後
   一筆紀錄的供應商；在第一筆之前或沒有紀錄時，算 agent 自己的。Pi 沒有供應商，呼叫都算它自己的。
+- **價格。** 供應商帶有自己模型的價格（`Provider.Prices`，以模型 ID 為鍵，每百萬 token，附上 `source`）：
+  設定檔的 `prices`，或 hub 的價格，跟供應商一起加密傳送（`wireProvider.prices`，舊版 AgentAPI 會忽略；
+  舊版 hub 不送）。`sessions.Config.ProviderPrices`（`Source.Prices`）把 `provider.PriceTable` 交給花費的
+  計算；呼叫歸屬完成後，`atProviderPrices` 用供應商對該模型的價格替送往該供應商的呼叫計價，價格拿掉後，先前這樣
+  計價的呼叫改回 `lib/pricing` 的價格（和歸屬一樣做成副本）。計算會保留價格表的摘要（`pricesKey`）：摘要
+  改變時，即使沒有紀錄檔改變，所有工作階段都會重新計價。在 hub 上，`lib/hub/prices.go` 把 OpenRouter 的
+  清單（`openrouter.go`：30 秒內取得，每 token 的 `pricing` 換算成每百萬 token，沒有價格的模型和價格小於零的 router 略過）
+  存在 `providers.json` 旁邊的 `openrouter.json`；清單滿一天時重新取得（有供應商時每 10 分鐘檢查一次；
+  失敗後一小時再試），`POST /api/providers/prices` 也會重新取得；每次重新取得都會列出沒有定義模型的供應商的模型
+  （`provider.ListModels`）。每個模型的價格是 `providers.json` 替它選的 OpenRouter 模型（`openrouter`：
+  ID 或 `none`），否則是正規化名稱（小寫，去掉廠商前綴和 `-nvfp4` 這類精度後綴）與該模型相同的那個，只在
+  不含 `:`、不以 `~` 開頭的模型裡找，而且只有一個相同時才算。
 
 ## 事件與對話狀態
 
@@ -861,7 +874,7 @@ AgentAPI 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
 `lib/hub-issues.ts` 的看板模型上（依區塊排列的卡片、建議的 agent 與主機、時間軸），派工的呼叫在
 `lib/hub-dispatch.ts`，每個回應進來時都會檢查。hub 的 GitHub App 由 Issues 和設定的 GitHub 分頁共用一份
 （`lib/hub-github-store.ts`、`useHubGitHub`），頁面重新顯示時會再讀一次。設定的 Providers 分頁
-（`components/hub/providers-settings.tsx`，邏輯在 `lib/hub-providers.ts`）用來編輯模型供應商。主機和 job 隨串流的 `dispatch`
+（`components/hub/providers-settings.tsx`，邏輯在 `lib/hub-providers.ts`）用來編輯模型供應商，`components/hub/provider-prices.tsx` 顯示並選擇模型價格。主機和 job 隨串流的 `dispatch`
 事件送來，Issues 按鈕上的數字和清單上處理 issue 的 agent 的標籤（`HubListContext.jobs`）也用它；操作的
 回應會先顯示在看板上，直到串流裡的 job 一樣新為止。hub 的 API 不是用 huma 寫的，它的傳輸型別是產生出來的：
 `make gen` 從 Go 型別（`hub.Schema`）寫出 `lib/hub/hub-schema.json`，`bun run gen:api` 再從它寫出

@@ -51,10 +51,12 @@ type SyncResponse struct {
 	Proof  string `json:"proof,omitempty"`
 }
 
-// wireProvider is a provider with its key, as Seal seals it.
+// wireProvider is a provider with its key and its models' prices, as Seal
+// seals it. AgentAPIs before the prices ignore them.
 type wireProvider struct {
 	Provider
-	APIKey string `json:"api_key,omitempty"`
+	APIKey string                `json:"api_key,omitempty"`
+	Prices map[string]ModelPrice `json:"prices,omitempty"`
 }
 
 // sealKey derives the key that seals providers from the hub's secret.
@@ -66,7 +68,7 @@ func sealKey(secret string) ([]byte, error) {
 func Seal(secret string, providers []Provider) (string, error) {
 	wire := make([]wireProvider, 0, len(providers))
 	for _, p := range providers {
-		wire = append(wire, wireProvider{Provider: p, APIKey: p.APIKey})
+		wire = append(wire, wireProvider{Provider: p, APIKey: p.APIKey, Prices: p.Prices})
 	}
 	plain, err := json.Marshal(wire)
 	if err != nil {
@@ -105,7 +107,7 @@ func Open(secret, sealed string) ([]Provider, error) {
 	out := make([]Provider, 0, len(wire))
 	for _, w := range wire {
 		p := w.Provider
-		p.APIKey = w.APIKey
+		p.APIKey, p.Prices = w.APIKey, w.Prices
 		out = append(out, p)
 	}
 	return out, nil

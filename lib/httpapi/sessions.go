@@ -87,10 +87,10 @@ func (s *Server) listSessions(_ context.Context, _ *struct{}) (*SessionsResponse
 	resp := &SessionsResponse{}
 	resp.Body.Sessions = make([]SessionInfo, 0, len(list))
 	for _, session := range list {
-		resp.Body.Sessions = append(resp.Body.Sessions, SessionInfo{SessionSummary: session, Cost: costs.Cost(session.ID)})
+		resp.Body.Sessions = append(resp.Body.Sessions, SessionInfo{SessionSummary: session, Cost: s.namedCost(costs.Cost(session.ID))})
 	}
 	resp.Body.Current = s.native.SessionRef()
-	resp.Body.TotalCost = costs.Total
+	resp.Body.TotalCost = s.namedCost(costs.Total)
 	return resp, nil
 }
 
@@ -112,7 +112,7 @@ func (s *Server) getCost(_ context.Context, input *CostRequest) (*CostResponse, 
 			calls = found
 		}
 	}
-	resp.Body.Cost = sessions.CostOf(calls)
+	resp.Body.Cost = s.namedCost(sessions.CostOf(calls))
 	resp.Body.TotalCalls = len(calls)
 	resp.Body.Digest = sessions.CallsDigest(calls)
 	resp.Body.Calls = calls
@@ -123,6 +123,17 @@ func (s *Server) getCost(_ context.Context, input *CostRequest) (*CostResponse, 
 		resp.Body.Calls = calls[input.From:]
 	}
 	return resp, nil
+}
+
+// namedCost is cost with the names of its providers, as the server's
+// providers have them now.
+func (s *Server) namedCost(cost sessions.SessionCost) sessions.SessionCost {
+	return cost.WithProviderNames(func(id string) string {
+		if p, ok := s.providers.Lookup(id); ok {
+			return p.Name
+		}
+		return ""
+	})
 }
 
 // resumeSession replaces the agent with one that opens another of its

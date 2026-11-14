@@ -53,6 +53,22 @@ describe("SpendCard by provider", () => {
     expect(container.querySelector("[data-provider=gateway]")?.getAttribute("title")).toContain("Some calls were to a model without a known price");
   });
 
+  test("a provider goes by the name the server gave it, else by its ID", async () => {
+    const container = await show(
+      cost([
+        {...onProvider("gateway", 16.19, 3, 2_000_000), name: "LiteLLM gateway"},
+        {...onProvider("vllm", 0, 1, 900, false), name: ""},
+        onProvider("default", 1, 1, 1000),
+      ]),
+    );
+    expect(rows(container)).toEqual([
+      "LiteLLM gateway3 calls · 2M tokens$16.19",
+      "vllm1 call · 900 tokensno price",
+      "Own provider1 call · 1k tokens$1.00",
+    ]);
+    expect(container.querySelector("[data-provider=gateway]")).not.toBeNull();
+  });
+
   test("hidden while every call went to the agent's own provider", async () => {
     const container = await show(cost([onProvider("default", 3.4, 120, 1_200_000)]));
     expect(container.querySelector("[data-spend-card]")).not.toBeNull();

@@ -11,6 +11,21 @@
   reaches the launchers without the environment's proxy (`HTTP_PROXY` and the others), which still
   applies to the instances.
 
+### Features
+
+- Model prices for model providers: a provider can carry a price per million tokens for each of its
+  models, and a call that went to the provider is priced at it before the built-in prices and
+  `--prices`. In `~/.agentapi/config.yaml` a provider takes them under `prices`, by model ID. The
+  hub prices its providers' models at OpenRouter's list prices: it gets OpenRouter's public model
+  list once a day and on **Refresh prices**, keeps the last one in `openrouter.json` for when it is
+  offline, matches each model by name (`Kimi-K3-NVFP4` is `moonshotai/kimi-k3`), and sends the
+  prices sealed with the providers, which AgentAPIs before this ignore. Its Providers settings show
+  each model's price and where it comes from, with a picker for another OpenRouter model, no price,
+  or the automatic match back (`openrouter` in `providers.json`; `POST /api/providers/prices`,
+  `GET /api/providers/openrouter`). For a self-hosted gateway these list prices are an estimate.
+- `GET /sessions` and `GET /cost` give each provider of a cost its `name`, and the chat's Session
+  tab lists **By provider** by name rather than ID.
+
 ### Fixes
 
 - Disconnecting the hub from GitHub while an issue's job started no longer panics the hub and

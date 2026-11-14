@@ -77,6 +77,10 @@ type Config struct {
 	// events and the instances' task.* events go to it, and it serves its
 	// routes (POST /api/dispatch, the machines, the jobs, GitHub).
 	Dispatch *dispatch.Service
+	// OpenRouterURL is where the hub gets OpenRouter's models and their
+	// prices (OpenRouterModelsURL), for its providers' models; empty looks
+	// no price up.
+	OpenRouterURL string
 }
 
 // Hub is the server.
@@ -85,6 +89,7 @@ type Hub struct {
 	logger     *slog.Logger
 	store      *store
 	providers  *providerStore
+	prices     *priceBook
 	client     *http.Client
 	deliveries *deliveries
 	// badSignatures limits the log of events refused for their signature.
@@ -137,12 +142,13 @@ func New(config Config) (*Hub, error) {
 	if err != nil {
 		return nil, err
 	}
+	prices := newPriceBook(config.StatePath, config.OpenRouterURL, &http.Client{Transport: newTransport()}, config.Logger, config.Clock)
 	var deliveriesFile string
 	if config.StatePath != "" {
 		deliveriesFile = deliveriesPath(config.StatePath)
 	}
 	return &Hub{
-		config: config, logger: config.Logger, store: st, providers: providers, client: client, clock: config.Clock,
+		config: config, logger: config.Logger, store: st, providers: providers, prices: prices, client: client, clock: config.Clock,
 		deliveries: newDeliveries(deliveriesFile, config.Logger, config.Clock.Now()),
 		interfaces: netaddr.Interfaces, watchers: map[string]context.CancelFunc{},
 		streamWriteTimeout: streamWriteTimeout,
@@ -173,6 +179,7 @@ func (h *Hub) Run(ctx context.Context) {
 			h.watch(instance)
 		}
 	}
+	h.watchWG.Go(func() { h.prices.run(ctx, h.providers.get) })
 	<-ctx.Done()
 	h.watchWG.Wait()
 }
@@ -248,6 +255,8 @@ func (h *Hub) routes(r chi.Router) {
 		r.Get("/api/providers", h.getProviders)
 		r.Put("/api/providers", h.setProviders)
 		r.Post("/api/providers/check", h.checkProvider)
+		r.Post("/api/providers/prices", h.refreshPrices)
+		r.Get("/api/providers/openrouter", h.searchOpenRouter)
 		r.Get("/api/events", h.streamEvents)
 		r.Get("/api/join", h.getJoin)
 		r.Get("/api/activity", h.getActivity)

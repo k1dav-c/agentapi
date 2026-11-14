@@ -40,6 +40,9 @@ type ModelCall struct {
 	key string
 	// cost is what the agent itself said the call cost (Pi), or -1.
 	cost float64
+	// providerPriced says USD is at its provider's price of the model
+	// (atProviderPrices), not at the store's prices.
+	providerPriced bool
 }
 
 // ModelCost is what a session spent on one model. Priced is false when
@@ -56,6 +59,7 @@ type ModelCost struct {
 // Priced is false when any of its calls had no price.
 type ProviderCost struct {
 	Provider string         `json:"provider" doc:"The AgentAPI model provider, by its ID; default for the agent's own."`
+	Name     string         `json:"name,omitempty" doc:"The provider's name, as the server's providers have it when it answers; missing for the agent's own, a provider without a name, or one the server no longer has."`
 	USD      float64        `json:"usd" doc:"API-equivalent cost in USD, at the list prices of the models called, whichever provider served them."`
 	Tokens   pricing.Tokens `json:"tokens" doc:"The tokens used."`
 	Calls    int            `json:"calls" doc:"How many calls were made."`
@@ -68,6 +72,31 @@ type ProviderCost struct {
 // Hourly is what was spent on the provider in each hour (UTC) with calls,
 // the earliest first. The caller must not change it.
 func (p ProviderCost) Hourly() []HourCost { return p.hourly }
+
+// WithProviderNames returns c with the name of each of its providers but
+// the agent's own: name's of its ID, empty for none. The providers are a
+// copy when any is named, so c, which a reading of the costs may share,
+// stays as it was.
+func (c SessionCost) WithProviderNames(name func(id string) string) SessionCost {
+	var named []ProviderCost
+	for i, p := range c.Providers {
+		if p.Provider == provider.Default {
+			continue
+		}
+		n := name(p.Provider)
+		if n == p.Name {
+			continue
+		}
+		if named == nil {
+			named = slices.Clone(c.Providers)
+		}
+		named[i].Name = n
+	}
+	if named != nil {
+		c.Providers = named
+	}
+	return c
+}
 
 // providerName is the provider a call with provider id went to, as
 // ProviderCost names it.
@@ -362,6 +391,9 @@ type costCache struct {
 	// marksVersion is the provider ledger's version the calls were
 	// attributed at.
 	marksVersion uint64
+	// pricesKey identifies the providers' model prices the calls were
+	// priced at (providerPricesKey).
+	pricesKey string
 }
 
 // sessionCost is what the readings of the costs found of a session.
@@ -451,16 +483,20 @@ func (s *Store) readCosts() (DirectoryCost, error) {
 	same := c.owner != nil && slices.Equal(sessions, c.order)
 	c.sessions, c.order = byPath, sessions
 	marks, marksVersion := s.providerMarks()
-	if same && !changed && marksVersion == c.marksVersion {
+	prices := s.providerPrices()
+	pricesKey := providerPricesKey(prices)
+	if same && !changed && marksVersion == c.marksVersion && pricesKey == c.pricesKey {
 		return c.result, nil
 	}
-	c.marksVersion = marksVersion
+	repriced := pricesKey != c.pricesKey
+	c.marksVersion, c.pricesKey = marksVersion, pricesKey
 	c.count(sessions, same)
 	for _, sc := range sessions {
-		if m := marks[sc.id]; sc.recount || !slices.Equal(m, sc.marks) {
+		if m := marks[sc.id]; sc.recount || repriced || !slices.Equal(m, sc.marks) {
 			if s.src.ledgered {
 				sc.own = attribute(sc.own, m)
 			}
+			sc.own = s.atProviderPrices(sc.own, prices)
 			sc.marks = m
 			sc.cost = CostOf(sc.own)
 			sc.recount = false
@@ -588,6 +624,72 @@ func attribute(calls []ModelCall, marks []providerlog.Mark) []ModelCall {
 	out := slices.Clone(calls)
 	for i := first; i < len(out); i++ {
 		out[i].Provider = providerlog.At(marks, out[i].Time)
+	}
+	return out
+}
+
+// providerPrices are the model prices of the providers, if the store has
+// them (Config.ProviderPrices).
+func (s *Store) providerPrices() provider.PriceTable {
+	if s.config.ProviderPrices == nil {
+		return nil
+	}
+	return s.config.ProviderPrices()
+}
+
+// providerPricesKey identifies prices: when it changes, the calls are
+// priced again.
+func providerPricesKey(prices provider.PriceTable) string {
+	if len(prices) == 0 {
+		return ""
+	}
+	h := fnv.New64a()
+	var line []byte
+	for _, id := range slices.Sorted(maps.Keys(prices)) {
+		models := prices[id]
+		for _, model := range slices.Sorted(maps.Keys(models)) {
+			p := models[model]
+			line = append(append(append(line[:0], id...), '|'), model...)
+			for _, v := range [...]float64{p.Input, p.Output, p.CacheRead, p.CacheWrite} {
+				line = strconv.AppendUint(append(line, '|'), math.Float64bits(v), 16)
+			}
+			_, _ = h.Write(append(line, '\n'))
+		}
+	}
+	return strconv.FormatUint(h.Sum64(), 16)
+}
+
+// atProviderPrices returns calls with those that went to a provider with a
+// price of their model at that price, before the store's prices, and those
+// priced so before at the store's prices again when their provider no
+// longer has one (or the call is attributed to another). They are a copy
+// when any cost changes, as attribute's.
+func (s *Store) atProviderPrices(calls []ModelCall, prices provider.PriceTable) []ModelCall {
+	var out []ModelCall
+	for i, call := range calls {
+		var next ModelCall
+		price, ok := prices.Lookup(call.Provider, call.Model)
+		switch {
+		case ok && call.Provider != "":
+			next = call
+			next.USD, next.Priced, next.providerPriced = price.Pricing().Cost(call.Tokens), true, true
+		case call.providerPriced:
+			next = call
+			next.USD, next.Priced, next.providerPriced = 0, false, false
+			next = priced(next, s.prices)
+		default:
+			continue
+		}
+		if next.USD == call.USD && next.Priced == call.Priced && next.providerPriced == call.providerPriced {
+			continue
+		}
+		if out == nil {
+			out = slices.Clone(calls)
+		}
+		out[i] = next
+	}
+	if out == nil {
+		return calls
 	}
 	return out
 }

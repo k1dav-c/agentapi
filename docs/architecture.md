@@ -76,7 +76,7 @@ emitter. Handlers call the conversation and read state from the emitter.
 | `lib/native/` | The native transport: `Conversation`, the `Adapter` and `Sink` contracts, requests, settings, usage, logins, the queue's hold (`hold.go`: a usage limit stop or a failed turn that waits to be tried again), its `Policy` (`policy.go`: continue, retry and restart delays), `ClassifyFailure` (a failed turn's stop reason) and the switch of model providers (`provider.go`) |
 | `lib/agentstate/` | The values a native agent reports and the API serves: capabilities, login, settings, usage, requests, the limit stop and the retry wait, and `ConversationState`, the conversation's state the observer gets whole, with the `StoredState` that survives a restart. A leaf package (huma and `lib/util` only), so the packages that serve them don't depend on `lib/native` |
 | `lib/native/claude`, `codex`, `pi` | One adapter per agent protocol |
-| `lib/provider/` | The [model providers](#model-providers) an agent can run on instead of its own: `Provider` and its checks, `Source` (the config file's `providers` section, read again when it changes, then the hub's; the models a provider lists, kept 10 minutes) and `HubSync`, which gets the hub's every minute, sealed with the hub's secret (`Seal`, `Open`) |
+| `lib/provider/` | The [model providers](#model-providers) an agent can run on instead of its own: `Provider` and its checks, its models' prices (`prices.go`: `ModelPrice`, `PriceTable`, `Source.Prices`), `Source` (the config file's `providers` section, read again when it changes, then the hub's; the models a provider lists, kept 10 minutes) and `HubSync`, which gets the hub's every minute, sealed with the hub's secret (`Seal`, `Open`) |
 | `lib/providerlog/` | The provider ledger, `provider-ledger.jsonl` beside the config file: which [model provider](#model-providers) each Claude Code or Codex session ran on, from when, which attributes Claude Code's calls to their provider |
 | `lib/native/agentio` | What those adapters share to run their agent: the process and its loop (`Host`), writing to its stdin, matching its responses to the requests waiting for them, where the answer to one of its requests stands (`Answer`), lenient decoding with drift warnings, the snapshot throttle |
 | `lib/native/demo` | `native-demo`, a simulated agent for working on the chat |
@@ -84,7 +84,7 @@ emitter. Handlers call the conversation and read state from the emitter.
 | `lib/native/procutil` | Child process groups and graceful shutdown |
 | `lib/statedb/` | SQLite persistence for `--state-db` |
 | `lib/instanceapi/` | The contract between an AgentAPI and the clients that watch many: who it is (`WebhookInstance`, in its webhook events, summary and registry entry, with its `AgentType`), its summary, the webhook envelope with its signature (`Sign`, `Verify`), and the state a hub shows of each instance (`StateOf`). It imports only `lib/agentstate` and `lib/util` |
-| `lib/hub/` | `agentapi hub serve`, over `lib/instanceapi` and `lib/httpmw` rather than the server: the instances, the groups and pins set on its page, when each last changed what its row shows and when the hub saw each working (`store.go`, `work.go`, kept in a file by `persist.go`), the activity of the last year hour by hour (`activity.go`, `activity.json`, `GET /api/activity`: the work, and each scope's spend from the summaries' `spend.hours`), the favorite prompts (`favorites.go`, `GET`/`PUT /api/favorites`, among the hub's settings in the same file), the model providers (`providers.go`, `providers.json`, `GET`/`PUT /api/providers`, `POST /api/providers/check` for the editor's Check connection, and `POST /api/providers/sync` for the AgentAPIs), the schema of its wire types (`schema.go`, `hub-schema.json`, for the page's types), the signed webhook receiver (`webhook.go`), each instance's summary stream (`watch.go`), sign-in, the browser's event stream and the proxy to the instances (`hub.go`, `proxy.go`), where machines join it (`join.go`: its addresses for `GET /api/join` and the startup log); the user guide is [hub.md](hub.md) |
+| `lib/hub/` | `agentapi hub serve`, over `lib/instanceapi` and `lib/httpmw` rather than the server: the instances, the groups and pins set on its page, when each last changed what its row shows and when the hub saw each working (`store.go`, `work.go`, kept in a file by `persist.go`), the activity of the last year hour by hour (`activity.go`, `activity.json`, `GET /api/activity`: the work, and each scope's spend from the summaries' `spend.hours`), the favorite prompts (`favorites.go`, `GET`/`PUT /api/favorites`, among the hub's settings in the same file), the model providers (`providers.go`, `providers.json`, `GET`/`PUT /api/providers`, `POST /api/providers/check` for the editor's Check connection, and `POST /api/providers/sync` for the AgentAPIs) and their models' prices from OpenRouter (`prices.go`, `openrouter.go`, `openrouter.json`, `POST /api/providers/prices`, `GET /api/providers/openrouter`), the schema of its wire types (`schema.go`, `hub-schema.json`, for the page's types), the signed webhook receiver (`webhook.go`), each instance's summary stream (`watch.go`), sign-in, the browser's event stream and the proxy to the instances (`hub.go`, `proxy.go`), where machines join it (`join.go`: its addresses for `GET /api/join` and the startup log); the user guide is [hub.md](hub.md) |
 | `lib/dispatch/` | The hub's issue dispatch, which `lib/hub` mounts: the machines whose launchers report (`host.*` events; each name pinned to the launcher token it first came with), the jobs with their runs' costs (`task.*` events) and the last 50 messages their agents were sent (`send`, from the hub's page, a review or an `/agent` comment), `POST /api/dispatch` (a start answers once its job is `starting`; the hub calls the launcher in the background and keeps the start until it ends, adopting it from the machine's next report if the answer was lost), the GitHub App, kept in `dispatch.json` and `github-app.json`. `Subscribe` and `Board` give the hub's stream the machines and jobs after each change (its `dispatch` event); the spec is [issue-dispatch.zh-TW.md](specs/issue-dispatch.zh-TW.md) |
 | `lib/host/` | `agentapi host`, the launcher on each machine: its settings (the `host` section of the config file), the repositories it has or clones, a git worktree and an AgentAPI for each job the hub starts (restarted after it exits, kept in `jobs.json`), its API for the hub behind its token (`server.go`), its `host.*` events and heartbeats to the hub (`hub.go`), and each job's GitHub token over a unix socket for its `git` and `gh` (`credentials.go`) |
 | `lib/github/` | The hub's GitHub App, with no dependency beyond the standard library: registering it from a manifest, its JWT, installation tokens for one repository (kept until five minutes before they expire) or all, and the REST calls the dispatch makes as the app |
@@ -375,7 +375,9 @@ type Factory func(resume Resume) (Adapter, error)
 - **Costs.** `sessions.Store.Costs` reads the model calls of every session in
   the directory, its subagents' included, from the same logs (`GET /sessions`,
   `GET /cost`): Claude Code's assistant messages (one per message id), Codex's
-  token counts, Pi's reported costs. `lib/pricing` prices each call; Claude
+  token counts, Pi's reported costs. `lib/pricing` prices each call but one to
+  a provider with a price of its model, priced at that
+  ([Prices](#model-providers)); Claude
   Code's `cost-state` records add the tokens its log doesn't list
   (compaction) as unitemized calls at the same prices; a cost that differs
   for the same tokens adds nothing and is logged once per model. Each call has its model provider
@@ -577,6 +579,22 @@ flowchart LR
   Claude Code session (its subagents' included; a fork's copy of an earlier call counts in that
   session) the provider of the session's latest entry at or before the call, and the agent's own
   before the first entry or without one. Pi has no providers: its calls are its own.
+- **Prices.** A provider carries prices of its models (`Provider.Prices`, by model ID, per million
+  tokens, with their `source`): the config file's `prices`, or the hub's, which travel sealed with
+  the providers (`wireProvider.prices`, which AgentAPIs before them ignore; a hub before them sends
+  none). `sessions.Config.ProviderPrices` (`Source.Prices`) gives the cost reading a
+  `provider.PriceTable`; once the calls are attributed, `atProviderPrices` prices a call to a provider
+  with a price of its model at it, and one priced so before at `lib/pricing`'s again when the price is
+  gone (a copy, as attributing makes). The reading keeps a digest of the table (`pricesKey`): when it
+  changes, every session is priced again, though no log changed. On the hub, `lib/hub/prices.go`
+  keeps OpenRouter's list (`openrouter.go`: fetched within 30 s, `pricing` per token converted to per
+  million, models without a price, and routers with one below zero, left out) in `openrouter.json` beside `providers.json`,
+  gets it again when a day old (checked every 10 minutes while the hub has providers; an hour after a
+  failure) and on `POST /api/providers/prices`; each refresh also lists the models of the providers
+  that define none (`provider.ListModels`). Each model's price is the OpenRouter model `providers.json`
+  picks for it (`openrouter`: an ID, or `none`), else the one whose normalized name (lowercase,
+  without the vendor prefix and a precision suffix such as `-nvfp4`) is the model's, among those
+  without `:` or a leading `~`, and only if one is.
 
 ## Events and the conversation state
 
@@ -1160,7 +1178,7 @@ dispatch's calls in `lib/hub-dispatch.ts`, which checks each answer as it comes.
 App is read once for Issues and the settings' GitHub tab (`lib/hub-github-store.ts`,
 `useHubGitHub`), and again whenever the page shows again. The settings' Providers tab
 (`components/hub/providers-settings.tsx`, its logic in `lib/hub-providers.ts`) edits the model
-providers. The machines and jobs come with the stream's
+providers, and `components/hub/provider-prices.tsx` shows and picks their models' prices. The machines and jobs come with the stream's
 `dispatch` event, which also feeds the badge on the Issues button and the list rows' issue chips
 (`HubListContext.jobs`); an action's answer shows on the board until the stream has the
 job as new.

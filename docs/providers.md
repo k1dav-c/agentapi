@@ -67,8 +67,51 @@ answer, and doesn't ask it again for a minute.
 An agent on a provider can read that provider's key: it runs as your user, with the key in its
 environment. Give a provider only a key you would give the agent.
 
-Model calls on a provider have no known price, so they add tokens but no cost (`--prices` adds
-prices). `GET /sessions`, `GET /cost` and the summary's `spend` count each provider's calls, tokens
-and cost apart (`providers`, `default` for the agent's own). Claude Code's log doesn't say which
+`GET /sessions`, `GET /cost` and the summary's `spend` count each provider's calls, tokens and cost
+apart (`providers`, `default` for the agent's own); `GET /sessions` and `GET /cost` give each
+provider its `name` as the server's providers have it then. Claude Code's log doesn't say which
 endpoint a call went to, so AgentAPI records in `~/.agentapi/provider-ledger.jsonl` which provider
 each session ran on, and from when.
+
+## Prices
+
+A gateway's models, such as `Kimi-K3-NVFP4`, aren't in AgentAPI's price table, so without a price
+their calls add tokens but no cost (**no price** in the chat). A provider can carry a price for each
+of its models, in USD per million tokens, and a call that went to the provider is priced at it
+before the table (the built-in prices and `--prices`, which still price the other calls). A
+provider of the hub gets prices from OpenRouter; one of the config file gets them under `prices`,
+by model ID:
+
+```yaml
+providers:
+  - id: kimi
+    base_url: https://gateway.example.com/v1
+    models: [Kimi-K3-NVFP4, Kimi-K3.1-Pro-NVFP4]
+    prices:
+      Kimi-K3-NVFP4: {input: 0.19, output: 16, cache_read: 0.18}
+      Kimi-K3.1-Pro-NVFP4: {input: 2, output: 10, cache_read: 0.2, cache_write: 0}
+```
+
+`input`, `output`, `cache_read` and `cache_write` (the last two the tokens read from and written to
+the prompt cache) are 0 when left out. A price applies to the model whose ID matches, ignoring
+case, also when the provider lists its models itself rather than in `models`. A price below zero
+leaves the provider out, with a warning. A change of the prices reprices every session's calls
+within a minute, when the costs are worked out again.
+
+The [hub](hub.md#model-providers) looks its providers' models up in OpenRouter's public model list
+(`https://openrouter.ai/api/v1/models`, no key needed), once a day and on **Refresh prices** in its
+Providers settings, and sends each machine the prices with the providers. It matches a model to an
+OpenRouter model by name: both lowercase, without a vendor prefix up to the last `/`
+(`moonshotai/`), and without a trailing precision or quantization suffix (`-nvfp4`, `-fp8`, `-fp4`,
+`-int4`, `-int8`, `-awq`, `-gptq`, `-bf16`, `-fp16`, also after `_`). `Kimi-K3-NVFP4` is then
+`moonshotai/kimi-k3`, and `Kimi-K3.1-Pro-NVFP4` `moonshotai/kimi-k3.1-pro`. OpenRouter's variants
+(`moonshotai/kimi-k3:batch`, `…:free`) and aliases (`~moonshotai/kimi-latest`) aren't matched by name,
+and a name two OpenRouter models share matches neither. In the Providers settings, pick another
+OpenRouter model for a model (variants too), **No price**, or **Automatic** to go back to the match
+by name. A provider that defines no models has the hub list them, with the provider's key, when it
+refreshes the prices.
+
+These are OpenRouter's list prices, what OpenRouter charges for the model: for a gateway that
+serves the model itself, such as a self-hosted vLLM, they are an estimate of what the calls would
+cost elsewhere, not what they cost you. A provider of the config file with the same ID as the
+hub's wins with its own prices, or none.

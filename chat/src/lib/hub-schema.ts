@@ -406,6 +406,47 @@ export interface components {
             /** @description Name to show; the ID when empty. */
             name?: string;
         };
+        ModelPrice: {
+            /**
+             * Format: double
+             * @description USD per million input tokens read from the prompt cache.
+             */
+            cache_read: number;
+            /**
+             * Format: double
+             * @description USD per million input tokens written to the prompt cache.
+             */
+            cache_write: number;
+            /**
+             * Format: double
+             * @description USD per million uncached input tokens.
+             */
+            input: number;
+            /**
+             * Format: double
+             * @description USD per million output tokens, thinking included.
+             */
+            output: number;
+            /** @description Where the price comes from: manual, or openrouter:<model> for an OpenRouter model's list price. */
+            source?: string;
+        };
+        OpenRouterModel: {
+            /** @description The OpenRouter model ID, e.g. moonshotai/kimi-k3. */
+            id: string;
+            /** @description OpenRouter's name of the model. */
+            name: string;
+            /** @description The model's list price on OpenRouter, in USD per million tokens. */
+            price: components["schemas"]["ModelPrice"];
+        };
+        OpenRouterModels: {
+            /**
+             * Format: date-time
+             * @description When the hub got the list they come from.
+             */
+            fetched_at?: string;
+            /** @description The models whose ID or name has every word of the query, in OpenRouter's order, at most 50. */
+            models: components["schemas"]["OpenRouterModel"][];
+        };
         PinsBody: {
             ids: string[];
         };
@@ -414,6 +455,22 @@ export interface components {
             error: string;
             ids: string[];
             message: string;
+        };
+        PriceStatus: {
+            /** @description The hub looks the prices up on OpenRouter. */
+            enabled: boolean;
+            /** @description Why the last try to get the list failed; the hub keeps the list it had. */
+            error?: string;
+            /**
+             * Format: date-time
+             * @description When the hub last got OpenRouter's list; missing before it got one.
+             */
+            fetched_at?: string;
+            /**
+             * Format: int64
+             * @description How many models with prices the hub's copy of the list has.
+             */
+            models: number;
         };
         ProviderChange: {
             /** @description Base URL for Claude Code when it isn't base_url without /v1. */
@@ -428,6 +485,10 @@ export interface components {
             models?: components["schemas"]["Model"][];
             /** @description Name to show; the ID when empty. */
             name?: string;
+            /** @description The price picked for a model, by its ID: an OpenRouter model ID, or none; missing keeps the provider's choices, an empty object removes them. */
+            openrouter?: {
+                [key: string]: string;
+            };
         };
         ProviderCheck: {
             /** @description Base URL for Claude Code when it isn't base_url without /v1. */
@@ -452,6 +513,23 @@ export interface components {
             /** @description The models the provider lists at <base_url>/models. */
             models: components["schemas"]["Model"][];
         };
+        ProviderModelPrice: {
+            /**
+             * @description auto: the OpenRouter model whose name matches; chosen: the one picked in the editor; none: no price, as picked.
+             * @enum {string}
+             */
+            choice: "auto" | "chosen" | "none";
+            /** @description The provider's model ID. */
+            model: string;
+            /** @description The model's name to show, if the provider gives it one. */
+            name?: string;
+            /** @description The OpenRouter model whose price it is; missing without one (auto found none, or none was picked). */
+            openrouter?: string;
+            /** @description OpenRouter's name of that model. */
+            openrouter_name?: string;
+            /** @description The price, USD per million tokens; missing without one, or when the chosen model isn't in the hub's copy of OpenRouter's list. */
+            price?: components["schemas"]["ModelPrice"];
+        };
         ProviderView: {
             /** @description Base URL for Claude Code when it isn't base_url without /v1. */
             anthropic_base_url?: string;
@@ -461,12 +539,20 @@ export interface components {
             has_key: boolean;
             /** @description Identifies the provider: lowercase letters, digits, - and _. */
             id: string;
+            /** @description The price of each of the provider's models: those it defines, else those it listed at the last price refresh, then those with a choice. */
+            model_prices: components["schemas"]["ProviderModelPrice"][];
             /** @description Models to offer; when empty, those the provider lists at <base_url>/models. */
             models?: components["schemas"]["Model"][];
             /** @description Name to show; the ID when empty. */
             name?: string;
+            /** @description The price picked for a model, by its ID: an OpenRouter model ID, or none for no price. A model without one is matched by name (auto). */
+            openrouter?: {
+                [key: string]: string;
+            };
         };
         ProvidersBody: {
+            /** @description Where the hub's copy of OpenRouter's prices stands. */
+            prices: components["schemas"]["PriceStatus"];
             providers: components["schemas"]["ProviderView"][];
             /** @description The hub's opaque optimistic-concurrency token for the provider list. */
             revision: string;

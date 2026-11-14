@@ -60,7 +60,45 @@ hub 的供應商會存在設定檔旁邊（`hub-providers.json`，以 hub 的 se
 用供應商的 agent 讀得到該供應商的金鑰：agent 以你的使用者身分執行，金鑰就在它的環境變數裡。
 只把你願意交給 agent 的金鑰設給供應商。
 
-供應商上的模型呼叫沒有已知的價格，只計 token、不計花費
-（可以用 `--prices` 加上價格）。`GET /sessions`、`GET /cost` 和摘要的 `spend` 會依供應商分開計算呼叫次數、
-token 和花費（`providers`，agent 自己的是 `default`）。Claude Code 的 log 不會寫出呼叫送往哪個端點，所以
+`GET /sessions`、`GET /cost` 和摘要的 `spend` 會依供應商分開計算呼叫次數、token 和花費
+（`providers`，agent 自己的是 `default`）；`GET /sessions` 和 `GET /cost` 還會附上每個供應商的
+`name`，也就是伺服器當下設定裡的名稱。Claude Code 的 log 不會寫出呼叫送往哪個端點，所以
 AgentAPI 在 `~/.agentapi/provider-ledger.jsonl` 記錄每個工作階段從什麼時候起用哪個供應商。
+
+## 價格
+
+gateway 的模型（例如 `Kimi-K3-NVFP4`）不在 AgentAPI 的價格表裡，沒有價格時，這些呼叫只計
+token、不計花費（聊天介面顯示 **no price**）。供應商可以替每個模型帶一個價格，單位是每百萬 token 的
+美元；送往該供應商的呼叫會先用這個價格計算，再輪到價格表（內建價格和 `--prices`，其他呼叫照舊用
+價格表計價）。hub 上的供應商從 OpenRouter 取得價格；設定檔裡的供應商則寫在 `prices` 底下，以模型 ID
+為鍵：
+
+```yaml
+providers:
+  - id: kimi
+    base_url: https://gateway.example.com/v1
+    models: [Kimi-K3-NVFP4, Kimi-K3.1-Pro-NVFP4]
+    prices:
+      Kimi-K3-NVFP4: {input: 0.19, output: 16, cache_read: 0.18}
+      Kimi-K3.1-Pro-NVFP4: {input: 2, output: 10, cache_read: 0.2, cache_write: 0}
+```
+
+`input`、`output`、`cache_read` 和 `cache_write`（後兩個是從 prompt 快取讀取和寫入的 token）沒寫
+就是 0。價格套用在 ID 相符（不分大小寫）的模型上，供應商自己列出模型、沒寫在 `models` 裡時也一樣。
+有價格小於零的供應商會略過不用，並留下警告。價格改了之後，一分鐘內所有工作階段的呼叫都會重新計價，
+因為花費每分鐘都會重新計算。
+
+[hub](hub.zh-TW.md#模型供應商) 會到 OpenRouter 公開的模型清單（`https://openrouter.ai/api/v1/models`，
+不需要金鑰）查各供應商的模型，每天一次，在供應商設定按 **Refresh prices** 時也會查，再把價格和
+供應商一起送給每台主機。hub 依名稱把模型對到 OpenRouter 的模型：兩邊都轉小寫、去掉最後一個 `/` 之前的
+廠商前綴（`moonshotai/`）、去掉結尾的精度或量化後綴（`-nvfp4`、`-fp8`、`-fp4`、`-int4`、`-int8`、
+`-awq`、`-gptq`、`-bf16`、`-fp16`，接在 `_` 後面也算）。於是 `Kimi-K3-NVFP4` 對到
+`moonshotai/kimi-k3`，`Kimi-K3.1-Pro-NVFP4` 對到 `moonshotai/kimi-k3.1-pro`。OpenRouter 的變體
+（`moonshotai/kimi-k3:batch`、`…:free`）和別名（`~moonshotai/kimi-latest`）不會用名稱自動對應；兩個
+OpenRouter 模型同名時，兩個都不對應。在供應商設定裡，可以替模型改選另一個 OpenRouter 模型（變體也行）、
+選 **No price**，或選 **Automatic** 回到依名稱對應。沒有定義模型的供應商，hub 會在更新價格時用該供應商的
+金鑰列出模型。
+
+這些是 OpenRouter 的牌價，也就是 OpenRouter 對該模型的收費：對自己提供模型的 gateway（例如自架的
+vLLM）來說，這只是估計這些呼叫在別處要花多少，不是你實際的成本。設定檔裡和 hub 同 ID 的供應商以
+設定檔為準，價格也用設定檔裡的（或沒有）。

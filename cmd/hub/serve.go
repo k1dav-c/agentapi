@@ -96,6 +96,7 @@ func serveCmd() *cobra.Command {
 			h, err := hub.New(hub.Config{
 				Token: token, NoToken: noToken, Secret: secret, InstanceToken: instanceToken, Bind: bind, Port: port,
 				StatePath: statePath, AllowedHosts: allowedHosts, Logger: logger, Dispatch: d,
+				OpenRouterURL: hub.OpenRouterModelsURL,
 			})
 			if err != nil {
 				_ = listener.Close()

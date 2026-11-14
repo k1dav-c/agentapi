@@ -41,6 +41,7 @@ import {
   providerMonogram,
   providerName,
   toggleModel,
+  withPriceChoice,
   type Provider,
   type ProviderChange,
   type ProviderDraft,
@@ -49,6 +50,7 @@ import {
 } from "@/lib/hub-providers";
 import {providerPeriod, providerTitle, providerTotals, type ProviderTotal} from "@/lib/hub-spend";
 import {cn} from "@/lib/utils";
+import {PricesNote, ProviderPrices, RefreshPrices} from "./provider-prices";
 import {fieldClass} from "./styles";
 
 // What the editor edits: a provider by its ID, or a new one (null).
@@ -80,6 +82,7 @@ export function ProvidersSettings({
   const [editing, setEditing] = useState<Editing | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   // A save may close only the operation that started it, not an editor or
   // confirmation opened while its request was under way.
   const operation = useRef(0);
@@ -146,6 +149,23 @@ export function ProvidersSettings({
     const next = previous ? list.map((each) => (each.id === previous.id ? change : keptChange(each))) : [...list.map(keptChange), change];
     if ((await save(next)) && operation.current === started) setEditing(null);
   };
+  // choosePrice saves a model's price choice, the rest as it is.
+  const choosePrice = (provider: Provider, model: string, choice: string | undefined) =>
+    save(list.map((each) => (each.id === provider.id ? withPriceChoice(each, model, choice) : keptChange(each))));
+  // refreshPrices has the hub get OpenRouter's prices again; it answers the
+  // providers, with why OpenRouter failed if it did.
+  const refreshPrices = async () => {
+    setRefreshing(true);
+    try {
+      const answer = await api.refreshPrices();
+      setSnapshot(answer);
+      if (answer.prices?.error) toast.error("Couldn't get OpenRouter's prices", {description: `${answer.prices.error}. The hub keeps those it had.`});
+    } catch (error) {
+      toast.error("Couldn't refresh the prices", {description: hubErrorText(error)});
+    } finally {
+      setRefreshing(false);
+    }
+  };
   const remove = async (provider: Provider) => {
     const started = operation.current;
     if ((await save(list.filter((each) => each.id !== provider.id).map(keptChange))) && operation.current === started) setDeleting(null);
@@ -178,6 +198,7 @@ export function ProvidersSettings({
             Gateways your Claude Code and Codex sessions can switch to. Every machine joined to this hub gets them within a minute.
           </p>
         </div>
+        {list.length > 0 && snapshot?.prices?.enabled && <RefreshPrices refreshing={refreshing} onRefresh={() => void refreshPrices()} />}
         {list.length > 0 && (
           <Button
             type="button"
@@ -279,6 +300,11 @@ export function ProvidersSettings({
                 key={provider.id}
                 provider={provider}
                 usage={usage.counted > 0 ? (usage.providers.find((total) => total.provider === provider.id) ?? null) : undefined}
+                prices={
+                  snapshot?.prices?.enabled && (
+                    <ProviderPrices api={api} provider={provider} saving={saving} onChoose={(model, choice) => choosePrice(provider, model, choice)} />
+                  )
+                }
                 onEdit={() => {
                   operation.current++;
                   setDeleting(null);
@@ -300,6 +326,7 @@ export function ProvidersSettings({
         </div>
       )}
 
+      {list.length > 0 && snapshot?.prices?.enabled && <PricesNote status={snapshot.prices} />}
       {list.length > 0 && (
         <p className="flex gap-2 text-xs leading-5 text-pretty text-muted-foreground">
           <ShieldCheck className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
@@ -334,17 +361,20 @@ function ProviderTile({provider, className}: {provider: {id: string; name?: stri
 
 // ProviderRow is a provider in the list: who it is, where it runs, its
 // models, whether it has a key, and what the agents used it for (usage:
-// null for nothing in the last 7 days, none while no agent reports it).
+// null for nothing in the last 7 days, none while no agent reports it),
+// and the prices of its models (prices, while the hub looks them up).
 // Its buttons show on hover and focus where there is a pointer, always on a
 // touch screen.
 function ProviderRow({
   provider,
   usage,
+  prices,
   onEdit,
   onDelete,
 }: {
   provider: Provider;
   usage?: ProviderTotal | null;
+  prices?: React.ReactNode;
   onEdit: () => void;
   onDelete: () => void;
 }) {
@@ -392,6 +422,7 @@ function ProviderRow({
           )}
         </div>
         {usage !== undefined && <ProviderUsage usage={usage} />}
+        {prices}
       </div>
       <div className="flex shrink-0 items-center transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-focus-within:opacity-100 [@media(hover:hover)]:group-hover:opacity-100">
         <IconButton label={`Edit ${providerName(provider)}`} onClick={onEdit}>

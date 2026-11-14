@@ -676,6 +676,18 @@ Once some agent reports its providers, each provider in the tab has a line of wh
 it for: its tokens and their cost (or **no price**) in the last 24 hours and 7 days, counted as the
 [Providers card](#provider-usage) counts them, or **No calls in the last 7 days**.
 
+The hub prices its providers' models at OpenRouter's list prices
+([Prices](providers.md#prices)), and each AgentAPI prices the calls to them with those. It gets
+OpenRouter's public list (no key) once a day while it has providers, and on **Refresh prices** at the
+top of the tab; it keeps the last list it got in `openrouter.json`, so it goes on pricing
+offline. A refresh also has each provider that defines no models list them, with its key. Under each
+provider, **Prices** folds out its models: each one's price per million tokens (input / output; hover
+for the cache's) and the OpenRouter model it comes from, **auto** when matched by name, **picked**
+when chosen. **Change** opens a picker that searches the hub's copy of the list, starting from the
+model's name, with **No price** and **Automatic** (back to the match by name). A pick saves the list
+as the editor does, with its revision. A line under the list says how old the prices are, and why the
+last refresh failed, if it did; the hub then keeps the prices it had.
+
 Every machine that joined the hub gets the keys: anyone with the hub's secret can. Give the hub only
 keys you would give each of those machines, and each agent that runs on the provider.
 
@@ -1156,10 +1168,12 @@ running AgentAPIs, which then no longer follow their conversation for the webhoo
 | `PUT /api/pins` | `{"ids": […]}` orders the pinned instances, from the top. It lists each pinned instance once and no other; 409, with the pinned ones in their order (`ids`), when it doesn't, such as after one was pinned, unpinned or forgotten; 404 for an instance the hub doesn't have |
 | `GET /api/favorites` | The [favorites](#favorites), in their order: `{"favorites": [{"id", "title", "text"}, …]}`; a favorite without a title has none |
 | `PUT /api/favorites` | `{"favorites": […]}` replaces them, in that order. At most 100; a title has at most 100 characters, on one line; a text isn't blank and has at most 20,000; an ID has 1 to 64 letters, digits, `-` or `_`, once. A favorite sent without an ID gets one; the answer is the list as the hub keeps it. 400, changing nothing, for a list it refuses |
-| `GET /api/providers` | The [model providers](#model-providers), without their keys, and the list's revision: `{"revision", "providers": [{"id", "name", "base_url", "anthropic_base_url", "models": [{"id", "name"}], "has_key"}, …]}`. The revision is an opaque token |
-| `PUT /api/providers` | `{"revision", "providers": […]}` replaces them, with the revision of the last `GET` or `PUT`. A provider's `api_key` sets its key; missing keeps the key the provider with its ID had only while its `base_url` and `anthropic_base_url` stay the same, `""` removes it. At most 50; an ID once, not `default`; the URLs http or https. The answer is the list and its new revision, as `GET` has them. 409, changing nothing, when the list changed since that revision: read it again; 400, changing nothing, for a list it refuses, a missing revision, or a changed URL without its key |
+| `GET /api/providers` | The [model providers](#model-providers), without their keys, and the list's revision: `{"revision", "providers": [{"id", "name", "base_url", "anthropic_base_url", "models": [{"id", "name"}], "has_key", "openrouter", "model_prices"}, …], "prices"}`. The revision is an opaque token. `openrouter` is the price picked for a model, by its ID: an OpenRouter model ID, or `none`. `model_prices` has each model (those defined, else those the provider listed at the last refresh, then those with a pick): `{"model", "name", "choice", "openrouter", "openrouter_name", "price"}`, `choice` `auto`, `chosen` or `none`, `price` `{"input", "output", "cache_read", "cache_write", "source"}` in USD per million tokens, missing without one. `prices` is `{"enabled", "fetched_at", "models", "error"}`: whether the hub looks prices up, when it last got OpenRouter's list, how many models it has, and why the last try failed |
+| `PUT /api/providers` | `{"revision", "providers": […]}` replaces them, with the revision of the last `GET` or `PUT`. A provider's `api_key` sets its key; missing keeps the key the provider with its ID had only while its `base_url` and `anthropic_base_url` stay the same, `""` removes it. Its `openrouter` replaces its price picks; missing keeps them, `{}` removes them. At most 50; an ID once, not `default`; the URLs http or https. The answer is the list and its new revision, as `GET` has them. 409, changing nothing, when the list changed since that revision: read it again; 400, changing nothing, for a list it refuses, a missing revision, or a changed URL without its key |
 | `POST /api/providers/check` | `{"id", "base_url", "anthropic_base_url", "api_key"}` asks the provider at `base_url` for its models (`GET <base_url>/models`) from the hub: `{"models": [{"id", "name"}], "latency_ms"}`. Without `api_key`, with the key the provider with `id` has, if its URLs are unchanged; 400 without asking when they changed. 502 with the reason when the provider doesn't answer with its models |
-| `POST /api/providers/sync` | An AgentAPI gets the providers with their keys, sealed with the hub's secret: `{"sealed", "nonce", "proof"}`, `proof` binding `sealed` to the request's `nonce`. Signed with `--secret` as events are, no session needed |
+| `POST /api/providers/prices` | Gets OpenRouter's list again and has the providers without models list theirs, then answers as `GET /api/providers`; OpenRouter failing is in `prices.error`. 409 for a hub that doesn't look prices up |
+| `GET /api/providers/openrouter?q=` | The OpenRouter models of the hub's copy whose ID or name has every word of `q`, at most 50: `{"models": [{"id", "name", "price"}], "fetched_at"}` |
+| `POST /api/providers/sync` | An AgentAPI gets the providers with their keys and their models' prices, sealed with the hub's secret: `{"sealed", "nonce", "proof"}`, `proof` binding `sealed` to the request's `nonce`. Signed with `--secret` as events are, no session needed. AgentAPIs before the prices ignore them |
 | `GET /api/events` | Server-sent events: `instances` (all of them and `hub_version`, as `GET /api/instances` has them) and `favorites` (as `GET /api/favorites` has them), then `instance` (one changed what the page shows, or its work time moved by a minute; when it was last heard of counts only while it is offline), `removed` (`{"id"}`), `favorites` (all of them, after a change), `dispatch` (the [issue dispatch's](#issues) machines and jobs, as `GET /api/hosts` and `GET /api/jobs` have them, at first and after each change) and a `heartbeat` every 15 s. A browser that takes no event for 30 s loses the stream |
 | `GET /api/hosts` | The machines whose launchers report: their agents, repositories, jobs and room, and whether each is `online` |
 | `DELETE /api/hosts/{name}` | Forgets a machine and the launcher token the hub pinned its name to, so a launcher with a new token can join under the name. 409 while the machine is online (`host_online`) or has a job that works (`host_busy`): stop its jobs first; 404 for a machine the hub doesn't have |
@@ -1190,7 +1204,8 @@ failed request answers `{"code": …, "message": …, "error": …}`: `code` is 
 | `~/.agentapi/hub/instances.deliveries.json` | `agentapi hub serve` | The delivery IDs of the events the hub took whose signature still holds, to refuse copies |
 | `~/.agentapi/hub/dispatch.json` | `agentapi hub serve` | The [issue dispatch's](#issues) machines with their launchers' tokens, and the jobs: their runs, costs and last 50 messages |
 | `~/.agentapi/hub/github-app.json` | `agentapi hub serve` | The hub's GitHub App and its private key |
-| `~/.agentapi/hub/providers.json` | `agentapi hub serve` | The [model providers](#model-providers) and their keys (0600) |
+| `~/.agentapi/hub/providers.json` | `agentapi hub serve` | The [model providers](#model-providers), their keys and their price picks (0600) |
+| `~/.agentapi/hub/openrouter.json` | `agentapi hub serve` | The hub's copy of OpenRouter's models and their prices, as it last got them, and the models the providers without models listed |
 | `~/.agentapi/hub-providers.json` | `agentapi server` | On each machine, beside its config file: the providers the hub last answered, sealed with the hub's secret, which stand in at the next start until the hub answers |
 
 `instances.json` is `{"version": 1, "instances": [...]}`. Hubs of 2.2 and earlier wrote, and read,

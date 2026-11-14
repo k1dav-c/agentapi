@@ -190,8 +190,9 @@ export function SpendCard({total, sessions}: {total: SessionCost; sessions: numb
 
 // ProviderList is what the sessions spent on each model provider, the most
 // expensive first: the calls, their tokens and their cost, or that their
-// models have no known price. Providers go by their IDs: the names are the
-// settings' options, which this list doesn't read.
+// models have no known price. A provider goes by the name the server gave
+// it, else by its ID (a server before the names, or a provider it no
+// longer has).
 function ProviderList({providers}: {providers: SessionCost["providers"]}) {
   return (
     <div className="mt-3 border-t pt-2" data-provider-spend>
@@ -199,7 +200,7 @@ function ProviderList({providers}: {providers: SessionCost["providers"]}) {
       <ul className="mt-1 space-y-0.5">
         {providers.map((cost) => (
           <li key={cost.provider} className="flex items-baseline gap-2 text-xs" title={costDetails(cost, !cost.priced)} data-provider={cost.provider}>
-            <span className="min-w-0 flex-1 truncate font-medium">{providerUsageLabel(cost.provider)}</span>
+            <span className="min-w-0 flex-1 truncate font-medium">{cost.name || providerUsageLabel(cost.provider)}</span>
             <span className="shrink-0 text-muted-foreground tabular-nums">
               {cost.calls} {cost.calls === 1 ? "call" : "calls"} · {formatTokens(inputTokens(cost.tokens) + cost.tokens.output)} tokens
             </span>

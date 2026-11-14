@@ -7,7 +7,15 @@
 
 import type {HubWire} from "./hub";
 import {parseFavorites, type Favorite, type FavoriteDraft} from "./hub-favorites";
-import {parseProviders, type ProviderChange, type ProviderRevision, type ProviderSnapshot} from "./hub-providers";
+import {
+  parsePrice,
+  parseProviders,
+  type OpenRouterModel,
+  type PriceStatus,
+  type ProviderChange,
+  type ProviderRevision,
+  type ProviderSnapshot,
+} from "./hub-providers";
 import type {Fetcher} from "./hub-update";
 
 // HubAPIError is a call the hub refused (status is its answer's) or didn't
@@ -101,6 +109,22 @@ export function createHubAPI(root: string, fetcher: Fetcher = (url, init) => fet
       if (!Array.isArray(body?.models)) throw new HubAPIError("The hub's answer has no models.", response.status);
       return {models: body.models.filter((m) => typeof m?.id === "string"), latency_ms: Number(body.latency_ms) || 0};
     },
+    // Has the hub get OpenRouter's prices again and the providers that list
+    // their models list them (POST /api/providers/prices), and returns the
+    // providers with their prices; OpenRouter failing is in prices.error.
+    refreshPrices: async (): Promise<ProviderSnapshot> => providersOf(await call("/api/providers/prices", {method: "POST"})),
+    // The OpenRouter models of the hub's copy whose ID or name has every
+    // word of query (GET /api/providers/openrouter), at most 50.
+    searchOpenRouter: async (query: string): Promise<OpenRouterModel[]> => {
+      const response = await call(`/api/providers/openrouter?q=${encodeURIComponent(query)}`);
+      const body = (await response.json().catch(() => null)) as {models?: unknown} | null;
+      if (!Array.isArray(body?.models)) throw new HubAPIError("The hub's answer has no models.", response.status);
+      return body.models.flatMap((entry: unknown): OpenRouterModel[] => {
+        const {id, name, price} = (entry ?? {}) as {id?: unknown; name?: unknown; price?: unknown};
+        const parsed = parsePrice(price);
+        return typeof id === "string" && id && parsed ? [{id, name: typeof name === "string" && name ? name : id, price: parsed}] : [];
+      });
+    },
   };
 }
 
@@ -109,14 +133,27 @@ export type ProviderCheckResult = HubWire["ProviderCheckResult"];
 // providersOf reads the providers and their list revision, or throws. Keep
 // the revision's JSON type so a hub's token remains opaque to this client.
 async function providersOf(response: Response): Promise<ProviderSnapshot> {
-  const body = (await response.json().catch(() => null)) as {providers?: unknown; revision?: unknown} | null;
+  const body = (await response.json().catch(() => null)) as {providers?: unknown; revision?: unknown; prices?: unknown} | null;
   const providers = parseProviders(body?.providers);
   if (!providers) throw new HubAPIError("The hub's answer has no providers.", response.status);
   const revision = body?.revision;
   if ((typeof revision !== "string" && typeof revision !== "number") || (typeof revision === "number" && !Number.isFinite(revision))) {
     throw new HubAPIError("The hub's answer has no providers revision.", response.status);
   }
-  return {revision, providers};
+  const prices = parsePriceStatus(body?.prices);
+  return prices ? {revision, providers, prices} : {revision, providers};
+}
+
+// parsePriceStatus reads where the hub's copy of OpenRouter's list stands;
+// undefined from a hub before the prices.
+function parsePriceStatus(data: unknown): PriceStatus | undefined {
+  if (!data || typeof data !== "object") return undefined;
+  const {enabled, fetched_at, models, error} = data as Partial<Record<keyof PriceStatus, unknown>>;
+  if (typeof enabled !== "boolean") return undefined;
+  const status: PriceStatus = {enabled, models: typeof models === "number" && Number.isFinite(models) ? models : 0};
+  if (typeof fetched_at === "string" && fetched_at) status.fetched_at = fetched_at;
+  if (typeof error === "string" && error) status.error = error;
+  return status;
 }
 
 // hubErrorText is what a toast says of error.

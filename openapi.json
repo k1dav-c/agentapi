@@ -1038,6 +1038,10 @@
             "format": "int64",
             "type": "integer"
           },
+          "name": {
+            "description": "The provider's name, as the server's providers have it when it answers; missing for the agent's own, a provider without a name, or one the server no longer has.",
+            "type": "string"
+          },
           "priced": {
             "description": "The price of every model called is known; when one isn't, its calls count no cost.",
             "type": "boolean"

@@ -44,6 +44,7 @@ var wireTypes = []reflect.Type{
 	reflect.TypeFor[providersChange](),
 	reflect.TypeFor[providerCheck](),
 	reflect.TypeFor[providerCheckResult](),
+	reflect.TypeFor[openRouterModels](),
 	reflect.TypeFor[instanceChange](),
 	reflect.TypeFor[addInstanceBody](),
 	reflect.TypeFor[pinsBody](),

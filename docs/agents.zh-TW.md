@@ -458,12 +458,15 @@ agent 可能改了紀錄格式，例如把欄位改了名。
 context 後綴（`[1m]`）和發布日期；找不到時取最長的已知前綴（`claude-opus-5-5-x` 以
 `claude-opus-5-5` 計價），但不跨過 `-mini`、`-nano` 或 `-pro` 這類變體（`gpt-5.1-codex-mini`
 不算 `gpt-5.1`）。沒有價格的模型只計 token、不計金額（`priced: false`），伺服器的 log 會對
-每個這種模型警告一次。`scripts/prices.mjs` 會比對內建價格和 Pi 的模型清單。
+每個這種模型警告一次。送往[模型供應商](providers.zh-TW.md)的呼叫，若該供應商有這個模型的價格，
+會先用那個價格計算（[價格](providers.zh-TW.md#價格)）。`scripts/prices.mjs` 會比對內建價格和 Pi 的模型清單。
 
 - `GET /sessions` 為每個工作階段提供 `cost`：`usd`、`tokens`、`calls`、每個模型的花費
-  （`models`）和每小時的花費（`hourly`，UTC，含當小時的 `tokens`），以及全部加總的 `total_cost`。
+  （`models`）、每小時的花費（`hourly`，UTC，含當小時的 `tokens`）和每個模型供應商的花費
+  （`providers`：`provider`、`default` 以外的還有 `name`，以及 `usd`、`tokens`、`calls`、`priced`），
+  以及全部加總的 `total_cost`。
 - `GET /cost` 提供目前開啟的工作階段的花費和它的模型呼叫 `calls`（`time`、`model`、`tokens`、
-  `usd`、`subagent_id`）；一個任務的花費，就是從它的訊息到下一個任務之間的呼叫。已經有前面幾筆呼叫的
+  `usd`、`subagent_id`、`provider`）；一個任務的花費，就是從它的訊息到下一個任務之間的呼叫。已經有前面幾筆呼叫的
   用戶端可以帶上 `from`（筆數）和當時拿到的 `digest`，只取得之後的呼叫（回應裡的 `from` 會標示起點）；
   回應的 `total_calls` 和 `digest` 就是下次要帶的值。若那些呼叫有變動，則會拿到全部，`from` 為 0。
 

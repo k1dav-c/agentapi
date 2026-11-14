@@ -579,6 +579,15 @@ hub 保存的金鑰。結果會顯示花了多久、列出幾個模型，失敗�
 token 與金額（或 **no price**），算法和 [Providers 卡片](#供應商用量)相同；沒有用到時寫
 **No calls in the last 7 days**。
 
+hub 用 OpenRouter 的牌價替供應商的模型定價（[價格](providers.zh-TW.md#價格)），各 AgentAPI 就用這些
+價格計算送往供應商的呼叫。有供應商時，hub 每天取得一次 OpenRouter 公開的清單（不需要金鑰），按下分頁上方的
+**Refresh prices** 也會重新取得；最後拿到的清單存在 `openrouter.json`，離線時照樣能定價。更新時，
+沒有定義模型的供應商也會用自己的金鑰列出模型。每個供應商底下的 **Prices** 可以展開模型：每個模型
+每百萬 token 的價格（輸入 / 輸出；滑過可看快取的價格），以及價格來自哪個 OpenRouter 模型，依名稱對應的
+標 **auto**，手動選的標 **picked**。**Change** 會開啟選擇器，從模型名稱開始搜尋 hub 保存的清單，另有
+**No price** 和 **Automatic**（回到依名稱對應）。選了就跟編輯器一樣帶著 revision 保存整份清單。清單下方
+有一行說明價格是什麼時候的，上次更新失敗時也會寫出原因；這時 hub 會沿用原本的價格。
+
 每台加入 hub 的主機都拿得到這些金鑰：有 hub secret 的人都能取得。存到 hub 的金鑰，必須是你願意交給
 每一台這類主機、也願意交給每個用這個供應商的 agent 的金鑰。
 
@@ -996,10 +1005,12 @@ loopback（`127.0.0.1`、`::1`）、link-local 位址（`169.254.0.0/16`、`fe80
 | `PUT /api/pins` | `{"ids": […]}` 由上而下排定釘選實例的順序。必須列出每個釘選的實例各一次，不能有其他實例；不符合時回 409，並在 `ids` 附上目前釘選實例的順序，例如這段期間有人釘選、取消釘選或移除了實例；hub 沒有的實例回 404 |
 | `GET /api/favorites` | [我的最愛](#我的最愛)，依排列順序：`{"favorites": [{"id", "title", "text"}, …]}`；沒有標題的項目沒有 `title` |
 | `PUT /api/favorites` | `{"favorites": […]}` 依這個順序整份取代。最多 100 項；標題最多 100 字、只能一行；內容不能空白，最多 20,000 字；ID 為 1 到 64 個英文字母、數字、`-` 或 `_`，不能重複。沒有 ID 的項目由 hub 指定一個；回應是 hub 保存後的清單。hub 不接受的清單回 400，什麼都不改 |
-| `GET /api/providers` | [模型供應商](#模型供應商)，不含金鑰，以及清單的 revision：`{"revision", "providers": [{"id", "name", "base_url", "anthropic_base_url", "models": [{"id", "name"}], "has_key"}, …]}`。revision 是不透明的 token |
-| `PUT /api/providers` | `{"revision", "providers": […]}` 整份取代，revision 帶最後一次 `GET` 或 `PUT` 拿到的值。供應商的 `api_key` 設定它的金鑰；沒有這個欄位時，只有在 `base_url` 和 `anthropic_base_url` 都沒變時才保留同一 ID 的供應商原本的金鑰，`""` 則移除金鑰。最多 50 個；ID 不能重複，也不能是 `default`；網址必須是 http 或 https。回應是 `GET` 格式的清單與新的 revision。清單在那個 revision 之後已被改過時回 409，什麼都不改，請重新讀取；hub 不接受的清單、缺少 revision，或網址改了卻沒給金鑰時回 400，什麼都不改 |
+| `GET /api/providers` | [模型供應商](#模型供應商)，不含金鑰，以及清單的 revision：`{"revision", "providers": [{"id", "name", "base_url", "anthropic_base_url", "models": [{"id", "name"}], "has_key", "openrouter", "model_prices"}, …], "prices"}`。revision 是不透明的 token。`openrouter` 是替各模型選的價格，以模型 ID 為鍵：OpenRouter 模型 ID，或 `none`。`model_prices` 列出每個模型（有定義的模型，否則是供應商在上次更新時列出的，再加上有選價格的）：`{"model", "name", "choice", "openrouter", "openrouter_name", "price"}`，`choice` 是 `auto`、`chosen` 或 `none`，`price` 是 `{"input", "output", "cache_read", "cache_write", "source"}`，單位是每百萬 token 的美元，沒有價格時省略。`prices` 是 `{"enabled", "fetched_at", "models", "error"}`：hub 是否查價格、上次取得 OpenRouter 清單的時間、清單有幾個模型，以及上次失敗的原因 |
+| `PUT /api/providers` | `{"revision", "providers": […]}` 整份取代，revision 帶最後一次 `GET` 或 `PUT` 拿到的值。供應商的 `api_key` 設定它的金鑰；沒有這個欄位時，只有在 `base_url` 和 `anthropic_base_url` 都沒變時才保留同一 ID 的供應商原本的金鑰，`""` 則移除金鑰。供應商的 `openrouter` 取代它選的價格；沒有這個欄位時保留，`{}` 則全部移除。最多 50 個；ID 不能重複，也不能是 `default`；網址必須是 http 或 https。回應是 `GET` 格式的清單與新的 revision。清單在那個 revision 之後已被改過時回 409，什麼都不改，請重新讀取；hub 不接受的清單、缺少 revision，或網址改了卻沒給金鑰時回 400，什麼都不改 |
 | `POST /api/providers/check` | `{"id", "base_url", "anthropic_base_url", "api_key"}` 由 hub 向 `base_url` 的供應商查詢模型（`GET <base_url>/models`）：`{"models": [{"id", "name"}], "latency_ms"}`。沒有 `api_key` 時，網址沒變才用 ID 為 `id` 的供應商保存的金鑰；網址改了則不發出查詢，直接回 400。供應商沒有回傳模型時回 502，並附上原因 |
-| `POST /api/providers/sync` | AgentAPI 取得含金鑰的供應商，以 hub 的 secret 加密：`{"sealed", "nonce", "proof"}`，`proof` 把 `sealed` 綁定到請求的 `nonce`。請求和事件一樣以 `--secret` 簽章，不需要 session |
+| `POST /api/providers/prices` | 重新取得 OpenRouter 的清單，並讓沒有定義模型的供應商列出模型，再以 `GET /api/providers` 的格式回應；OpenRouter 失敗時寫在 `prices.error`。不查價格的 hub 回 409 |
+| `GET /api/providers/openrouter?q=` | hub 保存的清單裡，ID 或名稱含有 `q` 每個字的 OpenRouter 模型，最多 50 個：`{"models": [{"id", "name", "price"}], "fetched_at"}` |
+| `POST /api/providers/sync` | AgentAPI 取得含金鑰和模型價格的供應商，以 hub 的 secret 加密：`{"sealed", "nonce", "proof"}`，`proof` 把 `sealed` 綁定到請求的 `nonce`。請求和事件一樣以 `--secret` 簽章，不需要 session。沒有價格功能的舊版 AgentAPI 會忽略價格 |
 | `GET /api/events` | Server-sent events：先送 `instances`（全部實例和 `hub_version`，格式同 `GET /api/instances`）和 `favorites`（格式同 `GET /api/favorites`），再送 `instance`（某個實例有頁面看得到的變動，或工作時間變動滿一分鐘；最後聯絡時間只在它離線時才算）、`removed`（`{"id"}`）、`favorites`（有變動時送出全部）、`dispatch`（[issue 派工](#issues)的主機和 job，格式同 `GET /api/hosts` 和 `GET /api/jobs`，一開始和每次變動時送出），以及每 15 秒一次的 `heartbeat`。瀏覽器 30 秒都沒收下事件，就會失去串流 |
 | `GET /api/hosts` | 有 launcher 回報的主機：能跑的 agent、有的 repo、job 與上限，以及是否在線（`online`） |
 | `DELETE /api/hosts/{name}` | 移除主機，以及 hub 為這個主機名稱記下的 launcher token，讓換了 token 的 launcher 能以同一個名稱重新加入。主機在線（`host_online`）或還有進行中的 job（`host_busy`）時回 409，請先停掉它的 job；hub 沒有這台主機時回 404 |
@@ -1029,7 +1040,8 @@ case 的 HTTP 狀態（例如 `not_found`）；`error` 和 `message` 相同，�
 | `~/.agentapi/hub/instances.deliveries.json` | `agentapi hub serve` | hub 處理過、簽章仍有效的事件的 delivery ID，用來拒絕重送的事件 |
 | `~/.agentapi/hub/dispatch.json` | `agentapi hub serve` | [issue 派工](#issues)的主機（含 launcher 的 token）和 job：各次 run、花費與最近 50 則訊息 |
 | `~/.agentapi/hub/github-app.json` | `agentapi hub serve` | hub 的 GitHub App 與它的私鑰 |
-| `~/.agentapi/hub/providers.json` | `agentapi hub serve` | [模型供應商](#模型供應商)和它們的金鑰（0600） |
+| `~/.agentapi/hub/providers.json` | `agentapi hub serve` | [模型供應商](#模型供應商)，以及各供應商的金鑰和選的價格（0600） |
+| `~/.agentapi/hub/openrouter.json` | `agentapi hub serve` | hub 最後一次取得的 OpenRouter 模型與價格，以及沒有定義模型的供應商列出的模型 |
 | `~/.agentapi/hub-providers.json` | `agentapi server` | 每台主機上、設定檔旁邊：hub 上次回應的供應商，以 hub 的 secret 加密；下次啟動時在 hub 回應前先拿來用 |
 
 `instances.json` 的格式是 `{"version": 1, "instances": [...]}`。2.2 以前的 hub 只寫、也只讀陣列：

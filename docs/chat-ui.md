@@ -417,9 +417,10 @@ the list totals session and subagent costs for today, the last 7 and 30 days (in
 your time zone), and all time. These are API-equivalent costs at list prices; hover for tokens.
 Once the agent has used a [model provider](providers.md) besides its own, the card
 lists **By provider** what the sessions spent on each, the agent's own as **Own provider** and the
-others by ID: calls, tokens and cost. A gateway's models often have no known price: a provider
-whose calls have none says **no price** rather than `$0.00`, and one whose calls only partly have
-one ends its cost with `+`. Hover a row for its tokens by kind.
+others by name (by ID for a provider without one, or one the server no longer has): calls, tokens
+and cost. A gateway's models often have no known price ([Prices](providers.md#prices) adds one): a
+provider whose calls have none says **no price** rather than `$0.00`, and one whose calls only
+partly have one ends its cost with `+`. Hover a row for its tokens by kind.
 
 **Open** restarts the agent on a session and displays its conversation. **Start a copy** opens a
 copy under a new id, leaving the original session unchanged. Both replace the current conversation

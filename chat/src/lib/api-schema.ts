@@ -1457,6 +1457,8 @@ export interface components {
              * @description How many calls were made.
              */
             calls: number;
+            /** @description The provider's name, as the server's providers have it when it answers; missing for the agent's own, a provider without a name, or one the server no longer has. */
+            name?: string;
             /** @description The price of every model called is known; when one isn't, its calls count no cost. */
             priced: boolean;
             /** @description The AgentAPI model provider, by its ID; default for the agent's own. */

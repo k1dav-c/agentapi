@@ -32,6 +32,10 @@ type Provider struct {
 	// APIKey is a secret: the APIs don't return it.
 	APIKey string  `json:"-" yaml:"api_key,omitempty"`
 	Models []Model `json:"models,omitempty" yaml:"models,omitempty" nullable:"false" doc:"Models to offer; when empty, those the provider lists at <base_url>/models."`
+	// Prices are the prices of the provider's models, by model ID: those
+	// written in the config file, or those the hub resolved. The APIs
+	// don't return them; the hub sends them sealed with the providers.
+	Prices map[string]ModelPrice `json:"-" yaml:"prices,omitempty"`
 }
 
 // Model is a model a provider offers.
@@ -92,6 +96,14 @@ func (p Provider) Validate() error {
 	for _, m := range p.Models {
 		if strings.TrimSpace(m.ID) == "" {
 			return fmt.Errorf("%w: a model of %s has no id", ErrInvalid, p.ID)
+		}
+	}
+	for model, price := range p.Prices {
+		if strings.TrimSpace(model) == "" {
+			return fmt.Errorf("%w: a price of %s has no model id", ErrInvalid, p.ID)
+		}
+		if err := price.validate(p.ID, model); err != nil {
+			return err
 		}
 	}
 	return nil

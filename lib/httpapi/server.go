@@ -58,6 +58,7 @@ type Server struct {
 	logger     *slog.Logger
 	native     *native.Conversation
 	sessions   *sessions.Store // the agent's sessions; nil unless it keeps logs
+	providers  *provider.Source // the model providers, which name the costs'; nil for none
 	ledger     *ledgerWriter   // appends to the provider ledger
 	stateDB    *statedb.DB     // nil unless the conversation is kept
 	// queueStoreMu guards what storeQueue last stored in stateDB: the
@@ -265,6 +266,8 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 			PiSessionDir: config.Native.PiSessionDir,
 			Logger:       logger,
 			Providers:    config.Native.ProviderLedger,
+			// The providers' prices of their models price the calls to them.
+			ProviderPrices: config.Native.Providers.Prices,
 		})
 		if err != nil {
 			return nil, err
@@ -299,6 +302,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		terminal:     terminal,
 		stateDB:      stateDB,
 		sessions:     history,
+		providers:    config.Native.Providers,
 	}
 	// Clients follow the queue through queue_update events, and the state
 	// database has every change: a message that went out isn't sent again
