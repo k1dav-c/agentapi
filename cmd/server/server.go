@@ -661,7 +661,7 @@ func serverFlagSpecs() []flagSpec {
 		{FlagTermWidth, "W", uint16(80), "Deprecated and without effect: the PTY transport's terminal width", "uint16"},
 		{FlagTermHeight, "H", uint16(1000), "Deprecated and without effect: the PTY transport's terminal height", "uint16"},
 		// localhost is the default host for the server. Port is ignored during matching.
-		{FlagAllowedHosts, "a", []string{"localhost", "127.0.0.1", "[::1]"}, "HTTP allowed hosts (hostnames only, no ports). Use '*' for all, comma-separated list via flag, space-separated list via AGENTAPI_ALLOWED_HOSTS env var", "stringSlice"},
+		{FlagAllowedHosts, "a", []string{"localhost", "127.0.0.1", "[::1]"}, "HTTP allowed hosts besides IP addresses, which always pass (hostnames only, no ports or networks). Use '*' for all, comma-separated list via flag, space-separated list via AGENTAPI_ALLOWED_HOSTS env var", "stringSlice"},
 		// localhost:3284 is the default origin when you open the chat interface in your browser. localhost:3000 and 3001 are used during development.
 		{FlagAllowedOrigins, "o", []string{"http://localhost:3284", "http://localhost:3000", "http://localhost:3001"}, "HTTP allowed origins. Use '*' for all, comma-separated list via flag, space-separated list via AGENTAPI_ALLOWED_ORIGINS env var", "stringSlice"},
 		{FlagInitialPrompt, "I", "", "Initial prompt, sent as the first message once the agent is ready. Read from stdin if piped (e.g., echo 'prompt' | agentapi server -- claude)", "string"},
