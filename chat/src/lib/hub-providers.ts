@@ -170,6 +170,24 @@ export function priceSourceText(model: ProviderModelPrice): string {
   }
 }
 
+// modelSearchText is what the OpenRouter picker searches for a model at
+// first: its name as the hub matches it, without a vendor prefix or a
+// precision suffix (Kimi-K3-NVFP4 is kimi-k3).
+export function modelSearchText(model: string): string {
+  let name = model.trim().toLowerCase();
+  name = name.slice(name.lastIndexOf("/") + 1);
+  for (;;) {
+    const trimmed = name.replace(/[-_](nvfp4|fp8|fp4|int4|int8|awq|gptq|bf16|fp16)$/, "");
+    if (trimmed === name || trimmed === "") return name;
+    name = trimmed;
+  }
+}
+
+// pricedCount is how many of a provider's models have a price.
+export function pricedCount(provider: Provider): number {
+  return (provider.model_prices ?? []).filter((model) => model.price).length;
+}
+
 // withPriceChoice is the change that leaves provider as it is but for the
 // price of model: an OpenRouter model ID, "none", or undefined for
 // automatic. It always sends the choices, so that the last one removed

@@ -2,10 +2,12 @@ import {describe, expect, test} from "bun:test";
 import {createHubAPI} from "./hub-api";
 import {
   keptChange,
+  modelSearchText,
   openRouterName,
   parseProviders,
   perMillion,
   priceDetails,
+  pricedCount,
   priceSourceText,
   priceText,
   withPriceChoice,
@@ -69,7 +71,7 @@ describe("provider prices", () => {
   });
 
   test("a change of one model's price keeps the rest of the provider", () => {
-    const {model_prices: _, has_key: __, ...rest} = gateway;
+    const rest = {id: gateway.id, base_url: gateway.base_url, models: gateway.models, openrouter: gateway.openrouter};
     expect(keptChange(gateway)).toEqual(rest);
     expect(withPriceChoice(gateway, "Kimi-K3-NVFP4", "moonshotai/kimi-k3:batch")).toEqual({
       ...rest,
@@ -109,4 +111,12 @@ describe("the hub's price calls", () => {
       [undefined, "/hub/api/providers"],
     ]);
   });
+});
+
+test("the picker searches a model by the name the hub matches", () => {
+  expect(modelSearchText("Kimi-K3-NVFP4")).toBe("kimi-k3");
+  expect(modelSearchText("hf/Qwen4-32B_AWQ")).toBe("qwen4-32b");
+  expect(modelSearchText("model-int4-gptq")).toBe("model");
+  expect(modelSearchText("fp8")).toBe("fp8");
+  expect(pricedCount(gateway)).toBe(1);
 });
