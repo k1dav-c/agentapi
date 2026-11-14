@@ -765,7 +765,11 @@ Content-Security-Policy。
   `task.*` 事件：hub 傳入它以那次執行讀到這個實例摘要的網址（`taskInstanceURL`），`TaskEvent` 檢查
   它在 run 所在主機的 launcher 網址那個位址上；launcher 網址有綁定的 launcher token 背書
   （`sameMachine`）。在自己的位址宣告某個 job 實例 ID 的主機，改不了那個 job 的狀態或花費；複製實例
-  ID 和執行的主機仍然可以，因為每個事件都是用共用的 secret 簽章。瀏覽器以 hub token 登入，換取
+  ID 和執行的主機仍然可以，因為每個事件都是用共用的 secret 簽章。hub 只呼叫 http 或 https、不含帳密的
+  launcher 網址，而且位址必須通過 `checkLauncherAddr`（沒有 `--allow-loopback-launchers` 時不能是
+  loopback，也不能是 link-local 或未指定位址）：`HostEvent` 檢查一次，名稱解析後每次連線再檢查一次
+  （`newLauncherClient` 裡 dialer 的 `Control`，不經 proxy、不跟隨重新導向，`launcher.go`）。內網位址
+  照常允許，所以持有 secret 的機器仍可讓 hub 對內網的其他機器呼叫 launcher API。瀏覽器以 hub token 登入，換取
   帶有簽發時間、以 token 簽章的 HttpOnly、SameSite=Lax cookie，30 天後 hub 不再接受；代理會移除瀏覽器的 cookie 以及 `Authorization`、
   `Origin`、`Referer`、`Sec-Fetch-*` 標頭，也會移除實例的 `Set-Cookie`，雙方的憑證都不會傳到另一邊。
   hub 和 AgentAPI 一樣，拒絕其他來源的網頁送出會造成改動的請求；設定 `--allowed-hosts` 時，只回應

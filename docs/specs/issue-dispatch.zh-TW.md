@@ -92,7 +92,7 @@ GitHub ──(runner 主動拉 job)──► 內網 runner                    �
 host:
   port: 3291                     # launcher API
   bind: ""                       # 預設所有介面；建議設內網位址
-  public-url: http://{ip}:3291   # hub 連回 launcher 的網址
+  public-url: http://{ip}:3291   # hub 連回 launcher 的網址（不能是 loopback、link-local，見 §11 第 10 點）
   token-file: ~/.agentapi/host.token              # hub → launcher；不存在時產生
   instance-token-file: ~/.agentapi/instance.token # 所有 job instance 共用，必須等於 hub 的 --instance-token
   workdir: ~/work                # repo 與 worktree 的根目錄
@@ -632,6 +632,7 @@ jobs:
 7. **主機身分（trust on first use）**：webhook secret 是所有加入的主機共用的，所以它不代表某一台主機。hub 第一次收到某個主機名稱的 `host.*` 事件時，記下事件裡的 host token，之後這個名稱只接受同一個 token：token 不同或沒帶 token 的事件一律拒絕（不論主機是否在線，`host.stopped` 也一樣），`/api/github/token` 也只認這個 token。否則持有 secret 的機器可以先送 `host.stopped` 再冒名送 heartbeat，取得那台主機上 job 的 GitHub token，並讓 hub 把派工送到自己那裡。主機重灌或 `host.token` 遺失時，先停掉它的 job，等它離線後以 `DELETE /api/hosts/{name}`（Issues 頁離線主機的 **×**）移除，新的 launcher 下一次 heartbeat 就會重新加入。
 8. **同一使用者的信任邊界**：主機上的 job 都以同一個使用者執行，agent 讀得到 `~/.agentapi/` 裡的 secret 與 host token。token 只發給 job 自己的 process（Linux），但同一台主機上的 agent 仍可讀其他檔案；需要更強的隔離時，以不同使用者或不同主機跑 job。
 9. **任務事件綁定主機**：`task.*` 事件同樣只用共用的 webhook secret 簽章，事件裡的實例 ID 是送出者自己宣告的。hub 只在它正從 job 所在主機的位址讀到那個實例（摘要裡是同一個 `server_id`）時才採計（§5.8），launcher 網址由第 7 點綁定的 host token 背書，所以持有 secret 的機器在自己的位址宣告別台主機的實例 ID，改不了那個 job 的狀態與花費。剩下的信任邊界仍是 secret：實例 ID 和 `server_id` 都在摘要裡，持有 secret、又讀得到摘要（所有 job 共用 instance token）的機器，照樣能以那個實例的名義送事件；要根除需要每台主機各一把金鑰。
+10. **launcher 網址（避免 SSRF）**：`host.*` 事件裡的 `url` 由送出者決定，hub 會以那台 launcher 的 token 呼叫它（start、send、stop，以及 reconcile 時自動停掉沒人要求的 job）。hub 只接受 http 或 https、不含帳號密碼、有主機的網址，並在每次連線時檢查實際連到的位址（名稱解析後；hub 不經 proxy 直接連線，也不跟隨重新導向）：拒絕 loopback、link-local（`169.254.0.0/16`、`fe80::/10`，含雲端 metadata `169.254.169.254`）與 `0.0.0.0`／`::`，內網位址照常允許。hub 本機上的 launcher 以 hub 的內網位址加入時，回報的就是那個位址，不受影響；以 `localhost` 加入而回報 `127.0.0.1` 的，要以 `agentapi hub serve --allow-loopback-launchers` 啟動 hub。剩下的邊界：持有 secret 的機器仍能讓 hub 對內網其他機器的 `/jobs` 送請求（帶的是它自己的 launcher token）。
 
 ## 12. 失敗處理
 
@@ -644,6 +645,7 @@ jobs:
 | 主機上有 hub 不知道的 job | 停掉，保留 worktree 與 state db（§5.4） |
 | 同時開工、或 hub 記的容量與主機不同 | 挑主機與記下 `starting` 在同一個鎖內；launcher 回 409 `capacity` 時改挑另一台 |
 | launcher 換了 host token | hub 拒絕它的事件（§11）；移除主機後重新加入 |
+| launcher 回報 loopback、link-local 等 hub 不呼叫的網址 | hub 拒絕它的事件（400，§11 第 10 點），主機不會上線；以 hub 的內網位址重新 `hub join`，或以 `--allow-loopback-launchers` 啟動 hub |
 | 重複事件（workflow 重跑） | `delivery_id` 去重；`start` 本身冪等 |
 | port 或容量不足 | 409，留言說明 |
 | repo 不在且不允許 clone | 422 `repo_missing` |

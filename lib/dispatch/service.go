@@ -42,11 +42,16 @@ type Config struct {
 	// POST /api/dispatch alone.
 	DispatchToken string
 	GitHub        *github.Client
-	// HTTP reaches the launchers.
-	HTTP     *http.Client
-	Logger   *slog.Logger
-	Now      func() time.Time
-	Location *time.Location
+	// HTTP reaches the launchers; nil is newLauncherClient's, which only
+	// connects to the addresses a launcher may have (launcher.go).
+	HTTP *http.Client
+	// AllowLoopback lets a launcher's URL be a loopback address, for a
+	// launcher on the hub's machine that joined it by localhost
+	// (--allow-loopback-launchers).
+	AllowLoopback bool
+	Logger        *slog.Logger
+	Now           func() time.Time
+	Location      *time.Location
 }
 
 // Service is the dispatch.
@@ -171,7 +176,7 @@ func New(config Config) (*Service, error) {
 	if config.HTTP == nil {
 		// Each call has its deadline (callLauncher): a start takes longer
 		// than the others.
-		config.HTTP = &http.Client{}
+		config.HTTP = newLauncherClient(config.AllowLoopback)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Service{
@@ -515,6 +520,10 @@ func (s *Service) HostEvent(eventType string, data json.RawMessage) error {
 	}
 	if d.Token == "" {
 		return errors.New("a host event has no launcher's token")
+	}
+	if err := checkLauncherURL(d.URL, s.config.AllowLoopback); err != nil {
+		s.logger.Warn("Refused a host event with a URL the hub doesn't call", "host", d.Hostname, "url", d.URL, "event", eventType, "error", err)
+		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1507,6 +1516,10 @@ func (s *Service) callLauncher(ctx context.Context, h Host, method, path string,
 			return err
 		}
 		reader = bytes.NewReader(data)
+	}
+	// Also a URL kept before the hub checked it in HostEvent.
+	if err := checkLauncherURL(h.URL, s.config.AllowLoopback); err != nil {
+		return jsonapi.Errorf(http.StatusBadGateway, "host_unreachable", "the machine %s: %v", h.Hostname, err)
 	}
 	u, err := url.JoinPath(h.URL, "/")
 	if err != nil {

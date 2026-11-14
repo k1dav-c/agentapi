@@ -821,6 +821,11 @@ AgentAPI 1.1 以上。在這裡輸入的 token 會為這個實例保存，取代
   送來的事件（[issue 的詳細資料](#issue-的詳細資料)），所以在自己的位址宣告某個 job 實例 ID 的主機，
   沒辦法替那個 job 記帳。但若送出的事件帶著 job 的 AgentAPI 的實例 ID 和執行（`server_id`，兩者都在
   它的摘要裡），仍然會被採計：這裡的界線同樣是 secret。
+- launcher 的事件寫明 hub 要以那個 launcher 的 token 呼叫它的網址，而 hub 會自己呼叫它，停掉沒有任何
+  啟動要求過的 job。所以 hub 只呼叫其他主機的位址，每次連線都檢查，直接連線、不跟隨重新導向：絕不連到
+  自己的 loopback（除非設了 `--allow-loopback-launchers`）、雲端 metadata 這類 link-local 位址或
+  `0.0.0.0`（見 [`agentapi host`](#agentapi-host)）。內網位址都還連得到，所以持有 secret 的機器仍然
+  可以讓 hub 對網路上的其他機器送出請求（`POST /jobs`、`DELETE /jobs/<key>`）。
 - 只有在已連上時，也就是 hub 正從那個網址讀到這個實例的摘要時，hub 才會轉送這個實例的請求
   （對話、核准、更新）。hub 重新啟動、串流斷線或事件把實例搬走後，連線中的期間 proxy 一律回 503，
   什麼都不送出。
@@ -889,6 +894,7 @@ AgentAPI 1.1 以上。在這裡輸入的 token 會為這個實例保存，取代
 | hub 的 log 有「The hub's file of instances doesn't parse」 | 檔案損壞，例如手動改壞了；或是 2.2 以前的 hub 讀到較新 hub 寫的檔案 | hub 已把它改名放到一旁（`instances.json.corrupt-<時間>`），從空的清單開始。用 webhook 加入的實例會在下一次 heartbeat 回來。其餘的要找回來，先停掉 hub，再用 `instances.json.bak`（hub 上次啟動時看到的檔案）覆蓋 `instances.json`；2.2 以前的 hub 請見[檔案](#檔案) |
 | hub 無法啟動：`instances.json is of a newer hub` | 檔案是較新的 hub 寫的 | 改用較新的 hub，或從 `instances.json.bak` 開始 |
 | Issues 裡某台主機一直離線，hub 的 log 有 "Refused a host event with another launcher's token than the machine's" | hub 會把主機名稱綁定到它第一次帶來的 launcher token。這台 launcher 換了 token（`~/.agentapi/host.token` 被刪除，或主機重新安裝），或是另一台持有 hub secret 的機器冒用這個名稱 | 是你自己的主機時：先停掉它的 job，等它顯示離線後在 [Issues](#issues) 按它的 **×** 移除，下一次 heartbeat 就會重新加入。不是你的主機時，更換 hub 的 `--secret`，再讓你的主機重新 join |
+| 主機沒出現在 Issues，或一直離線；hub 記下 "Refused a host event with a URL the hub doesn't call" | launcher 回報的網址是 hub 不會呼叫的：loopback（在 hub 這台主機上以 `localhost` 加入）、link-local，或含有帳號密碼（見 [`agentapi host`](#agentapi-host)） | 用 hub 的內網位址讓主機加入（`agentapi hub join http://<hub 的內網位址>:3290/hooks …`）再重新啟動 launcher，或設定 `host` 區段的 `public-url`；hub 這台主機上的 launcher，也可以改用 `--allow-loopback-launchers` 啟動 hub |
 | issue 停在 **Starting** 好幾分鐘 | 主機正在 clone 或 fetch 大的 repo（最多 10 分鐘），之後再等 agent 最多 1 分鐘 | 稍候；主機上的 `~/.agentapi/jobs/<owner>~<repo>~<issue>/agentapi.log` 有 agent 這端的紀錄。hub 沒收到回應的啟動，會在主機下一次 heartbeat 時改為工作中或失敗 |
 
 在實例所在的主機上執行 `agentapi hub status`，可以看到設定檔指向哪個 hub，以及每個執行中的
@@ -912,9 +918,11 @@ AgentAPI 的 log 會記下傳送失敗的 webhook。
 | `--log-level` | `AGENTAPI_HUB_LOG_LEVEL`，否則 `info` | 記錄的最低層級：`debug`、`info`、`warn` 或 `error` |
 | `--dispatch-token` | `AGENTAPI_HUB_DISPATCH_TOKEN` | 用戶端（GitHub workflow 的 runner）呼叫 `POST /api/dispatch` 用的 token，不能做別的事（見 [Issues](#issues)） |
 | `--github-app-file` | `--state` 旁的 `github-app.json` | hub 的 GitHub App，由 `/github/connect` 註冊 |
+| `--allow-loopback-launchers` | `false` | 允許呼叫 loopback 位址上的 launcher，例如在 hub 這台主機上、以 `localhost` 加入的 launcher（[`agentapi host`](#agentapi-host)） |
 
 hub 透過環境變數中的 proxy（`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`）連到實例。連線 30 秒內沒建立（TLS
-交握 10 秒）、回應的標頭 15 秒內沒來，就放棄；摘要串流和經 proxy 開啟的頁面則一直保持連線。
+交握 10 秒）、回應的標頭 15 秒內沒來，就放棄；摘要串流和經 proxy 開啟的頁面則一直保持連線。launcher
+則直接連線，不經 proxy，也不跟隨 launcher 的重新導向。
 
 ### `agentapi host`
 
@@ -934,6 +942,13 @@ launcher 的設定（`~/.agentapi/config.yaml` 的 `host` 區段）、它的檔�
 launcher token（`~/.agentapi/host.token`）：重灌過、或 token 檔被刪掉的主機，要先
 在 hub 上移除它，才能以原名稱加入：在 [Issues](#issues) 按主機的 **×**，或呼叫 `DELETE /api/hosts/{name}`
 （見[疑難排解](#疑難排解)）。
+
+hub 依 launcher 事件裡的網址呼叫它（`host` 區段的 `public-url`，預設 `http://{ip}:3291`），所以只接受
+http 或 https、不含帳號密碼的網址，而且只連到其他主機的位址：內網和 VPN 位址都可以；hub 自己這台主機的
+loopback（`127.0.0.1`、`::1`）、link-local 位址（`169.254.0.0/16`、`fe80::/10`，例如雲端的 metadata
+`169.254.169.254`）和 `0.0.0.0` 則不行。名稱解析出的位址，每次連線都會檢查。hub 這台主機上的 launcher
+請用 hub 的內網位址加入（啟動 log 列出的那個），它回報的就是那個位址。以 `localhost` 加入的 launcher 會
+回報 `127.0.0.1`，除非 hub 以 `--allow-loopback-launchers` 啟動，否則 hub 會拒絕。
 
 ### `agentapi hub join`、`leave`、`status`
 

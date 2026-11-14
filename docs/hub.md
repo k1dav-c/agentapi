@@ -962,6 +962,13 @@ right is forgotten, it closes.
   machine that announces a job's instance ID at its own address can't charge the job. One that
   sends events with the instance ID and run (`server_id`) of the job's AgentAPI, both in its
   summary, still can: there too the secret is the boundary.
+- A launcher's events name the URL the hub calls it at with that launcher's token, and the hub
+  calls it by itself to stop a job no start asked for. So the hub calls only another machine's
+  address there, checked at every connection, directly and without following redirects: never its
+  own loopback (unless `--allow-loopback-launchers`), a link-local address such as a cloud's
+  metadata, or `0.0.0.0` ([`agentapi host`](#agentapi-host)). Any LAN address stays reachable, so
+  a machine with the secret can still have the hub send requests (`POST /jobs`, `DELETE
+  /jobs/<key>`) to another machine on the network.
 - The hub forwards an instance's requests (the chat, approvals, updates) only while it is
   connected: it reads that instance's summary at its URL. While it connects, after the hub
   restarts, a stream drops or an event moved the instance, the proxy answers 503 and sends
@@ -1038,6 +1045,7 @@ right is forgotten, it closes.
 | The hub logs "The hub's file of instances doesn't parse" | The file was damaged, such as by an edit by hand, or a hub of 2.2 or earlier started on a newer hub's file | The hub moved it aside (`instances.json.corrupt-<time>`) and started empty. Joined instances come back with their next heartbeat. To get the rest back, stop the hub and copy `instances.json.bak` (the file as the hub's previous start found it) over `instances.json`; for a hub of 2.2 or earlier, see [Files](#files) |
 | The hub doesn't start: `instances.json is of a newer hub` | A newer hub wrote the file | Run the newer hub, or start from `instances.json.bak` |
 | A machine stays offline in Issues; the hub logs "Refused a host event with another launcher's token than the machine's" | The hub pins a machine's name to the launcher token it first came with. The launcher has a new token (its `~/.agentapi/host.token` was deleted, or the machine was set up again), or another machine with the hub's secret uses the name | If it is your machine: stop its jobs, and once it shows offline, forget it with its **×** in Issues ([Issues](#issues)); it joins with its next heartbeat. If it isn't, change the hub's `--secret` and join your machines again |
+| A machine doesn't show in Issues, or stays offline; the hub logs "Refused a host event with a URL the hub doesn't call" | The launcher reports a URL the hub doesn't call a launcher at: on loopback (it joined the hub by `localhost` on the hub's machine), link-local, or with a user and password in it ([`agentapi host`](#agentapi-host)) | Join the machine with the hub's LAN address (`agentapi hub join http://<hub's LAN address>:3290/hooks …`) and restart the launcher, or set the `host` section's `public-url`; for a launcher on the hub's machine, starting the hub with `--allow-loopback-launchers` also works |
 | An issue stays **Starting** for minutes | The machine clones or fetches a big repository (up to 10 minutes), then waits up to a minute for the agent | Wait; `~/.agentapi/jobs/<owner>~<repo>~<issue>/agentapi.log` on the machine has the agent's side. A start the hub lost the answer of works or fails with the machine's next heartbeat |
 
 `agentapi hub status` on an instance's machine shows which hub its config file names and where
@@ -1062,10 +1070,12 @@ failed.
 | `--log-level` | `AGENTAPI_HUB_LOG_LEVEL`, else `info` | Least important level to log: `debug`, `info`, `warn` or `error` |
 | `--dispatch-token` | `AGENTAPI_HUB_DISPATCH_TOKEN` | Token a client (a GitHub workflow's runner) calls `POST /api/dispatch` with, and nothing else ([Issues](#issues)) |
 | `--github-app-file` | `github-app.json` next to `--state` | The hub's GitHub App, which `/github/connect` registers |
+| `--allow-loopback-launchers` | `false` | Calls a launcher at a loopback address, such as one on the hub's machine that joined it by `localhost` ([`agentapi host`](#agentapi-host)) |
 
 The hub reaches the instances through the proxy of the environment (`HTTP_PROXY`, `HTTPS_PROXY`,
 `ALL_PROXY`). It gives up connecting after 30 seconds (10 for the TLS handshake) and waiting for an
-answer's headers after 15; the summary streams and the pages it proxies stay open.
+answer's headers after 15; the summary streams and the pages it proxies stay open. It reaches the
+launchers directly, without the proxy, and follows no redirect of theirs.
 
 ### `agentapi host`
 
@@ -1087,6 +1097,15 @@ GitHub App and workflow too. The hub pins each machine's name to the launcher to
 (`~/.agentapi/host.token`) it first came with: a machine set up again, or whose token file was
 deleted, joins under its name only after the hub forgets it: **×** on the machine in [Issues](#issues),
 or `DELETE /api/hosts/{name}` ([Troubleshooting](#troubleshooting)).
+
+The hub calls a launcher at the URL its events name (`public-url` in the `host` section, by
+default `http://{ip}:3291`), so it takes only an http or https URL without a user or password in it,
+and connects only to an address of another machine: private LAN and VPN addresses are fine; its own
+machine's loopback (`127.0.0.1`, `::1`), link-local addresses (`169.254.0.0/16`, `fe80::/10`, such as
+a cloud's metadata at `169.254.169.254`) and `0.0.0.0` aren't. It checks the address a name resolves
+to at every connection. A launcher on the hub's machine joins with the hub's LAN address, as the
+startup log has it, and then reports that address. One that joined by `localhost` reports
+`127.0.0.1`, which the hub refuses unless it was started with `--allow-loopback-launchers`.
 
 ### `agentapi hub join`, `leave`, `status`
 

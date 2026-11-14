@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Breaking changes
+
+- The hub calls a launcher only at another machine's address: a launcher that reports a loopback URL
+  (one on the hub's machine that joined it by `localhost`) is refused, and its machine stays
+  offline in Issues, unless the hub is started with the new `--allow-loopback-launchers`. Join such
+  a machine with the hub's LAN address instead, as the hub's startup log has it. The hub also
+  reaches the launchers without the environment's proxy (`HTTP_PROXY` and the others), which still
+  applies to the instances.
+
 ### Fixes
 
 - Disconnecting the hub from GitHub while an issue's job started no longer panics the hub and
@@ -14,6 +23,11 @@
   machine's job or add to its cost by naming its instance ID; one that copies the job's AgentAPI's
   whole identity still can, as the secret signs every event. An event that comes before the hub
   reaches the instance is dropped, and the run's cost marked as possibly missed.
+- A joined machine can no longer make the hub send requests with a launcher's token to any URL:
+  the hub takes a launcher's URL only over http or https, without credentials, and never connects
+  to a loopback address (unless `--allow-loopback-launchers`), a link-local one such as a cloud's
+  metadata at `169.254.169.254`, or `0.0.0.0`, checking the address a name resolves to at every
+  connection and following no redirect. LAN and VPN addresses stay allowed.
 
 ## v5.0.0
 

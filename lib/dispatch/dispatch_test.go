@@ -268,6 +268,8 @@ func newService(t *testing.T, g *fakeGitHub) (*Service, *time.Time) {
 		StatePath: filepath.Join(dir, "dispatch.json"), AppPath: filepath.Join(dir, "github-app.json"),
 		Secret: "hub-secret", DispatchToken: "dispatch-token", GitHub: client,
 		Now: func() time.Time { return now }, Location: time.UTC,
+		// The fake launchers listen on loopback.
+		AllowLoopback: true,
 	})
 	require.NoError(t, err)
 	t.Cleanup(s.Close)

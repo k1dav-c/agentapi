@@ -41,7 +41,7 @@ func TestHubDispatch(t *testing.T) {
 	defer launcher.Close()
 
 	dir := t.TempDir()
-	d, err := dispatch.New(dispatch.Config{StatePath: filepath.Join(dir, "dispatch.json"), AppPath: filepath.Join(dir, "github-app.json"), Secret: hubSecret, DispatchToken: "dispatch-token"})
+	d, err := dispatch.New(dispatch.Config{StatePath: filepath.Join(dir, "dispatch.json"), AppPath: filepath.Join(dir, "github-app.json"), Secret: hubSecret, DispatchToken: "dispatch-token", AllowLoopback: true})
 	require.NoError(t, err)
 	config := following("")
 	config.Dispatch = d

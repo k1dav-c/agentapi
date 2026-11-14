@@ -195,7 +195,9 @@ open it by (any without it), and `--log-level` (or
 `AGENTAPI_HUB_LOG_LEVEL`) how much it logs. For the [issue dispatch](hub.md#issues),
 `--dispatch-token` (or `AGENTAPI_HUB_DISPATCH_TOKEN`) is the token a client (a GitHub workflow's
 runner) calls `POST /api/dispatch` with, and nothing else, and `--github-app-file` the file of the
-hub's GitHub App (default `github-app.json` next to `--state`).
+hub's GitHub App (default `github-app.json` next to `--state`). `--allow-loopback-launchers` lets
+the hub call a launcher at a loopback address, one on its own machine that joined it by `localhost`;
+by default it calls launchers at other machines' addresses only.
 
 `join` writes the hub's webhook into `~/.agentapi/config.yaml` and applies it to the registered
 AgentAPIs running now. `--secret` (or `AGENTAPI_HUB_SECRET`) signs the events, `--events` picks them
