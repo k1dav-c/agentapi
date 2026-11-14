@@ -335,7 +335,7 @@ export function ProvidersSettings({
         <p className="flex gap-2 text-xs leading-5 text-pretty text-muted-foreground">
           <ShieldCheck className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
           <span>
-            Keys travel sealed with the hub&apos;s secret, and every joined machine gets them; an agent running on a provider can read its key. A provider with
+            Keys travel sealed with the hub&apos;s secret, and every joined machine gets them; an agent running on a provider calls it through AgentAPI&apos;s local proxy and never sees its key. A provider with
             the same ID in a machine&apos;s <code className="font-mono">~/.agentapi/config.yaml</code> wins there.
           </span>
         </p>

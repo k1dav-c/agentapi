@@ -74,7 +74,9 @@ key as a bearer token, as the agents sent it, the answer streaming back as it co
 provider up on each call: a key or URL changed in the config file or on the hub applies at once, and
 a removed provider answers 404. It follows a redirect to the same origin only; to another one the
 key doesn't go. AgentAPI still lists a provider's models itself, with the key. If the proxy can't
-start, the agent can't run on a provider: it never gets the key instead. A process of your user can
+start, the agent can't run on a provider: it never gets the key instead. With an HTTP proxy set
+(`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`), AgentAPI adds `127.0.0.1`, `localhost` and `::1` to the
+agent's `NO_PROXY` and `no_proxy`, so it reaches the proxy directly. A process of your user can
 still read the token in the agent's environment and call the providers through the proxy while
 AgentAPI runs, but it can't see a key.
 
