@@ -31,7 +31,7 @@
   `ANTHROPIC_BASE_URL` is `http://127.0.0.1:<port>/<id>/anthropic` and its `ANTHROPIC_AUTH_TOKEN`
   the token; Codex's provider `base_url` is `http://127.0.0.1:<port>/<id>/openai`. A provider
   changed in the config file or on the hub applies from the next call, and if the proxy can't start,
-  the agent can't run on a provider instead of getting the key.
+  the agent can't run on a provider rather than get the key.
 - Provider health: the proxy counts each provider's calls of the last hour, its failures (no
   answer, 5xx, 429, an answer that broke off) and client errors, the median and 95th percentile time
   to the first byte, and the last success and failure. `GET /settings` has it in each provider's

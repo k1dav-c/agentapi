@@ -67,18 +67,18 @@ answer, and doesn't ask it again for a minute.
 The agent never gets a provider's key. AgentAPI calls the provider for it, through a proxy on
 `127.0.0.1` that listens on a random port from the first time an agent runs on a provider, until
 AgentAPI stops. Claude Code gets `ANTHROPIC_BASE_URL=http://127.0.0.1:<port>/<id>/anthropic`,
-Codex a provider whose `base_url` is `http://127.0.0.1:<port>/<id>/openai`, and both a token AgentAPI makes up when
-it starts instead of the key (`ANTHROPIC_AUTH_TOKEN`, Codex's `AGENTAPI_PROVIDER_API_KEY`). The
-proxy answers a call without that token with 401, and sends the others on to the provider with its
-key as a bearer token, as the agents sent it, the answer streaming back as it comes. It looks the
-provider up on each call: a key or URL changed in the config file or on the hub applies at once, and
-a removed provider answers 404. It follows a redirect to the same origin only; to another one the
-key doesn't go. AgentAPI still lists a provider's models itself, with the key. If the proxy can't
-start, the agent can't run on a provider: it never gets the key instead. With an HTTP proxy set
-(`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`), AgentAPI adds `127.0.0.1`, `localhost` and `::1` to the
-agent's `NO_PROXY` and `no_proxy`, so it reaches the proxy directly. A process of your user can
-still read the token in the agent's environment and call the providers through the proxy while
-AgentAPI runs, but it can't see a key.
+Codex a provider whose `base_url` is `http://127.0.0.1:<port>/<id>/openai`. Both get a token
+AgentAPI makes up for the process instead of the key (`ANTHROPIC_AUTH_TOKEN`, Codex's
+`AGENTAPI_PROVIDER_API_KEY`). The proxy answers a call without that token with 401, and sends the
+others on to the provider with its key as a bearer token, the way the agents send one, and streams
+the answer back as it comes. It looks the provider up on each call: a key or URL changed in the
+config file or on the hub applies at once, and a removed provider answers 404. It follows a
+redirect with the key only to the same origin. AgentAPI still lists a provider's models itself,
+with the key. If the proxy can't start, the agent can't run on a provider rather than get the key.
+With an HTTP proxy set (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`), AgentAPI adds `127.0.0.1`,
+`localhost` and `::1` to the agent's `NO_PROXY` and `no_proxy`, so it reaches the proxy directly. A
+process of your user can still read the token in the agent's environment and call the providers
+through the proxy while AgentAPI runs, but it can't see a key.
 
 The proxy also learns how each provider answers. Over the last hour it counts the calls, the
 failures (a network error or timeout, a 5xx or 429 answer, an answer that broke off) and the client

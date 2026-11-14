@@ -437,16 +437,18 @@ flowchart LR
   或代理無法監聽時，啟動或切換就失敗，而不會交出金鑰。呼叫必須帶著 token（`Authorization: Bearer` 或
   `x-api-key`，以固定時間比較），否則回 401，也不會連到供應商。`/<id>/anthropic/<rest>` 送往
   `ClaudeBaseURL()/<rest>`，`/<id>/openai/<rest>` 送往 `OpenAIBaseURL()/<rest>`，連同查詢字串，對象是
-  `Source.Lookup` 當下的供應商（沒有就回 404；路徑有 `.` 或 `..` 區段時回 400，讓呼叫留在 base URL 底下）：agent 的憑證和逐跳標頭留在代理，其他標頭照送，並照 agent
-  原本的方式加上 `Authorization: Bearer <金鑰>`。`httputil.ReverseProxy` 雙向串流（`FlushInterval: -1`、
-  全雙工，升級後的連線原樣轉送），agent 取消時上游的呼叫也跟著結束。重新導向由 client 以 `provider.KeepKeyOnOrigin` 跟隨，
-  和模型清單同一條規則：金鑰只送往同一個 origin；它不跟隨的重新導向（帶 request body 的）回 502，不會
-  交給 agent，否則 agent 會帶著 token 跟過去。上游有 30 秒建立連線、15 秒完成 TLS、10 分鐘回應標頭，
-  和 Claude Code 等待的時間一樣；body 沒有時間限制。每個結束的呼叫都計入它的供應商的狀況
+  `Source.Lookup` 當下的供應商（沒有就回 404；路徑有 `.` 或 `..` 區段時回 400，讓呼叫留在 base URL
+  底下）：agent 的憑證和逐跳標頭留在代理，其他標頭照送，並照 agent 原本的方式加上
+  `Authorization: Bearer <金鑰>`。`httputil.ReverseProxy` 雙向串流（`FlushInterval: -1`、全雙工，
+  升級後的連線原樣轉送），agent 取消時上游的呼叫也跟著結束。重新導向由 client 以
+  `provider.KeepKeyOnOrigin` 跟隨，和模型清單同一條規則：金鑰只送往同一個 origin；client 不跟隨的
+  重新導向（帶 request body 的）回 502，不會交給 agent，否則 agent 會帶著 token 跟過去。上游有 30 秒
+  建立連線、15 秒完成 TLS、10 分鐘回應標頭，和 Claude Code 等待的時間一樣；body 沒有時間限制。每個
+  結束的呼叫都計入所屬供應商的狀況
   （`agentstate.ProviderHealth`）：過去 60 分鐘每分鐘的呼叫、失敗（沒有回應、5xx、429、body 中途斷掉）
   與用戶端錯誤（其他 4xx），最近 100 次非失敗回應收到標頭的時間（p50、p95），以及最近一次成功與失敗
   （種類、狀態碼，和從 body 前 4 KiB 讀到的供應商訊息）。agent 在回應前就取消的呼叫不計。`GET /settings`
-  把它放進每個 `ProviderOption.Health`，`provider_health.go` 則每 30 秒及 `GET /summary` 時把它放進摘要的
+  把這些狀況放進每個 `ProviderOption.Health`，`provider_health.go` 則每 30 秒及 `GET /summary` 時放進摘要的
   `provider_health`。
 - **切換。** 帶供應商的 `ApplySettings` 先檢查供應商和模型（沒指定時用第一個；換回 agent 自己的供應商時，
   用換過去之前的模型），再呼叫 `SwitchProvider`。Claude Code 在執行中切換：`apply_flag_settings` 設定

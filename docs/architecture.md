@@ -549,22 +549,22 @@ flowchart LR
 - **The proxy.** The agent calls a provider through `lib/providerproxy`, never with its key.
   `cmd/server` makes the `Proxy` over the `Source` and gives it to the Claude Code and Codex
   adapters (`Config.ProviderProxy`) and to the server (`NativeConfig.ProviderProxy`), which closes
-  it after the agent when it stops. `native.ProviderEndpoint` asks it where the agent calls a
+  it on shutdown, after the agent stops. `native.ProviderEndpoint` asks it where the agent calls a
   provider: the first time, it listens on `127.0.0.1:0` with a token of 32 random bytes; without
   a proxy, or one that can't listen, the launch or switch fails rather than hand over the key. A
   call must carry the token (`Authorization: Bearer` or `x-api-key`, compared in constant time),
   else it gets 401 and the provider isn't contacted. `/<id>/anthropic/<rest>` goes to
   `ClaudeBaseURL()/<rest>` and `/<id>/openai/<rest>` to `OpenAIBaseURL()/<rest>`, with the query,
   for the provider `Source.Lookup` has now (404 without one; 400 for a `.` or `..` segment, so a
-  call stays under the base URL): the agent's credentials and the
-  hop-by-hop headers stay behind, the others go on, and `Authorization: Bearer <key>` is added, as
-  the agents sent it. `httputil.ReverseProxy` streams both ways (`FlushInterval: -1`, full duplex,
-  an upgraded connection as it is), and the agent's cancellation ends the upstream call. A client follows redirects with
-  `provider.KeepKeyOnOrigin`, the model lists' rule: the key only to the same origin; a redirect it
-  doesn't follow (one of a request body) answers 502 rather than reach the agent, which would follow
-  it with the token. The upstream has 30 s to connect, 15 s for TLS and 10 minutes for its headers,
+  call stays under the base URL): the agent's credentials and the hop-by-hop headers stay behind,
+  the others go on, and `Authorization: Bearer <key>` is added, the way the agents send one.
+  `httputil.ReverseProxy` streams both ways (`FlushInterval: -1`, full duplex, an upgraded
+  connection as it is), and the agent's cancellation ends the upstream call. A client follows
+  redirects with `provider.KeepKeyOnOrigin`, the model lists' rule: the key only to the same
+  origin; a redirect it doesn't follow (one with a request body) answers 502 rather than reach the
+  agent, which would follow it with the token. The upstream has 30 s to connect, 15 s for TLS and 10 minutes for its headers,
   as long as Claude Code waits; the body has no limit. Each call that ends counts in its provider's
-  health (`agentstate.ProviderHealth`): the minute's calls, failures (no answer, 5xx, 429, a body
+  health (`agentstate.ProviderHealth`): each minute's calls, failures (no answer, 5xx, 429, a body
   that broke off) and client errors (another 4xx) of the last 60 minutes, the time to the answer's
   headers of the latest 100 answers that weren't failures (p50, p95), and the last success and
   failure (its kind, status and the provider's message, from the first 4 KiB of the body). A call
@@ -1118,8 +1118,8 @@ of the content's SHA-256, so a path never changes; unused ones are removed after
   says whether there is one); `POST /api/providers/sync` answers them, to a request signed with
   the hub's secret, sealed with AES-256-GCM under a key derived from the secret (HKDF-SHA256), so
   they don't cross plain HTTP in the clear. Every machine with the secret gets every key. An
-  agent never gets one: it calls the providers through the provider proxy on `127.0.0.1`, with a
-  token of the process, which adds the key. A process of the same user can read that token in the
+  agent never gets one: it calls the providers with a token of the process, through the provider
+  proxy on `127.0.0.1`, which adds the key. A process of the same user can read that token in the
   agent's environment and call the providers through the proxy while AgentAPI runs, but not see
   a key.
 - Agents don't inherit the variables (one of them a
