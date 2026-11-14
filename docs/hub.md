@@ -824,12 +824,22 @@ the identity of the jobs it takes over on its next report.
 The hub also needs to read that AgentAPI itself: it takes a task event only while it reads the
 instance the event names, as that run, at an address of the job's machine (the host of its launcher's
 URL, or a name with the same address). An event that comes before the hub reaches the instance, such
-as just after it started, is dropped, and the cost comment then says the hub may have missed some. An
+as just after it started, is dropped. An
 event for an instance the hub reads on another machine changes nothing; the hub logs "Refused a task
 event of an instance the hub doesn't reach on its job's machine". A launcher and its AgentAPIs that
 name the machine differently in their `public-url` (an address and a name with another address) hit
 this too. The events are still signed with the secret every machine has, so this doesn't stop a
 machine that copies the whole identity of the job's AgentAPI ([Tokens and security](#tokens-and-security)).
+
+A run's spend and agent time don't depend on those events. The hub takes them from what it reads of
+the run's AgentAPI, under the same checks: the spend of each hour in its summary (the agent's sessions
+in the job's worktree, subagents included; the summary lists the last 25 hours, so the hub catches up
+after a restart or a stretch without the instance), and the time the hub saw it working. The task
+events still count the tasks; where they add up to more than the hub read (the hub reached the
+instance after hours had left its summary), the run shows theirs, and only then does the cost comment
+say the hub may have missed some. The detail's **Elapsed** and the comment's 總經歷時間 are from the
+first run's start to the last one's end. A hub before 5.5 counted the events only; the runs it kept
+keep that count.
 
 #### The list's rows
 

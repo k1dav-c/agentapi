@@ -696,11 +696,18 @@ agent 還在工作時，可以從最下面的輸入框傳訊息給它（⌘/Ctrl
 
 hub 也要自己讀得到那個 AgentAPI：只有在 hub 正從 job 所在主機的位址（launcher 網址的主機，或解析到
 同一個位址的名稱）讀到事件所指的實例、而且是同一次執行時，才採計它的任務事件。在 hub 連上實例之前
-送到的事件（例如剛啟動時）會丟掉，花費留言就會註明 hub 可能漏算。hub 在別台主機上讀到的實例，
+送到的事件（例如剛啟動時）會丟掉。hub 在別台主機上讀到的實例，
 事件不會改變任何東西，hub 會記下 "Refused a task event of an instance the hub doesn't reach on
 its job's machine"。同一台主機上的 launcher 和 AgentAPI 在各自的 `public-url` 裡用不同方式指名主機時
 （一個寫位址、一個寫解析到別的位址的名稱），也會這樣。事件仍然是用每台主機共用的 secret 簽章，所以擋不住完整複製 job
 的 AgentAPI 身分的主機（[Token 與安全性](#token-與安全性)）。
+
+run 的花費和 agent 工作時間不靠這些事件。hub 在同樣的檢查下，從它讀到的 run 的 AgentAPI 取得：摘要裡
+每個小時的花費（job worktree 裡 agent 的工作階段，含 subagent；摘要列出最近 25 小時，所以 hub 重新啟動
+或一段時間連不上實例之後都補得回來），以及 hub 看到它在工作的時間。任務數仍然來自任務事件；事件加總
+比 hub 讀到的多時（hub 連上實例時，有些小時已經不在摘要裡），run 顯示事件的金額，這時花費留言才會註明
+hub 可能漏算。詳細資料的 **Elapsed** 和留言的「總經歷時間」是從第一次 run 開始到最後一次結束。5.5 之前的
+hub 只加總事件，它留下的 run 保留那時的金額。
 
 #### 清單上的列
 

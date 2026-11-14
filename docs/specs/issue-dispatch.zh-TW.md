@@ -386,8 +386,9 @@ job 已結束（`done`）時：視為新的一輪開發。遠端與本機分支�
 ### 5.8 花費彙總
 
 - job 每次「重新開一輪」（done 之後再開工）`round` 加 1；花費留言只列本輪的 run，之前幾輪另列一行合計。
-- hub 收到 instance 的 `task.completed` / `task.failed` 時，把 `data.cost` 累加到這個 instance 所屬的 run（以 `instance.id` 與 `server_id` 對應 job 和 process generation）；`work_seconds` 取任務的 `duration_seconds` 總和。換 agent 後舊 process 重試送來的延遲事件與目前 run 的 `server_id` 不同，不會改到新 run 的狀態或花費。run 或事件沒有 `server_id`（舊版 launcher 啟動的 run）時不採計，不猜測歸屬；launcher 需與 hub 一起升級，升級後的 launcher 接手 job 時會從 `/status` 取得 `server_id`，下一次回報時由 hub 補上。
+- hub 收到 instance 的 `task.completed` / `task.failed` 時，把 `data.cost` 累加到這個 instance 所屬 run 的 `events`（以 `instance.id` 與 `server_id` 對應 job 和 process generation）；`work_seconds` 取任務的 `duration_seconds` 總和。換 agent 後舊 process 重試送來的延遲事件與目前 run 的 `server_id` 不同，不會改到新 run 的狀態或花費。run 或事件沒有 `server_id`（舊版 launcher 啟動的 run）時不採計，不猜測歸屬；launcher 需與 hub 一起升級，升級後的 launcher 接手 job 時會從 `/status` 取得 `server_id`，下一次回報時由 hub 補上。
 - 事件裡的 `instance.id` 與 `server_id` 是送出者自己寫的，所以 hub 還要求自己讀得到這個實例：hub 正從某個網址讀到實例的摘要、而且是同一次執行（`server_id`），這個網址的主機也必須和 run 所在主機的 launcher 網址是同一個位址（相同的主機名稱，或解析出共同的位址）。hub 還沒連上實例時送到的事件丟掉，run 標記為可能漏算（`missed`）；在別台主機上讀到的實例，事件一律不採計（§11 第 9 點）。
+- run 的金額、tokens 和工作時間另外取自 hub 讀到的 run 的 AgentAPI（同樣要求同一次執行、在 run 所在主機的位址上讀到，`Saw`）：摘要 `spend.hours` 裡從 run 開始那個小時起的每小時花費（`seen.hours`；離開摘要 25 小時清單的小時已定案，併入 `seen.earlier`；同一個 scope 的下一次 run 回報的小時歸下一次 run），以及 hub 看到它在工作的時段（`seen.work_seconds`，每段只算一次，從 run 開始算起）。run 顯示的 `cost`：任務數與呼叫數取自 `events`；金額與 tokens 取 hub 讀到的，除非 `events` 的金額比較多；工作時間取兩者較長的。
 - 金額是 AgentAPI 換算的 **API 等價價格**；以訂閱方案登入的 agent 實際不會被收這筆錢，留言內要註明。
 - job 結束（`stop`）時，hub 以 App 身分在 PR 留言（沒有 PR 時在 issue），一個 job 只留一則，之後重做時更新同一則（`cost_comment_id`）：
 
@@ -400,10 +401,13 @@ job 已結束（`done`）時：視為新的一輪開發。遠端與本機分支�
   | 2 | Codex | pve-dev | 11/08 11:10–11:30 | 1 | 18 分 | … | $0.40 |
   | | **合計** | | | 4 | 49 分 | | **$1.63** |
 
+  總經歷時間：1 小時 28 分（11/08 10:02 開始，11/08 11:30 結束）。
+
   _金額依 API 牌價換算；使用訂閱方案登入時不會實際計費。_
   ```
 
-- hub 漏收事件時（離線、重啟），instance `GET /summary` 的 spend 不足以還原單一 job 的金額，所以花費可能偏低；表格註明「hub 未收到部分事件」。
+- 總經歷時間是本輪第一次 run 開始到最後一次 run 結束；還有 run 進行中時不列。
+- 只有某次 run 的金額取自事件、而且 hub 可能漏收事件（離線、重啟、還沒連上實例）時，表格註明「hub 未收到部分事件」。
 
 ## 6. GitHub App 設定（manifest flow）
 
