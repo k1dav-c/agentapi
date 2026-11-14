@@ -3,8 +3,8 @@
 English | [繁體中文](security.zh-TW.md)
 
 AgentAPI has no users or roles: whoever can reach the API can do what the agent can. Out of the box
-it takes no token and accepts any connection whose `Host` header names the machine itself
-(`localhost`, `127.0.0.1`, `[::1]`), on every network interface. The host check keeps web pages
+it takes no token and accepts any connection whose `Host` header is `localhost` or an IP address,
+on every network interface. The host check keeps web pages
 from calling it through DNS rebinding; it doesn't stop a program on the network, which can send any
 `Host` header. Protect the server before anyone else can reach the port. When it takes no token and
 listens on an address other machines can reach, AgentAPI logs a warning at startup.
@@ -76,7 +76,9 @@ from those who can.
 ## Allowed hosts
 
 By default, the server only allows requests with the `Host` header set to `localhost`, `127.0.0.1`
-or `[::1]`. To host AgentAPI elsewhere, set `AGENTAPI_ALLOWED_HOSTS` or `--allowed-hosts`.
+or `[::1]`, or to any other IP address: DNS rebinding needs a name the attacker's page controls, so
+an address (a LAN's, a VPN's, one DHCP changes) needs no entry. To open AgentAPI by a name, set
+`AGENTAPI_ALLOWED_HOSTS` or `--allowed-hosts`. A network such as `192.168.9.0/24` isn't accepted.
 Hosts must be hostnames only (no ports); the server ignores the port portion of incoming requests
 when authorizing. This checks the `Host` header only; to keep the server off the network
 altogether, also listen on loopback with `--bind 127.0.0.1` (see [Bind address](#bind-address)).

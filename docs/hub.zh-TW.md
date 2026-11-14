@@ -142,8 +142,8 @@ hub 的頁面已經備好這行指令，填好 hub 的位址和 secret，另附�
 - 想讓 hub 更新這台主機的 AgentAPI，加入時再加上 `--allow-update`（見[從 hub 更新](#從-hub-更新)）。
 - 正在執行的 AgentAPI 會立刻套用，一秒內就出現在 hub 上。1.2 之前啟動的 AgentAPI 沒有在這台主機
   上登記，`join` 找不到它們：重新啟動它們或整個 workspace 一次。
-- hub 轉送請求時，`Host` 標頭是實例網址裡的主機。AgentAPI 預設只接受 `localhost`、`127.0.0.1`、
-  `[::1]`，以及 `{ip}` 目前代表的位址。用 VPN 名稱時要允許它：用 `--allowed-hosts '*'` 啟動
+- hub 轉送請求時，`Host` 標頭是實例網址裡的主機。AgentAPI 預設接受 `localhost` 和任何 IP 位址，
+  所以 `{ip}` 和固定位址都不必設定。用 VPN 名稱時要允許它：用 `--allowed-hosts '*'` 啟動
   （Coder module 就是這樣做），或把名稱加進設定檔：
 
   ```yaml
