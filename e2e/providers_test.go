@@ -111,8 +111,40 @@ func TestNativeClaudeProviders(t *testing.T) {
 	assert.Regexp(t, `^Echo: two \[via http://127\.0\.0\.1:\d+/gw/anthropic on GLM: 200 gw ok\]$`, via)
 	assert.NotContains(t, via, gateway.URL)
 
+	// GET /settings has the provider's health, and so does the summary.
+	var health struct {
+		Options struct {
+			Providers []struct {
+				ID     string `json:"id"`
+				Health *struct {
+					Requests int `json:"requests"`
+					Failures int `json:"failures"`
+				} `json:"health"`
+			} `json:"providers"`
+		} `json:"options"`
+	}
+	code, data := s.do(ctx, http.MethodGet, "/settings", "")
+	require.Equal(t, http.StatusOK, code)
+	require.NoError(t, json.Unmarshal(data, &health))
+	require.NotNil(t, health.Options.Providers[0].Health)
+	assert.Equal(t, 1, health.Options.Providers[0].Health.Requests)
+	assert.Zero(t, health.Options.Providers[0].Health.Failures)
+	assert.Nil(t, health.Options.Providers[1].Health, "not called")
+	var summary struct {
+		ProviderHealth []struct {
+			Provider string `json:"provider"`
+			Requests int    `json:"requests"`
+		} `json:"provider_health"`
+	}
+	code, data = s.do(ctx, http.MethodGet, "/summary", "")
+	require.Equal(t, http.StatusOK, code)
+	require.NoError(t, json.Unmarshal(data, &summary))
+	require.Len(t, summary.ProviderHealth, 1)
+	assert.Equal(t, "gw", summary.ProviderHealth[0].Provider)
+	assert.Equal(t, 1, summary.ProviderHealth[0].Requests)
+
 	// A model the gateway doesn't list, or a provider there isn't.
-	code, _ := s.do(ctx, http.MethodPut, "/settings", `{"model":"nope"}`)
+	code, _ = s.do(ctx, http.MethodPut, "/settings", `{"model":"nope"}`)
 	assert.Equal(t, http.StatusBadRequest, code)
 	code, _ = s.do(ctx, http.MethodPut, "/settings", `{"provider":"nope"}`)
 	assert.Equal(t, http.StatusBadRequest, code)

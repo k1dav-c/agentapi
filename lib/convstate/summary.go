@@ -46,6 +46,7 @@ func (e *EventEmitter) summaryLocked() instanceapi.SummaryBody {
 		update := *e.summary.update
 		summary.Update = &update
 	}
+	summary.ProviderHealth = instanceapi.CloneProviderHealth(e.summary.providerHealth)
 	for _, r := range e.requests {
 		if r.Status != agentstate.RequestStatusPending {
 			continue
@@ -123,6 +124,21 @@ func (e *EventEmitter) SetUpdate(update instanceapi.UpdateStatus) {
 	e.summary.changed = true
 }
 
+// SetProviderHealth records how the model providers answered recently,
+// and sends the summary if that changed.
+func (e *EventEmitter) SetProviderHealth(health []instanceapi.SummaryProviderHealth) {
+	e.mu.Lock()
+	defer e.unlock()
+	if len(health) == 0 {
+		health = nil
+	}
+	if instanceapi.EqualProviderHealth(e.summary.providerHealth, health) {
+		return
+	}
+	e.summary.providerHealth = instanceapi.CloneProviderHealth(health)
+	e.summary.changed = true
+}
+
 // SummaryChanged sends the summary if it changed by something outside the
 // conversation (the instance's settings).
 func (e *EventEmitter) SummaryChanged() {
@@ -145,6 +161,9 @@ type summaryFeed struct {
 	// update is how far an update through the API is (updater); nil
 	// until the server sets it.
 	update *instanceapi.UpdateStatus
+	// providerHealth is how the providers answered (startProviderHealth);
+	// nil without calls.
+	providerHealth []instanceapi.SummaryProviderHealth
 }
 
 // sendSummaryLocked sends the summary if the state changed since it was

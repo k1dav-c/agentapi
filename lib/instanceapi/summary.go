@@ -154,6 +154,8 @@ type SummaryBody struct {
 	Request *SummaryRequest `json:"request,omitempty" doc:"The oldest request the agent waits on (see GET /requests); missing when none waits."`
 	// Spend is what the agent's sessions cost recently.
 	Spend *SummarySpend `json:"spend,omitempty" doc:"What the agent's sessions in this directory cost over the last 24 hours and 7 days, at list prices, worked out once a minute; missing for agents whose session logs AgentAPI doesn't read and until it is worked out. AgentAPIs with one scope add up the same sessions: count each scope once."`
+	// ProviderHealth is how the model providers answered recently.
+	ProviderHealth []SummaryProviderHealth `json:"provider_health,omitempty" doc:"How each model provider the agent called over the last hour answered, through AgentAPI's provider proxy, by provider ID; worked out every 30 seconds. Missing without such calls, and from earlier releases."`
 	// Update is nil from AgentAPIs that can't update through their API.
 	Update *UpdateStatus `json:"update,omitempty" doc:"Whether a client can update this AgentAPI to the latest release through its API (POST /update), and how far an update is. Missing from AgentAPIs that can't update through their API: earlier releases."`
 }
@@ -236,6 +238,33 @@ type SummaryProviderSpend struct {
 	WeekUSD    float64       `json:"week_usd" doc:"The same over the last 7 days."`
 	DayTokens  SummaryTokens `json:"day_tokens" doc:"The tokens of the provider's calls over the last 24 hours."`
 	WeekTokens SummaryTokens `json:"week_tokens" doc:"The same over the last 7 days."`
+}
+
+// SummaryProviderHealth is how a model provider answered the agent's
+// calls over the last hour.
+type SummaryProviderHealth struct {
+	Provider string `json:"provider" doc:"The AgentAPI model provider, by its ID."`
+	agentstate.ProviderHealth
+}
+
+// CloneProviderHealth returns a copy of health that shares nothing with
+// it.
+func CloneProviderHealth(health []SummaryProviderHealth) []SummaryProviderHealth {
+	if health == nil {
+		return nil
+	}
+	out := make([]SummaryProviderHealth, len(health))
+	for i, h := range health {
+		out[i] = SummaryProviderHealth{Provider: h.Provider, ProviderHealth: h.ProviderHealth.Clone()}
+	}
+	return out
+}
+
+// EqualProviderHealth reports whether a and b say the same.
+func EqualProviderHealth(a, b []SummaryProviderHealth) bool {
+	return slices.EqualFunc(a, b, func(x, y SummaryProviderHealth) bool {
+		return x.Provider == y.Provider && x.ProviderHealth.Equal(y.ProviderHealth)
+	})
 }
 
 // SummaryHour is what the agent's sessions in a directory spent in one

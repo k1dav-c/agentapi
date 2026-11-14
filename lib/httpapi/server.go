@@ -328,6 +328,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	s.startWebhook(config)
 	s.registry = s.newInstanceRegistry(config.RegistryDir, bind, config.RestartsInPlace)
 	s.startSpend()
+	s.startProviderHealth()
 	// Without a state database, a restart in place carries the agent's
 	// session, which the next run resumes if it can read its log.
 	s.updater = newUpdater(config.Update, logger, emitter, stateDB != nil, stateDB != nil || s.sessions != nil)

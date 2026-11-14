@@ -281,6 +281,9 @@ func (s *Server) settingsResponse(ctx context.Context) (*SettingsResponse, error
 	if resp.Body.Options.Models == nil {
 		resp.Body.Options.Models = []native.ModelOption{}
 	}
+	for i := range resp.Body.Options.Providers {
+		resp.Body.Options.Providers[i].Health = s.proxy.Health(resp.Body.Options.Providers[i].ID)
+	}
 	return resp, nil
 }
 

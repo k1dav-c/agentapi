@@ -1069,9 +1069,100 @@
         ],
         "type": "object"
       },
+      "ProviderFailure": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "description": "When the call failed.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ProviderFailureKind",
+            "description": "status (the provider answered 5xx or 429), network (it couldn't be reached), timeout (it didn't answer in time) or stream (its answer broke off)."
+          },
+          "message": {
+            "description": "What went wrong, short: the provider's error message, else the status or the network error.",
+            "type": "string"
+          },
+          "status": {
+            "description": "The HTTP status the provider answered, for status and stream; missing for the others.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "at",
+          "kind",
+          "message"
+        ],
+        "type": "object"
+      },
+      "ProviderFailureKind": {
+        "enum": [
+          "network",
+          "status",
+          "stream",
+          "timeout"
+        ],
+        "example": "status",
+        "title": "ProviderFailureKind",
+        "type": "string"
+      },
+      "ProviderHealth": {
+        "additionalProperties": false,
+        "properties": {
+          "client_errors": {
+            "description": "Of the requests, those answered with a 4xx other than 429 (a key the provider refuses, a model it doesn't have): the provider answered, so they don't count as failures.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "failures": {
+            "description": "Of the requests, those the provider failed: a network error or timeout, a 5xx or 429 answer, or an answer that broke off.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "first_byte_p50_ms": {
+            "description": "Median time in milliseconds from the call to the provider's first response byte (its headers), over the latest 100 answers of the hour that weren't failures; 0 without one.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "first_byte_p95_ms": {
+            "description": "The 95th percentile of the same.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "last_failure": {
+            "$ref": "#/components/schemas/ProviderFailure",
+            "description": "The latest failure of the hour; missing without one."
+          },
+          "last_success_at": {
+            "description": "When the latest call of the hour that wasn't a failure ended; missing without one.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "requests": {
+            "description": "The agent's calls to the provider over the last hour that got an answer or failed; those the agent cancelled before an answer don't count.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "client_errors",
+          "failures",
+          "first_byte_p50_ms",
+          "first_byte_p95_ms",
+          "requests"
+        ],
+        "type": "object"
+      },
       "ProviderOption": {
         "additionalProperties": false,
         "properties": {
+          "health": {
+            "$ref": "#/components/schemas/ProviderHealth",
+            "description": "How the provider answered the agent's calls over the last hour, through AgentAPI's provider proxy; missing when the agent called it none."
+          },
           "host": {
             "description": "The host of the provider's API, to show where it runs.",
             "type": "string"
@@ -2575,6 +2666,14 @@
             "format": "int64",
             "type": "integer"
           },
+          "provider_health": {
+            "description": "How each model provider the agent called over the last hour answered, through AgentAPI's provider proxy, by provider ID; worked out every 30 seconds. Missing without such calls, and from earlier releases.",
+            "items": {
+              "$ref": "#/components/schemas/SummaryProviderHealth"
+            },
+            "nullable": true,
+            "type": "array"
+          },
           "queued_messages": {
             "description": "Messages waiting in the queue; see GET /queue.",
             "format": "int64",
@@ -2667,6 +2766,58 @@
           "hour",
           "tokens",
           "usd"
+        ],
+        "type": "object"
+      },
+      "SummaryProviderHealth": {
+        "additionalProperties": false,
+        "properties": {
+          "client_errors": {
+            "description": "Of the requests, those answered with a 4xx other than 429 (a key the provider refuses, a model it doesn't have): the provider answered, so they don't count as failures.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "failures": {
+            "description": "Of the requests, those the provider failed: a network error or timeout, a 5xx or 429 answer, or an answer that broke off.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "first_byte_p50_ms": {
+            "description": "Median time in milliseconds from the call to the provider's first response byte (its headers), over the latest 100 answers of the hour that weren't failures; 0 without one.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "first_byte_p95_ms": {
+            "description": "The 95th percentile of the same.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "last_failure": {
+            "$ref": "#/components/schemas/ProviderFailure",
+            "description": "The latest failure of the hour; missing without one."
+          },
+          "last_success_at": {
+            "description": "When the latest call of the hour that wasn't a failure ended; missing without one.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "provider": {
+            "description": "The AgentAPI model provider, by its ID.",
+            "type": "string"
+          },
+          "requests": {
+            "description": "The agent's calls to the provider over the last hour that got an answer or failed; those the agent cancelled before an answer don't count.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "client_errors",
+          "failures",
+          "first_byte_p50_ms",
+          "first_byte_p95_ms",
+          "provider",
+          "requests"
         ],
         "type": "object"
       },
@@ -2858,6 +3009,14 @@
             "description": "Requests (approvals, questions, plans) the agent waits on; see GET /requests.",
             "format": "int64",
             "type": "integer"
+          },
+          "provider_health": {
+            "description": "How each model provider the agent called over the last hour answered, through AgentAPI's provider proxy, by provider ID; worked out every 30 seconds. Missing without such calls, and from earlier releases.",
+            "items": {
+              "$ref": "#/components/schemas/SummaryProviderHealth"
+            },
+            "nullable": true,
+            "type": "array"
           },
           "queued_messages": {
             "description": "Messages waiting in the queue; see GET /queue.",

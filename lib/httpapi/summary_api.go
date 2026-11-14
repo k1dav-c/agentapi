@@ -14,10 +14,12 @@ type SummaryResponse struct {
 }
 
 func (s *Server) getSummary(_ context.Context, _ *struct{}) (*SummaryResponse, error) {
+	s.updateProviderHealth()
 	return &SummaryResponse{Body: s.emitter.Summary()}, nil
 }
 
 func (s *Server) markSeen(_ context.Context, _ *struct{}) (*SummaryResponse, error) {
+	s.updateProviderHealth()
 	return &SummaryResponse{Body: s.emitter.MarkSeen()}, nil
 }
 
