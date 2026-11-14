@@ -32,6 +32,7 @@ Use these commands and conventions when changing AgentAPI.
 - `CGO_ENABLED=0 go test ./...` - Run all Go tests (CI runs them with `CGO_ENABLED=0`)
 - `CGO_ENABLED=1 go test -race ./lib/... ./cmd/...` - Run them with the race detector, as CI does
 - `go test ./e2e` - Run the end-to-end tests: the server binary with `e2e/fakeclaude`, a scripted Claude Code
+- `go test ./internal/docscheck` - Check the docs: relative links, images and anchors resolve, and each zh-TW twin has its English page's structure
 - `cd chat && bun test` - Run the chat UI tests
 - Tests are located alongside source files (e.g., `lib/httpapi/server_test.go`)
 - CI releases on every push to `main` from Conventional Commit messages, but only after these tests
@@ -133,7 +134,7 @@ The `exhaustive` linter checks every switch and map over `AgentType`.
 
 ## Project structure
 
-- User docs: `README.md` is the overview (features, quickstart, agents, an index of the guides); the guides are in `docs/`: `chat-ui.md`, `agents.md` (the native transport and each agent), `providers.md`, `api.md` (the conversation API, integrations and the endpoint reference), `security.md`, `cli.md`, `hub.md` and `architecture.md`. Each has a `.zh-TW.md` twin that mirrors it section by section: change both together, and keep headings, which other pages link to by anchor
+- User docs: `README.md` is the overview (features, quickstart, agents, an index of the guides); the guides are in `docs/`: `chat-ui.md`, `agents.md` (the native transport and each agent), `providers.md`, `api.md` (the conversation API, integrations and the endpoint reference), `security.md`, `cli.md`, `hub.md` and `architecture.md`. Each has a `.zh-TW.md` twin that mirrors it section by section: change both together, and keep headings, which other pages link to by anchor. Docs links and twins are checked by `go test ./internal/docscheck`: every relative link, image and `#anchor` in the tracked Markdown resolves (GitHub's heading slugs), and each twin has the same heading levels in order, fenced code blocks per section, images in order and linked files
 - Chat UI in `chat/` directory (Next.js + TypeScript)
 - OpenAPI schema auto-generated to `openapi.json`
 - Release versions determined by `next-version.sh`; builds stamp the binary version, and `version.sh` synchronizes generated metadata
