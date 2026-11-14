@@ -60,7 +60,7 @@ func (c Config) reportsToHub() bool { return c.HubURL != "" && c.HubSecret != ""
 
 // report sends the hub a host.* event about the machine.
 func (l *Launcher) report(ctx context.Context, eventType string) error {
-	data := HostEventData{HostInfo: l.Info(ctx), Token: l.hostToken, HeartbeatSeconds: int(heartbeatInterval / time.Second)}
+	data := HostEventData{HostInfo: l.Info(ctx), Token: l.hostToken, InstanceToken: l.instanceToken, HeartbeatSeconds: int(heartbeatInterval / time.Second)}
 	instance := instanceapi.WebhookInstance{ID: "host~" + l.hostname, ServerID: l.runID, Hostname: l.hostname, Version: version.Version, URL: data.URL}
 	body, err := json.Marshal(instanceapi.WebhookEvent{ID: randomID(), Type: eventType, CreatedAt: time.Now(), Instance: &instance, Data: data})
 	if err != nil {

@@ -53,6 +53,8 @@ type fakeLauncher struct {
 	gate    chan struct{}
 	onStart func(w http.ResponseWriter, job host.JobInfo)
 	maxJobs int
+	// instanceToken is the jobs' AgentAPIs' token its events report.
+	instanceToken string
 }
 
 func newFakeLauncher(t *testing.T, name string) *fakeLauncher {
@@ -123,7 +125,7 @@ func (f *fakeLauncher) event(agents ...string) host.HostEventData {
 			Hostname: f.name, URL: f.srv.URL, Repos: []string{"acme/widget"}, Agents: agents,
 			DefaultAgent: agents[0], MaxJobs: cmp.Or(f.maxJobs, 2), Clone: true, Jobs: jobs,
 		},
-		Token: f.token, HeartbeatSeconds: 60,
+		Token: f.token, InstanceToken: f.instanceToken, HeartbeatSeconds: 60,
 	}
 }
 
@@ -1731,5 +1733,39 @@ func TestReconcileByState(t *testing.T) {
 			defer l.mu.Unlock()
 			return slices.Equal(l.stops, []string{test.stop})
 		}, 5*time.Second, 10*time.Millisecond, name)
+	}
+}
+
+// A job's AgentAPI's token is its launcher's latest, kept across a
+// restart of the hub; a launcher that doesn't report one leaves it.
+func TestInstanceToken(t *testing.T) {
+	s, _ := newService(t, nil)
+	l := newFakeLauncher(t, "pve-1")
+	l.instanceToken = "made-by-pve-1"
+	join(t, s, l, "claude")
+	_, err := s.Dispatch(context.Background(), Request{Action: ActionStart, Repo: "acme/widget", Issue: 12})
+	require.NoError(t, err)
+	s.waitStarts()
+	id := "pve-1~acme~widget~12"
+	u, err := url.Parse(l.srv.URL)
+	require.NoError(t, err)
+	at := "http://" + u.Hostname() + ":4100"
+	assert.Equal(t, "made-by-pve-1", s.InstanceToken(id, at))
+	assert.Empty(t, s.InstanceToken(id, "http://10.9.9.9:4100"), "on another host than the launcher")
+	assert.Empty(t, s.InstanceToken("pve-1:3284", at), "no job's")
+
+	l.instanceToken = ""
+	join(t, s, l, "claude")
+	assert.Equal(t, "made-by-pve-1", s.InstanceToken(id, at), "an older launcher says nothing of it")
+	l.instanceToken = "made-again"
+	join(t, s, l, "claude")
+	s.Close()
+	s, err = New(s.config)
+	require.NoError(t, err)
+	t.Cleanup(s.Close)
+	assert.Equal(t, "made-again", s.InstanceToken(id, at))
+	for _, h := range s.Hosts() {
+		data, _ := json.Marshal(h)
+		assert.NotContains(t, string(data), "made-again", "never sent")
 	}
 }

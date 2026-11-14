@@ -104,10 +104,11 @@ type Service struct {
 }
 
 // storedHost is a machine as dispatch.json keeps it: with its launcher's
-// token, which the hub never sends.
+// token and its jobs' AgentAPIs', which the hub never sends.
 type storedHost struct {
 	Host
-	Token string `json:"token"`
+	Token         string `json:"token"`
+	InstanceToken string `json:"instance_token,omitempty"`
 }
 
 // stateFile is dispatch.json.
@@ -203,7 +204,7 @@ func New(config Config) (*Service, error) {
 			}
 			for _, h := range file.Hosts {
 				host := h.Host
-				host.Token = h.Token
+				host.Token, host.InstanceToken = h.Token, h.InstanceToken
 				s.hosts[h.Hostname] = &host
 			}
 			for _, j := range file.Jobs {
@@ -285,7 +286,7 @@ func (s *Service) saveLocked() {
 	}
 	file := stateFile{Version: stateVersion, Deliveries: s.deliveries, Starts: s.attempts}
 	for _, h := range s.hosts {
-		file.Hosts = append(file.Hosts, storedHost{Host: *h, Token: h.Token})
+		file.Hosts = append(file.Hosts, storedHost{Host: *h, Token: h.Token, InstanceToken: h.InstanceToken})
 	}
 	for _, j := range s.jobs {
 		file.Jobs = append(file.Jobs, j)
@@ -542,6 +543,10 @@ func (s *Service) HostEvent(eventType string, data json.RawMessage) error {
 		return fmt.Errorf("the machine %s has another launcher's token: forget the machine on the hub to admit this launcher", d.Hostname)
 	}
 	h.HostInfo = d.HostInfo
+	if d.InstanceToken != "" {
+		// A launcher older than the field leaves the one it had.
+		h.InstanceToken = d.InstanceToken
+	}
 	h.HeartbeatSeconds = d.HeartbeatSeconds
 	h.LastSeen = now
 	h.Stopped = eventType == host.EventHostStopped
@@ -550,6 +555,35 @@ func (s *Service) HostEvent(eventType string, data json.RawMessage) error {
 	}
 	s.saveLocked()
 	return nil
+}
+
+// InstanceToken is the API token of the AgentAPI instanceID at
+// instanceURL when it runs a job, as the job's machine's launcher reported
+// it; empty for any other AgentAPI. The instance's ID and URL come in
+// events any machine with the hub's secret can sign, so the URL has to be
+// on the launcher's own host, which its token pins: another machine
+// claiming the job's ID doesn't get the token sent to it.
+func (s *Service) InstanceToken(instanceID, instanceURL string) string {
+	u, err := url.Parse(instanceURL)
+	if err != nil || u.Hostname() == "" {
+		return ""
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, j := range s.jobs {
+		if j.InstanceID != instanceID {
+			continue
+		}
+		h := s.hosts[j.Host]
+		if h == nil || h.InstanceToken == "" {
+			return ""
+		}
+		if launcher, err := url.Parse(h.URL); err != nil || !strings.EqualFold(launcher.Hostname(), u.Hostname()) {
+			return ""
+		}
+		return h.InstanceToken
+	}
+	return ""
 }
 
 // ForgetHost removes a machine and the launcher's token its name is

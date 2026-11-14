@@ -30,8 +30,8 @@ type Config struct {
 	// TokenFile holds the token the hub calls the launcher with, made when
 	// missing.
 	TokenFile string `yaml:"token-file"`
-	// InstanceTokenFile holds the API token of every job's AgentAPI: the
-	// hub's --instance-token, made when missing.
+	// InstanceTokenFile holds the API token of every job's AgentAPI, made
+	// when missing; the launcher's events give it to the hub.
 	InstanceTokenFile string `yaml:"instance-token-file"`
 	// GitHubTokenFile holds a GitHub token the jobs' git and gh use, until
 	// the hub hands them out. Without it they use the machine's own
