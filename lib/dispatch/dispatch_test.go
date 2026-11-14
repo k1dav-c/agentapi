@@ -1120,6 +1120,44 @@ func TestStartRefused(t *testing.T) {
 	assert.Equal(t, JobWorking, s.job("acme/widget#12").State)
 }
 
+// GitHub disconnected while a start runs, after it reserved the job's
+// place: the start goes on with the App it began with, and ends as a
+// start does, leaving nothing starting.
+func TestDisconnectWhileStarting(t *testing.T) {
+	g := newFakeGitHub(t)
+	s, _ := newService(t, g)
+	l := newFakeLauncher(t, "pve-1")
+	join(t, s, l, "claude")
+	s.app = &github.App{ID: 42, Slug: "agentapi-hub-x", BotUserID: 99, PEM: g.pem(), Installations: []github.Installation{{ID: 7, Account: "acme"}}}
+	r := chi.NewRouter()
+	s.MountSession(r)
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+	s.reserved = func() {
+		req, err := http.NewRequest(http.MethodDelete, srv.URL+"/api/github", nil)
+		require.NoError(t, err)
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		_ = resp.Body.Close()
+		require.Equal(t, http.StatusNoContent, resp.StatusCode)
+	}
+	resp, err := s.Dispatch(context.Background(), Request{Action: ActionStart, Repo: "acme/widget", Issue: 12})
+	require.NoError(t, err)
+	assert.Equal(t, JobStarting, resp.Job.State)
+	require.Nil(t, s.currentApp(), "disconnected")
+	s.waitStarts()
+
+	job := s.job("acme/widget#12")
+	assert.Equal(t, JobWorking, job.State)
+	s.mu.Lock()
+	assert.Empty(t, s.running, "no start on its way")
+	assert.Empty(t, s.attempts)
+	s.mu.Unlock()
+	require.Equal(t, 1, l.startCount())
+	assert.Equal(t, &host.GitUser{Name: "agentapi-hub-x[bot]", Email: "99+agentapi-hub-x[bot]@users.noreply.github.com"}, l.starts[0].GitUser)
+	assert.Equal(t, host.CredentialsHub, l.starts[0].Credentials)
+}
+
 // A job stopped while it starts is stopped on the launcher once the start
 // answers, and a new start waits until then.
 func TestStopWhileStarting(t *testing.T) {

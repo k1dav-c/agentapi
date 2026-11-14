@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- Disconnecting the hub from GitHub while an issue's job started no longer panics the hub and
+  leaves the job `starting` for good: a start keeps the GitHub App it began with until it ends.
+
 ## v5.0.0
 
 ### Breaking changes

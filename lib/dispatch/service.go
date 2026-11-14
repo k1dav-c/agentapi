@@ -81,6 +81,9 @@ type Service struct {
 	ctx      context.Context
 	cancel   context.CancelFunc
 	starts   sync.WaitGroup
+	// reserved, when set, runs once a start reserved its job's place, before
+	// it goes on: the package's tests' seam for what happens meanwhile.
+	reserved func()
 
 	// The state file is written in the background (writeLoop): saveLocked
 	// leaves the latest in pending. writeState is the package's disk seam;
@@ -813,10 +816,9 @@ func (s *Service) currentApp() *github.App {
 	return s.app
 }
 
-// repoClient is the app's client for repo; without an app, ok is false
-// and the dispatch works without GitHub (the machines' own credentials).
-func (s *Service) repoClient(ctx context.Context, repo string) (as github.As, ok bool, err error) {
-	app := s.currentApp()
+// repoClient is app's client for repo; without an app, ok is false and
+// the dispatch works without GitHub (the machines' own credentials).
+func (s *Service) repoClient(ctx context.Context, app *github.App, repo string) (as github.As, ok bool, err error) {
 	if app == nil {
 		return github.As{}, false, nil
 	}
@@ -960,7 +962,11 @@ func (s *Service) readIssue(ctx context.Context, as github.As, ok bool, key host
 // launcher clones, fetches and starts the job's AgentAPI in the
 // background (runStart), longer than a client waits for an answer.
 func (s *Service) start(ctx context.Context, key host.Key, req Request) (Response, error) {
-	as, gh, err := s.repoClient(ctx, key.Repo())
+	// The App as the start begins is the start's, to its end: GitHub can be
+	// disconnected (DELETE /api/github) while it runs, and the start must
+	// not find no App after it reserved the job's place.
+	app := s.currentApp()
+	as, gh, err := s.repoClient(ctx, app, key.Repo())
 	if err != nil {
 		return Response{}, err
 	}
@@ -984,6 +990,9 @@ func (s *Service) start(ctx context.Context, key host.Key, req Request) (Respons
 	if err != nil {
 		return Response{}, err
 	}
+	if s.reserved != nil {
+		s.reserved()
+	}
 	data := promptData{Repo: key.Repo(), Issue: key.Issue, IssueURL: meta.url, DefaultBranch: cmp.Or(meta.defaultBranch, "main"), Credentials: gh, PreviousAgent: agentName(a.Previous), PRURL: updated.PRURL}
 	prompt := render("start", data)
 	if a.Previous != "" {
@@ -991,7 +1000,6 @@ func (s *Service) start(ctx context.Context, key host.Key, req Request) (Respons
 	}
 	start := host.StartRequest{Repo: key.Repo(), Issue: key.Issue, Agent: a.Agent, DefaultBranch: meta.defaultBranch, Prompt: prompt}
 	if gh {
-		app := s.currentApp()
 		start.GitUser = &host.GitUser{Name: app.BotName(), Email: app.BotEmail()}
 		start.Credentials = host.CredentialsHub
 	}
@@ -1003,7 +1011,7 @@ func (s *Service) start(ctx context.Context, key host.Key, req Request) (Respons
 		if a.Previous != "" {
 			verb = fmt.Sprintf("接手這個 issue（之前由 %s 處理）", agentName(a.Previous))
 		}
-		s.comment(ctx, as, key, key.Issue, fmt.Sprintf("🤖 %s 在 `%s` 上%s。%s", agentName(job.Agent), job.Host, verb, s.hubLink(job.InstanceID)))
+		s.comment(ctx, as, key, key.Issue, fmt.Sprintf("🤖 %s 在 `%s` 上%s。%s", agentName(job.Agent), job.Host, verb, hubLink(app, job.InstanceID)))
 		s.dropOtherAgentLabels(ctx, as, key, meta.labels, job.Agent)
 	}, func(ctx context.Context, job Job) {
 		if gh {
@@ -1318,7 +1326,7 @@ func (s *Service) stop(ctx context.Context, key host.Key) (Response, error) {
 	} else {
 		state = JobStopped
 	}
-	as, gh, err := s.repoClient(ctx, key.Repo())
+	as, gh, err := s.repoClient(ctx, s.currentApp(), key.Repo())
 	if err != nil {
 		s.logger.Warn("Couldn't reach GitHub as the app to clean up a job", "job", key.String(), "error", err)
 	}
@@ -1390,9 +1398,8 @@ func (s *Service) dropOtherAgentLabels(ctx context.Context, as github.As, key ho
 	}
 }
 
-// hubLink names where the job opens on the hub.
-func (s *Service) hubLink(instanceID string) string {
-	app := s.currentApp()
+// hubLink names where the job opens on app's hub.
+func hubLink(app *github.App, instanceID string) string {
 	if app == nil || app.HubURL == "" {
 		return ""
 	}
