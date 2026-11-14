@@ -420,8 +420,10 @@ func TestRedirects(t *testing.T) {
 	assert.Empty(t, resp.Header.Get("Location"))
 	assert.Contains(t, readAll(t, resp), "redirected")
 	assert.Empty(t, got)
+	// A call is counted once its handler ends, which may be after the
+	// agent read the answer.
+	require.Eventually(t, func() bool { h := proxy.Health("gw"); return h != nil && h.Requests == 3 }, 5*time.Second, 10*time.Millisecond)
 	health := proxy.Health("gw")
-	require.NotNil(t, health)
 	assert.Equal(t, 3, health.Requests)
 	assert.Equal(t, 1, health.Failures)
 	require.NotNil(t, health.LastFailure)
