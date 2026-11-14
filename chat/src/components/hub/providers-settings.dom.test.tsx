@@ -231,3 +231,41 @@ describe("ProvidersSettings usage", () => {
     expect(view.container.querySelector("[data-provider-usage]")).toBeNull();
   });
 });
+
+describe("ProvidersSettings health", () => {
+  const healthOf = (container: HTMLElement, id: string) => container.querySelector<HTMLElement>(`[data-provider="${id}"] [data-provider-health]`);
+  const calling = (id: string, provider: string, requests: number, failures: number): HubInstance =>
+    idleInstance(id, {
+      summary: summary({
+        provider_health: [
+          {
+            provider,
+            requests,
+            failures,
+            client_errors: 0,
+            first_byte_p50_ms: 900,
+            first_byte_p95_ms: 1800,
+            last_success_at: failures < requests ? new Date().toISOString() : undefined,
+            last_failure: failures > 0 ? {at: new Date(Date.now() - 30_000).toISOString(), kind: "status", status: 503, message: "Overloaded"} : undefined,
+          },
+        ],
+      }),
+    });
+
+  test("each provider the agents called says how it answered in the last hour", async () => {
+    routeFetch({"/hub/api/providers": () => json({revision: "r1", providers: [alpha, bravo]})});
+    view = await mount(<ProvidersSettings root="/hub" instances={[calling("a", "alpha", 30, 0), calling("b", "alpha", 10, 1)]} editor={{current: null}} />);
+    await settle();
+    const alphaHealth = healthOf(view.container, "alpha");
+    expect(alphaHealth?.textContent).toBe("1h 40 calls · 3% failed · p50 900 ms · 503 Overloaded just now");
+    expect(alphaHealth?.dataset.failing).toBeUndefined();
+    expect(alphaHealth?.title).toContain("1 of 40 calls failed in the last hour");
+    expect(healthOf(view.container, "bravo")).toBeNull();
+
+    await view.rerender(<ProvidersSettings root="/hub" instances={[calling("c", "bravo", 2, 2)]} editor={{current: null}} />);
+    expect(healthOf(view.container, "alpha")).toBeNull();
+    const bravoHealth = healthOf(view.container, "bravo");
+    expect(bravoHealth?.dataset.failing).toBe("true");
+    expect(bravoHealth?.textContent).toBe("1h 2 calls · 100% failed · 503 Overloaded just now");
+  });
+});
