@@ -30,6 +30,7 @@ import (
 	"github.com/coder/agentapi/lib/pricing"
 	"github.com/coder/agentapi/lib/provider"
 	"github.com/coder/agentapi/lib/providerlog"
+	"github.com/coder/agentapi/lib/providerproxy"
 	"github.com/coder/agentapi/lib/sessions"
 	"github.com/coder/agentapi/lib/shellterm"
 	"github.com/coder/agentapi/lib/statedb"
@@ -57,10 +58,11 @@ type Server struct {
 	updating   atomic.Bool // set under mu once an update restarts AgentAPI: messages wait in the queue, and no agent restart begins
 	logger     *slog.Logger
 	native     *native.Conversation
-	sessions   *sessions.Store // the agent's sessions; nil unless it keeps logs
-	providers  *provider.Source // the model providers, which name the costs'; nil for none
-	ledger     *ledgerWriter   // appends to the provider ledger
-	stateDB    *statedb.DB     // nil unless the conversation is kept
+	sessions   *sessions.Store      // the agent's sessions; nil unless it keeps logs
+	providers  *provider.Source     // the model providers, which name the costs'; nil for none
+	ledger     *ledgerWriter        // appends to the provider ledger
+	proxy      *providerproxy.Proxy // where the agent calls the model providers; nil without them
+	stateDB    *statedb.DB          // nil unless the conversation is kept
 	// queueStoreMu guards what storeQueue last stored in stateDB: the
 	// queue, its last ID and the version of the queue they are.
 	queueStoreMu      sync.Mutex
@@ -165,6 +167,10 @@ type NativeConfig struct {
 	// Providers are the model providers the agent can switch to (Claude
 	// Code, Codex); nil offers none.
 	Providers *provider.Source
+	// ProviderProxy is where the agent calls the providers, which the
+	// server closes when it stops; its health is in GET /settings and the
+	// summary. Nil without providers.
+	ProviderProxy *providerproxy.Proxy
 	// ProviderLedger records which provider each of the agent's sessions
 	// runs on, from when, which attributes Claude Code's calls to their
 	// provider (sessions.Config.Providers); nil records none, and every
@@ -288,6 +294,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 		auth:         auth,
 		native:       newNativeConversation(config, restored, emitter, uploads, ledger, logger),
 		ledger:       ledger,
+		proxy:        config.Native.ProviderProxy,
 		logger:       logger,
 		agentType:    config.AgentType,
 		emitter:      emitter,
@@ -321,6 +328,7 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	s.startWebhook(config)
 	s.registry = s.newInstanceRegistry(config.RegistryDir, bind, config.RestartsInPlace)
 	s.startSpend()
+	s.startProviderHealth()
 	// Without a state database, a restart in place carries the agent's
 	// session, which the next run resumes if it can read its log.
 	s.updater = newUpdater(config.Update, logger, emitter, stateDB != nil, stateDB != nil || s.sessions != nil)
@@ -577,6 +585,10 @@ func (s *Server) Stop(ctx context.Context) error {
 		}
 		if s.terminal != nil {
 			_ = s.terminal.Close()
+		}
+		// The agent stopped: nothing calls a provider.
+		if err := s.proxy.Close(); err != nil {
+			s.logger.Warn("Failed to close the model provider proxy", "error", err)
 		}
 		// The provider ledger has what the agent reported.
 		s.ledger.wait()

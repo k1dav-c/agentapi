@@ -4,6 +4,7 @@ package procenv
 
 import (
 	"os"
+	"slices"
 	"strings"
 )
 
@@ -59,19 +60,66 @@ func agentAPISecret(name string) bool {
 // ForAgent returns env (the process environment if nil) without the
 // variables a parent agent session leaves behind and AgentAPI's secrets,
 // followed by set: the "NAME=value" entries the caller relies on. The rest
-// of AgentAPI's variables stay (WithoutAgentAPI drops them too).
+// of AgentAPI's variables stay (WithoutAgentAPI drops them too). With an
+// HTTP proxy set, loopback is left out of it (bypassLoopback).
 func ForAgent(env []string, set ...string) []string {
 	if env == nil {
 		env = os.Environ()
 	}
-	out := make([]string, 0, len(env)+len(set))
+	out := make([]string, 0, len(env)+len(set)+2)
 	for _, kv := range env {
 		name, _, _ := strings.Cut(kv, "=")
 		if !parentSessionEnv[name] && !agentAPISecret(name) {
 			out = append(out, kv)
 		}
 	}
-	return append(out, set...)
+	return bypassLoopback(append(out, set...))
+}
+
+// proxyEnv are the variables that send an agent's HTTP through a proxy.
+var proxyEnv = []string{"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"}
+
+// loopbackHosts are what a proxy must not get: the agent reaches its model
+// provider through AgentAPI's proxy on 127.0.0.1, which a proxy elsewhere
+// can't reach.
+var loopbackHosts = []string{"127.0.0.1", "localhost", "::1"}
+
+// bypassLoopback returns env with loopbackHosts added to NO_PROXY and
+// no_proxy, when a proxy variable is set; both, as tools read either.
+func bypassLoopback(env []string) []string {
+	proxied := false
+	for _, kv := range env {
+		name, value, _ := strings.Cut(kv, "=")
+		if value != "" && slices.Contains(proxyEnv, name) {
+			proxied = true
+		}
+	}
+	if !proxied {
+		return env
+	}
+	for _, name := range []string{"NO_PROXY", "no_proxy"} {
+		i := slices.IndexFunc(env, func(kv string) bool { return strings.HasPrefix(kv, name+"=") })
+		var hosts []string
+		if i >= 0 {
+			for host := range strings.SplitSeq(strings.TrimPrefix(env[i], name+"="), ",") {
+				if host = strings.TrimSpace(host); host != "" {
+					hosts = append(hosts, host)
+				}
+			}
+		}
+		for _, host := range loopbackHosts {
+			if !slices.Contains(hosts, host) {
+				hosts = append(hosts, host)
+			}
+		}
+		kv := name + "=" + strings.Join(hosts, ",")
+		if i >= 0 {
+			env[i] = kv
+		} else {
+			env = append(env, kv)
+		}
+	}
+	return env
 }
 
 // WithoutAgentAPI returns env without AgentAPI's own variables, which would

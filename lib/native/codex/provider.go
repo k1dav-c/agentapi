@@ -9,13 +9,15 @@ import (
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/provider"
+	"github.com/coder/agentapi/lib/providerproxy"
 )
 
 var _ native.ProviderRunner = (*Adapter)(nil)
 
-// providerKeyEnv holds the provider's key for app-server. Codex leaves
-// variables named like a key out of the environment of the commands it
-// runs (shell_environment_policy's default excludes).
+// providerKeyEnv holds the token of AgentAPI's provider proxy for
+// app-server, the key it calls the provider with. Codex leaves variables
+// named like a key out of the environment of the commands it runs
+// (shell_environment_policy's default excludes).
 const providerKeyEnv = "AGENTAPI_PROVIDER_API_KEY"
 
 // providerName is the model_providers entry of p: AgentAPI's own, so it
@@ -25,22 +27,35 @@ func providerName(p provider.Provider) string {
 	return codexlog.ProviderPrefix + p.ID
 }
 
-// providerArgs are the app-server flags that define p and run on it,
-// through the Responses API.
-func providerArgs(p provider.Provider) []string {
+// providerArgs are the app-server flags that define p, called at
+// endpoint, and run on it, through the Responses API.
+func providerArgs(p provider.Provider, endpoint providerproxy.Endpoint) []string {
 	quote := func(s string) string {
 		// A JSON string is a TOML basic string.
 		b, _ := json.Marshal(s)
 		return string(b)
 	}
 	table := "{name=" + quote(p.DisplayName()) +
-		",base_url=" + quote(p.OpenAIBaseURL()) +
+		",base_url=" + quote(endpoint.OpenAIBaseURL) +
 		",env_key=" + quote(providerKeyEnv) +
 		",wire_api=\"responses\"}"
 	return []string{
 		"-c", "model_providers." + providerName(p) + "=" + table,
 		"-c", "model_provider=" + quote(providerName(p)),
 	}
+}
+
+// launchEndpoint is where app-server calls the provider it runs on,
+// through AgentAPI's provider proxy; nil on Codex's own.
+func (a *Adapter) launchEndpoint() (*providerproxy.Endpoint, error) {
+	if a.launch == nil {
+		return nil, nil
+	}
+	endpoint, err := native.ProviderEndpoint(a.cfg.ProviderProxy, a.launch.Provider)
+	if err != nil {
+		return nil, err
+	}
+	return &endpoint, nil
 }
 
 // SwitchProvider implements native.ProviderRunner. Codex binds a thread to

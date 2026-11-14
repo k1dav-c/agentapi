@@ -53,11 +53,18 @@ func TestNativeClaudeProviders(t *testing.T) {
 	defer cancel()
 
 	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/models" || r.Header.Get("Authorization") != "Bearer sk-test" {
+		switch {
+		case r.Header.Get("Authorization") != "Bearer sk-test":
 			w.WriteHeader(http.StatusUnauthorized)
-			return
+		case r.URL.Path == "/v1/models":
+			// AgentAPI lists the models with the key itself.
+			_, _ = w.Write([]byte(`{"data":[{"id":"K3"},{"id":"GLM"}]}`))
+		case r.URL.Path == "/v1/messages" && r.Header.Get("anthropic-version") != "" && r.Header.Get("x-api-key") == "":
+			// Claude Code's call, through AgentAPI's proxy, which adds the key.
+			_, _ = w.Write([]byte(`gw ok`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
 		}
-		_, _ = w.Write([]byte(`{"data":[{"id":"K3"},{"id":"GLM"}]}`))
 	}))
 	t.Cleanup(gateway.Close)
 	// A provider that never answers.
@@ -96,11 +103,48 @@ func TestNativeClaudeProviders(t *testing.T) {
 	assert.Equal(t, "gw", got.Settings.Provider)
 	assert.Equal(t, "GLM", got.Settings.Model)
 	s.post(ctx, "/message", `{"content":"two","type":"user"}`)
-	via := fmt.Sprintf("Echo: two [via %s on GLM]", gateway.URL)
-	s.waitMessages(ctx, []string{"one", "Echo: one", "two", via})
+	// Claude Code calls the proxy, with the proxy's token, and the gateway
+	// gets the call with its key.
+	var messages []string
+	require.Eventually(t, func() bool { messages = s.messages(ctx); return len(messages) == 4 }, operationTimeout, 50*time.Millisecond)
+	via := messages[3]
+	assert.Regexp(t, `^Echo: two \[via http://127\.0\.0\.1:\d+/gw/anthropic on GLM: 200 gw ok\]$`, via)
+	assert.NotContains(t, via, gateway.URL)
+
+	// GET /settings has the provider's health, and so does the summary.
+	var health struct {
+		Options struct {
+			Providers []struct {
+				ID     string `json:"id"`
+				Health *struct {
+					Requests int `json:"requests"`
+					Failures int `json:"failures"`
+				} `json:"health"`
+			} `json:"providers"`
+		} `json:"options"`
+	}
+	code, data := s.do(ctx, http.MethodGet, "/settings", "")
+	require.Equal(t, http.StatusOK, code)
+	require.NoError(t, json.Unmarshal(data, &health))
+	require.NotNil(t, health.Options.Providers[0].Health)
+	assert.Equal(t, 1, health.Options.Providers[0].Health.Requests)
+	assert.Zero(t, health.Options.Providers[0].Health.Failures)
+	assert.Nil(t, health.Options.Providers[1].Health, "not called")
+	var summary struct {
+		ProviderHealth []struct {
+			Provider string `json:"provider"`
+			Requests int    `json:"requests"`
+		} `json:"provider_health"`
+	}
+	code, data = s.do(ctx, http.MethodGet, "/summary", "")
+	require.Equal(t, http.StatusOK, code)
+	require.NoError(t, json.Unmarshal(data, &summary))
+	require.Len(t, summary.ProviderHealth, 1)
+	assert.Equal(t, "gw", summary.ProviderHealth[0].Provider)
+	assert.Equal(t, 1, summary.ProviderHealth[0].Requests)
 
 	// A model the gateway doesn't list, or a provider there isn't.
-	code, _ := s.do(ctx, http.MethodPut, "/settings", `{"model":"nope"}`)
+	code, _ = s.do(ctx, http.MethodPut, "/settings", `{"model":"nope"}`)
 	assert.Equal(t, http.StatusBadRequest, code)
 	code, _ = s.do(ctx, http.MethodPut, "/settings", `{"provider":"nope"}`)
 	assert.Equal(t, http.StatusBadRequest, code)
@@ -113,6 +157,7 @@ func TestNativeClaudeProviders(t *testing.T) {
 	assert.Equal(t, session, s.sessionID(ctx), "the same session")
 	s.post(ctx, "/message", `{"content":"three","type":"user"}`)
 	s.waitMessages(ctx, []string{"one", "Echo: one", "two", via, "three", "Echo: three"})
+	assert.NotContains(t, strings.Join(s.messages(ctx), "\n"), "sk-test")
 	s.mu.Lock()
 	logged := strings.Join(s.stderr, "\n")
 	s.mu.Unlock()

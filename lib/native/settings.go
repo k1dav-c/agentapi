@@ -29,6 +29,8 @@ type ProviderOption struct {
 	Host   string          `json:"host" doc:"The host of the provider's API, to show where it runs."`
 	Origin provider.Origin `json:"origin" enum:"config,hub" doc:"Where the provider is defined: config, the machine's ~/.agentapi/config.yaml; hub, the hub this AgentAPI reports to."`
 	Models []ModelOption   `json:"models" nullable:"false" doc:"Models the provider offers; empty when it defines none and its API listed none, then any model ID goes."`
+	// Health is the server's to fill in, from its provider proxy.
+	Health *agentstate.ProviderHealth `json:"health,omitempty" doc:"How the provider answered the agent's calls over the last hour, through AgentAPI's provider proxy; missing when the agent called it none."`
 }
 
 // ModelOption is a model the agent can switch to.

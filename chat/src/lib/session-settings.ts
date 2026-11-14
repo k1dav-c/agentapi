@@ -1,4 +1,4 @@
-import type { ModelOption, PermissionMode, SettingOptions } from "./chat-api";
+import type { ModelOption, PermissionMode, ProviderHealth, SettingOptions } from "./chat-api";
 
 export interface ModeMeta {
   label: string;
@@ -30,6 +30,8 @@ export interface ModelGroup {
   label: string;
   host?: string;
   origin?: string;
+  // How the provider answered over the last hour, once the agent called it.
+  health?: ProviderHealth;
   models: ModelOption[];
 }
 
@@ -65,7 +67,7 @@ export function modelGroups(options: SettingOptions | null): ModelGroup[] {
   if (!options) return [];
   const groups: ModelGroup[] = [{ provider: DEFAULT_PROVIDER, label: "", models: options.models }];
   for (const p of options.providers ?? []) {
-    if (p.models.length > 0) groups.push({ provider: p.id, label: p.name || p.id, host: p.host, origin: p.origin, models: p.models });
+    if (p.models.length > 0) groups.push({ provider: p.id, label: p.name || p.id, host: p.host, origin: p.origin, health: p.health, models: p.models });
   }
   return groups;
 }

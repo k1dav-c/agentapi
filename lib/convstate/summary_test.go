@@ -221,3 +221,33 @@ func TestSummaryRequest(t *testing.T) {
 	e.EmitRequest(agentstate.RequestState{Request: agentstate.Request{ID: "r1", Kind: agentstate.RequestKindApproval, Title: "Run: rm -rf build", CreatedAt: start}, Status: agentstate.RequestStatusResolved})
 	assert.Equal(t, "r2", e.Summary().Request.ID)
 }
+
+// The providers' health goes out when it changes, and a copy of it.
+func TestSummaryProviderHealth(t *testing.T) {
+	t.Parallel()
+	e := NewEventEmitter()
+	e.EmitStatus(conv.StatusStable)
+	_, ch, _ := e.SubscribeTo(SummaryEvents, 0, "")
+	e.SetProviderHealth(nil)
+	e.SetProviderHealth([]instanceapi.SummaryProviderHealth{})
+	assert.Empty(t, drain(ch), "none is none")
+
+	at := time.Date(2026, 11, 14, 10, 0, 0, 0, time.UTC)
+	health := []instanceapi.SummaryProviderHealth{{Provider: "kimi", ProviderHealth: agentstate.ProviderHealth{
+		Requests: 3, Failures: 1, LastFailure: &agentstate.ProviderFailure{At: at, Kind: agentstate.ProviderFailureStatus, Status: 529, Message: "Overloaded"},
+	}}}
+	e.SetProviderHealth(health)
+	got := summaries(t, drain(ch))
+	require.Len(t, got, 1)
+	require.Len(t, got[0].ProviderHealth, 1)
+	assert.Equal(t, "Overloaded", got[0].ProviderHealth[0].LastFailure.Message)
+	health[0].LastFailure.Message = "changed"
+	assert.Equal(t, "Overloaded", e.Summary().ProviderHealth[0].LastFailure.Message, "the emitter keeps a copy")
+
+	e.SetProviderHealth(instanceapi.CloneProviderHealth(e.Summary().ProviderHealth))
+	assert.Empty(t, drain(ch), "nothing changed")
+	e.SetProviderHealth(nil)
+	got = summaries(t, drain(ch))
+	require.Len(t, got, 1)
+	assert.Nil(t, got[0].ProviderHealth, "the hour passed")
+}

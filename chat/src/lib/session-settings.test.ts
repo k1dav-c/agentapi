@@ -47,6 +47,13 @@ describe("session settings", () => {
     expect(modelGroups(null)).toEqual([]);
   });
 
+  test("a provider's group has its health", () => {
+    const health = { requests: 4, failures: 4, client_errors: 0, first_byte_p50_ms: 0, first_byte_p95_ms: 0 };
+    const providers = [{ ...options.providers![0]!, health }];
+    expect(modelGroups({ ...options, providers })[1]!.health).toEqual(health);
+    expect(modelGroups(options)[1]!.health).toBeUndefined();
+  });
+
   test("model changes", () => {
     // Another model of the same provider changes only the model.
     expect(modelChange(modelValue("default", "haiku"), undefined)).toEqual({ model: "haiku" });

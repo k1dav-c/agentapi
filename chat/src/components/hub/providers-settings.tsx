@@ -49,8 +49,10 @@ import {
   type ProviderSnapshot,
 } from "@/lib/hub-providers";
 import {providerPeriod, providerTitle, providerTotals, type ProviderTotal} from "@/lib/hub-spend";
+import {providerHealthTotals, type ProviderHealthTotal} from "@/lib/provider-health";
 import {cn} from "@/lib/utils";
 import {PricesNote, ProviderPrices, RefreshPrices} from "./provider-prices";
+import {ProviderHealthLine} from "./provider-health";
 import {fieldClass} from "./styles";
 
 // What the editor edits: a provider by its ID, or a new one (null).
@@ -77,6 +79,7 @@ export function ProvidersSettings({
 }) {
   const api = useMemo(() => createHubAPI(root), [root]);
   const usage = useMemo(() => providerTotals(instances ?? []), [instances]);
+  const health = useMemo(() => providerHealthTotals(instances ?? []), [instances]);
   const [snapshot, setSnapshot] = useState<ProviderSnapshot | undefined>(undefined);
   const [loadError, setLoadError] = useState("");
   const [editing, setEditing] = useState<Editing | null>(null);
@@ -305,6 +308,7 @@ export function ProvidersSettings({
                     <ProviderPrices api={api} provider={provider} saving={saving} onChoose={(model, choice) => choosePrice(provider, model, choice)} />
                   )
                 }
+                health={health.get(provider.id)}
                 onEdit={() => {
                   operation.current++;
                   setDeleting(null);
@@ -331,7 +335,7 @@ export function ProvidersSettings({
         <p className="flex gap-2 text-xs leading-5 text-pretty text-muted-foreground">
           <ShieldCheck className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
           <span>
-            Keys travel sealed with the hub&apos;s secret, and every joined machine gets them; an agent running on a provider can read its key. A provider with
+            Keys travel sealed with the hub&apos;s secret, and every joined machine gets them; an agent running on a provider calls it through AgentAPI&apos;s local proxy and never sees its key. A provider with
             the same ID in a machine&apos;s <code className="font-mono">~/.agentapi/config.yaml</code> wins there.
           </span>
         </p>
@@ -360,21 +364,24 @@ function ProviderTile({provider, className}: {provider: {id: string; name?: stri
 }
 
 // ProviderRow is a provider in the list: who it is, where it runs, its
-// models, whether it has a key, and what the agents used it for (usage:
-// null for nothing in the last 7 days, none while no agent reports it),
-// and the prices of its models (prices, while the hub looks them up).
+// models, whether it has a key, what the agents used it for (usage: null
+// for nothing in the last 7 days, none while no agent reports it), how it
+// answered them in the last hour (health, once they called it) and the
+// prices of its models (prices, while the hub looks them up).
 // Its buttons show on hover and focus where there is a pointer, always on a
 // touch screen.
 function ProviderRow({
   provider,
   usage,
   prices,
+  health,
   onEdit,
   onDelete,
 }: {
   provider: Provider;
   usage?: ProviderTotal | null;
   prices?: React.ReactNode;
+  health?: ProviderHealthTotal;
   onEdit: () => void;
   onDelete: () => void;
 }) {
@@ -422,6 +429,7 @@ function ProviderRow({
           )}
         </div>
         {usage !== undefined && <ProviderUsage usage={usage} />}
+        {health && <ProviderHealthLine health={health} />}
         {prices}
       </div>
       <div className="flex shrink-0 items-center transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-focus-within:opacity-100 [@media(hover:hover)]:group-hover:opacity-100">

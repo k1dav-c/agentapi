@@ -8,11 +8,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/spf13/viper"
+
 	"github.com/coder/agentapi/lib/filelock"
 	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/native/procutil"
 	"github.com/coder/agentapi/lib/procenv"
+	"github.com/coder/agentapi/lib/provider"
+	"github.com/coder/agentapi/lib/providerproxy"
 )
 
 // runningAgent is the native agent as runServer prepares it: the server
@@ -21,6 +25,10 @@ type runningAgent struct {
 	factory native.Factory
 	// updateNative updates the agent's CLI before a restart.
 	updateNative func(context.Context)
+	// providers are the model providers the agent can run on (Claude
+	// Code, Codex), which it calls through proxy; nil for the others.
+	providers *provider.Source
+	proxy     *providerproxy.Proxy
 }
 
 // startAgent prepares the agent's adapter factory for cwd. Nothing is
@@ -29,16 +37,26 @@ func startAgent(opts serverOptions, cwd string, logger *slog.Logger) (*runningAg
 	if opts.printOpenAPI {
 		return &runningAgent{}, nil
 	}
-	factory, err := nativeFactory(opts.agentType, nativeAdapterConfig{
+	agent := &runningAgent{updateNative: agentUpdater(opts.agentType, opts.agent, logger)}
+	if opts.agentType == instanceapi.AgentTypeClaude || opts.agentType == instanceapi.AgentTypeCodex {
+		agent.providers = provider.NewSource(userConfigPath(viper.GetViper()), nil)
+		agent.proxy = providerproxy.New(agent.providers, providerproxy.Options{Logger: logger})
+	}
+	config := nativeAdapterConfig{
 		Program: opts.agent,
 		Args:    opts.agentArgs,
 		CWD:     cwd,
 		Logger:  logger,
-	})
+	}
+	if agent.proxy != nil {
+		config.ProviderProxy = agent.proxy
+	}
+	factory, err := nativeFactory(opts.agentType, config)
 	if err != nil {
 		return nil, err
 	}
-	return &runningAgent{factory: factory, updateNative: agentUpdater(opts.agentType, opts.agent, logger)}, nil
+	agent.factory = factory
+	return agent, nil
 }
 
 // agentUpdateTimeout bounds how long a restart waits for the agent CLI to

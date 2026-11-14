@@ -60,6 +60,9 @@ type Config struct {
 	StopTimeout time.Duration
 	// NewID generates session and message ids; nil uses random UUIDs.
 	NewID func() string
+	// ProviderProxy is where Claude Code calls a model provider; without
+	// one it can't run on any.
+	ProviderProxy native.ProviderProxy
 }
 
 // NewFactory returns a factory for Claude Code adapters. It fails for
@@ -278,15 +281,20 @@ func (a *Adapter) Capabilities() agentstate.Capabilities {
 // completes the initialize handshake. Without a login it returns a
 // native.LoginRequiredError.
 func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
+	providerEnv, err := a.launchEnv()
+	if err != nil {
+		return err
+	}
 	cmd := procutil.Command{
 		Program: a.cfg.Program,
 		Args:    buildArgs(a.args, a.sessionID, a.resumeRef, a.fork),
-		Env:     buildEnv(a.cfg.Env, launchEnv(a.launch)...),
+		Env:     buildEnv(a.cfg.Env, providerEnv...),
 		Dir:     a.cfg.CWD,
 		Logger:  a.log,
 	}
 	// The login check takes up to 10 s; the host doesn't start the CLI if
-	// a restart closed the adapter meanwhile. A provider has its own key.
+	// a restart closed the adapter meanwhile. On a provider, the proxy has
+	// its key.
 	if a.launch == nil {
 		if err := a.checkLogin(ctx, cmd.Env); err != nil {
 			return err
@@ -299,7 +307,7 @@ func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
 	a.log.Info("Starting Claude Code", "program", cmd.Program, "resume", a.resumeRef != "")
 	a.log.Debug("Claude Code command line", "args", cmd.Args)
 	// The read loop is the only caller of the sink after Start.
-	_, err := a.host.Launch(cmd, agentio.Loop{Line: a.handleLine, NextWake: a.nextWake, Wake: a.wake, Ended: a.outputClosed})
+	_, err = a.host.Launch(cmd, agentio.Loop{Line: a.handleLine, NextWake: a.nextWake, Wake: a.wake, Ended: a.outputClosed})
 	if err != nil {
 		return err
 	}

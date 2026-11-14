@@ -7,8 +7,10 @@
 // $CLAUDE_CONFIG_DIR or ~/.claude), so that AgentAPI can read the session
 // back. It keeps the provider its environment names (ANTHROPIC_BASE_URL,
 // ANTHROPIC_AUTH_TOKEN, as apply_flag_settings changes them) and the model
-// set_model picks; on a provider its reply says which, "Echo: <message>
-// [via <base URL> on <model>]".
+// set_model picks; on a provider each turn calls it, POST <base
+// URL>/v1/messages with the token, and its reply says which and what the
+// provider answered, "Echo: <message> [via <base URL> on <model>: <status>
+// <body>]".
 package main
 
 import (
@@ -16,6 +18,8 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -57,14 +61,14 @@ func main() {
 }
 
 // agent is what fakeclaude runs on: the provider's base URL (empty for
-// Anthropic) and the model.
+// Anthropic) with its token, and the model.
 type agent struct {
-	base, model string
+	base, token, model string
 }
 
 // serve reads AgentAPI's frames from stdin until it closes.
 func serve(session string) error {
-	runs := agent{base: os.Getenv("ANTHROPIC_BASE_URL"), model: os.Getenv("ANTHROPIC_MODEL")}
+	runs := agent{base: os.Getenv("ANTHROPIC_BASE_URL"), token: os.Getenv("ANTHROPIC_AUTH_TOKEN"), model: os.Getenv("ANTHROPIC_MODEL")}
 	if runs.model == "" {
 		runs.model = "claude-haiku-5-5"
 	}
@@ -141,6 +145,9 @@ func (a *agent) change(request map[string]any) {
 		if base, ok := env["ANTHROPIC_BASE_URL"].(string); ok {
 			a.base = base
 		}
+		if token, ok := env["ANTHROPIC_AUTH_TOKEN"].(string); ok {
+			a.token = token
+		}
 	}
 }
 
@@ -148,7 +155,7 @@ func (a *agent) change(request map[string]any) {
 func turn(session, cwd, text string, a agent) []map[string]any {
 	reply := "Echo: " + text
 	if a.base != "" {
-		reply += fmt.Sprintf(" [via %s on %s]", a.base, a.model)
+		reply += fmt.Sprintf(" [via %s on %s: %s]", a.base, a.model, a.call())
 	}
 	messageID := "msg_" + strings.ReplaceAll(newID(), "-", "")
 	usage := map[string]any{"input_tokens": 2, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 5}
@@ -164,6 +171,24 @@ func turn(session, cwd, text string, a agent) []map[string]any {
 			"result": reply, "stop_reason": "end_turn", "session_id": session, "total_cost_usd": 0.0001, "usage": usage, "uuid": newID(),
 		},
 	}
+}
+
+// call calls the provider's Messages API, and returns its status and body.
+func (a agent) call() string {
+	req, err := http.NewRequest(http.MethodPost, a.base+"/v1/messages", strings.NewReader(`{"model":"`+a.model+`","max_tokens":1}`))
+	if err != nil {
+		return err.Error()
+	}
+	req.Header.Set("Authorization", "Bearer "+a.token)
+	req.Header.Set("anthropic-version", "2023-06-01")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err.Error()
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	return fmt.Sprintf("%d %s", resp.StatusCode, strings.TrimSpace(string(body)))
 }
 
 // logTurn appends a turn, the user's text and the agent's assistant frame,

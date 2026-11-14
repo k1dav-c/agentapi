@@ -49,6 +49,10 @@ export type AgentSettings = Body<Schemas["Settings"]>;
 export type ModelOption = Schemas["ModelOption"];
 export type SettingOptions = Schemas["SettingOptions"];
 export type ProviderOption = Schemas["ProviderOption"];
+// How a provider answered the agent's calls over the last hour, through
+// AgentAPI's provider proxy (GET /settings, the summary's provider_health).
+export type ProviderHealth = Schemas["ProviderHealth"];
+export type ProviderFailure = Schemas["ProviderFailure"];
 // GET and PUT /settings.
 export type SettingsResponse = Body<Schemas["SettingsResponseBody"]>;
 

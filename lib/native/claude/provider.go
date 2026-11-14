@@ -10,6 +10,7 @@ import (
 	"github.com/coder/agentapi/lib/agentstate"
 	"github.com/coder/agentapi/lib/native"
 	"github.com/coder/agentapi/lib/provider"
+	"github.com/coder/agentapi/lib/providerproxy"
 )
 
 var _ native.ProviderRunner = (*Adapter)(nil)
@@ -26,13 +27,23 @@ var providerModelEnv = []string{
 	"CLAUDE_CODE_SUBAGENT_MODEL",
 }
 
-// providerEnv is the environment that has Claude Code call p on model:
-// its key as a bearer token, and no Anthropic API key, which would go to p
-// too.
-func providerEnv(p provider.Provider, model string) map[string]string {
+// providerEnv is the environment that has Claude Code call p on model,
+// through AgentAPI's provider proxy: the proxy's token as a bearer token,
+// never p's key, and no Anthropic API key, which would go to p too.
+func (a *Adapter) providerEnv(p provider.Provider, model string) (map[string]string, error) {
+	endpoint, err := native.ProviderEndpoint(a.cfg.ProviderProxy, p)
+	if err != nil {
+		return nil, err
+	}
+	return endpointEnv(endpoint, model), nil
+}
+
+// endpointEnv is the environment that has Claude Code call the endpoint on
+// model.
+func endpointEnv(endpoint providerproxy.Endpoint, model string) map[string]string {
 	env := map[string]string{
-		"ANTHROPIC_BASE_URL":   p.ClaudeBaseURL(),
-		"ANTHROPIC_AUTH_TOKEN": p.APIKey,
+		"ANTHROPIC_BASE_URL":   endpoint.AnthropicBaseURL,
+		"ANTHROPIC_AUTH_TOKEN": endpoint.Token,
 		"ANTHROPIC_API_KEY":    "",
 	}
 	for _, name := range providerModelEnv {
@@ -41,15 +52,19 @@ func providerEnv(p provider.Provider, model string) map[string]string {
 	return env
 }
 
-// launchEnv is the environment a new process on run starts with: also
-// the model it starts on, unless --model chose one.
-func launchEnv(run *native.ProviderRun) []string {
+// launchEnv is the environment a new process on the launch provider
+// starts with: also the model it starts on, unless --model chose one.
+func (a *Adapter) launchEnv() ([]string, error) {
+	run := a.launch
 	if run == nil {
-		return nil
+		return nil, nil
 	}
-	env := providerEnv(run.Provider, run.Model)
+	env, err := a.providerEnv(run.Provider, run.Model)
+	if err != nil {
+		return nil, err
+	}
 	env["ANTHROPIC_MODEL"] = run.Model
-	return envList(env)
+	return envList(env), nil
 }
 
 // envList is env as NAME=value entries, sorted.
@@ -73,7 +88,11 @@ func (a *Adapter) SwitchProvider(ctx context.Context, to *provider.Provider, mod
 	a.mu.Lock()
 	from, fromModel := a.provider, a.model
 	a.mu.Unlock()
-	if err := a.applyEnv(ctx, providerEnv(*to, model)); err != nil {
+	env, err := a.providerEnv(*to, model)
+	if err != nil {
+		return fmt.Errorf("switch to %s: %w", to.DisplayName(), err)
+	}
+	if err := a.applyEnv(ctx, env); err != nil {
 		failure := fmt.Errorf("switch to %s: %w", to.DisplayName(), err)
 		if errors.Is(err, native.ErrUnconfirmed) {
 			// apply_flag_settings may have changed any of the variables. Only
@@ -90,7 +109,11 @@ func (a *Adapter) SwitchProvider(ctx context.Context, to *provider.Provider, mod
 			// unconfirmed set_model may have taken effect. Restore in a new one.
 			return providerRecovery(from, fromModel, failure)
 		}
-		if rollbackErr := a.applyEnv(ctx, providerEnv(*from, fromModel)); rollbackErr != nil {
+		rollback, rollbackErr := a.providerEnv(*from, fromModel)
+		if rollbackErr == nil {
+			rollbackErr = a.applyEnv(ctx, rollback)
+		}
+		if rollbackErr != nil {
 			return providerRecovery(from, fromModel, fmt.Errorf("%v; restore %s: %w", failure, from.DisplayName(), rollbackErr))
 		}
 		return failure

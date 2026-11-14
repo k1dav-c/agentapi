@@ -674,7 +674,12 @@ wins over the hub's with the same ID.
 
 Once some agent reports its providers, each provider in the tab has a line of what the agents used
 it for: its tokens and their cost (or **no price**) in the last 24 hours and 7 days, counted as the
-[Providers card](#provider-usage) counts them, or **No calls in the last 7 days**.
+[Providers card](#provider-usage) counts them, or **No calls in the last 7 days**. A provider the
+agents called in the last hour has a second line of how it answered them, through each AgentAPI's
+[provider proxy](providers.md): the calls, the share that failed, the median time to the first byte
+and the last error with when, added up over the instances the hub follows (`provider_health` in
+their summaries). It turns amber while the provider fails (the latest call failed, or half of the
+hour's); hover for the full figures.
 
 The hub prices its providers' models at OpenRouter's list prices
 ([Prices](providers.md#prices)), and each AgentAPI prices the calls to them with those. It gets

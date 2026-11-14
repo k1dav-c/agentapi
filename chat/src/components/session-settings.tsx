@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { Brain, ChevronDown, ClipboardList, Cloud, Hand, Info, LoaderCircle, Shield, ShieldCheck, Zap } from "lucide-react";
+import { Brain, ChevronDown, ClipboardList, Cloud, Hand, Info, LoaderCircle, Shield, ShieldCheck, TriangleAlert, Zap } from "lucide-react";
 import { toast } from "sonner";
 import {useChatActions, useChatSelector} from "./chat-provider";
 import { Button } from "./ui/button";
@@ -15,10 +15,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
-import type { AgentSettings, PermissionMode } from "@/lib/chat-api";
+import type { AgentSettings, PermissionMode, ProviderHealth } from "@/lib/chat-api";
 import { getErrorMessage } from "@/lib/error-utils";
 import { modeMeta, modelChange, modelGroups, modelLabel, modelValue, effortsOf, providerLabel, providerSwitchHint } from "@/lib/session-settings";
 import { providerHue, providerMonogram } from "@/lib/hub-providers";
+import { providerFailing, providerHealthTitle } from "@/lib/provider-health";
 import { OPEN_SETTINGS_EVENT, type SettingsMenu } from "@/lib/slash-commands";
 import { cn } from "@/lib/utils";
 import {useLoaded} from "@/lib/use-loaded";
@@ -213,6 +214,7 @@ export function SessionSettings({ className }: { className?: string }) {
                             <span className="truncate text-xs font-medium text-foreground">{group.label}</span>
                             {group.host && <span className="truncate font-mono text-[10px] font-normal text-muted-foreground">{group.host}</span>}
                           </span>
+                          {group.health && providerFailing(group.health) && <ProviderFailing label={group.label} health={group.health} />}
                           {group.origin === "hub" && (
                             <span className="shrink-0 rounded-full border px-1.5 text-[10px] font-normal text-muted-foreground" title="Kept on the hub">
                               hub
@@ -260,5 +262,16 @@ export function SessionSettings({ className }: { className?: string }) {
         </DropdownMenu>
       )}
     </div>
+  );
+}
+
+// ProviderFailing marks a provider of the model menu whose recent calls
+// fail, with how many, and the last error, in its tooltip.
+function ProviderFailing({ label, health }: { label: string; health: ProviderHealth }) {
+  const title = providerHealthTitle(health, Date.now());
+  return (
+    <span role="img" aria-label={`${label} is failing. ${title}`} title={title} className="shrink-0 text-amber-600 dark:text-amber-400" data-provider-failing>
+      <TriangleAlert className="size-3.5" />
+    </span>
   );
 }

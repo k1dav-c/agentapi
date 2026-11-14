@@ -25,6 +25,19 @@
   `GET /api/providers/openrouter`). For a self-hosted gateway these list prices are an estimate.
 - `GET /sessions` and `GET /cost` give each provider of a cost its `name`, and the chat's Session
   tab lists **By provider** by name rather than ID.
+- Model provider keys stay in AgentAPI: Claude Code and Codex call a provider through a proxy on
+  `127.0.0.1` (a random port, opened the first time an agent runs on a provider), with a token
+  AgentAPI makes up for the process, and the proxy adds the provider's key. Claude Code's
+  `ANTHROPIC_BASE_URL` is `http://127.0.0.1:<port>/<id>/anthropic` and its `ANTHROPIC_AUTH_TOKEN`
+  the token; Codex's provider `base_url` is `http://127.0.0.1:<port>/<id>/openai`. A provider
+  changed in the config file or on the hub applies from the next call, and if the proxy can't start,
+  the agent can't run on a provider rather than get the key. Behind an HTTP proxy, the agent's
+  `NO_PROXY` and `no_proxy` gain `127.0.0.1`, `localhost` and `::1`, so it reaches the proxy directly.
+- Provider health: the proxy counts each provider's calls of the last hour, its failures (no
+  answer, 5xx, 429, an answer that broke off) and client errors, the median and 95th percentile time
+  to the first byte, and the last success and failure. `GET /settings` has it in each provider's
+  `health`, the summary in `provider_health`; the chat's model menu marks a provider that fails now,
+  and the hub's Providers settings show each provider's last hour over its agents.
 
 ### Fixes
 

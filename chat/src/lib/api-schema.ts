@@ -1471,7 +1471,65 @@ export interface components {
              */
             usd: number;
         };
+        ProviderFailure: {
+            /**
+             * Format: date-time
+             * @description When the call failed.
+             */
+            at: string;
+            /** @description status (the provider answered 5xx or 429), network (it couldn't be reached), timeout (it didn't answer in time) or stream (its answer broke off). */
+            kind: components["schemas"]["ProviderFailureKind"];
+            /** @description What went wrong, short: the provider's error message, else the status or the network error. */
+            message: string;
+            /**
+             * Format: int64
+             * @description The HTTP status the provider answered, for status and stream; missing for the others.
+             */
+            status?: number;
+        };
+        /**
+         * ProviderFailureKind
+         * @example status
+         * @enum {string}
+         */
+        ProviderFailureKind: "network" | "status" | "stream" | "timeout";
+        ProviderHealth: {
+            /**
+             * Format: int64
+             * @description Of the requests, those answered with a 4xx other than 429 (a key the provider refuses, a model it doesn't have): the provider answered, so they don't count as failures.
+             */
+            client_errors: number;
+            /**
+             * Format: int64
+             * @description Of the requests, those the provider failed: a network error or timeout, a 5xx or 429 answer, or an answer that broke off.
+             */
+            failures: number;
+            /**
+             * Format: int64
+             * @description Median time in milliseconds from the call to the provider's first response byte (its headers), over the latest 100 answers of the hour that weren't failures; 0 without one.
+             */
+            first_byte_p50_ms: number;
+            /**
+             * Format: int64
+             * @description The 95th percentile of the same.
+             */
+            first_byte_p95_ms: number;
+            /** @description The latest failure of the hour; missing without one. */
+            last_failure?: components["schemas"]["ProviderFailure"];
+            /**
+             * Format: date-time
+             * @description When the latest call of the hour that wasn't a failure ended; missing without one.
+             */
+            last_success_at?: string;
+            /**
+             * Format: int64
+             * @description The agent's calls to the provider over the last hour that got an answer or failed; those the agent cancelled before an answer don't count.
+             */
+            requests: number;
+        };
         ProviderOption: {
+            /** @description How the provider answered the agent's calls over the last hour, through AgentAPI's provider proxy; missing when the agent called it none. */
+            health?: components["schemas"]["ProviderHealth"];
             /** @description The host of the provider's API, to show where it runs. */
             host: string;
             /** @description Value of the provider setting that picks the provider. */
@@ -2190,6 +2248,8 @@ export interface components {
              * @description Requests (approvals, questions, plans) the agent waits on; see GET /requests.
              */
             pending_requests: number;
+            /** @description How each model provider the agent called over the last hour answered, through AgentAPI's provider proxy, by provider ID; worked out every 30 seconds. Missing without such calls, and from earlier releases. */
+            provider_health?: components["schemas"]["SummaryProviderHealth"][] | null;
             /**
              * Format: int64
              * @description Messages waiting in the queue; see GET /queue.
@@ -2239,6 +2299,42 @@ export interface components {
              * @description API-equivalent cost in USD of the hour's calls, at list prices.
              */
             usd: number;
+        };
+        SummaryProviderHealth: {
+            /**
+             * Format: int64
+             * @description Of the requests, those answered with a 4xx other than 429 (a key the provider refuses, a model it doesn't have): the provider answered, so they don't count as failures.
+             */
+            client_errors: number;
+            /**
+             * Format: int64
+             * @description Of the requests, those the provider failed: a network error or timeout, a 5xx or 429 answer, or an answer that broke off.
+             */
+            failures: number;
+            /**
+             * Format: int64
+             * @description Median time in milliseconds from the call to the provider's first response byte (its headers), over the latest 100 answers of the hour that weren't failures; 0 without one.
+             */
+            first_byte_p50_ms: number;
+            /**
+             * Format: int64
+             * @description The 95th percentile of the same.
+             */
+            first_byte_p95_ms: number;
+            /** @description The latest failure of the hour; missing without one. */
+            last_failure?: components["schemas"]["ProviderFailure"];
+            /**
+             * Format: date-time
+             * @description When the latest call of the hour that wasn't a failure ended; missing without one.
+             */
+            last_success_at?: string;
+            /** @description The AgentAPI model provider, by its ID. */
+            provider: string;
+            /**
+             * Format: int64
+             * @description The agent's calls to the provider over the last hour that got an answer or failed; those the agent cancelled before an answer don't count.
+             */
+            requests: number;
         };
         SummaryProviderSpend: {
             /** @description The tokens of the provider's calls over the last 24 hours. */
@@ -2343,6 +2439,8 @@ export interface components {
              * @description Requests (approvals, questions, plans) the agent waits on; see GET /requests.
              */
             pending_requests: number;
+            /** @description How each model provider the agent called over the last hour answered, through AgentAPI's provider proxy, by provider ID; worked out every 30 seconds. Missing without such calls, and from earlier releases. */
+            provider_health?: components["schemas"]["SummaryProviderHealth"][] | null;
             /**
              * Format: int64
              * @description Messages waiting in the queue; see GET /queue.

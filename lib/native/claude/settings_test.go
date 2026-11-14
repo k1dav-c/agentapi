@@ -37,6 +37,9 @@ func startedWith(t *testing.T, cfg Config, init, applied string) (*Adapter, *nat
 	cfg.AuthStatus = loggedIn
 	cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	cfg.Env = []string{}
+	if cfg.ProviderProxy == nil {
+		cfg.ProviderProxy = nativetest.ProviderProxy{}
+	}
 	a := newTestAdapter(t, cfg, "")
 	sink := nativetest.NewSink(t)
 	errCh := make(chan error, 1)
