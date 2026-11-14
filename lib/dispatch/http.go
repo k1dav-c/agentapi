@@ -286,7 +286,7 @@ func (s *Service) listIssues(w http.ResponseWriter, r *http.Request) {
 		jsonapi.WriteError(w, jsonapi.Errorf(http.StatusBadRequest, "bad_request", "%v", err))
 		return
 	}
-	as, ok, err := s.repoClient(r.Context(), repo)
+	as, ok, err := s.repoClient(r.Context(), s.currentApp(), repo)
 	if err == nil && !ok {
 		err = jsonapi.Errorf(http.StatusPreconditionFailed, "github_not_connected", "connect the hub to GitHub first")
 	}
@@ -357,7 +357,7 @@ func (s *Service) createIssue(w http.ResponseWriter, r *http.Request) {
 		jsonapi.WriteError(w, jsonapi.Errorf(http.StatusBadRequest, "bad_request", "an issue has a repo (owner/name) and a title"))
 		return
 	}
-	as, ok, err := s.repoClient(r.Context(), req.Repo)
+	as, ok, err := s.repoClient(r.Context(), s.currentApp(), req.Repo)
 	if err == nil && !ok {
 		err = jsonapi.Errorf(http.StatusPreconditionFailed, "github_not_connected", "connect the hub to GitHub first")
 	}

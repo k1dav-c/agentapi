@@ -198,15 +198,20 @@ func (h *Hub) Handler() http.Handler {
 	r := chi.NewRouter()
 	// The instances' responses through the proxy come compressed already.
 	r.Use(httpmw.Compress())
-	// Instances sign their webhook events, whatever name or origin they
-	// come by.
-	r.Post("/hooks", h.receiveWebhook)
-	// Signed with the hub's secret too: an AgentAPI gets the providers.
-	r.Post(provider.SyncPath, h.syncProviders)
-	if h.config.Dispatch != nil {
-		// Signed with the hub's secret, as the events are.
-		h.config.Dispatch.MountLauncher(r)
-	}
+	// Signed with the hub's secret rather than behind a session, so each
+	// reads its body within bodyReadTimeout.
+	r.Group(func(r chi.Router) {
+		r.Use(boundBodyRead)
+		// Instances sign their webhook events, whatever name or origin they
+		// come by.
+		r.Post("/hooks", h.receiveWebhook)
+		// Signed with the hub's secret too: an AgentAPI gets the providers.
+		r.Post(provider.SyncPath, h.syncProviders)
+		if h.config.Dispatch != nil {
+			// Signed with the hub's secret, as the events are.
+			h.config.Dispatch.MountLauncher(r)
+		}
+	})
 	r.Group(func(r chi.Router) {
 		r.Use(h.checkHost)
 		r.Use(httpmw.CrossOriginProtection(nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

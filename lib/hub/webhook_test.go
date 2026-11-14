@@ -3,11 +3,13 @@ package hub
 import (
 	"bufio"
 	"bytes"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -16,7 +18,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/coder/agentapi/lib/dispatch"
+	"github.com/coder/agentapi/lib/host"
 	"github.com/coder/agentapi/lib/instanceapi"
+	"github.com/coder/agentapi/lib/provider"
 )
 
 // An event of a run the hub knows is of that run; an unknown current run
@@ -133,27 +138,53 @@ func TestBadSignaturesLogOnceAMinute(t *testing.T) {
 	assert.Contains(t, logs.String(), "refused_since_last_logged=4")
 }
 
-// A sender that trickles in an event's body is cut off: it can't hold the
-// connection and its handler.
-func TestWebhookBodyReadTimeout(t *testing.T) {
-	defer func(d time.Duration) { webhookReadTimeout = d }(webhookReadTimeout)
-	webhookReadTimeout = 200 * time.Millisecond
-	h, err := New(Config{Token: "t", Secret: "s"})
+// A sender that trickles in the body of a request the hub's secret signs
+// is cut off: it can't hold the connection and its handler. One that sends
+// its body at once is answered as before.
+func TestSignedBodyReadTimeout(t *testing.T) {
+	defer func(d time.Duration) { bodyReadTimeout = d }(bodyReadTimeout)
+	bodyReadTimeout = 200 * time.Millisecond
+	dir := t.TempDir()
+	d, err := dispatch.New(dispatch.Config{StatePath: filepath.Join(dir, "dispatch.json"), Secret: "s"})
+	require.NoError(t, err)
+	t.Cleanup(d.Close)
+	h, err := New(Config{Token: "t", Secret: "s", Dispatch: d})
 	require.NoError(t, err)
 	srv := httptest.NewServer(h.Handler())
 	defer srv.Close()
-	conn, err := net.Dial("tcp", srv.Listener.Addr().String())
-	require.NoError(t, err)
-	defer func() { _ = conn.Close() }()
-	_, err = conn.Write([]byte("POST /hooks HTTP/1.1\r\nHost: hub\r\nContent-Length: 100\r\n\r\n{"))
-	require.NoError(t, err)
-	require.NoError(t, conn.SetReadDeadline(time.Now().Add(5*time.Second)))
-	start := time.Now()
-	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
-	require.NoError(t, err, "the hub answers before the client's deadline")
-	_ = resp.Body.Close()
-	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
-	assert.Less(t, time.Since(start), 4*time.Second)
+	for _, path := range []string{"/hooks", provider.SyncPath, host.HubTokenPath} {
+		conn, err := net.Dial("tcp", srv.Listener.Addr().String())
+		require.NoError(t, err)
+		_, err = conn.Write([]byte("POST " + path + " HTTP/1.1\r\nHost: hub\r\nContent-Length: 100\r\n\r\n{"))
+		require.NoError(t, err)
+		require.NoError(t, conn.SetReadDeadline(time.Now().Add(5*time.Second)))
+		start := time.Now()
+		resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+		require.NoError(t, err, "%s answers before the client's deadline", path)
+		_ = resp.Body.Close()
+		_ = conn.Close()
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode, path)
+		assert.Less(t, time.Since(start), 4*time.Second, path)
+	}
+
+	// The provider sync, sent at once, after longer than the deadline on
+	// the same connection: the deadline went with the body.
+	body := []byte(`{"nonce":"n-1"}`)
+	sync := func() int {
+		req, err := http.NewRequest(http.MethodPost, srv.URL+provider.SyncPath, bytes.NewReader(body))
+		require.NoError(t, err)
+		timestamp := strconv.FormatInt(time.Now().Unix(), 10)
+		req.Header.Set(instanceapi.HeaderTimestamp, timestamp)
+		req.Header.Set(instanceapi.HeaderSignature, instanceapi.Sign("s", timestamp, body))
+		resp, err := srv.Client().Do(req)
+		require.NoError(t, err)
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+		return resp.StatusCode
+	}
+	assert.Equal(t, http.StatusOK, sync())
+	time.Sleep(2 * bodyReadTimeout)
+	assert.Equal(t, http.StatusOK, sync())
 }
 
 // A delivery ID is remembered until its signature no longer holds, also

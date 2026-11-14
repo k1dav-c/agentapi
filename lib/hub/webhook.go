@@ -27,10 +27,41 @@ const (
 	badSignatureLogEvery = time.Minute
 )
 
-// webhookReadTimeout bounds reading an event's body: a sender that trickles
-// one in doesn't hold a connection and its handler. Only /hooks has one; a
+// bodyReadTimeout bounds reading the body of a request the hub's secret
+// signs (/hooks, the provider sync, a launcher's token request), which
+// anyone who reaches the hub may send: a sender that trickles one in
+// doesn't hold a connection and its handler. Only those routes have one; a
 // server-wide ReadTimeout would end the browsers' event streams.
-var webhookReadTimeout = 10 * time.Second
+var bodyReadTimeout = 10 * time.Second
+
+// boundBodyRead gives a request bodyReadTimeout to send its body in. Once
+// the body is read whole the deadline goes, so it can't cut off the
+// handler's work (the server's background read would cancel the request's
+// context); after a failure, or a body the handler didn't read to its end
+// (too large), it stays: the server would otherwise wait for the rest.
+func boundBodyRead(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rc := http.NewResponseController(w)
+		_ = rc.SetReadDeadline(time.Now().Add(bodyReadTimeout))
+		r.Body = &deadlineBody{ReadCloser: r.Body, rc: rc}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// deadlineBody clears the read deadline once its body reaches its end.
+type deadlineBody struct {
+	io.ReadCloser
+	rc   *http.ResponseController
+	once sync.Once
+}
+
+func (b *deadlineBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if errors.Is(err, io.EOF) {
+		b.once.Do(func() { _ = b.rc.SetReadDeadline(time.Time{}) })
+	}
+	return n, err
+}
 
 // logLimiter lets a log line through at most once per interval.
 type logLimiter struct {
@@ -188,7 +219,7 @@ func (h *Hub) receiveWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.config.Dispatch != nil && strings.HasPrefix(event.Type, "task.") {
 		// A job's task: its state and cost.
-		h.config.Dispatch.TaskEvent(instance.ID, instance.ServerID, event.Type, event.Data)
+		h.config.Dispatch.TaskEvent(r.Context(), instance.ID, instance.ServerID, h.taskInstanceURL(instance), event.Type, event.Data)
 	}
 	switch event.Type {
 	case instanceapi.EventInstanceStarted, instanceapi.EventInstanceHeartbeat:
@@ -220,14 +251,8 @@ func (h *Hub) receiveWebhook(w http.ResponseWriter, r *http.Request) {
 // for an instance.* event the run it is of. Otherwise it answers why not,
 // and reports false.
 func (h *Hub) readEvent(w http.ResponseWriter, r *http.Request) (webhookEvent, bool) {
-	rc := http.NewResponseController(w)
-	_ = rc.SetReadDeadline(time.Now().Add(webhookReadTimeout))
+	// Within bodyReadTimeout (boundBodyRead).
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxWebhookBody+1))
-	if err == nil && len(body) <= maxWebhookBody {
-		// Read whole. After a failure, or a body too large, the deadline
-		// stays: the server would wait for the rest before it answers.
-		_ = rc.SetReadDeadline(time.Time{})
-	}
 	if err != nil || len(body) > maxWebhookBody {
 		http.Error(w, "unreadable event", http.StatusBadRequest)
 		return webhookEvent{}, false
@@ -266,6 +291,20 @@ func (h *Hub) readEvent(w http.ResponseWriter, r *http.Request) (webhookEvent, b
 		return webhookEvent{}, false
 	}
 	return event, true
+}
+
+// taskInstanceURL is where the hub reads instance as the run its event
+// names, from that instance's own summary: the address the dispatch checks
+// against the job's machine. Empty when the hub doesn't read it there, or
+// read another run there last; the event's own URL counts for nothing, as
+// any machine with the secret can name one.
+func (h *Hub) taskInstanceURL(instance instanceapi.WebhookInstance) string {
+	i, ok := h.store.get(instance.ID)
+	if !ok || i.Connection == instanceapi.ConnectionStopped || i.confirmedURL == "" || i.URL != i.confirmedURL ||
+		instance.ServerID == "" || i.confirmedRun != instance.ServerID {
+		return ""
+	}
+	return i.confirmedURL
 }
 
 // sameRun reports whether an event of the run serverID is of the run the

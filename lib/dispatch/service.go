@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -41,11 +42,16 @@ type Config struct {
 	// POST /api/dispatch alone.
 	DispatchToken string
 	GitHub        *github.Client
-	// HTTP reaches the launchers.
-	HTTP     *http.Client
-	Logger   *slog.Logger
-	Now      func() time.Time
-	Location *time.Location
+	// HTTP reaches the launchers; nil is newLauncherClient's, which only
+	// connects to the addresses a launcher may have (launcher.go).
+	HTTP *http.Client
+	// AllowLoopback lets a launcher's URL be a loopback address, for a
+	// launcher on the hub's machine that joined it by localhost
+	// (--allow-loopback-launchers).
+	AllowLoopback bool
+	Logger        *slog.Logger
+	Now           func() time.Time
+	Location      *time.Location
 }
 
 // Service is the dispatch.
@@ -81,6 +87,9 @@ type Service struct {
 	ctx      context.Context
 	cancel   context.CancelFunc
 	starts   sync.WaitGroup
+	// reserved, when set, runs once a start reserved its job's place, before
+	// it goes on: the package's tests' seam for what happens meanwhile.
+	reserved func()
 
 	// The state file is written in the background (writeLoop): saveLocked
 	// leaves the latest in pending. writeState is the package's disk seam;
@@ -167,7 +176,7 @@ func New(config Config) (*Service, error) {
 	if config.HTTP == nil {
 		// Each call has its deadline (callLauncher): a start takes longer
 		// than the others.
-		config.HTTP = &http.Client{}
+		config.HTTP = newLauncherClient(config.AllowLoopback)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Service{
@@ -512,6 +521,10 @@ func (s *Service) HostEvent(eventType string, data json.RawMessage) error {
 	if d.Token == "" {
 		return errors.New("a host event has no launcher's token")
 	}
+	if err := checkLauncherURL(d.URL, s.config.AllowLoopback); err != nil {
+		s.logger.Warn("Refused a host event with a URL the hub doesn't call", "host", d.Hostname, "url", d.URL, "event", eventType, "error", err)
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.config.Now()
@@ -696,42 +709,132 @@ type taskEventData struct {
 // exact AgentAPI process of the current run counts: an instance ID is reused
 // when AgentAPI restarts. Runs kept before ServerID was recorded, and events
 // without one, are left alone rather than risking another run's cost.
-func (s *Service) TaskEvent(instanceID, serverID, eventType string, data json.RawMessage) {
+//
+// The event names its instance itself, under the secret every joined
+// machine has. So instanceURL is where the hub read that instance's
+// summary as that run, empty when it hasn't (it may not reach a new one
+// yet: the event is dropped, as after a restart of the hub), and it must
+// be on the run's machine: the same address as its launcher's URL, which the
+// launcher's pinned token vouches for. A machine that registers another's
+// instance ID at its own address can't move or charge that job. One that
+// copies the instance's whole identity, as the hub reads it there, still
+// can: that takes a key per machine, which the hub doesn't have.
+func (s *Service) TaskEvent(ctx context.Context, instanceID, serverID, instanceURL, eventType string, data json.RawMessage) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	key, launcherURL := "", ""
 	for _, job := range s.jobs {
-		run := job.current()
-		if run == nil || run.InstanceID != instanceID || serverID == "" || run.ServerID == "" || run.ServerID != serverID {
-			continue
+		if run := job.current(); isRun(run, instanceID, serverID) {
+			key = job.Key
+			if h := s.hosts[cmp.Or(run.Host, job.Host)]; h != nil {
+				launcherURL = h.URL
+			}
+			break
 		}
-		now := s.config.Now()
-		switch eventType {
-		case "task.started":
-			if job.State != JobFailed {
-				job.State = JobWorking
-			}
-		case "task.completed", "task.failed":
-			var d taskEventData
-			_ = json.Unmarshal(data, &d)
-			c := Cost{Tasks: 1, WorkSeconds: d.DurationSeconds}
-			if d.Cost != nil {
-				c.USD, c.Calls = d.Cost.USD, d.Cost.Calls
-				c.Tokens = Tokens{Input: d.Cost.Tokens.Input, Output: d.Cost.Tokens.Output, CacheWrite: d.Cost.Tokens.CacheWrite, CacheRead: d.Cost.Tokens.CacheRead}
-			}
-			run.Cost.add(c)
-			if job.State == JobWorking || job.State == JobStarting {
-				job.State = JobWorking
-				if job.PRURL != "" {
-					job.State = JobReview
-				}
-			}
-		default:
-			return
-		}
-		job.UpdatedAt = now
-		s.saveLocked()
+	}
+	s.mu.Unlock()
+	if key == "" {
 		return
 	}
+	if instanceURL == "" {
+		s.logger.Debug("Dropped a task event of an instance the hub doesn't reach yet", "job", key, "instance", instanceID, "event", eventType)
+		if eventType == "task.completed" || eventType == "task.failed" {
+			s.mu.Lock()
+			if job := s.jobs[key]; job != nil {
+				if run := job.current(); isRun(run, instanceID, serverID) && !run.Missed {
+					run.Missed = true
+					s.saveLocked()
+				}
+			}
+			s.mu.Unlock()
+		}
+		return
+	}
+	if !sameMachine(ctx, launcherURL, instanceURL) {
+		s.logger.Warn("Refused a task event of an instance the hub doesn't reach on its job's machine",
+			"job", key, "instance", instanceID, "instance_url", instanceURL, "launcher_url", launcherURL, "event", eventType)
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	job := s.jobs[key]
+	if job == nil {
+		return
+	}
+	run := job.current()
+	if !isRun(run, instanceID, serverID) {
+		// Another run started while the hub looked the addresses up.
+		return
+	}
+	now := s.config.Now()
+	switch eventType {
+	case "task.started":
+		if job.State != JobFailed {
+			job.State = JobWorking
+		}
+	case "task.completed", "task.failed":
+		var d taskEventData
+		_ = json.Unmarshal(data, &d)
+		c := Cost{Tasks: 1, WorkSeconds: d.DurationSeconds}
+		if d.Cost != nil {
+			c.USD, c.Calls = d.Cost.USD, d.Cost.Calls
+			c.Tokens = Tokens{Input: d.Cost.Tokens.Input, Output: d.Cost.Tokens.Output, CacheWrite: d.Cost.Tokens.CacheWrite, CacheRead: d.Cost.Tokens.CacheRead}
+		}
+		run.Cost.add(c)
+		if job.State == JobWorking || job.State == JobStarting {
+			job.State = JobWorking
+			if job.PRURL != "" {
+				job.State = JobReview
+			}
+		}
+	default:
+		return
+	}
+	job.UpdatedAt = now
+	s.saveLocked()
+}
+
+// isRun reports whether run, a job's current one, is the AgentAPI process
+// instanceID and serverID name.
+func isRun(run *Run, instanceID, serverID string) bool {
+	return run != nil && run.InstanceID == instanceID && serverID != "" && run.ServerID == serverID
+}
+
+// sameMachine reports whether the URLs a and b name one machine: the same
+// host, or names with an address in common.
+func sameMachine(ctx context.Context, a, b string) bool {
+	ua, errA := url.Parse(a)
+	ub, errB := url.Parse(b)
+	if errA != nil || errB != nil || ua.Hostname() == "" || ub.Hostname() == "" {
+		return false
+	}
+	if strings.EqualFold(ua.Hostname(), ub.Hostname()) {
+		return true
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	addrsA, addrsB := lookupHost(ctx, ua.Hostname()), lookupHost(ctx, ub.Hostname())
+	for _, x := range addrsA {
+		if slices.Contains(addrsB, x) {
+			return true
+		}
+	}
+	return false
+}
+
+// lookupHost is host's addresses: an IP address itself, else what DNS
+// answers; none when it doesn't.
+func lookupHost(ctx context.Context, host string) []netip.Addr {
+	if ip, err := netip.ParseAddr(host); err == nil {
+		return []netip.Addr{ip.Unmap()}
+	}
+	ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+	if err != nil {
+		return nil
+	}
+	for i, ip := range ips {
+		ips[i] = ip.Unmap()
+	}
+	return ips
 }
 
 // endRunLocked ends job's current run. s.mu is held.
@@ -813,10 +916,9 @@ func (s *Service) currentApp() *github.App {
 	return s.app
 }
 
-// repoClient is the app's client for repo; without an app, ok is false
-// and the dispatch works without GitHub (the machines' own credentials).
-func (s *Service) repoClient(ctx context.Context, repo string) (as github.As, ok bool, err error) {
-	app := s.currentApp()
+// repoClient is app's client for repo; without an app, ok is false and
+// the dispatch works without GitHub (the machines' own credentials).
+func (s *Service) repoClient(ctx context.Context, app *github.App, repo string) (as github.As, ok bool, err error) {
 	if app == nil {
 		return github.As{}, false, nil
 	}
@@ -960,7 +1062,11 @@ func (s *Service) readIssue(ctx context.Context, as github.As, ok bool, key host
 // launcher clones, fetches and starts the job's AgentAPI in the
 // background (runStart), longer than a client waits for an answer.
 func (s *Service) start(ctx context.Context, key host.Key, req Request) (Response, error) {
-	as, gh, err := s.repoClient(ctx, key.Repo())
+	// The App as the start begins is the start's, to its end: GitHub can be
+	// disconnected (DELETE /api/github) while it runs, and the start must
+	// not find no App after it reserved the job's place.
+	app := s.currentApp()
+	as, gh, err := s.repoClient(ctx, app, key.Repo())
 	if err != nil {
 		return Response{}, err
 	}
@@ -984,6 +1090,9 @@ func (s *Service) start(ctx context.Context, key host.Key, req Request) (Respons
 	if err != nil {
 		return Response{}, err
 	}
+	if s.reserved != nil {
+		s.reserved()
+	}
 	data := promptData{Repo: key.Repo(), Issue: key.Issue, IssueURL: meta.url, DefaultBranch: cmp.Or(meta.defaultBranch, "main"), Credentials: gh, PreviousAgent: agentName(a.Previous), PRURL: updated.PRURL}
 	prompt := render("start", data)
 	if a.Previous != "" {
@@ -991,7 +1100,6 @@ func (s *Service) start(ctx context.Context, key host.Key, req Request) (Respons
 	}
 	start := host.StartRequest{Repo: key.Repo(), Issue: key.Issue, Agent: a.Agent, DefaultBranch: meta.defaultBranch, Prompt: prompt}
 	if gh {
-		app := s.currentApp()
 		start.GitUser = &host.GitUser{Name: app.BotName(), Email: app.BotEmail()}
 		start.Credentials = host.CredentialsHub
 	}
@@ -1003,7 +1111,7 @@ func (s *Service) start(ctx context.Context, key host.Key, req Request) (Respons
 		if a.Previous != "" {
 			verb = fmt.Sprintf("接手這個 issue（之前由 %s 處理）", agentName(a.Previous))
 		}
-		s.comment(ctx, as, key, key.Issue, fmt.Sprintf("🤖 %s 在 `%s` 上%s。%s", agentName(job.Agent), job.Host, verb, s.hubLink(job.InstanceID)))
+		s.comment(ctx, as, key, key.Issue, fmt.Sprintf("🤖 %s 在 `%s` 上%s。%s", agentName(job.Agent), job.Host, verb, hubLink(app, job.InstanceID)))
 		s.dropOtherAgentLabels(ctx, as, key, meta.labels, job.Agent)
 	}, func(ctx context.Context, job Job) {
 		if gh {
@@ -1318,7 +1426,7 @@ func (s *Service) stop(ctx context.Context, key host.Key) (Response, error) {
 	} else {
 		state = JobStopped
 	}
-	as, gh, err := s.repoClient(ctx, key.Repo())
+	as, gh, err := s.repoClient(ctx, s.currentApp(), key.Repo())
 	if err != nil {
 		s.logger.Warn("Couldn't reach GitHub as the app to clean up a job", "job", key.String(), "error", err)
 	}
@@ -1390,9 +1498,8 @@ func (s *Service) dropOtherAgentLabels(ctx context.Context, as github.As, key ho
 	}
 }
 
-// hubLink names where the job opens on the hub.
-func (s *Service) hubLink(instanceID string) string {
-	app := s.currentApp()
+// hubLink names where the job opens on app's hub.
+func hubLink(app *github.App, instanceID string) string {
 	if app == nil || app.HubURL == "" {
 		return ""
 	}
@@ -1409,6 +1516,10 @@ func (s *Service) callLauncher(ctx context.Context, h Host, method, path string,
 			return err
 		}
 		reader = bytes.NewReader(data)
+	}
+	// Also a URL kept before the hub checked it in HostEvent.
+	if err := checkLauncherURL(h.URL, s.config.AllowLoopback); err != nil {
+		return jsonapi.Errorf(http.StatusBadGateway, "host_unreachable", "the machine %s: %v", h.Hostname, err)
 	}
 	u, err := url.JoinPath(h.URL, "/")
 	if err != nil {

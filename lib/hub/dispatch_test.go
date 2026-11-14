@@ -14,13 +14,20 @@ import (
 
 	"github.com/coder/agentapi/lib/dispatch"
 	"github.com/coder/agentapi/lib/host"
-	"github.com/coder/agentapi/lib/hub"
+	"github.com/coder/agentapi/lib/instanceapi"
 )
 
 // A launcher's host.* event joins its machine to the dispatch, the
 // dispatch token starts work on it and nothing else, and the job's task
-// events add up its cost.
+// events add up its cost once the hub reads the job's AgentAPI on the
+// machine.
 func TestHubDispatch(t *testing.T) {
+	// The job's AgentAPI, which the launcher starts.
+	instSrv, _ := startInstanceOn(t, nil, "pve~acme~widget~3")
+	var summary instanceapi.SummaryBody
+	require.Equal(t, http.StatusOK, request(t, http.MethodGet, instSrv.URL+"/summary", instanceToken, nil, &summary))
+	serverID := summary.Instance.ServerID
+	require.NotEmpty(t, serverID)
 	var starts atomic.Int32
 	launcher := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer launcher-token" || r.Method != http.MethodPost || r.URL.Path != "/jobs" {
@@ -29,14 +36,16 @@ func TestHubDispatch(t *testing.T) {
 		}
 		starts.Add(1)
 		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(host.StartResponse{Job: host.JobInfo{Key: "acme/widget#3", Agent: "claude", InstanceID: "pve~acme~widget~3", ServerID: "run-9", State: host.JobRunning}, Created: true})
+		_ = json.NewEncoder(w).Encode(host.StartResponse{Job: host.JobInfo{Key: "acme/widget#3", Agent: "claude", InstanceID: "pve~acme~widget~3", ServerID: serverID, State: host.JobRunning}, Created: true})
 	}))
 	defer launcher.Close()
 
 	dir := t.TempDir()
-	d, err := dispatch.New(dispatch.Config{StatePath: filepath.Join(dir, "dispatch.json"), AppPath: filepath.Join(dir, "github-app.json"), Secret: hubSecret, DispatchToken: "dispatch-token"})
+	d, err := dispatch.New(dispatch.Config{StatePath: filepath.Join(dir, "dispatch.json"), AppPath: filepath.Join(dir, "github-app.json"), Secret: hubSecret, DispatchToken: "dispatch-token", AllowLoopback: true})
 	require.NoError(t, err)
-	srv := startHubWith(t, hub.Config{Dispatch: d}, false)
+	config := following("")
+	config.Dispatch = d
+	srv := startHubWith(t, config, true)
 	// The page's stream has the machines and jobs, and each change.
 	events := openEvents(t, srv.URL+"/api/events")
 	assert.Equal(t, "instances", next(t, events).event)
@@ -90,17 +99,32 @@ func TestHubDispatch(t *testing.T) {
 	require.Equal(t, http.StatusOK, request(t, http.MethodPost, srv.URL+"/api/dispatch", hubToken, start, &resp))
 	assert.Equal(t, http.StatusUnauthorized, request(t, http.MethodGet, srv.URL+"/api/instances", "dispatch-token", nil, nil))
 
-	task := map[string]any{
-		"id": "task-1", "type": "task.completed", "created_at": time.Now(),
-		"instance": map[string]any{"id": "pve~acme~widget~3", "server_id": "run-9"},
-		"data":     map[string]any{"duration_seconds": 42, "cost": map[string]any{"usd": 0.3}},
+	task := func(id string) map[string]any {
+		return map[string]any{
+			"id": id, "type": "task.completed", "created_at": time.Now(),
+			"instance": map[string]any{"id": "pve~acme~widget~3", "server_id": serverID},
+			"data":     map[string]any{"duration_seconds": 42, "cost": map[string]any{"usd": 0.3}},
+		}
 	}
-	assert.Equal(t, http.StatusNoContent, postEvent(t, srv.URL, task, hubSecret, time.Now()))
-	var jobs struct {
-		Jobs []dispatch.Job `json:"jobs"`
+	run := func() dispatch.Run {
+		t.Helper()
+		var jobs struct {
+			Jobs []dispatch.Job `json:"jobs"`
+		}
+		require.Equal(t, http.StatusOK, request(t, http.MethodGet, srv.URL+"/api/jobs", hubToken, nil, &jobs))
+		require.Len(t, jobs.Jobs, 1)
+		require.Len(t, jobs.Jobs[0].Runs, 1)
+		return jobs.Jobs[0].Runs[0]
 	}
-	require.Equal(t, http.StatusOK, request(t, http.MethodGet, srv.URL+"/api/jobs", hubToken, nil, &jobs))
-	require.Len(t, jobs.Jobs, 1)
-	assert.InDelta(t, 0.3, jobs.Jobs[0].Runs[0].Cost.USD, 1e-9)
-	assert.Equal(t, 1, jobs.Jobs[0].Runs[0].Cost.Tasks)
+	// The event names the job's instance and run, signed with the secret
+	// every machine has; until the hub reads that instance on the job's
+	// machine, it is anyone's.
+	assert.Equal(t, http.StatusNoContent, postEvent(t, srv.URL, task("task-1"), hubSecret, time.Now()))
+	assert.Zero(t, run().Cost.Tasks)
+	assert.True(t, run().Missed)
+
+	joinInstance(t, srv.URL, instSrv.URL)
+	assert.Equal(t, http.StatusNoContent, postEvent(t, srv.URL, task("task-2"), hubSecret, time.Now()))
+	assert.InDelta(t, 0.3, run().Cost.USD, 1e-9)
+	assert.Equal(t, 1, run().Cost.Tasks)
 }

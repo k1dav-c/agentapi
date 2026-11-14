@@ -177,7 +177,9 @@ agentapi hub leave
 `--port` 和 `--bind` 設定監聽位置，`--allowed-hosts` 是瀏覽器可以用來開啟 hub 的名稱（不設定時任何名稱都可以），`--log-level`（或 `AGENTAPI_HUB_LOG_LEVEL`）設定要記錄多少。
 [issue 派工](hub.zh-TW.md#issues)用到的是 `--dispatch-token`（或 `AGENTAPI_HUB_DISPATCH_TOKEN`）：
 用戶端（GitHub workflow 的 runner）只能拿它呼叫 `POST /api/dispatch`；以及 `--github-app-file`：
-hub 的 GitHub App 存放的檔案（預設是 `--state` 旁的 `github-app.json`）。
+hub 的 GitHub App 存放的檔案（預設是 `--state` 旁的 `github-app.json`）。`--allow-loopback-launchers`
+讓 hub 可以呼叫 loopback 位址上的 launcher，也就是在 hub 這台主機上、以 `localhost` 加入的 launcher；
+預設只呼叫其他主機位址上的 launcher。
 
 `join` 把 hub 的 webhook 寫進 `~/.agentapi/config.yaml`，並套用到正在執行、已登記的 AgentAPI。
 `--secret`（或 `AGENTAPI_HUB_SECRET`）為事件簽章，`--events` 選擇事件（預設 `instance.*`，hub 只需要

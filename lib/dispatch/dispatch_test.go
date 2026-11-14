@@ -13,8 +13,10 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -266,6 +268,8 @@ func newService(t *testing.T, g *fakeGitHub) (*Service, *time.Time) {
 		StatePath: filepath.Join(dir, "dispatch.json"), AppPath: filepath.Join(dir, "github-app.json"),
 		Secret: "hub-secret", DispatchToken: "dispatch-token", GitHub: client,
 		Now: func() time.Time { return now }, Location: time.UTC,
+		// The fake launchers listen on loopback.
+		AllowLoopback: true,
 	})
 	require.NoError(t, err)
 	t.Cleanup(s.Close)
@@ -325,9 +329,9 @@ func TestDispatchWithoutGitHub(t *testing.T) {
 
 	// The tasks' events add up the run's cost.
 	serverID := s.job("acme/widget#12").Runs[0].ServerID
-	s.TaskEvent("pve-1~acme~widget~12", serverID, "task.completed", json.RawMessage(`{"duration_seconds":90,"cost":{"usd":0.5,"tokens":{"input":10,"output":2000,"cache_read":80000},"calls":4}}`))
-	s.TaskEvent("pve-1~acme~widget~12", serverID, "task.completed", json.RawMessage(`{"duration_seconds":30,"cost":{"usd":0.25,"tokens":{"input":5,"output":1000},"calls":2}}`))
-	s.TaskEvent("someone-else", serverID, "task.completed", json.RawMessage(`{"cost":{"usd":100}}`))
+	s.taskEvent("pve-1~acme~widget~12", serverID, "task.completed", json.RawMessage(`{"duration_seconds":90,"cost":{"usd":0.5,"tokens":{"input":10,"output":2000,"cache_read":80000},"calls":4}}`))
+	s.taskEvent("pve-1~acme~widget~12", serverID, "task.completed", json.RawMessage(`{"duration_seconds":30,"cost":{"usd":0.25,"tokens":{"input":5,"output":1000},"calls":2}}`))
+	s.taskEvent("someone-else", serverID, "task.completed", json.RawMessage(`{"cost":{"usd":100}}`))
 	job := s.job("acme/widget#12")
 	assert.Equal(t, JobReview, job.State, "a task ended with a pull request open")
 	assert.InDelta(t, 0.75, job.Runs[0].Cost.USD, 1e-9)
@@ -501,7 +505,7 @@ func TestDispatchWithGitHubApp(t *testing.T) {
 	assert.Equal(t, "codex", replaced.Job.Agent)
 	assert.Equal(t, "https://github.com/acme/widget/pull/34", replaced.Job.PRURL, "the pull request stays")
 
-	s.TaskEvent("pve-1~acme~widget~12", replaced.Job.Runs[1].ServerID, "task.completed", json.RawMessage(`{"duration_seconds":600,"cost":{"usd":1.5,"tokens":{"output":5000}}}`))
+	s.taskEvent("pve-1~acme~widget~12", replaced.Job.Runs[1].ServerID, "task.completed", json.RawMessage(`{"duration_seconds":600,"cost":{"usd":1.5,"tokens":{"output":5000}}}`))
 	stopped, err := s.Dispatch(ctx, Request{Action: ActionStop, Repo: "acme/widget", Issue: 12})
 	require.NoError(t, err)
 	assert.Equal(t, JobDone, stopped.Job.State)
@@ -561,7 +565,7 @@ func TestHostReconcile(t *testing.T) {
 	again := startJob(t, s, Request{Repo: "acme/widget", Issue: 5})
 	require.Len(t, again.Job.Runs, 2)
 	assert.Equal(t, "failed", again.Job.Runs[0].EndReason)
-	s.TaskEvent(again.Job.InstanceID, again.Job.Runs[1].ServerID, "task.completed", json.RawMessage(`{"cost":{"usd":0.4}}`))
+	s.taskEvent(again.Job.InstanceID, again.Job.Runs[1].ServerID, "task.completed", json.RawMessage(`{"cost":{"usd":0.4}}`))
 	assert.InDelta(t, 0.4, s.job("acme/widget#5").Runs[1].Cost.USD, 1e-9)
 }
 
@@ -941,6 +945,23 @@ func TestReconnectReplacesTheAppOnlyOnceSaved(t *testing.T) {
 	assert.Equal(t, 2, g.tokens, "a token of the new app, not the old one's kept")
 }
 
+// taskEvent is s.TaskEvent of an event from the instance the hub reads at
+// an address of its run's machine, as the hub passes one that it reaches.
+func (s *Service) taskEvent(instanceID, serverID, eventType string, data json.RawMessage) {
+	s.mu.Lock()
+	instanceURL := "http://192.0.2.99:4100"
+	for _, job := range s.jobs {
+		if run := job.current(); run != nil && run.InstanceID == instanceID {
+			if h := s.hosts[cmp.Or(run.Host, job.Host)]; h != nil {
+				u, _ := url.Parse(h.URL)
+				instanceURL = "http://" + net.JoinHostPort(u.Hostname(), "4100")
+			}
+		}
+	}
+	s.mu.Unlock()
+	s.TaskEvent(context.Background(), instanceID, serverID, instanceURL, eventType, data)
+}
+
 // waitStarts waits for the starts on their way.
 func (s *Service) waitStarts() { s.starts.Wait() }
 
@@ -1118,6 +1139,44 @@ func TestStartRefused(t *testing.T) {
 	assert.False(t, resp.Duplicate)
 	s.waitStarts()
 	assert.Equal(t, JobWorking, s.job("acme/widget#12").State)
+}
+
+// GitHub disconnected while a start runs, after it reserved the job's
+// place: the start goes on with the App it began with, and ends as a
+// start does, leaving nothing starting.
+func TestDisconnectWhileStarting(t *testing.T) {
+	g := newFakeGitHub(t)
+	s, _ := newService(t, g)
+	l := newFakeLauncher(t, "pve-1")
+	join(t, s, l, "claude")
+	s.app = &github.App{ID: 42, Slug: "agentapi-hub-x", BotUserID: 99, PEM: g.pem(), Installations: []github.Installation{{ID: 7, Account: "acme"}}}
+	r := chi.NewRouter()
+	s.MountSession(r)
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+	s.reserved = func() {
+		req, err := http.NewRequest(http.MethodDelete, srv.URL+"/api/github", nil)
+		require.NoError(t, err)
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		_ = resp.Body.Close()
+		require.Equal(t, http.StatusNoContent, resp.StatusCode)
+	}
+	resp, err := s.Dispatch(context.Background(), Request{Action: ActionStart, Repo: "acme/widget", Issue: 12})
+	require.NoError(t, err)
+	assert.Equal(t, JobStarting, resp.Job.State)
+	require.Nil(t, s.currentApp(), "disconnected")
+	s.waitStarts()
+
+	job := s.job("acme/widget#12")
+	assert.Equal(t, JobWorking, job.State)
+	s.mu.Lock()
+	assert.Empty(t, s.running, "no start on its way")
+	assert.Empty(t, s.attempts)
+	s.mu.Unlock()
+	require.Equal(t, 1, l.startCount())
+	assert.Equal(t, &host.GitUser{Name: "agentapi-hub-x[bot]", Email: "99+agentapi-hub-x[bot]@users.noreply.github.com"}, l.starts[0].GitUser)
+	assert.Equal(t, host.CredentialsHub, l.starts[0].Credentials)
 }
 
 // A job stopped while it starts is stopped on the launcher once the start
@@ -1480,9 +1539,10 @@ func TestTaskEventByState(t *testing.T) {
 		}
 		s.mu.Lock()
 		s.jobs[job.Key] = job
+		s.hosts["a"] = &Host{HostInfo: host.HostInfo{Hostname: "a", URL: "http://192.0.2.1:3291"}}
 		s.mu.Unlock()
-		s.TaskEvent("a~acme~widget~1", "server-1", test.event, json.RawMessage(`{"duration_seconds": 3}`))
-		s.TaskEvent("b~acme~widget~1", "server-1", "task.started", nil) // another instance's
+		s.taskEvent("a~acme~widget~1", "server-1", test.event, json.RawMessage(`{"duration_seconds": 3}`))
+		s.taskEvent("b~acme~widget~1", "server-1", "task.started", nil) // another instance's
 		got := s.job(job.Key)
 		assert.Equal(t, test.want, got.State, name)
 		assert.Equal(t, test.costTasks, got.Runs[0].Cost.Tasks, name)
@@ -1494,13 +1554,51 @@ func TestTaskEventByState(t *testing.T) {
 		job := &Job{Key: "acme/widget#1", Host: "a", State: state, Runs: []Run{{InstanceID: "a~acme~widget~1", ServerID: "server-1", StartedAt: now.Add(-time.Hour), EndedAt: now.Add(-time.Minute)}}}
 		s.mu.Lock()
 		s.jobs[job.Key] = job
+		s.hosts["a"] = &Host{HostInfo: host.HostInfo{Hostname: "a", URL: "http://192.0.2.1:3291"}}
 		s.mu.Unlock()
-		s.TaskEvent("a~acme~widget~1", "server-1", "task.started", nil)
-		s.TaskEvent("a~acme~widget~1", "server-1", "task.completed", nil)
+		s.taskEvent("a~acme~widget~1", "server-1", "task.started", nil)
+		s.taskEvent("a~acme~widget~1", "server-1", "task.completed", nil)
 		got := s.job(job.Key)
 		assert.Equal(t, state, got.State)
 		assert.Zero(t, got.Runs[0].Cost.Tasks)
 	}
+}
+
+// A task event counts only from the instance the hub reads on its job's
+// machine: one another machine sends with the shared secret, naming the
+// job's instance and run, changes nothing, nor does one of an instance the
+// hub doesn't reach yet, though it marks the run's cost as maybe missed.
+func TestTaskEventOnItsMachine(t *testing.T) {
+	ctx := context.Background()
+	s, now := newService(t, nil)
+	job := &Job{Key: "acme/widget#1", Host: "a", State: JobWorking, UpdatedAt: now.Add(-time.Hour), Runs: []Run{{Host: "a", InstanceID: "a~acme~widget~1", ServerID: "server-1", StartedAt: now.Add(-time.Hour)}}}
+	s.mu.Lock()
+	s.jobs[job.Key] = job
+	s.hosts["a"] = &Host{HostInfo: host.HostInfo{Hostname: "a", URL: "http://192.0.2.1:3291"}}
+	s.hosts["b"] = &Host{HostInfo: host.HostInfo{Hostname: "b", URL: "http://192.0.2.2:3291"}}
+	s.mu.Unlock()
+	completed := json.RawMessage(`{"duration_seconds":100,"cost":{"usd":100}}`)
+
+	s.TaskEvent(ctx, "a~acme~widget~1", "server-1", "http://192.0.2.2:4100", "task.completed", completed)
+	s.TaskEvent(ctx, "a~acme~widget~1", "server-1", "http://b.invalid:4100", "task.completed", completed)
+	got := s.job(job.Key)
+	assert.Zero(t, got.Runs[0].Cost.Tasks, "another machine's address")
+	assert.False(t, got.Runs[0].Missed)
+	assert.Equal(t, now.Add(-time.Hour), got.UpdatedAt)
+
+	s.TaskEvent(ctx, "a~acme~widget~1", "server-1", "", "task.completed", completed)
+	got = s.job(job.Key)
+	assert.Zero(t, got.Runs[0].Cost.Tasks, "an instance the hub doesn't reach")
+	assert.True(t, got.Runs[0].Missed)
+
+	s.TaskEvent(ctx, "a~acme~widget~1", "server-1", "http://192.0.2.1:4100", "task.completed", json.RawMessage(`{"cost":{"usd":0.5}}`))
+	got = s.job(job.Key)
+	assert.Equal(t, 1, got.Runs[0].Cost.Tasks)
+	assert.InDelta(t, 0.5, got.Runs[0].Cost.USD, 1e-9)
+
+	assert.True(t, sameMachine(ctx, "http://localhost:3291", "http://127.0.0.1:4100"), "a name and its address")
+	assert.True(t, sameMachine(ctx, "http://[::ffff:192.0.2.1]:3291", "http://192.0.2.1:4100"))
+	assert.False(t, sameMachine(ctx, "", "http://192.0.2.1:4100"))
 }
 
 // A late event of the previous AgentAPI process can't move or charge the run
@@ -1529,8 +1627,8 @@ func TestTaskEventRunIdentity(t *testing.T) {
 	require.Equal(t, b.Runs[1].ServerID, before.Runs[1].ServerID)
 	cost, updated := before.Runs[1].Cost, before.UpdatedAt
 
-	reloaded.TaskEvent(b.InstanceID, a.Runs[0].ServerID, "task.started", nil)
-	reloaded.TaskEvent(b.InstanceID, a.Runs[0].ServerID, "task.completed", json.RawMessage(`{"duration_seconds":100,"cost":{"usd":100}}`))
+	reloaded.taskEvent(b.InstanceID, a.Runs[0].ServerID, "task.started", nil)
+	reloaded.taskEvent(b.InstanceID, a.Runs[0].ServerID, "task.completed", json.RawMessage(`{"duration_seconds":100,"cost":{"usd":100}}`))
 	got := reloaded.job(b.Key)
 	assert.Equal(t, JobReview, got.State, "the old start doesn't take B out of review")
 	assert.Equal(t, cost, got.Runs[1].Cost, "the old completion doesn't charge B")
@@ -1543,15 +1641,15 @@ func TestTaskEventRunIdentity(t *testing.T) {
 	reloaded.mu.Lock()
 	reloaded.jobs[legacyKey] = &Job{Key: legacyKey, State: JobWorking, Runs: []Run{{InstanceID: "pve-1~acme~widget~99", StartedAt: now.Add(-time.Hour)}}}
 	reloaded.mu.Unlock()
-	reloaded.TaskEvent("pve-1~acme~widget~99", "server-old", "task.completed", json.RawMessage(`{"cost":{"usd":100}}`))
+	reloaded.taskEvent("pve-1~acme~widget~99", "server-old", "task.completed", json.RawMessage(`{"cost":{"usd":100}}`))
 	assert.Zero(t, reloaded.job(legacyKey).Runs[0].Cost.Tasks)
-	reloaded.TaskEvent(b.InstanceID, "", "task.started", nil)
+	reloaded.taskEvent(b.InstanceID, "", "task.started", nil)
 	assert.Equal(t, JobReview, reloaded.job(b.Key).State)
 
 	// B's own events still count.
-	reloaded.TaskEvent(b.InstanceID, b.Runs[1].ServerID, "task.started", nil)
+	reloaded.taskEvent(b.InstanceID, b.Runs[1].ServerID, "task.started", nil)
 	assert.Equal(t, JobWorking, reloaded.job(b.Key).State)
-	reloaded.TaskEvent(b.InstanceID, b.Runs[1].ServerID, "task.completed", json.RawMessage(`{"duration_seconds":3,"cost":{"usd":0.25}}`))
+	reloaded.taskEvent(b.InstanceID, b.Runs[1].ServerID, "task.completed", json.RawMessage(`{"duration_seconds":3,"cost":{"usd":0.25}}`))
 	got = reloaded.job(b.Key)
 	assert.Equal(t, JobReview, got.State)
 	assert.InDelta(t, 0.25, got.Runs[1].Cost.USD, 1e-9)
@@ -1574,9 +1672,9 @@ func TestHostReportAdoptsRestartedProcess(t *testing.T) {
 	*now = now.Add(3 * time.Minute)
 	join(t, s, l, "claude")
 
-	s.TaskEvent(job.InstanceID, oldServerID, "task.completed", json.RawMessage(`{"cost":{"usd":100}}`))
+	s.taskEvent(job.InstanceID, oldServerID, "task.completed", json.RawMessage(`{"cost":{"usd":100}}`))
 	assert.Zero(t, s.job(job.Key).Runs[0].Cost.Tasks)
-	s.TaskEvent(job.InstanceID, "server-restarted", "task.completed", json.RawMessage(`{"cost":{"usd":0.5}}`))
+	s.taskEvent(job.InstanceID, "server-restarted", "task.completed", json.RawMessage(`{"cost":{"usd":0.5}}`))
 	assert.InDelta(t, 0.5, s.job(job.Key).Runs[0].Cost.USD, 1e-9)
 }
 

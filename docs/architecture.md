@@ -1004,7 +1004,9 @@ of the content's SHA-256, so a path never changes; unused ones are removed after
 - The server, the hub and the launcher give a client 10 seconds to send a
   request's headers and close a keep-alive connection after 2 idle minutes.
   Nothing limits how long an answer takes to write, as the event streams stay
-  open.
+  open. The hub's routes signed with its secret instead of a session (`/hooks`,
+  `POST /api/providers/sync`, a launcher's token request) also get 10 seconds
+  for the body (`boundBodyRead`).
 - Uploads go to a private directory, and only images are served back. Files
   outside the working directory can't be opened.
 - The webhook sends its configured events, the conversation included, to
@@ -1033,6 +1035,21 @@ of the content's SHA-256, so a path never changes; unused ones are removed after
   can still point a new instance ID, or one whose address stopped answering,
   at an address of its own and get `--instance-token`; a key per machine
   would close that.
+- The dispatch (`lib/dispatch`) takes a job's `task.*` events only from its
+  current run's AgentAPI process (`server_id`) as the hub reads it: the hub
+  passes the URL where it reads that instance's summary as that run
+  (`taskInstanceURL`), and `TaskEvent` checks that this URL is on an address of
+  the launcher URL of the run's machine, which the launcher's pinned token vouches
+  for (`sameMachine`). A machine that announces a job's instance ID at its own
+  address can't move or charge the job; one that copies the instance's ID and
+  run still can, since the shared secret signs every event. The hub calls a
+  launcher only at an http or https URL without credentials, on an address
+  `checkLauncherAddr` allows (not loopback without `--allow-loopback-launchers`,
+  link-local or unspecified), checked in `HostEvent` and, after a name is
+  resolved, at every connection (the dialer's `Control` in
+  `newLauncherClient`, which uses no proxy and follows no redirect,
+  `launcher.go`). LAN addresses stay allowed, so a machine with the secret
+  can still point the hub's launcher calls at another machine there.
 
   Browsers sign in with the hub token for an HttpOnly, SameSite=Lax cookie
   that holds its issue time, signed with the token, which the hub refuses

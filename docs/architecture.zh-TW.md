@@ -743,7 +743,8 @@ Content-Security-Policy。
   列在清單上，否則一律拒絕；`*` 不信任任何來源（`lib/httpmw/crossorigin.go`：net/http 的
   `CrossOriginProtection`，加上清單裡含 `*` 的來源）。
 - server、hub 和 launcher 給用戶端 10 秒送完請求的標頭，閒置 2 分鐘的 keep-alive 連線會關閉。
-  回應寫多久則不設限，因為事件串流會一直開著。
+  回應寫多久則不設限，因為事件串流會一直開著。hub 以 secret 簽章、不需要 session 的路由（`/hooks`、
+  `POST /api/providers/sync`、launcher 換 token）也只給 10 秒送完 body（`boundBodyRead`）。
 - 上傳的檔案存放在私有目錄，只回傳圖片。工作目錄以外的檔案無法開啟。
 - webhook 會把設定要送的內容（包括對話）送到它的網址，而 `PUT /webhook` 可以修改網址；它的
   HMAC secret 只能寫入、無法讀回。
@@ -759,7 +760,16 @@ Content-Security-Policy。
   實例（超過連線寬限仍連不上，或那裡回應的是另一個 AgentAPI），已連上或連線中的實例、手動加入的實例
   一律不動；實例搬走後，hub 不再送出它自己的 token。檔案記下 hub 最後一次讀到各實例摘要的網址，hub
   重新啟動後先從那裡追蹤。每台加入的主機都有同一個 secret，所以任何一台仍然可以把新的實例 ID，或位址
-  已經不回應的實例 ID，指向自己的位址，拿到 `--instance-token`；每台主機各用一把金鑰才能根除。瀏覽器以 hub token 登入，換取
+  已經不回應的實例 ID，指向自己的位址，拿到 `--instance-token`；每台主機各用一把金鑰才能根除。派工
+  （`lib/dispatch`）只採計 hub 讀到的、job 目前這次 run 的 AgentAPI process（`server_id`）送來的
+  `task.*` 事件：hub 傳入以那次執行讀到這個實例摘要的網址（`taskInstanceURL`），`TaskEvent` 檢查
+  這個網址位在 run 所在主機的 launcher 網址的位址上；launcher 網址有綁定的 launcher token 背書
+  （`sameMachine`）。在自己的位址宣告某個 job 實例 ID 的主機，改不了那個 job 的狀態或花費；複製實例
+  ID 和執行的主機仍然可以，因為每個事件都是用共用的 secret 簽章。hub 只呼叫 http 或 https、不含帳密的
+  launcher 網址，而且位址必須通過 `checkLauncherAddr`（沒有 `--allow-loopback-launchers` 時不能是
+  loopback，也不能是 link-local 或未指定位址）：`HostEvent` 檢查一次，名稱解析後每次連線再檢查一次
+  （`newLauncherClient` 裡 dialer 的 `Control`，不經 proxy、不跟隨重新導向，`launcher.go`）。內網位址
+  照常允許，所以持有 secret 的機器仍可讓 hub 對內網的其他機器呼叫 launcher API。瀏覽器以 hub token 登入，換取
   帶有簽發時間、以 token 簽章的 HttpOnly、SameSite=Lax cookie，30 天後 hub 不再接受；代理會移除瀏覽器的 cookie 以及 `Authorization`、
   `Origin`、`Referer`、`Sec-Fetch-*` 標頭，也會移除實例的 `Set-Cookie`，雙方的憑證都不會傳到另一邊。
   hub 和 AgentAPI 一樣，拒絕其他來源的網頁送出會造成改動的請求；設定 `--allowed-hosts` 時，只回應

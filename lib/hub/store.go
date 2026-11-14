@@ -62,6 +62,10 @@ type Instance struct {
 	// summary, kept in the file: after a restart the hub follows it there
 	// first, not at a URL an event moved it to that never answered.
 	confirmedURL string
+	// confirmedRun is the server ID of the summary the hub last read at
+	// confirmedURL, since the hub started: whose task events the dispatch
+	// takes (taskInstanceURL).
+	confirmedRun string
 	// refusedRun is the server ID of the last run whose URL change the hub
 	// refused, to log it once.
 	refusedRun string

@@ -202,6 +202,7 @@ func (h *Hub) applySummary(ctx context.Context, id, url string, summary instance
 		i.answeredBy = ""
 		i.failed = false
 		i.confirmedURL = url
+		i.confirmedRun = summary.Instance.ServerID
 		i.LastSeen = now
 		// Who it is, as it says: after a restart in place, another run
 		// with its own server ID and version, also before its events say
