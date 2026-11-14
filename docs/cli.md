@@ -330,3 +330,8 @@ at 250 tasks), while its first replay, the latest 20 tasks, stayed at 1.8 MB.
 
 To size a machine, plan per session about 35 MiB for AgentAPI plus the agent (about 350 MiB for
 Claude Code or Codex, 150 MiB for Pi) and whatever its MCP servers and commands need.
+
+To measure again, run `bun scripts/measure-resources.mjs` (Linux only) on an isolated AgentAPI: it
+measures `native-demo` by default, the agents you name with `--agents claude,codex,pi` (their turns
+go to your accounts), and with `--long 0,250,1000` a long conversation, and prints the results as
+these tables.

@@ -303,3 +303,7 @@ AgentAPI 5.0.0 用了 148 MiB（250 個任務時 67 MiB），而第一次重播�
 
 規劃主機時，每個工作階段請預留約 35 MiB 給 AgentAPI，再加上 agent 本身（Claude Code 或 Codex
 約 350 MiB，Pi 約 150 MiB），以及它的 MCP 伺服器和指令所需的資源。
+
+要重新量測，執行 `bun scripts/measure-resources.mjs`（僅限 Linux），它會用隔離的 AgentAPI 量測：
+預設只量 `native-demo`；`--agents claude,codex,pi` 指定的 agent 也會量（它們的回合會用到你的帳號）；
+加上 `--long 0,250,1000` 會量長對話。結果會印成上面這些表格。

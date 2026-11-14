@@ -36,6 +36,7 @@ go test ./...                           # Run all Go tests
 go test ./lib/httpapi/...               # Run tests in a specific package
 go test -run TestOpenAPISchema ./lib/httpapi/...  # Run a single test
 go test ./e2e                           # Run e2e tests (smoke test)
+go test ./internal/docscheck            # Check the docs' links, anchors and zh-TW twins
 cd chat && bun test                     # Run the chat UI tests
 ```
 
@@ -124,4 +125,4 @@ value, update every switch and map literal over that type to pass lint.
 - The chat UI build output goes to `lib/httpmw/chat/` with a base-path placeholder that gets replaced at runtime
 - AgentAPI-specific environment variables use the `AGENTAPI_` prefix (e.g., `AGENTAPI_ALLOWED_HOSTS`)
 - Server defaults: port 3284, chat at `/chat`, docs at `/docs`
-- User docs: `README.md` is the overview (features, quickstart, agents, an index of the guides); the guides are in `docs/`: `chat-ui.md`, `agents.md` (the native transport and each agent), `providers.md`, `api.md` (the conversation API, integrations and the endpoint reference), `security.md`, `cli.md`, `hub.md` and `architecture.md`. Each has a `.zh-TW.md` twin that mirrors it section by section: change both together, and keep headings, which other pages link to by anchor
+- User docs: `README.md` is the overview (features, quickstart, agents, an index of the guides); the guides are in `docs/`: `chat-ui.md`, `agents.md` (the native transport and each agent), `providers.md`, `api.md` (the conversation API, integrations and the endpoint reference), `security.md`, `cli.md`, `hub.md` and `architecture.md`. The Resource usage tables in `docs/cli.md` come from `bun scripts/measure-resources.mjs` (Linux; `native-demo` unless `--agents` names real agents). Each has a `.zh-TW.md` twin that mirrors it section by section: change both together, and keep headings, which other pages link to by anchor. Docs links and twins are checked by `go test ./internal/docscheck`: every relative link, image and `#anchor` in the tracked Markdown resolves (GitHub's heading slugs), and each twin has the same heading levels in order, fenced code blocks per section, images in order and linked files
