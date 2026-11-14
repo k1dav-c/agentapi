@@ -721,6 +721,9 @@
             "format": "date-time",
             "type": "string"
           },
+          "events": {
+            "$ref": "#/components/schemas/DispatchCost"
+          },
           "host": {
             "type": "string"
           },
@@ -733,6 +736,9 @@
           "round": {
             "format": "int64",
             "type": "integer"
+          },
+          "seen": {
+            "$ref": "#/components/schemas/DispatchSeen"
           },
           "server_id": {
             "type": "string"
@@ -749,6 +755,78 @@
           "instance_id",
           "started_at",
           "cost"
+        ],
+        "type": "object"
+      },
+      "DispatchSeen": {
+        "additionalProperties": false,
+        "properties": {
+          "earlier": {
+            "$ref": "#/components/schemas/DispatchSpend"
+          },
+          "hours": {
+            "items": {
+              "$ref": "#/components/schemas/DispatchSpendHour"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "scope": {
+            "type": "string"
+          },
+          "work_seconds": {
+            "format": "double",
+            "type": "number"
+          },
+          "worked_until": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "earlier",
+          "work_seconds"
+        ],
+        "type": "object"
+      },
+      "DispatchSpend": {
+        "additionalProperties": false,
+        "properties": {
+          "tokens": {
+            "$ref": "#/components/schemas/DispatchTokens"
+          },
+          "usd": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "usd",
+          "tokens"
+        ],
+        "type": "object"
+      },
+      "DispatchSpendHour": {
+        "additionalProperties": false,
+        "properties": {
+          "hour": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "tokens": {
+            "$ref": "#/components/schemas/DispatchTokens"
+          },
+          "usd": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "hour",
+          "usd",
+          "tokens"
         ],
         "type": "object"
       },

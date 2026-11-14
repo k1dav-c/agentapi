@@ -232,14 +232,21 @@ type Run struct {
 	EndedAt   time.Time `json:"ended_at,omitzero"`
 	// EndReason is replaced (another agent took over), stopped or failed.
 	EndReason string `json:"end_reason,omitempty"`
-	Cost      Cost   `json:"cost"`
+	// Cost is what the run spent, as the hub shows it (shown): its tasks
+	// and calls from Events, its spend and work time from Seen, or from
+	// Events where they are more.
+	Cost Cost `json:"cost"`
+	// Events adds up the run's task.completed and task.failed events.
+	Events Cost `json:"events,omitzero"`
+	// Seen is the run's spend and work time as the hub read them of its
+	// AgentAPI; nil until it did.
+	Seen *Seen `json:"seen,omitempty"`
 	// Missed is whether the hub may have missed a task's cost: it
 	// restarted, or an event didn't reach it.
 	Missed bool `json:"missed,omitempty"`
 }
 
-// Cost is a run's API-equivalent spend, from its tasks' task.completed and
-// task.failed events.
+// Cost is a run's API-equivalent spend.
 type Cost struct {
 	USD         float64 `json:"usd"`
 	Tokens      Tokens  `json:"tokens"`

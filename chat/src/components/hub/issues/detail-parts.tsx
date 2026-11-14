@@ -43,15 +43,16 @@ export function Totals({job}: {job: DispatchJob}) {
   const stats = [
     {label: "Spend", value: <Money usd={totals.usd} />, title: "API-equivalent spend of all its runs"},
     {label: totals.runs === 1 ? "Run" : "Runs", value: String(totals.runs)},
-    {label: "Agent time", value: formatRunDuration(totals.agentSeconds), title: "How long its agents worked on tasks"},
+    {label: "Agent time", value: formatRunDuration(totals.agentSeconds), title: "How long the hub saw its agents working"},
+    {label: "Elapsed", value: formatRunDuration(totals.elapsedSeconds), title: "From its first run's start to its last one's end"},
     {label: "Tokens", value: formatTokens(totals.tokens)},
   ];
   return (
-    <dl className="grid grid-cols-4 divide-x rounded-2xl border bg-card shadow-xs">
+    <dl className="grid grid-cols-5 divide-x rounded-2xl border bg-card shadow-xs">
       {stats.map((stat) => (
         <div key={stat.label} className="min-w-0 px-3 py-2.5" title={stat.title}>
           <dt className="truncate text-[11px] text-muted-foreground">{stat.label}</dt>
-          <dd className="mt-0.5 truncate text-[17px] font-semibold tracking-tight tabular-nums">{stat.value}</dd>
+          <dd className="mt-0.5 truncate text-[15px] font-semibold sm:text-[17px] tracking-tight tabular-nums">{stat.value}</dd>
         </div>
       ))}
     </dl>

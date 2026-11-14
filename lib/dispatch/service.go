@@ -211,6 +211,15 @@ func New(config Config) (*Service, error) {
 				s.hosts[h.Hostname] = &host
 			}
 			for _, j := range file.Jobs {
+				for i := range j.Runs {
+					run := &j.Runs[i]
+					// A hub before 5.5 kept only the events' cost, as the
+					// run's.
+					if run.Events == (Cost{}) && run.Seen == nil {
+						run.Events = run.Cost
+					}
+					run.Cost = run.shown()
+				}
 				// The hub may have missed the cost of the tasks that ended
 				// while it didn't run.
 				if run := j.current(); run != nil {
@@ -758,16 +767,7 @@ type taskEventData struct {
 // can: that takes a key per machine, which the hub doesn't have.
 func (s *Service) TaskEvent(ctx context.Context, instanceID, serverID, instanceURL, eventType string, data json.RawMessage) {
 	s.mu.Lock()
-	key, launcherURL := "", ""
-	for _, job := range s.jobs {
-		if run := job.current(); isRun(run, instanceID, serverID) {
-			key = job.Key
-			if h := s.hosts[cmp.Or(run.Host, job.Host)]; h != nil {
-				launcherURL = h.URL
-			}
-			break
-		}
-	}
+	key, launcherURL := s.runOfLocked(instanceID, serverID)
 	s.mu.Unlock()
 	if key == "" {
 		return
@@ -816,7 +816,8 @@ func (s *Service) TaskEvent(ctx context.Context, instanceID, serverID, instanceU
 			c.USD, c.Calls = d.Cost.USD, d.Cost.Calls
 			c.Tokens = Tokens{Input: d.Cost.Tokens.Input, Output: d.Cost.Tokens.Output, CacheWrite: d.Cost.Tokens.CacheWrite, CacheRead: d.Cost.Tokens.CacheRead}
 		}
-		run.Cost.add(c)
+		run.Events.add(c)
+		run.Cost = run.shown()
 		if job.State == JobWorking || job.State == JobStarting {
 			job.State = JobWorking
 			if job.PRURL != "" {

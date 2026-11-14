@@ -186,7 +186,8 @@ describe("a job's story", () => {
   ];
 
   test("adds up its runs", () => {
-    expect(jobTotals({runs}, now)).toEqual({usd: 1.75, seconds: 3600, agentSeconds: 660, tokens: 200, runs: 2});
+    expect(jobTotals({runs}, now)).toEqual({usd: 1.75, seconds: 3600, agentSeconds: 660, elapsedSeconds: 3600, tokens: 200, runs: 2});
+    expect(jobTotals({runs: [{...runs[0]}]}, now).elapsedSeconds).toBe(1800);
     expect(runSeconds(runs[1], now)).toBe(1800);
   });
 

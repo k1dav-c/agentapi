@@ -243,21 +243,28 @@ export function formatRunDuration(seconds: number): string {
   return `${Math.floor(s / 86400)}d ${Math.floor((s % 86400) / 3600)}h`;
 }
 
-// jobTotals add up a job's runs.
-export function jobTotals(job: Pick<DispatchJob, "runs">, now: number): {usd: number; seconds: number; agentSeconds: number; tokens: number; runs: number} {
+// jobTotals add up a job's runs. elapsedSeconds is from the first run's
+// start to the last one's end, or to now while one goes on.
+export function jobTotals(job: Pick<DispatchJob, "runs">, now: number): {usd: number; seconds: number; agentSeconds: number; elapsedSeconds: number; tokens: number; runs: number} {
   const runs = job.runs ?? [];
   let usd = 0;
   let seconds = 0;
   let agentSeconds = 0;
   let tokens = 0;
+  let first = Infinity;
+  let last = -Infinity;
   for (const run of runs) {
     usd += run.cost?.usd ?? 0;
     seconds += runSeconds(run, now);
     agentSeconds += run.cost?.work_seconds ?? 0;
     const t = run.cost?.tokens;
     if (t) tokens += t.input + t.output + t.cache_read + t.cache_write;
+    const start = Date.parse(run.started_at);
+    if (Number.isFinite(start)) first = Math.min(first, start);
+    last = Math.max(last, run.ended_at ? Date.parse(run.ended_at) : now);
   }
-  return {usd, seconds, agentSeconds, tokens, runs: runs.length};
+  const elapsedSeconds = Number.isFinite(first) && last > first ? (last - first) / 1000 : 0;
+  return {usd, seconds, agentSeconds, elapsedSeconds, tokens, runs: runs.length};
 }
 
 // endReason says how a run ended, for its line in the timeline.

@@ -256,3 +256,22 @@ func TestMoveNeedsADeadURL(t *testing.T) {
 		})
 	}
 }
+
+// What the hub read of an instance goes to the dispatch: its spend hours,
+// its run, and the spans of work it saw that ended.
+func TestSighting(t *testing.T) {
+	start := time.Date(2026, 11, 14, 8, 0, 0, 0, time.UTC)
+	spend := &instanceapi.SummarySpend{Scope: "s", Hours: []instanceapi.SummaryHour{{Hour: start, USD: 1}}}
+	i := Instance{work: workLog{spans: []workSpan{{start: start, end: start.Add(time.Minute)}}, since: start.Add(time.Hour)}}
+	i.ID = "a~acme~widget~1"
+	i.Summary = &instanceapi.SummaryBody{Spend: spend}
+	i.Summary.Instance.ServerID = "server-1"
+	seen := sighting(i, "http://192.0.2.1:4100")
+	assert.Equal(t, dispatch.Sighting{
+		InstanceID: "a~acme~widget~1", ServerID: "server-1", URL: "http://192.0.2.1:4100", Spend: spend,
+		Work: []dispatch.WorkSpan{{Start: start, End: start.Add(time.Minute)}},
+	}, seen)
+	// A summary without hours (before 4.2) has no spend to give.
+	i.Summary.Spend = &instanceapi.SummarySpend{Scope: "s"}
+	assert.Nil(t, sighting(i, "u").Spend)
+}

@@ -102,7 +102,8 @@ func costComment(job *Job, loc *time.Location) string {
 	b.WriteString("| # | Agent | 主機 | 期間 | 任務數 | 工作時間 | Tokens（in / out / cache） | API 等價花費 |\n")
 	b.WriteString("|---|---|---|---|---|---|---|---|\n")
 	var total, before Cost
-	missed := false
+	var started, ended time.Time
+	missed, ongoing := false, false
 	i := 0
 	for _, run := range job.Runs {
 		if run.Round != job.Round {
@@ -111,7 +112,15 @@ func costComment(job *Job, loc *time.Location) string {
 		}
 		i++
 		total.add(run.Cost)
-		missed = missed || run.Missed
+		// The spend read of the AgentAPI itself misses no event.
+		missed = missed || (run.Missed && !run.spendSeen())
+		if started.IsZero() || run.StartedAt.Before(started) {
+			started = run.StartedAt
+		}
+		ongoing = ongoing || run.EndedAt.IsZero()
+		if run.EndedAt.After(ended) {
+			ended = run.EndedAt
+		}
 		end := "進行中"
 		if !run.EndedAt.IsZero() {
 			end = run.EndedAt.In(loc).Format("15:04")
@@ -123,6 +132,10 @@ func costComment(job *Job, loc *time.Location) string {
 			short(c.Tokens.CacheWrite+c.Tokens.CacheRead), c.USD)
 	}
 	fmt.Fprintf(&b, "| | **合計** | | | %d | %s | | **$%.2f** |\n\n", total.Tasks, minutes(total.WorkSeconds), total.USD)
+	if !started.IsZero() && !ongoing && ended.After(started) {
+		fmt.Fprintf(&b, "總經歷時間：%s（%s 開始，%s 結束）。\n\n", elapsed(ended.Sub(started)),
+			started.In(loc).Format("01/02 15:04"), ended.In(loc).Format("01/02 15:04"))
+	}
 	if before.USD > 0 || before.Tasks > 0 {
 		fmt.Fprintf(&b, "這個 issue 之前幾輪的花費另計：%d 個任務，$%.2f。\n\n", before.Tasks, before.USD)
 	}
@@ -138,6 +151,20 @@ func minutes(seconds float64) string {
 		return fmt.Sprintf("%.0f 秒", seconds)
 	}
 	return fmt.Sprintf("%.0f 分", seconds/60)
+}
+
+// elapsed is a duration in days, hours and minutes.
+func elapsed(d time.Duration) string {
+	m := int64(d.Round(time.Minute) / time.Minute)
+	days, hours, mins := m/(24*60), m/60%24, m%60
+	switch {
+	case days > 0:
+		return fmt.Sprintf("%d 天 %d 小時 %d 分", days, hours, mins)
+	case hours > 0:
+		return fmt.Sprintf("%d 小時 %d 分", hours, mins)
+	default:
+		return fmt.Sprintf("%d 分", mins)
+	}
 }
 
 func short(n int64) string {

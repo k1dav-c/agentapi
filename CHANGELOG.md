@@ -4,6 +4,18 @@
 
 ### Features
 
+- An issue job's spend and agent time no longer depend on task events reaching the hub. The hub
+  takes them from what it reads of the job's AgentAPI: the spend of each hour in its summary
+  (the last 25 hours, so it catches up after a restart or a stretch without the instance) and the
+  time it saw the agent working. Task events still count the tasks. The cost comment says the hub
+  may have missed some only when a run's figures come from the events, and it now gives the
+  round's elapsed time (總經歷時間, from the first run's start to the last one's end); the
+  issue's detail in the hub shows it as **Elapsed**.
+
+## v5.4.0
+
+### Features
+
 - A job can push changes to `.github/workflows/`: the hub's GitHub App asks for Workflows (read and
   write) too, and so do the jobs' repository tokens. GitHub refused such a push before
   ("refusing to allow a GitHub App to create or update workflow … without `workflows`
