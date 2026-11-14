@@ -184,7 +184,12 @@ instance:
   [activity](hub.md#activity) keeps them for a year). AgentAPIs of one agent in one directory
   of a machine report the same sessions, with the same `scope`: a client that adds up many counts each scope
   once. Its `update` says whether a client can [update the AgentAPI](#updating-through-the-api), and
-  how far an update is.
+  how far an update is. For Claude Code and Codex, `provider_health` says how each
+  [model provider](providers.md) the agent called in the last hour answered, through AgentAPI's
+  proxy: its `provider`, `requests`, `failures` (no answer, 5xx, 429, an answer that broke off),
+  `client_errors` (another 4xx), `first_byte_p50_ms` and `first_byte_p95_ms` (of the latest 100
+  answers), `last_success_at` and `last_failure` (`at`, `kind`, `status`, `message`), worked out every
+  30 seconds; `GET /settings` has the same in each provider's `health`.
 - `attention` identifies why the agent needs you, in priority order: `login`, `request` (approval,
   question or plan), `limit` (a usage limit stopped the turn), `exited`, or `none`.
 - `GET /events?only=summary` sends `summary_update` on connection and when the summary changes,
@@ -551,7 +556,7 @@ default.
 | `POST /interrupt` | Stop the running turn |
 | `GET /requests`, `GET /requests/{id}` | The requests the agent waits on (approvals, questions, plans) and the recently closed ones |
 | `POST /requests/{id}/respond` | Answer a request: `option_id`, or `answers` keyed by question, with optional `text` |
-| `GET /settings`, `PUT /settings` | The permission mode, model and reasoning effort, with the values they can take; PUT changes the ones in its body |
+| `GET /settings`, `PUT /settings` | The permission mode, model and reasoning effort, with the values they can take (and each model provider's health of the last hour); PUT changes the ones in its body |
 | `POST /compact` | Compact the agent's context (Codex, Pi) |
 | `POST /login/retry` | Check the agent's login again now, while `login_required` is reported (409 when no login is needed) |
 | `POST /limit/continue`, `DELETE /limit/continue` | Continue a turn stopped by a usage limit, now or at the reset; cancel a scheduled continuation |

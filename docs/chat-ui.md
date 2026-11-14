@@ -246,7 +246,9 @@ API call, and starts again on its session to go back; Codex starts again in a ne
 the conversation's messages as text. While a switch runs, the button says **Switching to …**, and a
 toast says which model the agent is on once it is done. A switch that starts the agent again can't
 be made during a turn. On a provider, the button shows a cloud in place of the brain, and the
-provider's name after the model. A provider that lists no models isn't in the menu.
+provider's name after the model. A provider that lists no models isn't in the menu. A provider
+whose calls fail now (the agent's latest call to it failed, or half of the last hour's did) has an
+amber warning beside its name; hover for how many calls failed and the last error, with when.
 
 ### Context and usage limits
 

@@ -76,6 +76,7 @@ flowchart TB
 | `lib/agentstate/` | Native agent 回報、API 提供的值：功能、登入、設定、用量、請求、用量限制停止與重試等待，以及 `ConversationState`（observer 整份收到的對話狀態），連同重新啟動後保留的 `StoredState`。它是末端套件（只用 huma 和 `lib/util`），提供這些值的套件因此不必依賴 `lib/native` |
 | `lib/native/claude`、`codex`、`pi` | 每種 agent 協定各一個 adapter |
 | `lib/provider/` | agent 可以用來取代自己供應商的[模型供應商](#模型供應商)：`Provider` 和它的檢查、模型價格（`prices.go`：`ModelPrice`、`PriceTable`、`Source.Prices`）、`Source`（設定檔的 `providers` 區段，有變動就重新讀取，接著是 hub 的；供應商列出的模型保留 10 分鐘），以及 `HubSync`：每分鐘向 hub 取得供應商，以 hub 的 secret 加密（`Seal`、`Open`） |
+| `lib/providerproxy/` | agent 呼叫模型供應商時經過的[供應商代理](#模型供應商)，讓 agent 永遠拿不到金鑰：從第一次 `Endpoint` 起在 `127.0.0.1` 上監聽，每個行程一個 token，把 `/<id>/anthropic/…` 和 `/<id>/openai/…` 帶上金鑰轉送給供應商，並記錄每個供應商過去一小時的狀況 |
 | `lib/providerlog/` | 供應商帳本，設定檔旁的 `provider-ledger.jsonl`：記錄每個 Claude Code 或 Codex 工作階段從什麼時候起用哪個[模型供應商](#模型供應商)，Claude Code 的呼叫靠它歸到供應商 |
 | `lib/native/agentio` | 這些 adapter 執行 agent 時共用的部分：行程與它的迴圈（`Host`）、寫入 stdin、把回應對應到等待中的請求、agent 請求的回答進度（`Answer`）、寬鬆解碼與協定變動警告、快照節流 |
 | `lib/native/demo` | `native-demo`，開發聊天介面用的模擬 agent |
@@ -113,6 +114,7 @@ flowchart TB
 - `lib/convstate`、`lib/webhook` → `lib/instanceapi` → `lib/agentstate` → `lib/util`
 - `lib/native` 與各 adapter、`lib/statedb` → `lib/agentstate`：只有伺服器會用到 `lib/native`
 - `lib/native`、`lib/hub` → `lib/provider` → `lib/userconfig`、`lib/instanceapi`
+- `lib/native` → `lib/providerproxy` → `lib/provider`、`lib/agentstate`
 - `cmd/hub`、`lib/hub` → `lib/instanceapi`、`lib/httpmw`（它不匯入本儲存庫的任何套件）：hub
   不會連同伺服器一起編譯
 - `lib/hub` → `lib/dispatch` → `lib/host`、`lib/github`、`lib/jsonapi`：派工使用 launcher 的型別；
@@ -402,6 +404,10 @@ flowchart LR
   conv -- "SwitchProvider" --> adapter["ProviderRunner<br/>claude, codex"]
   adapter -. "RelaunchError" .-> http["PUT /settings<br/>relaunchOnProvider"]
   http -- "BeginProviderSwitch" --> conv
+  adapter -- "Endpoint" --> proxy["providerproxy.Proxy<br/>127.0.0.1"]
+  agent["Claude Code, Codex"] -- "the proxy's token" --> proxy
+  proxy -- "Lookup, the key" --> provider["the provider"]
+  source --> proxy
 ```
 
 - **來源。** `cmd/server` 會給 Claude Code 或 Codex 的伺服器一個 `provider.Source`
@@ -424,9 +430,27 @@ flowchart LR
   adapter 從 `Resume.Provider`（`ProviderRun`：供應商和啟動時用的模型）拿到它。選定的供應商若已不存在，
   對話會放棄這個選擇並發出警告，agent 改用自己的供應商啟動。hub 回應之前（`HubSettled`），選定的供應商若可能是
   hub 的，就繼續保持選定，agent 這次先用自己的供應商啟動，也不套用選定的模型，因為那是該供應商的模型。
+- **代理。** agent 透過 `lib/providerproxy` 呼叫供應商，從不帶著金鑰。`cmd/server` 以 `Source` 建立
+  `Proxy`，交給 Claude Code 和 Codex 的 adapter（`Config.ProviderProxy`）以及伺服器
+  （`NativeConfig.ProviderProxy`），伺服器結束時在 agent 之後關閉它。`native.ProviderEndpoint` 向它詢問
+  agent 要在哪裡呼叫供應商：第一次詢問時，它以 32 個隨機 byte 的 token 在 `127.0.0.1:0` 上監聽；沒有代理、
+  或代理無法監聽時，啟動或切換就失敗，而不會交出金鑰。呼叫必須帶著 token（`Authorization: Bearer` 或
+  `x-api-key`，以固定時間比較），否則回 401，也不會連到供應商。`/<id>/anthropic/<rest>` 送往
+  `ClaudeBaseURL()/<rest>`，`/<id>/openai/<rest>` 送往 `OpenAIBaseURL()/<rest>`，連同查詢字串，對象是
+  `Source.Lookup` 當下的供應商（沒有就回 404；路徑有 `.` 或 `..` 區段時回 400，讓呼叫留在 base URL 底下）：agent 的憑證和逐跳標頭留在代理，其他標頭照送，並照 agent
+  原本的方式加上 `Authorization: Bearer <金鑰>`。`httputil.ReverseProxy` 雙向串流（`FlushInterval: -1`、
+  全雙工，升級後的連線原樣轉送），agent 取消時上游的呼叫也跟著結束。重新導向由 client 以 `provider.KeepKeyOnOrigin` 跟隨，
+  和模型清單同一條規則：金鑰只送往同一個 origin；它不跟隨的重新導向（帶 request body 的）回 502，不會
+  交給 agent，否則 agent 會帶著 token 跟過去。上游有 30 秒建立連線、15 秒完成 TLS、10 分鐘回應標頭，
+  和 Claude Code 等待的時間一樣；body 沒有時間限制。每個結束的呼叫都計入它的供應商的狀況
+  （`agentstate.ProviderHealth`）：過去 60 分鐘每分鐘的呼叫、失敗（沒有回應、5xx、429、body 中途斷掉）
+  與用戶端錯誤（其他 4xx），最近 100 次非失敗回應收到標頭的時間（p50、p95），以及最近一次成功與失敗
+  （種類、狀態碼，和從 body 前 4 KiB 讀到的供應商訊息）。agent 在回應前就取消的呼叫不計。`GET /settings`
+  把它放進每個 `ProviderOption.Health`，`provider_health.go` 則每 30 秒及 `GET /summary` 時把它放進摘要的
+  `provider_health`。
 - **切換。** 帶供應商的 `ApplySettings` 先檢查供應商和模型（沒指定時用第一個；換回 agent 自己的供應商時，
   用換過去之前的模型），再呼叫 `SwitchProvider`。Claude Code 在執行中切換：`apply_flag_settings` 設定
-  `ANTHROPIC_BASE_URL`（去掉 `/v1` 的 base URL）、`ANTHROPIC_AUTH_TOKEN`、空的 `ANTHROPIC_API_KEY`，
+  `ANTHROPIC_BASE_URL`（代理的 `/<id>/anthropic`）、`ANTHROPIC_AUTH_TOKEN`（代理的 token）、空的 `ANTHROPIC_API_KEY`，
   並把模型寫進 `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL`、`ANTHROPIC_SMALL_FAST_MODEL` 和
   `CLAUDE_CODE_SUBAGENT_MODEL`，接著送 `set_model`。同一個 adapter 的設定與供應商變更一次只做一個，
   舊操作的 rollback 不會蓋掉較新回應。確定失敗時會恢復先前的環境與模型；未確認的回應或 rollback 失敗代表狀態未知，
@@ -441,7 +465,8 @@ flowchart LR
   接續同一個工作階段（`Resume.Ref`），或在有 `Carry` 時開一個新的工作階段，帶入對話的訊息
   （`Resume.Carry`）。Codex 把 thread 綁定在它的供應商上，而 OpenAI 的 thread 裡有其他供應商不接受的
   項目（additional tools、加密的推理內容）：app-server 以 `-c model_providers.agentapi-<id>={…}`
-  （Responses API，金鑰在 `AGENTAPI_PROVIDER_API_KEY`）和 `-c model_provider="agentapi-<id>"` 啟動，
+  （代理的 `/<id>/openai` 上的 Responses API，代理的 token 在 `AGENTAPI_PROVIDER_API_KEY`）和
+  `-c model_provider="agentapi-<id>"` 啟動，
   新的 thread 透過 `thread/inject_items` 以文字拿到訊息，只取放得進 200,000 字元的最近訊息。
 - **各供應商的用量。** 每個模型呼叫都算在它送往的供應商（`ModelCall.provider`、`SessionCost.providers`、
   摘要的 `spend.providers`）。Codex 的紀錄檔會寫出供應商：`session_meta` 有 thread 的 `model_provider`，
@@ -793,8 +818,9 @@ Content-Security-Policy。
 - 模型供應商的金鑰放在設定檔（其他人讀得到時 AgentAPI 會警告）和 hub 的 `providers.json`（0600）。
   hub 的 API 從不回傳金鑰（`has_key` 只說有沒有）；`POST /api/providers/sync` 會回傳金鑰，但只回應以
   hub secret 簽章的請求，並以從 secret 衍生（HKDF-SHA256）的金鑰用 AES-256-GCM 加密，所以金鑰不會以
-  明文經過一般 HTTP。持有 secret 的每台主機都拿得到每一把金鑰。用供應商的 agent 環境變數裡就有金鑰，
-  又以使用者身分執行，所以讀得到它。
+  明文經過一般 HTTP。持有 secret 的每台主機都拿得到每一把金鑰。agent 永遠拿不到金鑰：它帶著這個行程的
+  token，透過 `127.0.0.1` 上的供應商代理呼叫供應商，由代理加上金鑰。同一個使用者底下的程序可以從 agent 的
+  環境變數讀到這個 token，在 AgentAPI 執行期間透過代理呼叫供應商，但看不到金鑰。
 - 上層 agent 工作階段會為它執行的指令設定環境變數（包含機密資訊）；agent 不會繼承這些變數，也不會拿到 AgentAPI 的機密：API token、webhook 與 hub 的 secret 和
   token（`lib/procenv`）。
 

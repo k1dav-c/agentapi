@@ -57,8 +57,23 @@ hub 的供應商會存在設定檔旁邊（`hub-providers.json`，以 hub 的 se
 供應商的模型（它在 `<base_url>/models` 列出的）會保留 10 分鐘，之後在背景重新查詢。供應商沒有回應時，
 `GET /settings` 最多等 3 秒，一分鐘內也不會再問。
 
-用供應商的 agent 讀得到該供應商的金鑰：agent 以你的使用者身分執行，金鑰就在它的環境變數裡。
-只把你願意交給 agent 的金鑰設給供應商。
+agent 永遠拿不到供應商的金鑰。AgentAPI 透過 `127.0.0.1` 上的代理替它呼叫供應商：第一次有 agent
+用供應商時，代理開始在隨機的連接埠上監聽，直到 AgentAPI 結束。Claude Code 拿到
+`ANTHROPIC_BASE_URL=http://127.0.0.1:<port>/<id>/anthropic`，Codex 拿到 `base_url` 為
+`http://127.0.0.1:<port>/<id>/openai` 的供應商，兩者拿到的都是 AgentAPI 啟動時產生的 token，
+而不是金鑰（`ANTHROPIC_AUTH_TOKEN`、Codex 的 `AGENTAPI_PROVIDER_API_KEY`）。沒帶這個 token 的呼叫，
+代理回 401；其他的呼叫則照 agent 原本的方式，以 bearer token 帶上供應商的金鑰轉送過去，回應一邊收到
+一邊傳回。代理每次呼叫都重新查詢供應商：在設定檔或 hub 上改了金鑰或網址會立即生效，已移除的供應商
+回 404。它只跟隨同一個 origin 的重新導向，金鑰不會送往其他 origin。供應商的模型清單仍由 AgentAPI 自己
+帶著金鑰查詢。代理無法啟動時，agent 就無法使用供應商，而不會改拿金鑰。你的使用者底下的其他程序，
+在 AgentAPI 執行期間仍可以從 agent 的環境變數讀到 token，透過代理呼叫供應商，但看不到金鑰。
+
+代理也會得知每個供應商的回應狀況。它計算過去一小時內的呼叫次數、失敗（網路錯誤或逾時、5xx 或 429
+回應、回應中途斷掉），以及用戶端錯誤（其他 4xx，例如供應商不接受的金鑰或模型，不算供應商的失敗），
+最近 100 次回應收到第一個 byte 的時間中位數與第 95 百分位數，以及最近一次成功與失敗。`GET /settings`
+把它放在每個供應商的 `health`，摘要則放在 `provider_health`，列出這一小時內 agent 呼叫過的供應商。
+聊天介面的模型選單會標示最近一次呼叫失敗、或這一小時有一半呼叫失敗的供應商，提示中有失敗的比例和最後
+一次錯誤；hub 的 Providers 設定則顯示每個供應商在回報的 agent 上這一小時的狀況。
 
 `GET /sessions`、`GET /cost` 和摘要的 `spend` 會依供應商分開計算呼叫次數、token 和花費
 （`providers`，agent 自己的是 `default`）；`GET /sessions` 和 `GET /cost` 還會附上每個供應商的

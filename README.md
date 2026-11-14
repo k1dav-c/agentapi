@@ -81,7 +81,8 @@ has the complete commit history.
   while the agent runs: bypass (the default), auto, ask or plan.
 - Switch Claude Code or Codex to [another model provider](docs/providers.md), such as a LiteLLM
   gateway, while it runs, and back; the conversation goes on. Define providers per machine or once
-  on the hub.
+  on the hub. The agent calls them through a local proxy and never gets their keys; the model menu
+  and the hub show which ones fail.
 - See how full the [context and the rate limits](docs/agents.md#context-and-rate-limits)
   are, and [compact](docs/agents.md#slash-commands-and-compaction) the context; the chat
   suggests it once Claude Code's prompt cache has expired.

@@ -70,7 +70,8 @@ AgentAPI 可以用來：
 - 在 agent 執行中切換[權限模式、模型和推理強度](docs/agents.zh-TW.md#工作階段設定)：bypass（預設）、auto、ask
   或 plan。
 - 在 Claude Code 或 Codex 執行中把它換到[其他模型供應商](docs/providers.zh-TW.md)，例如 LiteLLM
-  gateway，也能換回來，對話照常接續。供應商可以在每台主機各自設定，也可以在 hub 設定一次。
+  gateway，也能換回來，對話照常接續。供應商可以在每台主機各自設定，也可以在 hub 設定一次。agent 透過
+  本機的代理呼叫它們，永遠拿不到金鑰；模型選單和 hub 會標出正在失敗的供應商。
 - 查看 [context 與用量限制](docs/agents.zh-TW.md#context-與用量限制)用了多少，並[壓縮](docs/agents.zh-TW.md#斜線指令與壓縮) context；
   Claude Code 的 prompt cache 過期後，聊天介面會建議先壓縮。
 - 回合因為[達到用量限制](docs/agents.zh-TW.md#達到用量限制時)而停下時，佇列會等到限制重置，回合也可以在重置後

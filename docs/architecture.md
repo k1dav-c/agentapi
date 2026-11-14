@@ -77,6 +77,7 @@ emitter. Handlers call the conversation and read state from the emitter.
 | `lib/agentstate/` | The values a native agent reports and the API serves: capabilities, login, settings, usage, requests, the limit stop and the retry wait, and `ConversationState`, the conversation's state the observer gets whole, with the `StoredState` that survives a restart. A leaf package (huma and `lib/util` only), so the packages that serve them don't depend on `lib/native` |
 | `lib/native/claude`, `codex`, `pi` | One adapter per agent protocol |
 | `lib/provider/` | The [model providers](#model-providers) an agent can run on instead of its own: `Provider` and its checks, its models' prices (`prices.go`: `ModelPrice`, `PriceTable`, `Source.Prices`), `Source` (the config file's `providers` section, read again when it changes, then the hub's; the models a provider lists, kept 10 minutes) and `HubSync`, which gets the hub's every minute, sealed with the hub's secret (`Seal`, `Open`) |
+| `lib/providerproxy/` | The [provider proxy](#model-providers) the agents call the model providers through, so they never get a key: on `127.0.0.1` from the first `Endpoint`, a token per process, `/<id>/anthropic/…` and `/<id>/openai/…` sent on to the provider with its key, and each provider's health over the last hour |
 | `lib/providerlog/` | The provider ledger, `provider-ledger.jsonl` beside the config file: which [model provider](#model-providers) each Claude Code or Codex session ran on, from when, which attributes Claude Code's calls to their provider |
 | `lib/native/agentio` | What those adapters share to run their agent: the process and its loop (`Host`), writing to its stdin, matching its responses to the requests waiting for them, where the answer to one of its requests stands (`Answer`), lenient decoding with drift warnings, the snapshot throttle |
 | `lib/native/demo` | `native-demo`, a simulated agent for working on the chat |
@@ -115,6 +116,7 @@ The internal imports point one way, from the commands to the leaves:
 - `lib/native` and its adapters, `lib/statedb` → `lib/agentstate`: only the server reaches
   `lib/native`
 - `lib/native`, `lib/hub` → `lib/provider` → `lib/userconfig`, `lib/instanceapi`
+- `lib/native` → `lib/providerproxy` → `lib/provider`, `lib/agentstate`
 - `cmd/hub`, `lib/hub` → `lib/instanceapi`, `lib/httpmw`, which imports no package of the
   repository: the hub doesn't build the server
 - `lib/hub` → `lib/dispatch` → `lib/host`, `lib/github`, `lib/jsonapi`: the dispatch uses the
@@ -513,6 +515,10 @@ flowchart LR
   conv -- "SwitchProvider" --> adapter["ProviderRunner<br/>claude, codex"]
   adapter -. "RelaunchError" .-> http["PUT /settings<br/>relaunchOnProvider"]
   http -- "BeginProviderSwitch" --> conv
+  adapter -- "Endpoint" --> proxy["providerproxy.Proxy<br/>127.0.0.1"]
+  agent["Claude Code, Codex"] -- "the proxy's token" --> proxy
+  proxy -- "Lookup, the key" --> provider["the provider"]
+  source --> proxy
 ```
 
 - **Where they come from.** `cmd/server` gives a Claude Code or Codex server a `provider.Source`
@@ -540,10 +546,35 @@ flowchart LR
   that is no longer defined is dropped with a warning, and the agent starts on its own. Before the
   hub answered (`HubSettled`), a chosen provider the hub may have stays chosen while the agent starts on its own,
   without the chosen model, which is that provider's.
+- **The proxy.** The agent calls a provider through `lib/providerproxy`, never with its key.
+  `cmd/server` makes the `Proxy` over the `Source` and gives it to the Claude Code and Codex
+  adapters (`Config.ProviderProxy`) and to the server (`NativeConfig.ProviderProxy`), which closes
+  it after the agent when it stops. `native.ProviderEndpoint` asks it where the agent calls a
+  provider: the first time, it listens on `127.0.0.1:0` with a token of 32 random bytes; without
+  a proxy, or one that can't listen, the launch or switch fails rather than hand over the key. A
+  call must carry the token (`Authorization: Bearer` or `x-api-key`, compared in constant time),
+  else it gets 401 and the provider isn't contacted. `/<id>/anthropic/<rest>` goes to
+  `ClaudeBaseURL()/<rest>` and `/<id>/openai/<rest>` to `OpenAIBaseURL()/<rest>`, with the query,
+  for the provider `Source.Lookup` has now (404 without one; 400 for a `.` or `..` segment, so a
+  call stays under the base URL): the agent's credentials and the
+  hop-by-hop headers stay behind, the others go on, and `Authorization: Bearer <key>` is added, as
+  the agents sent it. `httputil.ReverseProxy` streams both ways (`FlushInterval: -1`, full duplex,
+  an upgraded connection as it is), and the agent's cancellation ends the upstream call. A client follows redirects with
+  `provider.KeepKeyOnOrigin`, the model lists' rule: the key only to the same origin; a redirect it
+  doesn't follow (one of a request body) answers 502 rather than reach the agent, which would follow
+  it with the token. The upstream has 30 s to connect, 15 s for TLS and 10 minutes for its headers,
+  as long as Claude Code waits; the body has no limit. Each call that ends counts in its provider's
+  health (`agentstate.ProviderHealth`): the minute's calls, failures (no answer, 5xx, 429, a body
+  that broke off) and client errors (another 4xx) of the last 60 minutes, the time to the answer's
+  headers of the latest 100 answers that weren't failures (p50, p95), and the last success and
+  failure (its kind, status and the provider's message, from the first 4 KiB of the body). A call
+  the agent cancelled before an answer doesn't count. `GET /settings` puts it in each
+  `ProviderOption.Health`, and `provider_health.go` in the summary's `provider_health` every 30
+  seconds and on `GET /summary`.
 - **A switch.** `ApplySettings` with a provider checks the provider and the model (its first when
   none is given; back on the agent's own, the model it had before), then calls
   `SwitchProvider`. Claude Code switches while it runs: `apply_flag_settings` sets
-  `ANTHROPIC_BASE_URL` (the base URL without `/v1`), `ANTHROPIC_AUTH_TOKEN`, an empty
+  `ANTHROPIC_BASE_URL` (the proxy's `/<id>/anthropic`), `ANTHROPIC_AUTH_TOKEN` (the proxy's token), an empty
   `ANTHROPIC_API_KEY` and the model in `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL`,
   `ANTHROPIC_SMALL_FAST_MODEL` and `CLAUDE_CODE_SUBAGENT_MODEL`, then `set_model`. Settings and
   provider mutations of one adapter run one at a time, so an older rollback can't overwrite a newer
@@ -561,8 +592,9 @@ flowchart LR
   `Replacement` the server starts: on the same session (`Resume.Ref`), or with `Carry` on a new
   one that gets the conversation's messages (`Resume.Carry`). Codex binds a thread to its
   provider, and an OpenAI thread holds items others refuse (additional tools, encrypted
-  reasoning): app-server starts with `-c model_providers.agentapi-<id>={…}` (the Responses API,
-  its key in `AGENTAPI_PROVIDER_API_KEY`) and `-c model_provider="agentapi-<id>"`, and the new
+  reasoning): app-server starts with `-c model_providers.agentapi-<id>={…}` (the Responses API at
+  the proxy's `/<id>/openai`, the proxy's token in `AGENTAPI_PROVIDER_API_KEY`) and
+  `-c model_provider="agentapi-<id>"`, and the new
   thread gets the messages as text through `thread/inject_items`, the latest that fit in 200,000
   characters.
 - **Usage by provider.** Each model call counts toward the provider it went to (`ModelCall.provider`,
@@ -1086,7 +1118,10 @@ of the content's SHA-256, so a path never changes; unused ones are removed after
   says whether there is one); `POST /api/providers/sync` answers them, to a request signed with
   the hub's secret, sealed with AES-256-GCM under a key derived from the secret (HKDF-SHA256), so
   they don't cross plain HTTP in the clear. Every machine with the secret gets every key. An
-  agent on a provider has its key in its environment and runs as the user, so it can read it.
+  agent never gets one: it calls the providers through the provider proxy on `127.0.0.1`, with a
+  token of the process, which adds the key. A process of the same user can read that token in the
+  agent's environment and call the providers through the proxy while AgentAPI runs, but not see
+  a key.
 - Agents don't inherit the variables (one of them a
   secret) that a parent agent session sets for the commands it runs, nor
   AgentAPI's secrets: its API token, the webhook and hub secrets and tokens

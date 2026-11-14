@@ -577,7 +577,10 @@ hub 保存的金鑰。結果會顯示花了多久、列出幾個模型，失敗�
 
 有 agent 回報供應商之後，分頁裡每個供應商都會多一行，寫出 agent 用了它多少：最近 24 小時和 7 天的
 token 與金額（或 **no price**），算法和 [Providers 卡片](#供應商用量)相同；沒有用到時寫
-**No calls in the last 7 days**。
+**No calls in the last 7 days**。過去一小時有 agent 呼叫過的供應商，會再多一行，寫出它透過各 AgentAPI 的
+[供應商代理](providers.zh-TW.md)回應得如何：呼叫次數、失敗的比例、收到第一個 byte 的時間中位數，以及最後
+一次錯誤和發生時間，加總 hub 追蹤的所有實例（摘要裡的 `provider_health`）。供應商正在失敗時（最近一次呼叫
+失敗，或這一小時有一半失敗），這一行會變成琥珀色；游標移上去可以看到完整的數字。
 
 hub 用 OpenRouter 的牌價替供應商的模型定價（[價格](providers.zh-TW.md#價格)），各 AgentAPI 就用這些
 價格計算送往供應商的呼叫。有供應商時，hub 每天取得一次 OpenRouter 公開的清單（不需要金鑰），按下分頁上方的

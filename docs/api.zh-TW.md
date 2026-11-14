@@ -150,7 +150,12 @@ AgentAPI，用[人工回覆 API](#人工回覆-api)讓機器人代為回覆 agen
   25 小時中有呼叫的每一小時，含 UTC 的開始時間、`usd` 和 `tokens`；hub 的[活動](hub.zh-TW.md#活動)
   會保留一年）。同一台主機上，同一個 agent 在同一個目錄的 AgentAPI 回報的是同一批
   工作階段，`scope` 也相同：加總多個 AgentAPI 的用戶端每個 scope 只算一次。`update` 則說明用戶端
-  能不能[更新這個 AgentAPI](#透過-api-更新)，以及更新進行到哪裡。
+  能不能[更新這個 AgentAPI](#透過-api-更新)，以及更新進行到哪裡。Claude Code 和 Codex 的摘要還有
+  `provider_health`，說明 agent 過去一小時呼叫過的每個[模型供應商](providers.zh-TW.md)透過 AgentAPI 的
+  代理回應得如何：`provider`、`requests`、`failures`（沒有回應、5xx、429、回應中途斷掉）、
+  `client_errors`（其他 4xx）、`first_byte_p50_ms` 與 `first_byte_p95_ms`（最近 100 次回應）、
+  `last_success_at` 和 `last_failure`（`at`、`kind`、`status`、`message`），每 30 秒計算一次；
+  `GET /settings` 在每個供應商的 `health` 也有相同的內容。
 - `attention` 依優先順序標示需要使用者處理的原因：`login`、`request`（核准、提問或計畫）、
   `limit`（用量限制使回合停止）、`exited`，或 `none`。
 - `GET /events?only=summary` 在連線時及摘要變動時送出 `summary_update`，另有心跳。
@@ -478,7 +483,7 @@ webhook，也能在這裡設定。
 | `POST /interrupt` | 停止執行中的回合 |
 | `GET /requests`、`GET /requests/{id}` | agent 正在等待的請求（核准、提問、計畫），以及最近關閉的請求 |
 | `POST /requests/{id}/respond` | 回覆請求：`option_id`，或以問題為鍵的 `answers`，可另附 `text` |
-| `GET /settings`、`PUT /settings` | 權限模式、模型和推理強度，以及可選的值；PUT 會修改請求內容中列出的欄位 |
+| `GET /settings`、`PUT /settings` | 權限模式、模型和推理強度，以及可選的值（和每個模型供應商過去一小時的狀況）；PUT 會修改請求內容中列出的欄位 |
 | `POST /compact` | 壓縮 agent 的 context（Codex、Pi） |
 | `POST /login/retry` | 回報 `login_required` 期間，立刻再檢查一次 agent 的登入（不需要登入時回傳 409） |
 | `POST /limit/continue`、`DELETE /limit/continue` | 現在或在重置時繼續因用量限制停下的回合；取消排定的繼續 |
