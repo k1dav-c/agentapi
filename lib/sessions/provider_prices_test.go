@@ -123,3 +123,16 @@ func TestCodexCallsAtProviderPrices(t *testing.T) {
 	assert.True(t, d.Sessions["t1"][0].Priced)
 	assert.InDelta(t, 12.0, d.Total.USD, 1e-9)
 }
+
+// The providers but the agent's own get their names, in a copy.
+func TestWithProviderNames(t *testing.T) {
+	t.Parallel()
+	c := SessionCost{Providers: []ProviderCost{{Provider: "default"}, {Provider: "gw"}, {Provider: "gone"}}}
+	named := c.WithProviderNames(func(id string) string {
+		return map[string]string{"default": "Own", "gw": "LiteLLM gateway"}[id]
+	})
+	assert.Equal(t, []string{"", "LiteLLM gateway", ""}, []string{named.Providers[0].Name, named.Providers[1].Name, named.Providers[2].Name})
+	assert.Empty(t, c.Providers[1].Name, "c stays as it was")
+	same := c.WithProviderNames(func(string) string { return "" })
+	assert.Same(t, &c.Providers[0], &same.Providers[0], "nothing named: no copy")
+}

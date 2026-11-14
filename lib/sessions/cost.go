@@ -59,6 +59,7 @@ type ModelCost struct {
 // Priced is false when any of its calls had no price.
 type ProviderCost struct {
 	Provider string         `json:"provider" doc:"The AgentAPI model provider, by its ID; default for the agent's own."`
+	Name     string         `json:"name,omitempty" doc:"The provider's name, as the server's providers have it when it answers; missing for the agent's own, a provider without a name, or one the server no longer has."`
 	USD      float64        `json:"usd" doc:"API-equivalent cost in USD, at the list prices of the models called, whichever provider served them."`
 	Tokens   pricing.Tokens `json:"tokens" doc:"The tokens used."`
 	Calls    int            `json:"calls" doc:"How many calls were made."`
@@ -71,6 +72,31 @@ type ProviderCost struct {
 // Hourly is what was spent on the provider in each hour (UTC) with calls,
 // the earliest first. The caller must not change it.
 func (p ProviderCost) Hourly() []HourCost { return p.hourly }
+
+// WithProviderNames returns c with the name of each of its providers but
+// the agent's own: name's of its ID, empty for none. The providers are a
+// copy when any is named, so c, which a reading of the costs may share,
+// stays as it was.
+func (c SessionCost) WithProviderNames(name func(id string) string) SessionCost {
+	var named []ProviderCost
+	for i, p := range c.Providers {
+		if p.Provider == provider.Default {
+			continue
+		}
+		n := name(p.Provider)
+		if n == p.Name {
+			continue
+		}
+		if named == nil {
+			named = slices.Clone(c.Providers)
+		}
+		named[i].Name = n
+	}
+	if named != nil {
+		c.Providers = named
+	}
+	return c
+}
 
 // providerName is the provider a call with provider id went to, as
 // ProviderCost names it.
