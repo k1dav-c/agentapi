@@ -9,6 +9,11 @@
 - The hub gives `POST /api/providers/sync` and a launcher's token request 10 seconds to send their
   body, as `/hooks` had: these routes need no session, so a client that trickled a body in held a
   connection and its handler for as long as it liked.
+- A job's task events count only from the AgentAPI the hub reads, as that run, on the job's machine
+  (the address of its launcher's URL). Before, any machine with the hub's secret could move another
+  machine's job or add to its cost by naming its instance ID; one that copies the job's AgentAPI's
+  whole identity still can, as the secret signs every event. An event that comes before the hub
+  reaches the instance is dropped, and the run's cost marked as possibly missed.
 
 ## v5.0.0
 

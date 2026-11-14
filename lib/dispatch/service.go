@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -699,42 +700,132 @@ type taskEventData struct {
 // exact AgentAPI process of the current run counts: an instance ID is reused
 // when AgentAPI restarts. Runs kept before ServerID was recorded, and events
 // without one, are left alone rather than risking another run's cost.
-func (s *Service) TaskEvent(instanceID, serverID, eventType string, data json.RawMessage) {
+//
+// The event names its instance itself, under the secret every joined
+// machine has. So instanceURL is where the hub read that instance's
+// summary as that run, empty when it hasn't (it may not reach a new one
+// yet: the event is dropped, as after a restart of the hub), and it must
+// be on the run's machine: the same address as its launcher's URL, which the
+// launcher's pinned token vouches for. A machine that registers another's
+// instance ID at its own address can't move or charge that job. One that
+// copies the instance's whole identity, as the hub reads it there, still
+// can: that takes a key per machine, which the hub doesn't have.
+func (s *Service) TaskEvent(ctx context.Context, instanceID, serverID, instanceURL, eventType string, data json.RawMessage) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	key, launcherURL := "", ""
 	for _, job := range s.jobs {
-		run := job.current()
-		if run == nil || run.InstanceID != instanceID || serverID == "" || run.ServerID == "" || run.ServerID != serverID {
-			continue
+		if run := job.current(); isRun(run, instanceID, serverID) {
+			key = job.Key
+			if h := s.hosts[cmp.Or(run.Host, job.Host)]; h != nil {
+				launcherURL = h.URL
+			}
+			break
 		}
-		now := s.config.Now()
-		switch eventType {
-		case "task.started":
-			if job.State != JobFailed {
-				job.State = JobWorking
-			}
-		case "task.completed", "task.failed":
-			var d taskEventData
-			_ = json.Unmarshal(data, &d)
-			c := Cost{Tasks: 1, WorkSeconds: d.DurationSeconds}
-			if d.Cost != nil {
-				c.USD, c.Calls = d.Cost.USD, d.Cost.Calls
-				c.Tokens = Tokens{Input: d.Cost.Tokens.Input, Output: d.Cost.Tokens.Output, CacheWrite: d.Cost.Tokens.CacheWrite, CacheRead: d.Cost.Tokens.CacheRead}
-			}
-			run.Cost.add(c)
-			if job.State == JobWorking || job.State == JobStarting {
-				job.State = JobWorking
-				if job.PRURL != "" {
-					job.State = JobReview
-				}
-			}
-		default:
-			return
-		}
-		job.UpdatedAt = now
-		s.saveLocked()
+	}
+	s.mu.Unlock()
+	if key == "" {
 		return
 	}
+	if instanceURL == "" {
+		s.logger.Debug("Dropped a task event of an instance the hub doesn't reach yet", "job", key, "instance", instanceID, "event", eventType)
+		if eventType == "task.completed" || eventType == "task.failed" {
+			s.mu.Lock()
+			if job := s.jobs[key]; job != nil {
+				if run := job.current(); isRun(run, instanceID, serverID) && !run.Missed {
+					run.Missed = true
+					s.saveLocked()
+				}
+			}
+			s.mu.Unlock()
+		}
+		return
+	}
+	if !sameMachine(ctx, launcherURL, instanceURL) {
+		s.logger.Warn("Refused a task event of an instance the hub doesn't reach on its job's machine",
+			"job", key, "instance", instanceID, "instance_url", instanceURL, "launcher_url", launcherURL, "event", eventType)
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	job := s.jobs[key]
+	if job == nil {
+		return
+	}
+	run := job.current()
+	if !isRun(run, instanceID, serverID) {
+		// Another run started while the hub looked the addresses up.
+		return
+	}
+	now := s.config.Now()
+	switch eventType {
+	case "task.started":
+		if job.State != JobFailed {
+			job.State = JobWorking
+		}
+	case "task.completed", "task.failed":
+		var d taskEventData
+		_ = json.Unmarshal(data, &d)
+		c := Cost{Tasks: 1, WorkSeconds: d.DurationSeconds}
+		if d.Cost != nil {
+			c.USD, c.Calls = d.Cost.USD, d.Cost.Calls
+			c.Tokens = Tokens{Input: d.Cost.Tokens.Input, Output: d.Cost.Tokens.Output, CacheWrite: d.Cost.Tokens.CacheWrite, CacheRead: d.Cost.Tokens.CacheRead}
+		}
+		run.Cost.add(c)
+		if job.State == JobWorking || job.State == JobStarting {
+			job.State = JobWorking
+			if job.PRURL != "" {
+				job.State = JobReview
+			}
+		}
+	default:
+		return
+	}
+	job.UpdatedAt = now
+	s.saveLocked()
+}
+
+// isRun reports whether run, a job's current one, is the AgentAPI process
+// instanceID and serverID name.
+func isRun(run *Run, instanceID, serverID string) bool {
+	return run != nil && run.InstanceID == instanceID && serverID != "" && run.ServerID == serverID
+}
+
+// sameMachine reports whether the URLs a and b name one machine: the same
+// host, or names with an address in common.
+func sameMachine(ctx context.Context, a, b string) bool {
+	ua, errA := url.Parse(a)
+	ub, errB := url.Parse(b)
+	if errA != nil || errB != nil || ua.Hostname() == "" || ub.Hostname() == "" {
+		return false
+	}
+	if strings.EqualFold(ua.Hostname(), ub.Hostname()) {
+		return true
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	addrsA, addrsB := lookupHost(ctx, ua.Hostname()), lookupHost(ctx, ub.Hostname())
+	for _, x := range addrsA {
+		if slices.Contains(addrsB, x) {
+			return true
+		}
+	}
+	return false
+}
+
+// lookupHost is host's addresses: an IP address itself, else what DNS
+// answers; none when it doesn't.
+func lookupHost(ctx context.Context, host string) []netip.Addr {
+	if ip, err := netip.ParseAddr(host); err == nil {
+		return []netip.Addr{ip.Unmap()}
+	}
+	ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+	if err != nil {
+		return nil
+	}
+	for i, ip := range ips {
+		ips[i] = ip.Unmap()
+	}
+	return ips
 }
 
 // endRunLocked ends job's current run. s.mu is held.

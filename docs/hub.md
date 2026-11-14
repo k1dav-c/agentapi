@@ -795,6 +795,16 @@ than this hub reports no `server_id`: the hub then ignores its jobs' task events
 state and cost where they were. Upgrade the launchers along with the hub; an upgraded launcher reports
 the identity of the jobs it takes over on its next report.
 
+The hub also needs to read that AgentAPI itself: it takes a task event only while it reads the
+instance the event names, as that run, at an address of the job's machine (the host of its launcher's
+URL, or a name with the same address). An event that comes before the hub reaches the instance, such
+as just after it started, is dropped, and the cost comment then says the hub may have missed some. An
+event for an instance the hub reads on another machine changes nothing; the hub logs "Refused a task
+event of an instance the hub doesn't reach on its job's machine". A launcher and its AgentAPIs that
+name the machine differently in their `public-url` (an address and a name with another address) hit
+this too. The events are still signed with the secret every machine has, so this doesn't stop a
+machine that copies the job's AgentAPI's whole identity ([Tokens and security](#tokens-and-security)).
+
 #### The list's rows
 
 ![The agents of issues in the list, each with its issue](screenshots/dispatch-list.png)
@@ -947,6 +957,11 @@ right is forgotten, it closes.
   `--instance-token`, and once it answers as that instance, the messages and approvals you send
   it. Join only machines you would give the instance token, and add an instance by hand if
   it must never move. A key per machine would close this; the hub doesn't have one yet.
+- A job's task events move its state and add to its cost. The hub takes them only from the job's
+  AgentAPI as it reads it on the job's machine ([An issue's detail](#an-issues-detail)), so a
+  machine that announces a job's instance ID at its own address can't charge the job. One that
+  sends events with the instance ID and run (`server_id`) of the job's AgentAPI, both in its
+  summary, still can: there too the secret is the boundary.
 - The hub forwards an instance's requests (the chat, approvals, updates) only while it is
   connected: it reads that instance's summary at its URL. While it connects, after the hub
   restarts, a stream drops or an event moved the instance, the proxy answers 503 and sends

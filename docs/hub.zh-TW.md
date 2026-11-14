@@ -675,6 +675,14 @@ agent 還在工作時，可以從最下面的輸入框傳訊息給它（⌘/Ctrl
 它的 job 的任務事件，狀態和花費就停在原處。升級 hub 時請一併升級 launcher；升級後的 launcher 會在
 下一次回報時帶上它接手的 job 的身分。
 
+hub 也要自己讀得到那個 AgentAPI：只有在 hub 正從 job 所在主機的位址（launcher 網址的主機，或解析到
+同一個位址的名稱）讀到事件所指的實例、而且是同一次執行時，才採計它的任務事件。在 hub 連上實例之前
+送到的事件（例如剛啟動時）會被丟掉，花費留言就會註明 hub 可能漏算。hub 在別台主機上讀到的實例，
+它的事件不會改變任何東西，hub 會記下 "Refused a task event of an instance the hub doesn't reach on
+its job's machine"。launcher 和它的 AgentAPI 在 `public-url` 裡用不同方式指名主機時（一個寫位址、
+一個寫解析到別的位址的名稱），也會這樣。事件仍然是用每台主機共用的 secret 簽章，所以完整複製 job
+的 AgentAPI 身分的主機，仍然擋不住（[Token 與安全性](#token-與安全性)）。
+
 #### 清單上的列
 
 ![清單上處理 issue 的 agent，各自標出它的 issue](screenshots/dispatch-list.png)
@@ -809,6 +817,10 @@ AgentAPI 1.1 以上。在這裡輸入的 token 會為這個實例保存，取代
   `--instance-token` 送到那個位址，等它以那個實例的身分回應後，再把你送給那個實例的訊息和核准
   也送過去。只讓你願意交出實例 token 的主機加入；網址絕不能變的實例，請手動加入。每台主機各用一把金鑰
   才能根除這個問題，hub 目前還沒有這個功能。
+- job 的任務事件會改變它的狀態、累加它的花費。hub 只採計它在 job 所在主機上讀到的那個 AgentAPI
+  送來的事件（[issue 的詳細資料](#issue-的詳細資料)），所以在自己的位址宣告某個 job 實例 ID 的主機，
+  沒辦法替那個 job 記帳。但若送出的事件帶著 job 的 AgentAPI 的實例 ID 和執行（`server_id`，兩者都在
+  它的摘要裡），仍然會被採計：這裡的界線同樣是 secret。
 - 只有在已連上時，也就是 hub 正從那個網址讀到這個實例的摘要時，hub 才會轉送這個實例的請求
   （對話、核准、更新）。hub 重新啟動、串流斷線或事件把實例搬走後，連線中的期間 proxy 一律回 503，
   什麼都不送出。

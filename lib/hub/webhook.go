@@ -219,7 +219,7 @@ func (h *Hub) receiveWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.config.Dispatch != nil && strings.HasPrefix(event.Type, "task.") {
 		// A job's task: its state and cost.
-		h.config.Dispatch.TaskEvent(instance.ID, instance.ServerID, event.Type, event.Data)
+		h.config.Dispatch.TaskEvent(r.Context(), instance.ID, instance.ServerID, h.taskInstanceURL(instance), event.Type, event.Data)
 	}
 	switch event.Type {
 	case instanceapi.EventInstanceStarted, instanceapi.EventInstanceHeartbeat:
@@ -291,6 +291,20 @@ func (h *Hub) readEvent(w http.ResponseWriter, r *http.Request) (webhookEvent, b
 		return webhookEvent{}, false
 	}
 	return event, true
+}
+
+// taskInstanceURL is where the hub reads instance as the run its event
+// names, from that instance's own summary: the address the dispatch checks
+// against the job's machine. Empty when the hub doesn't read it there, or
+// read another run there last; the event's own URL counts for nothing, as
+// any machine with the secret can name one.
+func (h *Hub) taskInstanceURL(instance instanceapi.WebhookInstance) string {
+	i, ok := h.store.get(instance.ID)
+	if !ok || i.Connection == instanceapi.ConnectionStopped || i.confirmedURL == "" || i.URL != i.confirmedURL ||
+		instance.ServerID == "" || i.confirmedRun != instance.ServerID {
+		return ""
+	}
+	return i.confirmedURL
 }
 
 // sameRun reports whether an event of the run serverID is of the run the
