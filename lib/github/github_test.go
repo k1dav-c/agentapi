@@ -215,3 +215,69 @@ func TestPagination(t *testing.T) {
 	assert.Len(t, repos, maxPages*100)
 	assert.Len(t, f.taken(), maxPages)
 }
+
+// An installation of an app made before workflows was asked for refuses it
+// (422): the token comes without it, says so, and the installation isn't
+// asked for it again for an hour, or until Forget.
+func TestRepoTokenWithoutWorkflows(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 11, 14, 10, 0, 0, 0, time.UTC)
+	var asked []map[string]string
+	f := &fakeAPI{}
+	f.handle = func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/repos/acme/widget/installation":
+			writeJSON(w, http.StatusOK, map[string]any{"id": 11})
+		case r.URL.Path == "/app/installations/11/access_tokens":
+			var body struct {
+				Permissions map[string]string `json:"permissions"`
+			}
+			assert.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			asked = append(asked, body.Permissions)
+			if body.Permissions["workflows"] != "" {
+				writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"message": "The permissions requested are not granted to this installation."})
+				return
+			}
+			writeJSON(w, http.StatusCreated, map[string]any{"token": "ghs_base", "expires_at": now.Add(time.Hour)})
+		default:
+			writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
+		}
+	}
+	c, app := newTestClient(t, f, &now)
+
+	token, err := c.RepoToken(ctx, app, "acme/widget")
+	require.NoError(t, err)
+	assert.Equal(t, "ghs_base", token.Value)
+	assert.True(t, token.WithoutWorkflows)
+	require.Len(t, asked, 2)
+	assert.Equal(t, "write", asked[0]["workflows"], "asked with workflows first")
+	assert.Equal(t, basePermissions, asked[1])
+
+	// The kept token says it too; the next one goes straight to the base.
+	token, err = c.RepoToken(ctx, app, "acme/widget")
+	require.NoError(t, err)
+	assert.True(t, token.WithoutWorkflows)
+	now = now.Add(56 * time.Minute)
+	asked = nil
+	token, err = c.RepoToken(ctx, app, "acme/widget")
+	require.NoError(t, err)
+	assert.True(t, token.WithoutWorkflows)
+	assert.Equal(t, []map[string]string{basePermissions}, asked)
+
+	// An hour after the refusal it is asked for again, once the kept token
+	// is due: the owner may have granted it since.
+	now = now.Add(56 * time.Minute)
+	asked = nil
+	_, err = c.RepoToken(ctx, app, "acme/widget")
+	require.NoError(t, err)
+	require.NotEmpty(t, asked)
+	assert.Equal(t, "write", asked[0]["workflows"])
+
+	// And at once after Forget (the app changed).
+	c.Forget()
+	asked = nil
+	_, err = c.RepoToken(ctx, app, "acme/widget")
+	require.NoError(t, err)
+	require.NotEmpty(t, asked)
+	assert.Equal(t, "write", asked[0]["workflows"])
+}

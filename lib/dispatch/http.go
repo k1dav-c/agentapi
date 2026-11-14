@@ -95,6 +95,12 @@ func (s *Service) handleToken(w http.ResponseWriter, r *http.Request) {
 		jsonapi.WriteError(w, jsonapi.Errorf(http.StatusBadGateway, "github_failed", "%v", err))
 		return
 	}
+	if token.WithoutWorkflows {
+		if _, said := s.noWorkflows.LoadOrStore(key.Repo(), true); !said {
+			s.logger.Warn("The hub's GitHub App hasn't been granted the workflows permission, so a job's push that changes .github/workflows/ is refused: add Workflows (read and write) to the app's repository permissions, then accept the new permissions on its installation",
+				"repo", key.Repo(), "settings", app.SettingsURL(s.gh.Web))
+		}
+	}
 	jsonapi.Write(w, http.StatusOK, host.Token{Value: token.Value, ExpiresAt: token.ExpiresAt})
 }
 
@@ -446,7 +452,7 @@ func Manifest(hubURL, name string) map[string]any {
 		"public":          false,
 		"hook_attributes": map[string]any{"url": hubURL + "/github/unused", "active": false},
 		"default_permissions": map[string]string{
-			"contents": "write", "pull_requests": "write", "issues": "write", "metadata": "read",
+			"contents": "write", "pull_requests": "write", "issues": "write", "workflows": "write", "metadata": "read",
 		},
 	}
 }

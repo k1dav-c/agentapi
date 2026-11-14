@@ -604,6 +604,13 @@ hub 用 OpenRouter 的牌價替供應商的模型定價（[價格](providers.zh-
 下面列出安裝了 App 的每個帳號，附上大頭貼、**All repositories** 或選了幾個 repo，以及前幾個 repo 的名稱。
 hub 的頁面重新顯示時，這個分頁和 Issues 頁都會再讀一次，所以從 GitHub 切回來就看得到改動。
 
+App 要求 Contents、Pull requests、Issues 和 Workflows 的讀寫權限。GitHub App 沒有 Workflows 時，
+GitHub 會拒絕它推送修改 `.github/workflows/` 的提交，所以 job 也能修改 CI：合併前請先檢查這類修改，
+因為從 repo 自己的分支開的 PR，會帶著 repo 的 secret 執行 workflow。在要求 Workflows 之前建立的 App
+只有另外三項：它的 job 拿到的 token 沒有 Workflows，hub 會在 log 裡為每個 repo 提醒一次，這類推送也會被拒絕。
+請在 **App settings on GitHub**（Permissions & events、Repository permissions）加上
+**Workflows: Read and write**，再到每個安裝處接受新的權限；hub 一小時內會再次要求這項權限。
+
 - **Choose repositories** 在新分頁開啟 GitHub，可以把 App 裝到其他帳號，或改選已安裝帳號的 repo。帳號旁的
   **Change** 直接開到那個帳號的安裝設定。
 - **App settings on GitHub** 開啟 App 的設定：名稱、權限，以及 **Delete GitHub App**。3.14 以前建立
@@ -876,6 +883,7 @@ AgentAPI 1.1 以上。在這裡輸入的 token 會為這個實例保存，取代
 | 看到的狀況 | 原因 | 處理方式 |
 | --- | --- | --- |
 | 實例一直沒出現 | AgentAPI 在 `join` 之前、或 1.2 之前就啟動了 | 重新啟動它，或重開它的 workspace |
+| job 推送時出現「refusing to allow a GitHub App to create or update workflow … without `workflows` permission」 | hub 的 GitHub App 是在要求 Workflows 之前建立的 | 在 GitHub 上替 App 加上 Workflows（讀寫），並在安裝處接受（[GitHub 設定](#github-設定)） |
 | `join` 說 hub 前面有登入頁 | hub 的網址是 Coder 的 port 網址（或其他需要登入的網址） | 改用 hub 在你的網路或 VPN 上的位址；事件是由 AgentAPI 自己送出的 |
 | `join` 說 hub 在另一台主機上 | `--public-url` 寫的是 `localhost` | 改成 hub 連得到這台主機的位址 |
 | 新增對話框的指令裡是 `<hub secret>` | hub 以 `--no-token` 執行，頁面一律不顯示 secret | 填入 hub 的 `--secret` |

@@ -59,6 +59,9 @@ type Service struct {
 	config Config
 	logger *slog.Logger
 	gh     *github.Client
+	// noWorkflows are the repositories the hub said can't take a job's
+	// change to .github/workflows/ yet, so it says so once each.
+	noWorkflows sync.Map
 
 	mu         sync.Mutex
 	hosts      map[string]*Host

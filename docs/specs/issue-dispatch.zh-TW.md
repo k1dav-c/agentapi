@@ -430,6 +430,7 @@ job 已結束（`done`）時：視為新的一輪開發。遠端與本機分支�
        "contents": "write",
        "pull_requests": "write",
        "issues": "write",
+       "workflows": "write",
        "metadata": "read"
      }
    }

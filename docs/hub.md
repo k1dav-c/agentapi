@@ -708,6 +708,15 @@ owns it. Below, each account the app is installed on has its picture, **All repo
 many were selected, and their first names. The section and the Issues page read the app again when
 the hub's page shows again, so coming back from GitHub is enough to see a change.
 
+The app asks for read and write on Contents, Pull requests, Issues and Workflows. GitHub refuses a
+GitHub App's push that changes `.github/workflows/` without Workflows, so a job can change CI too:
+review such a change before you merge it, as a pull request from a branch of the repository runs
+its workflows with the repository's secrets. An app registered before Workflows was asked for has
+the other three only. Its jobs' tokens come without Workflows, the hub logs that once for each
+repository, and such a push is refused. Add **Workflows: Read and write** in **App settings on
+GitHub** (Permissions & events, Repository permissions), then accept the new permissions on each
+installation; the hub asks for it again within the hour.
+
 - **Choose repositories** opens GitHub in a new tab, where you install the app on another account
   or pick the repositories of one it is on. **Change** beside an account goes straight to its
   installation.
@@ -1032,6 +1041,7 @@ right is forgotten, it closes.
 | What you see | Why | What to do |
 | --- | --- | --- |
 | An instance never appears | Its AgentAPI started before `join`, or before 1.2 | Restart it, or its workspace |
+| A job's push fails with "refusing to allow a GitHub App to create or update workflow … without `workflows` permission" | The hub's GitHub App was registered before it asked for Workflows | Add Workflows (read and write) to the app on GitHub and accept it on the installation ([GitHub settings](#github-settings)) |
 | `join` says a sign-in page is in front of the hub | The hub's URL is a Coder port URL (or another behind a login) | Join with the hub's address on your network or VPN; the AgentAPIs send events themselves |
 | `join` says the hub is on another machine | `--public-url` names `localhost` | Give the address the hub reaches this machine at |
 | The Add dialog's command has `<hub secret>` | The hub runs with `--no-token`, so its page never shows the secret | Put in the hub's `--secret` |
