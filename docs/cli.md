@@ -307,6 +307,8 @@ minute, and CPU seconds for a whole turn, the agent's processes together.
   over its turns, and Codex grew to 265 MiB on its first turn, then gave back about 70 MiB.
 - AgentAPI's code (about 17 MiB of its memory) is shared by instances started from the same binary:
   with four running, each costs about 17–21 MiB (PSS).
+- Against the same measurement with v0.24.0 (2026-10-18, a 29.5 MiB binary), AgentAPI takes about
+  4 MiB more (27–30 MiB then) and the same CPU; the agents' own figures changed little.
 - Not counted: MCP servers the agent starts, the commands it runs, the shell terminal (one shell
   while it is open) and the browser tab.
 
