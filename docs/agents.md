@@ -549,13 +549,16 @@ context suffix (`[1m]`) and a release date, else by the longest known prefix
 (`claude-opus-5-5-x` is priced as `claude-opus-5-5`), but not across a `-mini`, `-nano` or `-pro`
 variant (`gpt-5.1-codex-mini` isn't a `gpt-5.1`). A call to a model without a price counts its
 tokens but no cost (`priced: false`), and the server's log warns of the model once.
-`scripts/prices.mjs` compares the built-in prices with Pi's model registry.
+A call to a [model provider](providers.md) with a price of its model is priced at that price first
+([Prices](providers.md#prices)). `scripts/prices.mjs` compares the built-in prices with Pi's model
+registry.
 
 - `GET /sessions` gives each session's `cost`: `usd`, `tokens`, `calls`, the cost per model
-  (`models`) and per hour (`hourly`, in UTC, with its `tokens`), and `total_cost`, the sum of all
-  of them.
+  (`models`), per hour (`hourly`, in UTC, with its `tokens`) and per model provider (`providers`:
+  `provider`, its `name` but for `default`, `usd`, `tokens`, `calls`, `priced`), and `total_cost`,
+  the sum of all of them.
 - `GET /cost` gives the open session's cost and its model `calls` (`time`, `model`, `tokens`, `usd`,
-  `subagent_id`), from which a task's cost is the calls made from its message until the next. A
+  `subagent_id`, `provider`), from which a task's cost is the calls made from its message until the next. A
   client that has the first calls sends `from` (how many) and the `digest` it got with them, and
   gets the calls after them only (`from` in the answer); the answer's `total_calls` and `digest`
   are what to send next time. If those calls changed, it gets them all, with `from` 0.

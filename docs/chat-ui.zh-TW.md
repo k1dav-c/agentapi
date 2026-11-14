@@ -375,8 +375,9 @@ Explorer（⌘K / Ctrl+K，或資料夾按鈕）有五個分頁。Index、Files 
 訊息、訊息數、最後變動時間和花費。上方卡片加總工作階段及 sub agent 今天、最近 7 天和 30 天
 （含今天，依你的時區），以及全部期間的花費。金額以牌價計算，為 API 等價金額；滑鼠移上去可看 token。
 agent 用過自己以外的[模型供應商](providers.zh-TW.md)之後，卡片會以 **By provider** 列出
-這些工作階段在每個供應商花了多少：agent 自己的寫成 **Own provider**，其他的以 ID 表示，各有呼叫數、
-token 和金額。gateway 的模型常常沒有已知價格：呼叫全都沒有價格的供應商會寫 **no price**，而不是
+這些工作階段在每個供應商花了多少：agent 自己的寫成 **Own provider**，其他的以名稱表示（沒有名稱、
+或伺服器已經沒有這個供應商時，以 ID 表示），各有呼叫數、token 和金額。gateway 的模型常常沒有已知價格
+（可以用[價格](providers.zh-TW.md#價格)補上）：呼叫全都沒有價格的供應商會寫 **no price**，而不是
 `$0.00`；只有部分呼叫有價格的，金額後面會加上 `+`。滑鼠移到某一列可看各類 token。
 
 **Open** 會在該工作階段重新啟動 agent 並顯示對話；**Start a copy** 會以新 id 開啟

@@ -247,7 +247,8 @@ one to open it in the chat. On a phone the list and the chat take turns.
   and filter forget every stopped one at once.
 - The gear opens the hub's settings. There you keep [favorite prompts](hub.md#favorites)
   (☆ in the composer of a chat the hub opens inserts one), keep the
-  [model providers](hub.md#model-providers) every machine's sessions can switch to, and
+  [model providers](hub.md#model-providers) every machine's sessions can switch to, with their
+  models' prices from OpenRouter, and
   connect the hub's [GitHub App](hub.md#github-settings).
 - ◎ (or `i`) opens [Issues](hub.md#issues), the issue dispatch: the open issues of your
   repositories by stage, the machines whose launchers report (an offline one can be forgotten
@@ -556,7 +557,7 @@ default.
 | `POST /limit/continue`, `DELETE /limit/continue` | Continue a turn stopped by a usage limit, now or at the reset; cancel a scheduled continuation |
 | `DELETE /limit` | Forget a usage limit stop, so the queued messages go out |
 | `POST /retry`, `DELETE /retry` | Try a turn that failed on a transient API error again now; cancel the retry, so the queued messages go out |
-| `GET /sessions` | The agent's sessions in its working directory (Claude Code, Codex, Pi), with what each cost and the total |
+| `GET /sessions` | The agent's sessions in its working directory (Claude Code, Codex, Pi), with what each cost and the total, by model, hour and [model provider](agents.md#session-costs) (named) |
 | `GET /cost` | What the open session cost, and its model calls (Claude Code, Codex, Pi) |
 | `GET /subagents`, `GET /subagents/{id}` | The subagents the agent ran in its session, and one's task and messages (Claude Code, Codex) |
 | `POST /sessions/{id}/resume` | Open one of them, or a copy of it (`{"fork": true}`), in place of the conversation |

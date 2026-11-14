@@ -205,7 +205,7 @@ agentapi hub serve --token "$HUB_TOKEN" --secret "$HUB_SECRET" --instance-token 
   移除所有已停止的實例。
 - 齒輪按鈕會開啟 hub 的設定，可以在那裡保存[我的最愛](hub.zh-TW.md#我的最愛)提示；在 hub 開啟的
   聊天介面裡，輸入框的 ☆ 會把它插入訊息。也可以在那裡保存每台主機的工作階段都能換用的
-  [模型供應商](hub.zh-TW.md#模型供應商)，以及連接 hub 的
+  [模型供應商](hub.zh-TW.md#模型供應商)（附上 OpenRouter 的模型價格），以及連接 hub 的
   [GitHub App](hub.zh-TW.md#github-設定)。
 - ◎（或 `i`）開啟 [Issues](hub.zh-TW.md#issues)，也就是 issue 派工：依階段列出各 repo 的 open
   issue、有 launcher 回報的主機（離線的可以在這裡移除），以及每個 job 的 agent、PR 和花費。主機要用
@@ -484,7 +484,7 @@ webhook，也能在這裡設定。
 | `POST /limit/continue`、`DELETE /limit/continue` | 現在或在重置時繼續因用量限制停下的回合；取消排定的繼續 |
 | `DELETE /limit` | 忽略用量限制造成的停止，讓排隊中的訊息送出 |
 | `POST /retry`、`DELETE /retry` | 立刻再試因暫時性 API 錯誤失敗的回合；取消重試，讓排隊中的訊息送出 |
-| `GET /sessions` | agent 在工作目錄中的工作階段（Claude Code、Codex、Pi），以及各自的花費和總額 |
+| `GET /sessions` | agent 在工作目錄中的工作階段（Claude Code、Codex、Pi），以及各自的花費和總額，依模型、小時和[模型供應商](agents.zh-TW.md#工作階段花費)（附名稱）分開 |
 | `GET /cost` | 目前開啟的工作階段的花費和它的模型呼叫（Claude Code、Codex、Pi） |
 | `GET /subagents`、`GET /subagents/{id}` | agent 在工作階段中執行過的 sub agent，以及其中一個的任務和訊息（Claude Code、Codex） |
 | `POST /sessions/{id}/resume` | 開啟其中一個，或它的副本（`{"fork": true}`），取代目前的對話 |
