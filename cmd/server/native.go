@@ -18,6 +18,8 @@ type nativeAdapterConfig struct {
 	Args    []string
 	CWD     string
 	Logger  *slog.Logger
+	// ProviderProxy is where Claude Code and Codex call a model provider.
+	ProviderProxy native.ProviderProxy
 }
 
 // nativeFactory returns the factory of the agent's adapter. native-demo, a
@@ -31,17 +33,19 @@ func nativeFactory(agentType instanceapi.AgentType, cfg nativeAdapterConfig) (na
 	switch agentType {
 	case instanceapi.AgentTypeClaude:
 		return claude.NewFactory(claude.Config{
-			Program: cfg.Program,
-			Args:    cfg.Args,
-			CWD:     cfg.CWD,
-			Logger:  cfg.Logger,
+			Program:       cfg.Program,
+			Args:          cfg.Args,
+			CWD:           cfg.CWD,
+			Logger:        cfg.Logger,
+			ProviderProxy: cfg.ProviderProxy,
 		})
 	case instanceapi.AgentTypeCodex:
 		return codex.NewFactory(codex.Config{
-			Program: cfg.Program,
-			Args:    cfg.Args,
-			CWD:     cfg.CWD,
-			Logger:  cfg.Logger,
+			Program:       cfg.Program,
+			Args:          cfg.Args,
+			CWD:           cfg.CWD,
+			Logger:        cfg.Logger,
+			ProviderProxy: cfg.ProviderProxy,
 		})
 	case instanceapi.AgentTypePi:
 		return nativepi.NewFactory(nativepi.Config{

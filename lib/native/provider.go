@@ -10,7 +10,29 @@ import (
 	"github.com/coder/agentapi/lib/agentstate"
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/provider"
+	"github.com/coder/agentapi/lib/providerproxy"
 )
+
+// ProviderProxy is where an agent on a model provider calls it: AgentAPI's
+// provider proxy (*providerproxy.Proxy), which adds the provider's key, so
+// the agent never gets it.
+type ProviderProxy interface {
+	Endpoint(providerID string) (providerproxy.Endpoint, error)
+}
+
+// ProviderEndpoint is where an agent calls p through proxy. Without a
+// proxy, or one that can't start, the agent can't run on p: it never gets
+// the key instead.
+func ProviderEndpoint(proxy ProviderProxy, p provider.Provider) (providerproxy.Endpoint, error) {
+	if proxy == nil {
+		return providerproxy.Endpoint{}, fmt.Errorf("can't run on %s: AgentAPI has no provider proxy", p.DisplayName())
+	}
+	endpoint, err := proxy.Endpoint(p.ID)
+	if err != nil {
+		return providerproxy.Endpoint{}, fmt.Errorf("can't run on %s: %w", p.DisplayName(), err)
+	}
+	return endpoint, nil
+}
 
 // ErrProviderRelaunch is returned by ApplySettings for a switch of
 // providers the agent can't make while it runs: BeginProviderSwitch makes

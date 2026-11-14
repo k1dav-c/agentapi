@@ -1,35 +1,66 @@
 package codex
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	conv "github.com/coder/agentapi/lib/conversation"
 	"github.com/coder/agentapi/lib/native"
+	"github.com/coder/agentapi/lib/native/nativetest"
+	"github.com/coder/agentapi/lib/native/procutil"
 	"github.com/coder/agentapi/lib/provider"
 )
 
 func TestProviderArgs(t *testing.T) {
 	t.Parallel()
 	p := provider.Provider{ID: "kimi", Name: `Kimi "K3"`, BaseURL: "https://gw.example.com", APIKey: "sk-1"}
-	args := providerArgs(p)
+	endpoint, err := nativetest.ProviderProxy{}.Endpoint(p.ID)
+	require.NoError(t, err)
+	args := providerArgs(p, endpoint)
 	assert.Equal(t, []string{
-		"-c", `model_providers.agentapi-kimi={name="Kimi \"K3\"",base_url="https://gw.example.com/v1",env_key="AGENTAPI_PROVIDER_API_KEY",wire_api="responses"}`,
+		"-c", `model_providers.agentapi-kimi={name="Kimi \"K3\"",base_url="http://127.0.0.1:1/kimi/openai",env_key="AGENTAPI_PROVIDER_API_KEY",wire_api="responses"}`,
 		"-c", `model_provider="agentapi-kimi"`,
 	}, args)
-	assert.NotContains(t, strings.Join(args, " "), "sk-1", "the key goes in the environment")
 
-	// The provider's flags follow the user's, which they override.
-	a := newAdapter(Config{}, launchOptions{appServerArgs: []string{"-c", `model_provider="mine"`}}, "")
+	// The provider's flags follow the user's, which they override; the
+	// proxy's token is in the environment, and the key nowhere.
+	a := newAdapter(Config{ProviderProxy: nativetest.ProviderProxy{}}, launchOptions{appServerArgs: []string{"-c", `model_provider="mine"`}}, "")
 	a.launch = &native.ProviderRun{Provider: p, Model: "Kimi-K3"}
-	assert.Equal(t, append([]string{"app-server", "-c", `model_provider="mine"`}, args...), a.command())
-	assert.Contains(t, a.env(), "AGENTAPI_PROVIDER_API_KEY=sk-1")
+	launch, err := a.launchEndpoint()
+	require.NoError(t, err)
+	command, env := a.command(launch), a.env(launch)
+	assert.Equal(t, append([]string{"app-server", "-c", `model_provider="mine"`}, args...), command)
+	assert.Contains(t, env, "AGENTAPI_PROVIDER_API_KEY="+nativetest.ProxyToken)
+	for _, s := range append(command, env...) {
+		assert.NotContains(t, s, "sk-1", "the key stays in AgentAPI")
+		assert.NotContains(t, s, "gw.example.com")
+	}
 	assert.Equal(t, "Kimi-K3", a.launchModel())
+
+	// Without a proxy, or one that can't start, no provider.
+	a.cfg.ProviderProxy = nil
+	_, err = a.launchEndpoint()
+	assert.ErrorContains(t, err, "no provider proxy")
+	a.cfg.ProviderProxy = nativetest.ProviderProxy{Err: errors.New("no port")}
+	_, err = a.launchEndpoint()
+	assert.ErrorContains(t, err, `can't run on Kimi "K3": no port`)
+	started := false
+	a.cfg.StartProcess = func(procutil.Command) (procutil.Process, error) { started = true; return nil, errors.New("unexpected") }
+	assert.ErrorContains(t, a.Start(context.Background(), nativetest.NewSink(t)), "no port")
+	assert.False(t, started)
+
 	// Codex's own provider: the command line's model.
 	a = newAdapter(Config{}, launchOptions{model: "gpt-x"}, "")
-	assert.Equal(t, []string{"app-server"}, a.command())
+	launch, err = a.launchEndpoint()
+	require.NoError(t, err)
+	assert.Nil(t, launch)
+	assert.Equal(t, []string{"app-server"}, a.command(launch))
+	assert.NotContains(t, strings.Join(a.env(launch), "\n"), "AGENTAPI_PROVIDER_API_KEY")
 	assert.Equal(t, "gpt-x", a.launchModel())
 }
 

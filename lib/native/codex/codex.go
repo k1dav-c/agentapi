@@ -22,6 +22,7 @@ import (
 	"github.com/coder/agentapi/lib/native/agentio"
 	"github.com/coder/agentapi/lib/native/procutil"
 	"github.com/coder/agentapi/lib/procenv"
+	"github.com/coder/agentapi/lib/providerproxy"
 )
 
 // Config configures the adapters a Factory creates.
@@ -54,6 +55,9 @@ type Config struct {
 	// Clock times snapshots, interrupted turns and Close; nil means the
 	// real clock.
 	Clock quartz.Clock
+	// ProviderProxy is where app-server calls a model provider; without
+	// one it can't run on any.
+	ProviderProxy native.ProviderProxy
 }
 
 // NewFactory checks the command line and returns a factory for adapters
@@ -213,38 +217,44 @@ func (a *Adapter) Capabilities() agentstate.Capabilities {
 	return agentstate.Capabilities{Steer: true, Interrupt: true, Resume: true, Images: true, Settings: true, Compact: true}
 }
 
-// command returns the app-server command line.
-func (a *Adapter) command() []string {
+// command returns the app-server command line; endpoint is where it calls
+// the provider it runs on (nil: Codex's own).
+func (a *Adapter) command(endpoint *providerproxy.Endpoint) []string {
 	args := append([]string{"app-server"}, a.opts.appServerArgs...)
-	if a.launch != nil {
+	if a.launch != nil && endpoint != nil {
 		// After the user's -c, which they override.
-		args = append(args, providerArgs(a.launch.Provider)...)
+		args = append(args, providerArgs(a.launch.Provider, *endpoint)...)
 	}
 	return args
 }
 
-// env is app-server's environment: on a provider, with its key.
-func (a *Adapter) env() []string {
-	if a.launch == nil {
+// env is app-server's environment: on a provider, with the proxy's token.
+func (a *Adapter) env(endpoint *providerproxy.Endpoint) []string {
+	if endpoint == nil {
 		return procenv.ForAgent(a.cfg.Env)
 	}
-	return procenv.ForAgent(a.cfg.Env, providerKeyEnv+"="+a.launch.Provider.APIKey)
+	return procenv.ForAgent(a.cfg.Env, providerKeyEnv+"="+endpoint.Token)
 }
 
 // Start implements native.Adapter: it starts app-server, initializes the
 // connection, checks the login and starts (or resumes) the thread. Without
 // a login it returns a native.LoginRequiredError.
 func (a *Adapter) Start(ctx context.Context, sink native.Sink) error {
+	endpoint, err := a.launchEndpoint()
+	if err != nil {
+		a.calls.Close(errExited)
+		return err
+	}
 	a.mu.Lock()
 	a.sink = sink
 	a.mu.Unlock()
 	// The read loop handles app-server's messages in order, and is the
 	// only goroutine that calls the sink.
-	_, err := a.host.Launch(procutil.Command{
+	_, err = a.host.Launch(procutil.Command{
 		Program: a.cfg.Program,
-		Args:    a.command(),
+		Args:    a.command(endpoint),
 		Dir:     a.cwd(),
-		Env:     a.env(),
+		Env:     a.env(endpoint),
 		Logger:  a.log,
 	}, agentio.Loop{Line: a.handleLine, NextWake: a.loop.nextWake, Wake: a.loop.wake, Ended: a.outputEnded})
 	if err != nil {
