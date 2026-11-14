@@ -196,6 +196,12 @@ func (h *Hub) tokenFor(instance Instance) string {
 	if instance.Token != "" {
 		return instance.Token
 	}
+	if h.config.Dispatch != nil {
+		// A job's AgentAPI takes its launcher's token.
+		if token := h.config.Dispatch.InstanceToken(instance.ID, instance.URL); token != "" {
+			return token
+		}
+	}
 	return h.config.InstanceToken
 }
 

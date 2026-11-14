@@ -94,7 +94,7 @@ host:
   bind: ""                       # 預設所有介面；建議設內網位址
   public-url: http://{ip}:3291   # hub 連回 launcher 的網址（不能是 loopback、link-local，見 §11 第 10 點）
   token-file: ~/.agentapi/host.token              # hub → launcher；不存在時產生
-  instance-token-file: ~/.agentapi/instance.token # 所有 job instance 共用，必須等於 hub 的 --instance-token
+  instance-token-file: ~/.agentapi/instance.token # 這台所有 job instance 共用；不存在時產生，經 host.* 事件交給 hub
   workdir: ~/work                # repo 與 worktree 的根目錄
   scan: [~/work, ~/src]          # 掃描既有 repo 的目錄（深度 2）
   ports: 4100-4199               # job instance 的 port 範圍

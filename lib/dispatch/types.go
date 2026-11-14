@@ -105,7 +105,10 @@ type Host struct {
 	host.HostInfo
 	// Token is what the hub calls the launcher with: kept in
 	// dispatch.json (storedHost), never sent.
-	Token            string    `json:"-"`
+	Token string `json:"-"`
+	// InstanceToken is what the hub calls the jobs' AgentAPIs with, as
+	// the launcher's events say: kept in dispatch.json, never sent.
+	InstanceToken    string    `json:"-"`
 	HeartbeatSeconds int       `json:"heartbeat_seconds"`
 	LastSeen         time.Time `json:"last_seen"`
 	Stopped          bool      `json:"stopped,omitempty"`

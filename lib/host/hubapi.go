@@ -11,11 +11,16 @@ const (
 	EventHostStopped   = "host.stopped"
 )
 
-// HostEventData is the data of a host.* event: the machine, and the token
-// the hub calls the launcher with.
+// HostEventData is the data of a host.* event: the machine, the token the
+// hub calls the launcher with, and the one it calls the jobs' AgentAPIs
+// with.
 type HostEventData struct {
 	HostInfo
 	Token string `json:"token"`
+	// InstanceToken is the API token of every job's AgentAPI, which the
+	// launcher made (instance.token): each machine has its own, so the hub
+	// needs no --instance-token of theirs.
+	InstanceToken string `json:"instance_token,omitempty"`
 	// HeartbeatSeconds is how often host.heartbeat comes.
 	HeartbeatSeconds int `json:"heartbeat_seconds"`
 }

@@ -943,7 +943,6 @@ launcher 則不經 proxy、直接連線，也不跟隨 launcher 的重新導向�
 
 ```sh
 agentapi hub join http://<hub>:3290/hooks --secret "$HUB_SECRET" --public-url 'http://{ip}:{port}'
-echo "$INSTANCE_TOKEN" > ~/.agentapi/instance.token && chmod 600 ~/.agentapi/instance.token  # hub 的 --instance-token
 agentapi host install --now  # 裝成 systemd user service；agentapi host serve 則在前景執行
 agentapi host status
 ```

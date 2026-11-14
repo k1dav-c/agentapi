@@ -1102,7 +1102,6 @@ issue the hub dispatches there. On each machine:
 
 ```sh
 agentapi hub join http://<hub>:3290/hooks --secret "$HUB_SECRET" --public-url 'http://{ip}:{port}'
-echo "$INSTANCE_TOKEN" > ~/.agentapi/instance.token && chmod 600 ~/.agentapi/instance.token  # the hub's --instance-token
 agentapi host install --now  # a systemd user service; agentapi host serve runs it in the foreground
 agentapi host status
 ```

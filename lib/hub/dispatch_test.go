@@ -128,3 +128,53 @@ func TestHubDispatch(t *testing.T) {
 	assert.InDelta(t, 0.3, run().Cost.USD, 1e-9)
 	assert.Equal(t, 1, run().Cost.Tasks)
 }
+
+// A job's AgentAPI takes the token its machine's launcher made, which the
+// launcher's events give the hub: the hub's --instance-token needn't be it.
+// Another AgentAPI that claims the job's ID elsewhere doesn't get it.
+func TestHubSendsAJobItsLaunchersToken(t *testing.T) {
+	instSrv, _ := startInstanceOn(t, nil, "pve~acme~widget~3")
+	var summary instanceapi.SummaryBody
+	require.Equal(t, http.StatusOK, request(t, http.MethodGet, instSrv.URL+"/summary", instanceToken, nil, &summary))
+	launcher := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(host.StartResponse{Job: host.JobInfo{Key: "acme/widget#3", Agent: "claude", InstanceID: "pve~acme~widget~3", ServerID: summary.Instance.ServerID, State: host.JobRunning}, Created: true})
+	}))
+	defer launcher.Close()
+	dir := t.TempDir()
+	d, err := dispatch.New(dispatch.Config{StatePath: filepath.Join(dir, "dispatch.json"), Secret: hubSecret, DispatchToken: "dispatch-token", AllowLoopback: true})
+	require.NoError(t, err)
+	config := following("")
+	config.InstanceToken = "not-the-launchers"
+	config.Dispatch = d
+	srv := startHubWith(t, config, true)
+
+	event := map[string]any{
+		"id": "host-1", "type": host.EventHostStarted, "created_at": time.Now(),
+		"instance": map[string]any{"id": "host~pve", "server_id": "run-1"},
+		"data": host.HostEventData{
+			HostInfo:      host.HostInfo{Hostname: "pve", URL: launcher.URL, Repos: []string{"acme/widget"}, Agents: []string{"claude"}, DefaultAgent: "claude", MaxJobs: 2},
+			Token:         "launcher-token",
+			InstanceToken: instanceToken,
+		},
+	}
+	require.Equal(t, http.StatusNoContent, postEvent(t, srv.URL, event, hubSecret, time.Now()))
+	var hosts struct {
+		Hosts []json.RawMessage `json:"hosts"`
+	}
+	require.Equal(t, http.StatusOK, request(t, http.MethodGet, srv.URL+"/api/hosts", hubToken, nil, &hosts))
+	require.Len(t, hosts.Hosts, 1)
+	assert.NotContains(t, string(hosts.Hosts[0]), instanceToken, "the token stays on the hub")
+	start := dispatch.Request{Action: dispatch.ActionStart, Repo: "acme/widget", Issue: 3}
+	require.Equal(t, http.StatusCreated, request(t, http.MethodPost, srv.URL+"/api/dispatch", "dispatch-token", start, nil))
+	require.Eventually(t, func() bool { return d.Jobs()[0].InstanceID == "pve~acme~widget~3" }, 10*time.Second, 20*time.Millisecond)
+
+	joined := joinInstance(t, srv.URL, instSrv.URL)
+	assert.Equal(t, "pve~acme~widget~3", joined.ID)
+	assert.Equal(t, http.StatusOK, request(t, http.MethodGet, srv.URL+"/i/pve~acme~widget~3/status", hubToken, nil, nil), "the proxy sends it too")
+
+	// The job's ID at a URL on another host than the launcher's.
+	assert.Empty(t, d.InstanceToken("pve~acme~widget~3", "http://10.9.9.9:4100"))
+	assert.Equal(t, instanceToken, d.InstanceToken("pve~acme~widget~3", instSrv.URL))
+	assert.Empty(t, d.InstanceToken("pve:3284", instSrv.URL), "not a job's")
+}
