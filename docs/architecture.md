@@ -375,7 +375,8 @@ type Factory func(resume Resume) (Adapter, error)
 - **Costs.** `sessions.Store.Costs` reads the model calls of every session in
   the directory, its subagents' included, from the same logs (`GET /sessions`,
   `GET /cost`): Claude Code's assistant messages (one per message id), Codex's
-  token counts, Pi's reported costs. `lib/pricing` prices each call, a call to a provider with a price of its model at that
+  token counts, Pi's reported costs. `lib/pricing` prices each call but one to
+  a provider with a price of its model, priced at that
   ([Prices](#model-providers)); Claude
   Code's `cost-state` records add the tokens its log doesn't list
   (compaction) as unitemized calls at the same prices; a cost that differs
@@ -587,10 +588,10 @@ flowchart LR
   gone (a copy, as attributing makes). The reading keeps a digest of the table (`pricesKey`): when it
   changes, every session is priced again, though no log changed. On the hub, `lib/hub/prices.go`
   keeps OpenRouter's list (`openrouter.go`: fetched within 30 s, `pricing` per token converted to per
-  million, routers with a price below zero left out) in `openrouter.json` beside `providers.json`,
+  million, models without a price, and routers with one below zero, left out) in `openrouter.json` beside `providers.json`,
   gets it again when a day old (checked every 10 minutes while the hub has providers; an hour after a
-  failure) and on `POST /api/providers/prices`, which also lists the models of the providers that
-  define none (`provider.ListModels`). Each model's price is the OpenRouter model `providers.json`
+  failure) and on `POST /api/providers/prices`; each refresh also lists the models of the providers
+  that define none (`provider.ListModels`). Each model's price is the OpenRouter model `providers.json`
   picks for it (`openrouter`: an ID, or `none`), else the one whose normalized name (lowercase,
   without the vendor prefix and a precision suffix such as `-nvfp4`) is the model's, among those
   without `:` or a leading `~`, and only if one is.

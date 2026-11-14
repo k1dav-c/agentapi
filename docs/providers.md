@@ -92,11 +92,11 @@ providers:
       Kimi-K3.1-Pro-NVFP4: {input: 2, output: 10, cache_read: 0.2, cache_write: 0}
 ```
 
-`input` and `output` are required; `cache_read` and `cache_write` (tokens read from and written to
+`input`, `output`, `cache_read` and `cache_write` (the last two the tokens read from and written to
 the prompt cache) are 0 when left out. A price applies to the model whose ID matches, ignoring
 case, also when the provider lists its models itself rather than in `models`. A price below zero
 leaves the provider out, with a warning. A change of the prices reprices every session's calls
-within a minute, as the costs are worked out again then.
+within a minute, when the costs are worked out again.
 
 The [hub](hub.md#model-providers) looks its providers' models up in OpenRouter's public model list
 (`https://openrouter.ai/api/v1/models`, no key needed), once a day and on **Refresh prices** in its

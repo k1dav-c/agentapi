@@ -678,8 +678,8 @@ it for: its tokens and their cost (or **no price**) in the last 24 hours and 7 d
 
 The hub prices its providers' models at OpenRouter's list prices
 ([Prices](providers.md#prices)), and each AgentAPI prices the calls to them with those. It gets
-OpenRouter's public list (no key) once a day while it has providers, and when **Refresh prices** at
-the top of the tab asks; it keeps the last list it got in `openrouter.json`, so it goes on pricing
+OpenRouter's public list (no key) once a day while it has providers, and on **Refresh prices** at the
+top of the tab; it keeps the last list it got in `openrouter.json`, so it goes on pricing
 offline. A refresh also has each provider that defines no models list them, with its key. Under each
 provider, **Prices** folds out its models: each one's price per million tokens (input / output; hover
 for the cache's) and the OpenRouter model it comes from, **auto** when matched by name, **picked**

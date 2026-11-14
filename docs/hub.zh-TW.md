@@ -580,9 +580,9 @@ token 與金額（或 **no price**），算法和 [Providers 卡片](#供應商�
 **No calls in the last 7 days**。
 
 hub 用 OpenRouter 的牌價替供應商的模型定價（[價格](providers.zh-TW.md#價格)），各 AgentAPI 就用這些
-價格計算送往它們的呼叫。有供應商時，hub 每天取得一次 OpenRouter 公開的清單（不需要金鑰），分頁上方的
-**Refresh prices** 也會要它重新取得；它把最後拿到的清單存在 `openrouter.json`，離線時照樣能定價。更新時，
-沒有定義模型的供應商也會用它的金鑰列出模型。每個供應商底下的 **Prices** 可以展開它的模型：每個模型
+價格計算送往供應商的呼叫。有供應商時，hub 每天取得一次 OpenRouter 公開的清單（不需要金鑰），按下分頁上方的
+**Refresh prices** 也會重新取得；最後拿到的清單存在 `openrouter.json`，離線時照樣能定價。更新時，
+沒有定義模型的供應商也會用自己的金鑰列出模型。每個供應商底下的 **Prices** 可以展開模型：每個模型
 每百萬 token 的價格（輸入 / 輸出；滑過可看快取的價格），以及價格來自哪個 OpenRouter 模型，依名稱對應的
 標 **auto**，手動選的標 **picked**。**Change** 會開啟選擇器，從模型名稱開始搜尋 hub 保存的清單，另有
 **No price** 和 **Automatic**（回到依名稱對應）。選了就跟編輯器一樣帶著 revision 保存整份清單。清單下方
@@ -1040,7 +1040,7 @@ case 的 HTTP 狀態（例如 `not_found`）；`error` 和 `message` 相同，�
 | `~/.agentapi/hub/instances.deliveries.json` | `agentapi hub serve` | hub 處理過、簽章仍有效的事件的 delivery ID，用來拒絕重送的事件 |
 | `~/.agentapi/hub/dispatch.json` | `agentapi hub serve` | [issue 派工](#issues)的主機（含 launcher 的 token）和 job：各次 run、花費與最近 50 則訊息 |
 | `~/.agentapi/hub/github-app.json` | `agentapi hub serve` | hub 的 GitHub App 與它的私鑰 |
-| `~/.agentapi/hub/providers.json` | `agentapi hub serve` | [模型供應商](#模型供應商)、它們的金鑰和選的價格（0600） |
+| `~/.agentapi/hub/providers.json` | `agentapi hub serve` | [模型供應商](#模型供應商)，以及各供應商的金鑰和選的價格（0600） |
 | `~/.agentapi/hub/openrouter.json` | `agentapi hub serve` | hub 最後一次取得的 OpenRouter 模型與價格，以及沒有定義模型的供應商列出的模型 |
 | `~/.agentapi/hub-providers.json` | `agentapi server` | 每台主機上、設定檔旁邊：hub 上次回應的供應商，以 hub 的 secret 加密；下次啟動時在 hub 回應前先拿來用 |
 
