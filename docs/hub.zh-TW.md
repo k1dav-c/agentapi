@@ -677,11 +677,11 @@ agent 還在工作時，可以從最下面的輸入框傳訊息給它（⌘/Ctrl
 
 hub 也要自己讀得到那個 AgentAPI：只有在 hub 正從 job 所在主機的位址（launcher 網址的主機，或解析到
 同一個位址的名稱）讀到事件所指的實例、而且是同一次執行時，才採計它的任務事件。在 hub 連上實例之前
-送到的事件（例如剛啟動時）會被丟掉，花費留言就會註明 hub 可能漏算。hub 在別台主機上讀到的實例，
-它的事件不會改變任何東西，hub 會記下 "Refused a task event of an instance the hub doesn't reach on
-its job's machine"。launcher 和它的 AgentAPI 在 `public-url` 裡用不同方式指名主機時（一個寫位址、
-一個寫解析到別的位址的名稱），也會這樣。事件仍然是用每台主機共用的 secret 簽章，所以完整複製 job
-的 AgentAPI 身分的主機，仍然擋不住（[Token 與安全性](#token-與安全性)）。
+送到的事件（例如剛啟動時）會丟掉，花費留言就會註明 hub 可能漏算。hub 在別台主機上讀到的實例，
+事件不會改變任何東西，hub 會記下 "Refused a task event of an instance the hub doesn't reach on
+its job's machine"。同一台主機上的 launcher 和 AgentAPI 在各自的 `public-url` 裡用不同方式指名主機時
+（一個寫位址、一個寫解析到別的位址的名稱），也會這樣。事件仍然是用每台主機共用的 secret 簽章，所以擋不住完整複製 job
+的 AgentAPI 身分的主機（[Token 與安全性](#token-與安全性)）。
 
 #### 清單上的列
 
@@ -819,10 +819,10 @@ AgentAPI 1.1 以上。在這裡輸入的 token 會為這個實例保存，取代
   才能根除這個問題，hub 目前還沒有這個功能。
 - job 的任務事件會改變它的狀態、累加它的花費。hub 只採計它在 job 所在主機上讀到的那個 AgentAPI
   送來的事件（[issue 的詳細資料](#issue-的詳細資料)），所以在自己的位址宣告某個 job 實例 ID 的主機，
-  沒辦法替那個 job 記帳。但若送出的事件帶著 job 的 AgentAPI 的實例 ID 和執行（`server_id`，兩者都在
-  它的摘要裡），仍然會被採計：這裡的界線同樣是 secret。
-- launcher 的事件寫明 hub 要以那個 launcher 的 token 呼叫它的網址，而 hub 會自己呼叫它，停掉沒有任何
-  啟動要求過的 job。所以 hub 只呼叫其他主機的位址，每次連線都檢查，直接連線、不跟隨重新導向：絕不連到
+  改不了那個 job 的狀態或花費。但送出的事件若帶著 job 的 AgentAPI 的實例 ID 和執行（`server_id`，兩者都在
+  摘要裡），hub 仍然會採計：這裡的界線同樣是 secret。
+- launcher 的事件寫明 hub 要以那個 launcher 的 token 呼叫它的網址，而 hub 會主動呼叫這個網址，停掉沒人
+  要求啟動的 job。所以 hub 只呼叫其他主機的位址，每次連線都檢查，直接連線、不跟隨重新導向：絕不連到
   自己的 loopback（除非設了 `--allow-loopback-launchers`）、雲端 metadata 這類 link-local 位址或
   `0.0.0.0`（見 [`agentapi host`](#agentapi-host)）。內網位址都還連得到，所以持有 secret 的機器仍然
   可以讓 hub 對網路上的其他機器送出請求（`POST /jobs`、`DELETE /jobs/<key>`）。
@@ -894,7 +894,7 @@ AgentAPI 1.1 以上。在這裡輸入的 token 會為這個實例保存，取代
 | hub 的 log 有「The hub's file of instances doesn't parse」 | 檔案損壞，例如手動改壞了；或是 2.2 以前的 hub 讀到較新 hub 寫的檔案 | hub 已把它改名放到一旁（`instances.json.corrupt-<時間>`），從空的清單開始。用 webhook 加入的實例會在下一次 heartbeat 回來。其餘的要找回來，先停掉 hub，再用 `instances.json.bak`（hub 上次啟動時看到的檔案）覆蓋 `instances.json`；2.2 以前的 hub 請見[檔案](#檔案) |
 | hub 無法啟動：`instances.json is of a newer hub` | 檔案是較新的 hub 寫的 | 改用較新的 hub，或從 `instances.json.bak` 開始 |
 | Issues 裡某台主機一直離線，hub 的 log 有 "Refused a host event with another launcher's token than the machine's" | hub 會把主機名稱綁定到它第一次帶來的 launcher token。這台 launcher 換了 token（`~/.agentapi/host.token` 被刪除，或主機重新安裝），或是另一台持有 hub secret 的機器冒用這個名稱 | 是你自己的主機時：先停掉它的 job，等它顯示離線後在 [Issues](#issues) 按它的 **×** 移除，下一次 heartbeat 就會重新加入。不是你的主機時，更換 hub 的 `--secret`，再讓你的主機重新 join |
-| 主機沒出現在 Issues，或一直離線；hub 記下 "Refused a host event with a URL the hub doesn't call" | launcher 回報的網址是 hub 不會呼叫的：loopback（在 hub 這台主機上以 `localhost` 加入）、link-local，或含有帳號密碼（見 [`agentapi host`](#agentapi-host)） | 用 hub 的內網位址讓主機加入（`agentapi hub join http://<hub 的內網位址>:3290/hooks …`）再重新啟動 launcher，或設定 `host` 區段的 `public-url`；hub 這台主機上的 launcher，也可以改用 `--allow-loopback-launchers` 啟動 hub |
+| 主機沒出現在 Issues，或一直離線；hub 的 log 有 "Refused a host event with a URL the hub doesn't call" | launcher 回報的網址是 hub 不會呼叫的：loopback（在 hub 這台主機上以 `localhost` 加入）、link-local，或含有帳號密碼（見 [`agentapi host`](#agentapi-host)） | 用 hub 的內網位址讓主機加入（`agentapi hub join http://<hub 的內網位址>:3290/hooks …`）再重新啟動 launcher，或設定 `host` 區段的 `public-url`；hub 這台主機上的 launcher，也可以改用 `--allow-loopback-launchers` 啟動 hub |
 | issue 停在 **Starting** 好幾分鐘 | 主機正在 clone 或 fetch 大的 repo（最多 10 分鐘），之後再等 agent 最多 1 分鐘 | 稍候；主機上的 `~/.agentapi/jobs/<owner>~<repo>~<issue>/agentapi.log` 有 agent 這端的紀錄。hub 沒收到回應的啟動，會在主機下一次 heartbeat 時改為工作中或失敗 |
 
 在實例所在的主機上執行 `agentapi hub status`，可以看到設定檔指向哪個 hub，以及每個執行中的
@@ -921,8 +921,8 @@ AgentAPI 的 log 會記下傳送失敗的 webhook。
 | `--allow-loopback-launchers` | `false` | 允許呼叫 loopback 位址上的 launcher，例如在 hub 這台主機上、以 `localhost` 加入的 launcher（[`agentapi host`](#agentapi-host)） |
 
 hub 透過環境變數中的 proxy（`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`）連到實例。連線 30 秒內沒建立（TLS
-交握 10 秒）、回應的標頭 15 秒內沒來，就放棄；摘要串流和經 proxy 開啟的頁面則一直保持連線。launcher
-則直接連線，不經 proxy，也不跟隨 launcher 的重新導向。
+交握 10 秒）、回應的標頭 15 秒內沒來，就放棄；摘要串流和經 proxy 開啟的頁面則一直保持連線。hub 連
+launcher 則不經 proxy、直接連線，也不跟隨 launcher 的重新導向。
 
 ### `agentapi host`
 

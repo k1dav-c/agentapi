@@ -762,8 +762,8 @@ Content-Security-Policy。
   重新啟動後先從那裡追蹤。每台加入的主機都有同一個 secret，所以任何一台仍然可以把新的實例 ID，或位址
   已經不回應的實例 ID，指向自己的位址，拿到 `--instance-token`；每台主機各用一把金鑰才能根除。派工
   （`lib/dispatch`）只採計 hub 讀到的、job 目前這次 run 的 AgentAPI process（`server_id`）送來的
-  `task.*` 事件：hub 傳入它以那次執行讀到這個實例摘要的網址（`taskInstanceURL`），`TaskEvent` 檢查
-  它在 run 所在主機的 launcher 網址那個位址上；launcher 網址有綁定的 launcher token 背書
+  `task.*` 事件：hub 傳入以那次執行讀到這個實例摘要的網址（`taskInstanceURL`），`TaskEvent` 檢查
+  這個網址位在 run 所在主機的 launcher 網址的位址上；launcher 網址有綁定的 launcher token 背書
   （`sameMachine`）。在自己的位址宣告某個 job 實例 ID 的主機，改不了那個 job 的狀態或花費；複製實例
   ID 和執行的主機仍然可以，因為每個事件都是用共用的 secret 簽章。hub 只呼叫 http 或 https、不含帳密的
   launcher 網址，而且位址必須通過 `checkLauncherAddr`（沒有 `--allow-loopback-launchers` 時不能是

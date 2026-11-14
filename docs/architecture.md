@@ -1038,8 +1038,8 @@ of the content's SHA-256, so a path never changes; unused ones are removed after
 - The dispatch (`lib/dispatch`) takes a job's `task.*` events only from its
   current run's AgentAPI process (`server_id`) as the hub reads it: the hub
   passes the URL where it reads that instance's summary as that run
-  (`taskInstanceURL`), and `TaskEvent` checks that it is on the address of
-  the run's machine's launcher URL, which the launcher's pinned token vouches
+  (`taskInstanceURL`), and `TaskEvent` checks that this URL is on an address of
+  the launcher URL of the run's machine, which the launcher's pinned token vouches
   for (`sameMachine`). A machine that announces a job's instance ID at its own
   address can't move or charge the job; one that copies the instance's ID and
   run still can, since the shared secret signs every event. The hub calls a

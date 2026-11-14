@@ -803,7 +803,7 @@ event for an instance the hub reads on another machine changes nothing; the hub 
 event of an instance the hub doesn't reach on its job's machine". A launcher and its AgentAPIs that
 name the machine differently in their `public-url` (an address and a name with another address) hit
 this too. The events are still signed with the secret every machine has, so this doesn't stop a
-machine that copies the job's AgentAPI's whole identity ([Tokens and security](#tokens-and-security)).
+machine that copies the whole identity of the job's AgentAPI ([Tokens and security](#tokens-and-security)).
 
 #### The list's rows
 
@@ -959,7 +959,7 @@ right is forgotten, it closes.
   it must never move. A key per machine would close this; the hub doesn't have one yet.
 - A job's task events move its state and add to its cost. The hub takes them only from the job's
   AgentAPI as it reads it on the job's machine ([An issue's detail](#an-issues-detail)), so a
-  machine that announces a job's instance ID at its own address can't charge the job. One that
+  machine that announces a job's instance ID at its own address can't move or charge the job. One that
   sends events with the instance ID and run (`server_id`) of the job's AgentAPI, both in its
   summary, still can: there too the secret is the boundary.
 - A launcher's events name the URL the hub calls it at with that launcher's token, and the hub

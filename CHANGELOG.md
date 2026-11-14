@@ -20,14 +20,14 @@
   connection and its handler for as long as it liked.
 - A job's task events count only from the AgentAPI the hub reads, as that run, on the job's machine
   (the address of its launcher's URL). Before, any machine with the hub's secret could move another
-  machine's job or add to its cost by naming its instance ID; one that copies the job's AgentAPI's
-  whole identity still can, as the secret signs every event. An event that comes before the hub
+  machine's job or add to its cost by naming its instance ID; one that copies the whole identity of
+  the job's AgentAPI still can, as the secret signs every event. An event that comes before the hub
   reaches the instance is dropped, and the run's cost marked as possibly missed.
 - A joined machine can no longer make the hub send requests with a launcher's token to any URL:
   the hub takes a launcher's URL only over http or https, without credentials, and never connects
   to a loopback address (unless `--allow-loopback-launchers`), a link-local one such as a cloud's
-  metadata at `169.254.169.254`, or `0.0.0.0`, checking the address a name resolves to at every
-  connection and following no redirect. LAN and VPN addresses stay allowed.
+  metadata at `169.254.169.254`, or `0.0.0.0`. It checks the address a name resolves to at every
+  connection and follows no redirect. LAN and VPN addresses stay allowed.
 
 ## v5.0.0
 
