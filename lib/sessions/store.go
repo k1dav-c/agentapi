@@ -14,6 +14,7 @@ import (
 	"github.com/coder/agentapi/lib/agentlog"
 	"github.com/coder/agentapi/lib/agentlog/codexlog"
 	"github.com/coder/agentapi/lib/pricing"
+	"github.com/coder/agentapi/lib/provider"
 	"github.com/coder/agentapi/lib/providerlog"
 )
 
@@ -84,6 +85,11 @@ type Config struct {
 	// provider each session last ran on before them; nil attributes them
 	// all to the agent's own.
 	Providers *providerlog.Ledger
+	// ProviderPrices, if set, are the model prices of the providers
+	// (provider.Source.Prices): a call to a provider with a price of its
+	// model costs that, before Prices. They are read at each reading of
+	// the costs, which prices the calls again when they change.
+	ProviderPrices func() provider.PriceTable
 }
 
 // The bounds of what a Store keeps of the logs it read: past them, it

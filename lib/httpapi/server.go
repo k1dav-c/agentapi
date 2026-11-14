@@ -265,6 +265,8 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 			PiSessionDir: config.Native.PiSessionDir,
 			Logger:       logger,
 			Providers:    config.Native.ProviderLedger,
+			// The providers' prices of their models price the calls to them.
+			ProviderPrices: config.Native.Providers.Prices,
 		})
 		if err != nil {
 			return nil, err

@@ -112,6 +112,12 @@ func LoadFile(path string, logger *slog.Logger) ([]Provider, error) {
 	if err := yaml.Unmarshal(data, &all); err != nil {
 		return nil, fmt.Errorf("read %s of %s: %w", ConfigKey, path, err)
 	}
+	for _, p := range all {
+		for model, price := range p.Prices {
+			price.Source = SourceManual
+			p.Prices[model] = price
+		}
+	}
 	return Valid(all, logger), nil
 }
 
