@@ -153,7 +153,7 @@ AgentAPI，用[人工回覆 API](#人工回覆-api)讓機器人代為回覆 agen
   能不能[更新這個 AgentAPI](#透過-api-更新)，以及更新進行到哪裡。Claude Code 和 Codex 的摘要還有
   `provider_health`，說明 agent 過去一小時呼叫過的每個[模型供應商](providers.zh-TW.md)透過 AgentAPI 的
   代理回應得如何：`provider`、`requests`、`failures`（沒有回應、5xx、429、回應中途斷掉）、
-  `client_errors`（其他 4xx）、`first_byte_p50_ms` 與 `first_byte_p95_ms`（最近 100 次回應）、
+  `client_errors`（其他 4xx）、`first_byte_p50_ms` 與 `first_byte_p95_ms`（最近 100 次非失敗的回應）、
   `last_success_at` 和 `last_failure`（`at`、`kind`、`status`、`message`），每 30 秒計算一次；
   `GET /settings` 在每個供應商的 `health` 也有相同的內容。
 - `attention` 依優先順序標示需要使用者處理的原因：`login`、`request`（核准、提問或計畫）、

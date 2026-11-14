@@ -188,7 +188,7 @@ instance:
   [model provider](providers.md) the agent called in the last hour answered, through AgentAPI's
   proxy: its `provider`, `requests`, `failures` (no answer, 5xx, 429, an answer that broke off),
   `client_errors` (another 4xx), `first_byte_p50_ms` and `first_byte_p95_ms` (of the latest 100
-  answers), `last_success_at` and `last_failure` (`at`, `kind`, `status`, `message`), worked out every
+  answers that weren't failures), `last_success_at` and `last_failure` (`at`, `kind`, `status`, `message`), worked out every
   30 seconds; `GET /settings` has the same in each provider's `health`.
 - `attention` identifies why the agent needs you, in priority order: `login`, `request` (approval,
   question or plan), `limit` (a usage limit stopped the turn), `exited`, or `none`.

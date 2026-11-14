@@ -83,7 +83,7 @@ through the proxy while AgentAPI runs, but it can't see a key.
 The proxy also learns how each provider answers. Over the last hour it counts the calls, the
 failures (a network error or timeout, a 5xx or 429 answer, an answer that broke off) and the client
 errors (another 4xx, such as a key or model the provider refuses, which aren't the provider's
-failures), the median and 95th percentile time to the first byte of the latest 100 answers, and the
+failures), the median and 95th percentile time to the first byte of the latest 100 answers that weren't failures, and the
 last success and failure. `GET /settings` has it in each provider's `health`, and the summary in
 `provider_health`, for the providers the agent called in the hour. The chat's model menu marks a
 provider whose latest call failed, or half of the hour's, with how many failed and the last error in
