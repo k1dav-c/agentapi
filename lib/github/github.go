@@ -106,10 +106,25 @@ func (a *App) InstallURL(web, state string) string {
 type Token struct {
 	Value     string    `json:"token"`
 	ExpiresAt time.Time `json:"expires_at"`
+	// WithoutWorkflows is set on a token of an installation that hasn't
+	// granted the workflows permission: a push that changes
+	// .github/workflows/ is refused with it.
+	WithoutWorkflows bool `json:"-"`
 }
 
 // Permissions are what a token for a job, and the hub's own, may do.
+// workflows lets a job's branch change .github/workflows/, which GitHub
+// refuses a GitHub App without it.
 var Permissions = map[string]string{
+	"contents":      "write",
+	"pull_requests": "write",
+	"issues":        "write",
+	"workflows":     "write",
+}
+
+// basePermissions are Permissions but workflows: what an installation of an
+// app made before it asked for, until its owner grants workflows too.
+var basePermissions = map[string]string{
 	"contents":      "write",
 	"pull_requests": "write",
 	"issues":        "write",
@@ -132,6 +147,10 @@ type Client struct {
 	installations map[string]int64
 	// generation counts Forget: a token asked for before one isn't kept.
 	generation int
+	// noWorkflows are when the installations that refused workflows did:
+	// their tokens are asked for with basePermissions for an hour, then
+	// with workflows again, as their owner may have granted it since.
+	noWorkflows map[int64]time.Time
 }
 
 // NewClient returns a client of github.com.
@@ -331,9 +350,27 @@ func (c *Client) RepoToken(ctx context.Context, app *App, repo string) (Token, e
 		}
 		installation = out.ID
 	}
-	var t Token
-	body := map[string]any{"repositories": []string{name}, "permissions": Permissions}
-	if err := c.do(ctx, http.MethodPost, "/app/installations/"+strconv.FormatInt(installation, 10)+"/access_tokens", "Bearer "+jwt, body, &t); err != nil {
+	c.mu.Lock()
+	refused, ok := c.noWorkflows[installation]
+	withoutWorkflows := ok && c.Now().Before(refused.Add(time.Hour))
+	c.mu.Unlock()
+	t, err := c.installationToken(ctx, jwt, installation, name, !withoutWorkflows)
+	if !withoutWorkflows && IsStatus(err, http.StatusUnprocessableEntity) {
+		// An installation answers 422 to a permission it hasn't granted:
+		// one of an app made before workflows was asked for.
+		withoutWorkflows = true
+		t, err = c.installationToken(ctx, jwt, installation, name, false)
+		if err == nil {
+			c.mu.Lock()
+			if c.noWorkflows == nil {
+				c.noWorkflows = map[int64]time.Time{}
+			}
+			c.noWorkflows[installation] = c.Now()
+			c.mu.Unlock()
+		}
+	}
+	t.WithoutWorkflows = withoutWorkflows
+	if err != nil {
 		if IsStatus(err, http.StatusNotFound) {
 			c.mu.Lock()
 			delete(c.installations, repo)
@@ -352,11 +389,24 @@ func (c *Client) RepoToken(ctx context.Context, app *App, repo string) (Token, e
 	return t, nil
 }
 
+// installationToken asks for a token of installation for the repository
+// name alone, with Permissions, or basePermissions without workflows.
+func (c *Client) installationToken(ctx context.Context, jwt string, installation int64, name string, workflows bool) (Token, error) {
+	permissions := basePermissions
+	if workflows {
+		permissions = Permissions
+	}
+	var t Token
+	body := map[string]any{"repositories": []string{name}, "permissions": permissions}
+	err := c.do(ctx, http.MethodPost, "/app/installations/"+strconv.FormatInt(installation, 10)+"/access_tokens", "Bearer "+jwt, body, &t)
+	return t, err
+}
+
 // Forget drops the tokens kept, as when the app changes; a token asked for
 // meanwhile isn't kept either.
 func (c *Client) Forget() {
 	c.mu.Lock()
-	c.tokens, c.installations = nil, nil
+	c.tokens, c.installations, c.noWorkflows = nil, nil, nil
 	c.generation++
 	c.mu.Unlock()
 }

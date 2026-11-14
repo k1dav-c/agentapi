@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- A job can push changes to `.github/workflows/`: the hub's GitHub App asks for Workflows (read and
+  write) too, and so do the jobs' repository tokens. GitHub refused such a push before
+  ("refusing to allow a GitHub App to create or update workflow … without `workflows`
+  permission"). An app registered earlier has to be given Workflows on GitHub and the new
+  permissions accepted on its installation; until then its tokens come without it, as before,
+  and the hub logs that once for each repository.
+
 ## v5.2.0
 
 ### Features
