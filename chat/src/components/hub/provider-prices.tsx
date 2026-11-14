@@ -62,9 +62,10 @@ export function ProviderPrices({api, provider, saving, onChoose}: {api: HubAPI; 
               <div className="flex min-w-0 items-center gap-2">
                 <span className="min-w-0 flex-1">
                   <span className="block truncate font-mono text-[11px]">{model.name || model.model}</span>
-                  <span className="block truncate text-xs" title={model.price ? priceDetails(model.price) : undefined}>
-                    {model.price ? <span className="font-medium tabular-nums">{priceText(model.price)}</span> : <span className="text-muted-foreground">No price</span>}
-                    <span className="text-muted-foreground"> · {priceSourceText(model)}</span>
+                  {/* The source shortens first; the price and its badge stay whole. */}
+                  <span className="flex min-w-0 items-center text-xs" title={model.price ? priceDetails(model.price) : undefined}>
+                    {model.price ? <span className="shrink-0 font-medium tabular-nums">{priceText(model.price)}</span> : <span className="shrink-0 text-muted-foreground">No price</span>}
+                    <span className="min-w-0 truncate whitespace-pre text-muted-foreground"> · {priceSourceText(model)}</span>
                     {model.choice === "auto" && model.price && <ChoiceBadge>auto</ChoiceBadge>}
                     {model.choice === "chosen" && <ChoiceBadge>picked</ChoiceBadge>}
                   </span>
@@ -101,7 +102,7 @@ export function ProviderPrices({api, provider, saving, onChoose}: {api: HubAPI; 
 }
 
 function ChoiceBadge({children}: {children: React.ReactNode}) {
-  return <span className="ml-1.5 rounded-full border px-1.5 py-px text-[10px] text-muted-foreground">{children}</span>;
+  return <span className="ml-1.5 shrink-0 rounded-full border px-1.5 py-px text-[10px] text-muted-foreground">{children}</span>;
 }
 
 // PricePicker searches the hub's copy of OpenRouter's list for the model
