@@ -7,8 +7,17 @@
 import type {HubWire} from "./hub";
 import {hubLimits} from "./hub-schema";
 
-// A provider as the hub answers it: without its key.
-export type Provider = HubWire["ProviderView"];
+// A provider as the hub answers it: without its key, and with the prices
+// of its models (a hub before the prices answers none).
+export type Provider = Omit<HubWire["ProviderView"], "model_prices"> & {model_prices?: ProviderModelPrice[]};
+
+// The price the hub has for a provider's model: matched on OpenRouter by
+// name (auto), picked (chosen), or none, as picked.
+export type ProviderModelPrice = HubWire["ProviderModelPrice"];
+export type ModelPrice = HubWire["ModelPrice"];
+export type OpenRouterModel = HubWire["OpenRouterModel"];
+// Where the hub's copy of OpenRouter's list stands.
+export type PriceStatus = HubWire["PriceStatus"];
 
 // A provider as PUT /api/providers takes it: without api_key the hub keeps
 // the key only at unchanged endpoints, "" removes it.
@@ -17,7 +26,7 @@ export type ProviderChange = HubWire["ProviderChange"];
 // The list's optimistic-concurrency token. The wire keeps it opaque: the
 // client sends back exactly what the hub answered.
 export type ProviderRevision = string | number;
-export type ProviderSnapshot = {revision: ProviderRevision; providers: Provider[]};
+export type ProviderSnapshot = {revision: ProviderRevision; providers: Provider[]; prices?: PriceStatus};
 
 export type ProviderModel = HubWire["Model"];
 
@@ -57,13 +66,17 @@ export function parseProviders(data: unknown): Provider[] | undefined {
   const ids = new Set<string>();
   for (const entry of data) {
     if (!entry || typeof entry !== "object") continue;
-    const {id, name, base_url, anthropic_base_url, models, has_key} = entry as Partial<Record<keyof Provider, unknown>>;
+    const {id, name, base_url, anthropic_base_url, models, has_key, openrouter, model_prices} = entry as Partial<Record<keyof Provider, unknown>>;
     if (typeof id !== "string" || !id || ids.has(id) || typeof base_url !== "string") continue;
     const provider: Provider = {id, base_url, has_key: has_key === true};
     if (typeof name === "string" && name) provider.name = name;
     if (typeof anthropic_base_url === "string" && anthropic_base_url) provider.anthropic_base_url = anthropic_base_url;
     const kept = Array.isArray(models) ? models.flatMap(parseModel) : [];
     if (kept.length > 0) provider.models = kept;
+    const choices = parseChoices(openrouter);
+    if (choices) provider.openrouter = choices;
+    const prices = Array.isArray(model_prices) ? model_prices.flatMap(parseModelPrice) : [];
+    if (prices.length > 0) provider.model_prices = prices;
     ids.add(id);
     providers.push(provider);
   }
@@ -75,6 +88,97 @@ function parseModel(entry: unknown): ProviderModel[] {
   const {id, name} = entry as {id?: unknown; name?: unknown};
   if (typeof id !== "string" || !id) return [];
   return [typeof name === "string" && name ? {id, name} : {id}];
+}
+
+// parseChoices reads a provider's price choices: model ID to an OpenRouter
+// model ID, or "none".
+function parseChoices(data: unknown): Record<string, string> | undefined {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return undefined;
+  const entries = Object.entries(data).filter((entry): entry is [string, string] => typeof entry[1] === "string" && entry[0] !== "" && entry[1] !== "");
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
+const choices: readonly string[] = ["auto", "chosen", "none"] satisfies ProviderModelPrice["choice"][];
+
+function parseModelPrice(entry: unknown): ProviderModelPrice[] {
+  if (!entry || typeof entry !== "object") return [];
+  const {model, name, choice, openrouter, openrouter_name, price} = entry as Partial<Record<keyof ProviderModelPrice, unknown>>;
+  if (typeof model !== "string" || !model || typeof choice !== "string" || !choices.includes(choice)) return [];
+  const parsed: ProviderModelPrice = {model, choice: choice as ProviderModelPrice["choice"]};
+  if (typeof name === "string" && name) parsed.name = name;
+  if (typeof openrouter === "string" && openrouter) parsed.openrouter = openrouter;
+  if (typeof openrouter_name === "string" && openrouter_name) parsed.openrouter_name = openrouter_name;
+  const read = parsePrice(price);
+  if (read) parsed.price = read;
+  return [parsed];
+}
+
+// parsePrice reads a price per million tokens.
+export function parsePrice(data: unknown): ModelPrice | undefined {
+  if (!data || typeof data !== "object") return undefined;
+  const {input, output, cache_read, cache_write, source} = data as Partial<Record<keyof ModelPrice, unknown>>;
+  const number = (value: unknown) => (typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined);
+  const [i, o] = [number(input), number(output)];
+  if (i === undefined || o === undefined) return undefined;
+  const price: ModelPrice = {input: i, output: o, cache_read: number(cache_read) ?? 0, cache_write: number(cache_write) ?? 0};
+  if (typeof source === "string" && source) price.source = source;
+  return price;
+}
+
+// perMillion is a price per million tokens, short: $16, $2.5, $0.19,
+// $0.038, $0.
+export function perMillion(usd: number): string {
+  if (usd === 0) return "$0";
+  const text = usd >= 1 ? usd.toFixed(2) : usd.toPrecision(2);
+  return `$${text.includes(".") ? text.replace(/\.?0+$/, "") : text}`;
+}
+
+// priceText is a model's price as a line shows it: input and output per
+// million tokens.
+export function priceText(price: ModelPrice): string {
+  return `${perMillion(price.input)} / ${perMillion(price.output)} per M tokens`;
+}
+
+// priceDetails is all of a model's price, for a title: cache reads and
+// writes too, where it has them.
+export function priceDetails(price: ModelPrice): string {
+  const parts = [`input ${perMillion(price.input)}`, `output ${perMillion(price.output)}`];
+  if (price.cache_read > 0) parts.push(`cache read ${perMillion(price.cache_read)}`);
+  if (price.cache_write > 0) parts.push(`cache write ${perMillion(price.cache_write)}`);
+  return `USD per million tokens: ${parts.join(", ")}`;
+}
+
+// openRouterName is how a line names an OpenRouter model: its name without
+// the vendor OpenRouter puts before it ("MoonshotAI: Kimi K3" is Kimi K3),
+// else its ID.
+export function openRouterName(model: {openrouter?: string; openrouter_name?: string}): string {
+  const name = model.openrouter_name?.trim();
+  if (name) return name.replace(/^[^:]+:\s+/, "");
+  return model.openrouter ?? "";
+}
+
+// priceSourceText says where a model's price comes from, or that it has
+// none and why.
+export function priceSourceText(model: ProviderModelPrice): string {
+  switch (model.choice) {
+    case "none":
+      return "No price, as picked";
+    case "chosen":
+      return model.price ? `OpenRouter: ${openRouterName(model)}` : `OpenRouter: ${model.openrouter} isn't in the hub's list`;
+    case "auto":
+      return model.price ? `OpenRouter: ${openRouterName(model)}` : "No OpenRouter model of this name";
+  }
+}
+
+// withPriceChoice is the change that leaves provider as it is but for the
+// price of model: an OpenRouter model ID, "none", or undefined for
+// automatic. It always sends the choices, so that the last one removed
+// removes them.
+export function withPriceChoice(provider: Provider, model: string, choice: string | undefined): ProviderChange {
+  const next = {...provider.openrouter};
+  if (choice === undefined) delete next[model];
+  else next[model] = choice;
+  return {...keptChange(provider), openrouter: next};
 }
 
 // draftOf is the editor's draft of a provider, or of a new one.
@@ -117,8 +221,9 @@ export function changeOf(draft: ProviderDraft, previous?: Provider): ProviderCha
 
 // keptChange is the change that leaves provider as it is, key included.
 export function keptChange(provider: Provider): ProviderChange {
-  const change: ProviderChange & {has_key?: boolean} = {...provider};
+  const change: ProviderChange & {has_key?: boolean; model_prices?: unknown} = {...provider};
   delete change.has_key;
+  delete change.model_prices;
   return change;
 }
 

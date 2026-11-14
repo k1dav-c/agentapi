@@ -1,0 +1,136 @@
+{
+  "data": [
+    {
+      "id": "inclusionai/ling-3.2-flash:free",
+      "canonical_slug": "inclusionai/ling-3.2-flash-20261113",
+      "name": "inclusionAI: Ling 3.2 Flash (free)",
+      "created": 1794591958,
+      "context_length": 1048576,
+      "pricing": {
+        "prompt": "0",
+        "completion": "0"
+      }
+    },
+    {
+      "id": "openai/gpt-6.1-terra-pro",
+      "canonical_slug": "openai/gpt-6.1-terra-pro-20261026",
+      "name": "OpenAI: GPT-6.1 Terra Pro",
+      "created": 1793038556,
+      "context_length": 1050000,
+      "pricing": {
+        "prompt": "0.000001",
+        "completion": "0.000005",
+        "web_search": "0.01",
+        "input_cache_read": "0.00000005",
+        "input_cache_write": "0.00000125",
+        "overrides": [
+          {
+            "min_prompt_tokens": 272000,
+            "prompt": "0.000002",
+            "completion": "0.0000075",
+            "input_cache_read": "0.0000001",
+            "input_cache_write": "0.0000025"
+          }
+        ]
+      }
+    },
+    {
+      "id": "moonshotai/kimi-k3.1-pro",
+      "canonical_slug": "moonshotai/kimi-k3.1-pro-20261023",
+      "name": "MoonshotAI: Kimi K3.1 Pro",
+      "created": 1792778188,
+      "context_length": 1048576,
+      "pricing": {
+        "prompt": "0.000002",
+        "completion": "0.00001",
+        "input_cache_read": "0.0000002"
+      }
+    },
+    {
+      "id": "moonshotai/kimi-k3.1-pro:batch",
+      "canonical_slug": "moonshotai/kimi-k3.1-pro-20261023",
+      "name": "MoonshotAI: Kimi K3.1 Pro (batch)",
+      "created": 1792778188,
+      "context_length": 1048576,
+      "pricing": {
+        "prompt": "0.0000007",
+        "completion": "0.000006",
+        "input_cache_read": "0.0000001"
+      }
+    },
+    {
+      "id": "moonshotai/kimi-k3",
+      "canonical_slug": "moonshotai/kimi-k3-20260715",
+      "name": "MoonshotAI: Kimi K3",
+      "created": 1784215858,
+      "context_length": 1048576,
+      "pricing": {
+        "prompt": "0.000000192",
+        "completion": "0.000016",
+        "input_cache_read": "0.000000182"
+      }
+    },
+    {
+      "id": "moonshotai/kimi-k3:batch",
+      "canonical_slug": "moonshotai/kimi-k3-20260715",
+      "name": "MoonshotAI: Kimi K3 (batch)",
+      "created": 1784215858,
+      "context_length": 1048576,
+      "pricing": {
+        "prompt": "0.00000228",
+        "completion": "0.0000114",
+        "input_cache_read": "0.000000228"
+      }
+    },
+    {
+      "id": "~moonshotai/kimi-latest",
+      "canonical_slug": "~moonshotai/kimi-latest",
+      "name": "MoonshotAI: Kimi Latest",
+      "created": 1777318428,
+      "context_length": 1048576,
+      "pricing": {
+        "prompt": "0.0000001824",
+        "completion": "0.0000110055",
+        "input_cache_read": "0.00000018"
+      }
+    },
+    {
+      "id": "moonshotai/kimi-k2.6",
+      "canonical_slug": "moonshotai/kimi-k2.6-20260420",
+      "name": "MoonshotAI: Kimi K2.6",
+      "created": 1776699402,
+      "context_length": 262144,
+      "pricing": {
+        "prompt": "0.00000065",
+        "completion": "0.00000341",
+        "input_cache_read": "0.00000015"
+      }
+    },
+    {
+      "id": "anthropic/claude-sonnet-4.6",
+      "canonical_slug": "anthropic/claude-4.6-sonnet-20260217",
+      "name": "Anthropic: Claude Sonnet 4.6",
+      "created": 1771342990,
+      "context_length": 1000000,
+      "pricing": {
+        "prompt": "0.000003",
+        "completion": "0.000015",
+        "web_search": "0.01",
+        "input_cache_read": "0.0000003",
+        "input_cache_write": "0.00000375",
+        "input_cache_write_1h": "0.000006"
+      }
+    },
+    {
+      "id": "openrouter/auto",
+      "canonical_slug": "openrouter/auto",
+      "name": "Auto Router",
+      "created": 1793885889,
+      "context_length": 2000000,
+      "pricing": {
+        "prompt": "-1",
+        "completion": "-1"
+      }
+    }
+  ]
+}
