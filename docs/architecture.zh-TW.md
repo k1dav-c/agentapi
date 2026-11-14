@@ -743,7 +743,8 @@ Content-Security-Policy。
   列在清單上，否則一律拒絕；`*` 不信任任何來源（`lib/httpmw/crossorigin.go`：net/http 的
   `CrossOriginProtection`，加上清單裡含 `*` 的來源）。
 - server、hub 和 launcher 給用戶端 10 秒送完請求的標頭，閒置 2 分鐘的 keep-alive 連線會關閉。
-  回應寫多久則不設限，因為事件串流會一直開著。
+  回應寫多久則不設限，因為事件串流會一直開著。hub 以 secret 簽章、不需要 session 的路由（`/hooks`、
+  `POST /api/providers/sync`、launcher 換 token）也只給 10 秒送完 body（`boundBodyRead`）。
 - 上傳的檔案存放在私有目錄，只回傳圖片。工作目錄以外的檔案無法開啟。
 - webhook 會把設定要送的內容（包括對話）送到它的網址，而 `PUT /webhook` 可以修改網址；它的
   HMAC secret 只能寫入、無法讀回。

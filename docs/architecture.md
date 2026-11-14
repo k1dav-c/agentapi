@@ -1004,7 +1004,9 @@ of the content's SHA-256, so a path never changes; unused ones are removed after
 - The server, the hub and the launcher give a client 10 seconds to send a
   request's headers and close a keep-alive connection after 2 idle minutes.
   Nothing limits how long an answer takes to write, as the event streams stay
-  open.
+  open. The hub's routes signed with its secret instead of a session (`/hooks`,
+  `POST /api/providers/sync`, a launcher's token request) also get 10 seconds
+  for the body (`boundBodyRead`).
 - Uploads go to a private directory, and only images are served back. Files
   outside the working directory can't be opened.
 - The webhook sends its configured events, the conversation included, to

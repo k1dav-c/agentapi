@@ -795,7 +795,8 @@ AgentAPI 1.1 以上。在這裡輸入的 token 會為這個實例保存，取代
   delivery ID；沒有的事件一律拒絕，否則同一份事件在這 10 分鐘內重送也會生效。這很重要：事件裡的
   網址，就是 hub 送出實例 token 的地方。hub 會把 delivery ID 保存在
   `instances.deliveries.json`，直到事件的簽章失效，所以重新啟動後也照樣拒絕重送的事件。hub 讀一個
-  事件最多花 10 秒、最多讀 1 MiB。
+  事件最多花 10 秒、最多讀 1 MiB。其他以 secret 簽章、不需要 session 的請求（AgentAPI 同步供應商、
+  launcher 換 token）也一樣要在 10 秒內送完 body。
 - 有簽章的事件可以新增 hub 還沒有的實例，也可以把 hub 確定舊網址已失效的實例（超過 10 秒寬限仍
   Unreachable、錯過 heartbeat 而視為已停止，或那裡回應的是另一個 AgentAPI）改到事件裡的網址。hub
   已連上或還在連線中的實例，不論事件寫的是哪一次執行，事件都改不了它的網址；手動加入的實例也一樣。

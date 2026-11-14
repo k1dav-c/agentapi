@@ -6,6 +6,9 @@
 
 - Disconnecting the hub from GitHub while an issue's job started no longer panics the hub and
   leaves the job `starting` for good: a start keeps the GitHub App it began with until it ends.
+- The hub gives `POST /api/providers/sync` and a launcher's token request 10 seconds to send their
+  body, as `/hooks` had: these routes need no session, so a client that trickled a body in held a
+  connection and its handler for as long as it liked.
 
 ## v5.0.0
 

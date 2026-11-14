@@ -930,7 +930,9 @@ right is forgotten, it closes.
   work again for those 10 minutes. This matters because an event names the URL the hub sends an
   instance token to. The hub keeps the IDs for as long as their event's signature holds, in
   `instances.deliveries.json`, so a copy is refused after a restart too. It reads an event for at
-  most 10 seconds, and 1 MiB.
+  most 10 seconds, and 1 MiB. The other requests signed with the secret instead of a session, an
+  AgentAPI's provider sync and a launcher's token request, get the same 10 seconds to send their
+  body.
 - A signed event can add an instance the hub doesn't have, and move one whose URL is dead to the
   hub (unreachable past the 10 s grace, stopped after missed heartbeats, or another AgentAPI
   answers there) to the event's URL. It never moves an instance the hub is connected or connecting
