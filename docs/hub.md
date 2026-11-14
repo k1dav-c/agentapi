@@ -160,8 +160,8 @@ for an agent on the machine: [Joining a machine from the page](#joining-a-machin
   Ones that started before 1.2 aren't registered on the machine, so `join` can't reach them:
   restart them, or the workspace, once.
 - The hub forwards requests with the host of the instance's URL as the `Host` header. By default an
-  AgentAPI accepts `localhost`, `127.0.0.1`, `[::1]` and the address `{ip}` stands for now. For a
-  VPN name, start it with `--allowed-hosts '*'` (the Coder module does), or add the name
+  AgentAPI accepts `localhost` and any IP address, so `{ip}` and a fixed address need nothing. For
+  a VPN name, start it with `--allowed-hosts '*'` (the Coder module does), or add the name
   to the config file:
 
   ```yaml

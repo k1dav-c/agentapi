@@ -40,6 +40,13 @@ func ParseAllowedHosts(input []string) ([]string, error) {
 			return nil, fmt.Errorf("'%s' must not include http:// or https://", item)
 		}
 	}
+	// A network such as 192.168.9.0/24 isn't a host: url.Parse would read
+	// /24 as a path and allow 192.168.9.0 alone. Addresses pass anyway.
+	for _, item := range input {
+		if strings.Contains(item, "/") {
+			return nil, fmt.Errorf("'%s' must be a hostname, not a path or a network (IP addresses are always allowed)", item)
+		}
+	}
 	hosts := make([]*url.URL, 0, len(input))
 	// Third pass: url parse
 	for _, item := range input {
@@ -145,8 +152,10 @@ func isValidHostname(name string) bool {
 // HostAuthorization enforces that the request Host header matches one of the allowed
 // hosts, ignoring any port in the comparison. If allowedHosts is empty, all hosts are allowed.
 // Always uses url.Parse("http://" + r.Host) to robustly extract the hostname (handles IPv6).
-// also, if set, allows a host the list doesn't name.
-func HostAuthorization(allowedHosts []string, also func(hostname string) bool, badHostHandler http.Handler) func(next http.Handler) http.Handler {
+// An IP address always passes, as the hub's check lets it: DNS rebinding,
+// which the check is against, needs a name the page controls, so an address
+// (a LAN's, a VPN's, one DHCP changes) needs no entry.
+func HostAuthorization(allowedHosts []string, badHostHandler http.Handler) func(next http.Handler) http.Handler {
 	// Copy for safety; also build a map for O(1) lookups with case-insensitive keys.
 	allowed := make(map[string]struct{}, len(allowedHosts))
 	for _, h := range allowedHosts {
@@ -167,7 +176,7 @@ func HostAuthorization(allowedHosts []string, also func(hostname string) bool, b
 			}
 			if u, err := url.Parse("http://" + hostHeader); err == nil {
 				hostname := u.Hostname()
-				if _, ok := allowed[strings.ToLower(hostname)]; ok || (also != nil && also(hostname)) {
+				if _, ok := allowed[strings.ToLower(hostname)]; ok || net.ParseIP(hostname) != nil {
 					next.ServeHTTP(w, r)
 					return
 				}

@@ -155,41 +155,6 @@ func TestWebhookAPIPublicURLTemplate(t *testing.T) {
 	require.ErrorContains(t, err, "invalid public URL")
 }
 
-// The address {ip} stands for is an allowed host: --allowed-hosts can't
-// name one that DHCP changes. Others stay refused.
-func TestPublicIPIsAnAllowedHost(t *testing.T) {
-	t.Parallel()
-	ctx := logctx.WithLogger(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)))
-	factory := &nativetest.Factory{}
-	clock := quartz.NewMock(t)
-	srv, err := NewServer(ctx, ServerConfig{
-		AgentType:      instanceapi.AgentTypeClaude,
-		Native:         NativeConfig{Factory: factory.New},
-		ChatBasePath:   "/chat",
-		AllowedHosts:   []string{"localhost"},
-		AllowedOrigins: []string{"*"},
-		Clock:          clock,
-		Webhook:        webhook.Config{URL: "http://192.168.9.210:3290/hooks", PublicURL: "http://{ip}:3285"},
-	})
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = srv.Stop(context.Background()) })
-	route := &fakeRoute{source: "192.168.9.49"}
-	srv.webhook.SetResolver(route.resolver(clock))
-	srv.webhook.RefreshIP(t.Context())
-
-	status := func(host string) int {
-		req := httptest.NewRequest(http.MethodGet, "/status", nil)
-		req.Host = host
-		rec := httptest.NewRecorder()
-		srv.Handler().ServeHTTP(rec, req)
-		return rec.Code
-	}
-	assert.Equal(t, http.StatusOK, status("localhost:3285"))
-	assert.Equal(t, http.StatusOK, status("192.168.9.49:3285"))
-	assert.Equal(t, http.StatusBadRequest, status("192.168.9.48:3285"))
-	assert.Equal(t, http.StatusBadRequest, status("evil.example:3285"))
-}
-
 // A lookup of {ip} that hangs (DNS for the receiver's hostname) holds up
 // neither the events nor the summary, which the emitter builds under its
 // lock: they name the last address found.

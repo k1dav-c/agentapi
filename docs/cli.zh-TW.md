@@ -54,7 +54,7 @@ state-db: ~/.agentapi/state/{port}.db
 | `-I`, `--initial-prompt` | | 給 agent 的第一則訊息；以管線輸入時從 stdin 讀取 |
 | `-W`, `--term-width`, `-H`, `--term-height` | | 已棄用且沒有作用：PTY transport 的終端機大小 |
 | `--api-token` | 關閉 | 要求 Bearer token；不帶值時會產生隨機 token 並印出；見 [API token 驗證](security.zh-TW.md#api-token-驗證) |
-| `-a`, `--allowed-hosts` | `localhost`、`127.0.0.1`、`[::1]` | 接受的 `Host` 標頭，`*` 表示全部；見[允許的主機](security.zh-TW.md#允許的主機) |
+| `-a`, `--allowed-hosts` | `localhost`、`127.0.0.1`、`[::1]` | IP 位址以外接受的 `Host` 名稱，`*` 表示全部；見[允許的主機](security.zh-TW.md#允許的主機) |
 | `-o`, `--allowed-origins` | `http://localhost:3284`、`http://localhost:3000`、`http://localhost:3001` | 允許從瀏覽器呼叫 API 的來源，`*` 表示全部；見[允許的來源](security.zh-TW.md#允許的來源) |
 | `--webhook-url` | | webhook 事件 POST 的目的網址；見 [Webhook](api.zh-TW.md#webhook) |
 | `--webhook-events` | `run.status_changed` | 要送的事件：類型、群組（`task.*`）或 `*` |
@@ -64,7 +64,7 @@ state-db: ~/.agentapi/state/{port}.db
 | `--name` | 工作目錄的名稱 | 監看多個 AgentAPI 的用戶端顯示的名稱 |
 | `--registry` | `true` | 執行期間在登記目錄保留登記檔；見[監看多個實例](api.zh-TW.md#監看多個實例) |
 | `--registry-dir` | `~/.agentapi/instances` | 登記目錄 |
-| `--public-url` | | 可以連到這個 AgentAPI 的網址，會放在 `GET /summary` 和每個 webhook 事件中；`{port}` 和 `{hostname}` 會填入，`{ip}` 則填入這台主機通往 webhook 網址那條路由上的 IPv4 位址（沒有 webhook 網址時，取第一個私有網路位址，其次是 CGNAT 位址），執行期間最多每 30 秒重新查詢一次；查不到時沿用上一個位址。`{ip}` 代表的位址一律是允許的主機 |
+| `--public-url` | | 可以連到這個 AgentAPI 的網址，會放在 `GET /summary` 和每個 webhook 事件中；`{port}` 和 `{hostname}` 會填入，`{ip}` 則填入這台主機通往 webhook 網址那條路由上的 IPv4 位址（沒有 webhook 網址時，取第一個私有網路位址，其次是 CGNAT 位址），執行期間最多每 30 秒重新查詢一次；查不到時沿用上一個位址 |
 | `--config` | `~/.agentapi/config.yaml` | 設定檔：以旗標名稱設定，優先順序低於旗標和環境變數 |
 | `--allow-update` | `false` | 讓 API 用戶端（例如 hub）把 AgentAPI 更新到最新發行版，再原地重新啟動；見[透過 API 更新](api.zh-TW.md#透過-api-更新) |
 | `--webhook-timeout` | `10s` | 每次傳送的逾時時間 |

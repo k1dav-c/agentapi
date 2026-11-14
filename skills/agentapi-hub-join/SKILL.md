@@ -134,13 +134,13 @@ answers 401.
    agents appear within a second, as Connecting and then in their state.
 
 6. **Make sure the hub can open them.** The hub sends the host of `--public-url` as the `Host`
-   header. An AgentAPI accepts `localhost`, `127.0.0.1`, `[::1]` and the address `{ip}` stands for,
-   unless it runs with `--allowed-hosts '*'` (as the Coder module starts it) or lists more. With a
-   name or a fixed address in `--public-url`, if the hub shows the instance as unreachable with
-   `400 Bad Request`, add it to `~/.agentapi/config.yaml`:
+   header. An AgentAPI accepts `localhost` and any IP address, unless it runs with `--allowed-hosts '*'`
+   (as the Coder module starts it) or lists more. With a name in `--public-url` (a VPN's, such as
+   `dev-1.vpn`), if the hub shows the instance as unreachable with `400 Bad Request`, add it to
+   `~/.agentapi/config.yaml`:
 
    ```yaml
-   allowed-hosts: [localhost, 127.0.0.1, "[::1]", 192.168.1.31]
+   allowed-hosts: [localhost, 127.0.0.1, "[::1]", dev-1.vpn]
    ```
 
    That takes effect when the AgentAPI next starts.

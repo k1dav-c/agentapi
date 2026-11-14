@@ -207,7 +207,7 @@ func TestServer_AllowedHosts(t *testing.T) {
 			allowedHosts:       []string{"localhost", "app.example.com"},
 			hostHeader:         "malicious.com",
 			expectedStatusCode: http.StatusBadRequest,
-			expectedErrorMsg:   "Invalid host header. Allowed hosts: localhost, app.example.com",
+			expectedErrorMsg:   "Invalid host header. Allowed hosts: localhost, app.example.com and IP addresses",
 		},
 		{
 			name:               "ipv6 bracketed configured allowed - with port",
@@ -216,11 +216,28 @@ func TestServer_AllowedHosts(t *testing.T) {
 			expectedStatusCode: http.StatusOK,
 		},
 		{
-			name:               "ipv6 literal invalid host rejected",
+			name:               "ip addresses allowed without an entry",
+			allowedHosts:       []string{"localhost"},
+			hostHeader:         "192.168.9.106:4100",
+			expectedStatusCode: http.StatusOK,
+		},
+		{
+			name:               "ipv6 addresses allowed without an entry",
 			allowedHosts:       []string{"[2001:db8::1]"},
 			hostHeader:         "[2001:db8::2]",
+			expectedStatusCode: http.StatusOK,
+		},
+		{
+			name:               "a name that looks like an address is still a name",
+			allowedHosts:       []string{"localhost"},
+			hostHeader:         "192.168.9.106.nip.io",
 			expectedStatusCode: http.StatusBadRequest,
-			expectedErrorMsg:   "Invalid host header. Allowed hosts: 2001:db8::1",
+			expectedErrorMsg:   "Invalid host header. Allowed hosts: localhost and IP addresses",
+		},
+		{
+			name:               "a network is not a host",
+			allowedHosts:       []string{"192.168.9.0/24"},
+			validationErrorMsg: "must be a hostname, not a path or a network",
 		},
 		{
 			name:               "allowed hosts must not be empty",

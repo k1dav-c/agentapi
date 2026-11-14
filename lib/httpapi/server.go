@@ -226,17 +226,13 @@ func NewServer(ctx context.Context, config ServerConfig) (*Server, error) {
 	logger.Info(fmt.Sprintf("Allowed hosts: %s", strings.Join(allowedHosts, ", ")))
 	logger.Info(fmt.Sprintf("Allowed origins: %s", strings.Join(allowedOrigins, ", ")))
 
-	// The address {ip} in the public URL stands for now, which DHCP may
-	// change: the list can't name it.
-	var dispatcher *webhook.Dispatcher
-	publicIP := func(hostname string) bool { return dispatcher != nil && dispatcher.PublicIP() == hostname }
-	router, auth := newRouter(config, logger, allowedHosts, allowedOrigins, publicIP)
+	router, auth := newRouter(config, logger, allowedHosts, allowedOrigins)
 
 	humaConfig := huma.DefaultConfig("AgentAPI", version.Version)
 	humaConfig.Info.Description = "HTTP API for Claude Code, Codex and Pi.\n\nhttps://github.com/coder/agentapi"
 	api := humachi.New(router, humaConfig)
 
-	dispatcher, err = webhook.New(config.Webhook, logger, config.AgentType, config.Clock)
+	dispatcher, err := webhook.New(config.Webhook, logger, config.AgentType, config.Clock)
 	if err != nil {
 		return nil, fmt.Errorf("configure webhook: %w", err)
 	}
@@ -425,17 +421,16 @@ func newEventEmitter(config ServerConfig, serverID string, dispatcher *webhook.D
 }
 
 // newRouter returns the router with the middleware every request goes
-// through: the host check (publicIP says whether a hostname is the
-// webhook's current public address), request logs, compression, CORS, the
+// through: the host check, request logs, compression, CORS, the
 // cross-origin check and, with an API token, its authentication.
-func newRouter(config ServerConfig, logger *slog.Logger, allowedHosts, allowedOrigins []string, publicIP func(string) bool) (chi.Router, *tokenAuth) {
+func newRouter(config ServerConfig, logger *slog.Logger, allowedHosts, allowedOrigins []string) (chi.Router, *tokenAuth) {
 	router := chi.NewMux()
 
 	// Enforce allowed hosts in a custom middleware that ignores the port during matching.
 	badHostHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "Invalid host header. Allowed hosts: "+strings.Join(allowedHosts, ", "), http.StatusBadRequest)
+		http.Error(w, "Invalid host header. Allowed hosts: "+strings.Join(allowedHosts, ", ")+" and IP addresses", http.StatusBadRequest)
 	})
-	router.Use(httpmw.HostAuthorization(allowedHosts, publicIP, badHostHandler))
+	router.Use(httpmw.HostAuthorization(allowedHosts, badHostHandler))
 
 	router.Use(requestLogMiddleware(logger))
 	router.Use(httpmw.Compress())

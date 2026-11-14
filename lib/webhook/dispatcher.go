@@ -442,15 +442,6 @@ func (d *Dispatcher) refreshIPs(ctx context.Context) {
 	}
 }
 
-// PublicIP is the address {ip} in the public URL stands for now; empty
-// when it holds no {ip}.
-func (d *Dispatcher) PublicIP() string {
-	if !instanceapi.HasIP(d.Config().PublicURL) {
-		return ""
-	}
-	return d.cachedIP()
-}
-
 // Config is the configuration in use.
 func (d *Dispatcher) Config() Config {
 	d.mu.RLock()

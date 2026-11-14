@@ -57,7 +57,7 @@ state-db: ~/.agentapi/state/{port}.db
 | `-I`, `--initial-prompt` | | First message for the agent; read from stdin when piped |
 | `-W`, `--term-width`, `-H`, `--term-height` | | Deprecated and without effect: the PTY transport's terminal size |
 | `--api-token` | off | Require a Bearer token; without a value, a random token is generated and printed; see [API token authentication](security.md#api-token-authentication) |
-| `-a`, `--allowed-hosts` | `localhost`, `127.0.0.1`, `[::1]` | Accepted `Host` headers, `*` for any; see [Allowed hosts](security.md#allowed-hosts) |
+| `-a`, `--allowed-hosts` | `localhost`, `127.0.0.1`, `[::1]` | Accepted `Host` names besides IP addresses, `*` for any; see [Allowed hosts](security.md#allowed-hosts) |
 | `-o`, `--allowed-origins` | `http://localhost:3284`, `http://localhost:3000`, `http://localhost:3001` | Origins allowed to call the API from a browser, `*` for any; see [Allowed origins](security.md#allowed-origins) |
 | `--webhook-url` | | URL the webhook events are POSTed to; see [Webhooks](api.md#webhooks) |
 | `--webhook-events` | `run.status_changed` | Events to send: types, groups (`task.*`) or `*` |
@@ -67,7 +67,7 @@ state-db: ~/.agentapi/state/{port}.db
 | `--name` | the working directory's name | What clients that watch many AgentAPIs call this one |
 | `--registry` | `true` | Keep an entry in the registry directory while serving; see [Watching many instances](api.md#watching-many-instances) |
 | `--registry-dir` | `~/.agentapi/instances` | Registry directory |
-| `--public-url` | | URL this AgentAPI is reached at, in `GET /summary` and every webhook event; `{port}` and `{hostname}` are filled in, and `{ip}` with the machine's IPv4 address on the route to the webhook URL (without one, its first private, then CGNAT, address), looked up again at most every 30 seconds while it runs; when none is found the last one stays. The address `{ip}` stands for is an allowed host |
+| `--public-url` | | URL this AgentAPI is reached at, in `GET /summary` and every webhook event; `{port}` and `{hostname}` are filled in, and `{ip}` with the machine's IPv4 address on the route to the webhook URL (without one, its first private, then CGNAT, address), looked up again at most every 30 seconds while it runs; when none is found the last one stays |
 | `--config` | `~/.agentapi/config.yaml` | Settings file: flags by name, below flags and variables |
 | `--allow-update` | `false` | Let API clients, such as the hub, update AgentAPI to the latest release, which then restarts in place; see [Updating through the API](api.md#updating-through-the-api) |
 | `--webhook-timeout` | `10s` | Timeout of each delivery attempt |
