@@ -225,7 +225,6 @@ programs on the machine, which joining doesn't.
 
 ```bash
 agentapi hub join http://hub.vpn:3290/hooks --secret "$HUB_SECRET" --public-url 'http://{ip}:{port}'
-echo "$INSTANCE_TOKEN" > ~/.agentapi/instance.token && chmod 600 ~/.agentapi/instance.token
 agentapi host install --now
 agentapi host status
 ```
@@ -283,7 +282,7 @@ host:
 | File | Holds |
 | --- | --- |
 | `~/.agentapi/host.token` | The token the hub calls the launcher with, made on first start. The hub pins the machine's name to it: a launcher with a new one (the file deleted, the machine set up again) joins only after the hub forgets the machine: **×** on it in the hub's Issues, or `DELETE /api/hosts/{name}` ([Troubleshooting](hub.md#troubleshooting)) |
-| `~/.agentapi/instance.token` | The API token of every job's AgentAPI; it must be the hub's `--instance-token` |
+| `~/.agentapi/instance.token` | The API token of every job's AgentAPI, made on first start. The launcher's events give it to the hub, which sends it to this machine's jobs alone, so each machine has its own and the hub's `--instance-token` needn't be it |
 | `~/.agentapi/host.sock` | Where the jobs' `git` and `gh` get their GitHub token from the launcher |
 | `~/.agentapi/jobs.json`, `~/.agentapi/jobs/` | The jobs, and each one's state database, log and `gh` shim |
 

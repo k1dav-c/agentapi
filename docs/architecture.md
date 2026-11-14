@@ -1084,7 +1084,10 @@ of the content's SHA-256, so a path never changes; unused ones are removed after
   follows first. Every joined machine has the same secret, so any of them
   can still point a new instance ID, or one whose address stopped answering,
   at an address of its own and get `--instance-token`; a key per machine
-  would close that.
+  would close that. A job's AgentAPI takes its launcher's token instead
+  (`instance.token`, in the launcher's `host.*` events, which its launcher
+  token pins), which the hub sends only to an instance whose ID is a job's
+  and whose URL is at the address of that job's machine's launcher.
 - The dispatch (`lib/dispatch`) takes a job's `task.*` events only from its
   current run's AgentAPI process (`server_id`) as the hub reads it: the hub
   passes the URL where it reads that instance's summary as that run

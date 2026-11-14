@@ -20,14 +20,14 @@ agentapi hub serve --token "$HUB_TOKEN" --secret "$HUB_SECRET" --instance-token 
 
 hub 把機器與 job 存在 `~/.agentapi/hub/dispatch.json`，GitHub App 存在 `github-app.json`（都是 0600）。
 
+`--instance-token` 只給手動開的 AgentAPI 用；launcher 開的 job 用各主機自己產生的 token（`~/.agentapi/instance.token`），launcher 會在事件裡交給 hub，不必複製到各台主機。
+
 ## 2. 每台主機的 launcher
 
 主機先加入 hub（`agentapi hub join`），再把 launcher 裝成 systemd user service：
 
 ```bash
 agentapi hub join http://<hub>:3290/hooks --secret "$HUB_SECRET" --public-url 'http://{ip}:{port}'
-echo "$INSTANCE_TOKEN" > ~/.agentapi/instance.token   # 必須等於 hub 的 --instance-token
-chmod 600 ~/.agentapi/instance.token
 agentapi host install --now
 agentapi host status
 ```

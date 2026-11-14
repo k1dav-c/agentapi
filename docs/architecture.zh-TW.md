@@ -800,7 +800,7 @@ Content-Security-Policy。
   實例（超過連線寬限仍連不上，或那裡回應的是另一個 AgentAPI），已連上或連線中的實例、手動加入的實例
   一律不動；實例搬走後，hub 不再送出它自己的 token。檔案記下 hub 最後一次讀到各實例摘要的網址，hub
   重新啟動後先從那裡追蹤。每台加入的主機都有同一個 secret，所以任何一台仍然可以把新的實例 ID，或位址
-  已經不回應的實例 ID，指向自己的位址，拿到 `--instance-token`；每台主機各用一把金鑰才能根除。派工
+  已經不回應的實例 ID，指向自己的位址，拿到 `--instance-token`；每台主機各用一把金鑰才能根除。job 的 AgentAPI 則改用它的 launcher 的 token（`instance.token`，放在 launcher token 背書的 `host.*` 事件裡），hub 只把它送給 ID 是某個 job、網址又位在那個 job 所在主機的 launcher 位址上的實例。派工
   （`lib/dispatch`）只採計 hub 讀到的、job 目前這次 run 的 AgentAPI process（`server_id`）送來的
   `task.*` 事件：hub 傳入以那次執行讀到這個實例摘要的網址（`taskInstanceURL`），`TaskEvent` 檢查
   這個網址位在 run 所在主機的 launcher 網址的位址上；launcher 網址有綁定的 launcher token 背書
