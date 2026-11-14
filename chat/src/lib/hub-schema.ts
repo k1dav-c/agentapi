@@ -211,14 +211,37 @@ export interface components {
             end_reason?: string;
             /** Format: date-time */
             ended_at?: string;
+            events?: components["schemas"]["DispatchCost"];
             host: string;
             instance_id: string;
             missed?: boolean;
             /** Format: int64 */
             round: number;
+            seen?: components["schemas"]["DispatchSeen"];
             server_id?: string;
             /** Format: date-time */
             started_at: string;
+        };
+        DispatchSeen: {
+            earlier: components["schemas"]["DispatchSpend"];
+            hours?: components["schemas"]["DispatchSpendHour"][] | null;
+            scope?: string;
+            /** Format: double */
+            work_seconds: number;
+            /** Format: date-time */
+            worked_until?: string;
+        };
+        DispatchSpend: {
+            tokens: components["schemas"]["DispatchTokens"];
+            /** Format: double */
+            usd: number;
+        };
+        DispatchSpendHour: {
+            /** Format: date-time */
+            hour: string;
+            tokens: components["schemas"]["DispatchTokens"];
+            /** Format: double */
+            usd: number;
         };
         DispatchTokens: {
             /** Format: int64 */

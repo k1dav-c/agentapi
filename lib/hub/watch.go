@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/coder/agentapi/lib/dispatch"
 	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/sse"
 )
@@ -187,7 +188,7 @@ func (h *Hub) streamFailed(ctx context.Context, id string, err error, heard, now
 func (h *Hub) applySummary(ctx context.Context, id, url string, summary instanceapi.SummaryBody) bool {
 	now := h.clock.Now()
 	applied := false
-	_, _ = h.store.update(id, false, func(i *Instance) {
+	updated, _ := h.store.update(id, false, func(i *Instance) {
 		if ctx.Err() != nil || i.Connection == instanceapi.ConnectionStopped || i.URL != url {
 			return
 		}
@@ -212,7 +213,23 @@ func (h *Hub) applySummary(ctx context.Context, id, url string, summary instance
 		i.WebhookInstance = summary.Instance
 		i.ID, i.URL = id, url
 	})
+	if applied && h.config.Dispatch != nil {
+		h.config.Dispatch.Saw(ctx, sighting(updated, url))
+	}
 	return applied
+}
+
+// sighting is what the hub read of instance at url for the issue
+// dispatch: its spend, and the spans of work it saw that ended.
+func sighting(instance Instance, url string) dispatch.Sighting {
+	seen := dispatch.Sighting{InstanceID: instance.ID, URL: url, Spend: spendHours(instance.Summary)}
+	if instance.Summary != nil {
+		seen.ServerID = instance.Summary.Instance.ServerID
+	}
+	for _, span := range instance.work.spans {
+		seen.Work = append(seen.Work, dispatch.WorkSpan{Start: span.start, End: span.end})
+	}
+	return seen
 }
 
 // otherInstanceError: another AgentAPI answers at an instance's URL.
