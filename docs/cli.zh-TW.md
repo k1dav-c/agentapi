@@ -26,7 +26,7 @@ agentapi server -- pi
 （例如 `AGENTAPI_ALLOWED_HOSTS`）。清單在旗標中以逗號分隔，在環境變數中以空白分隔。
 
 也可以寫在 `~/.agentapi/config.yaml`（`--config` 可指定其他檔案），以旗標名稱為 key，套用到這個
-使用者啟動的每個伺服器；旗標或環境變數會覆蓋它。不是旗標名稱的設定會記在 log 中；讀不了的檔案會
+使用者啟動的每個伺服器；旗標或環境變數會覆蓋設定檔。不是旗標名稱的設定會記在 log 中；讀不了的檔案會
 記下並略過，agent 仍會啟動。[`agentapi hub join`](#agentapi-hub) 會寫入這個檔案；含有 secret 時
 請只讓擁有者讀取（`chmod 600`）。檔案或目錄設定開頭的 `~` 代表家目錄，不論設定來自哪裡。
 `state-db` 和 `pid-file` 指的檔案只能給一個伺服器使用，所以寫在設定檔時，路徑中都要有 `{port}`
@@ -64,7 +64,7 @@ state-db: ~/.agentapi/state/{port}.db
 | `--name` | 工作目錄的名稱 | 監看多個 AgentAPI 的用戶端顯示的名稱 |
 | `--registry` | `true` | 執行期間在登記目錄保留登記檔；見[監看多個實例](api.zh-TW.md#監看多個實例) |
 | `--registry-dir` | `~/.agentapi/instances` | 登記目錄 |
-| `--public-url` | | 可以連到這個 AgentAPI 的網址，會放在 `GET /summary` 和每個 webhook 事件中；`{port}` 和 `{hostname}` 會填入，`{ip}` 則填入這台主機通往 webhook 網址那條路由上的 IPv4 位址（沒有 webhook 網址時，取第一個私有網路位址，其次是 CGNAT 位址），執行期間最多每 30 秒重新查詢一次；查不到時沿用上一個位址 |
+| `--public-url` | | 可以連到這個 AgentAPI 的網址，會放在 `GET /summary` 和每個 webhook 事件中；`{port}` 和 `{hostname}` 會填入，`{ip}` 則填入這台主機通往 webhook 網址那條路由上的 IPv4 位址（沒有 webhook 網址或找不到這條路由時，取第一個私有網路位址，其次是 CGNAT 位址），執行期間最多每 30 秒重新查詢一次；查不到時沿用上一個位址 |
 | `--config` | `~/.agentapi/config.yaml` | 設定檔：以旗標名稱設定，優先順序低於旗標和環境變數 |
 | `--allow-update` | `false` | 讓 API 用戶端（例如 hub）把 AgentAPI 更新到最新發行版，再原地重新啟動；見[透過 API 更新](api.zh-TW.md#透過-api-更新) |
 | `--webhook-timeout` | `10s` | 每次傳送的逾時時間 |
@@ -78,7 +78,7 @@ state-db: ~/.agentapi/state/{port}.db
 AgentAPI 把 log 寫到標準輸出，每筆一行 `time=… level=… msg=…`。`--log-level debug`（或
 `AGENTAPI_LOG_LEVEL`、設定檔中的 `log-level`）會加上排查問題用的內容，例如 agent 的命令列、登入
 檢查，以及成功的讀取（狀態碼低於 400 的 `GET`、`HEAD`、`OPTIONS` 請求；用戶端會輪詢 `GET /status`，
-所以 Info 不記這些）；`warn` 和 `error` 則略過例行的紀錄。層級不正確時，伺服器不會啟動。
+所以 `info` 不記這些）；`warn` 和 `error` 則略過例行的紀錄。層級不正確時，伺服器不會啟動。
 
 ## `agentapi update`
 
@@ -215,7 +215,7 @@ agentapi host status
 | `uninstall` | | 停用、停止並移除這個 service；job 的 AgentAPI 繼續執行，檔案也都保留 |
 
 service 設了 `KillMode=process`：重新啟動或停止 launcher 時，job 的 AgentAPI 繼續執行，由下一個
-launcher 接手。`install` 需要 systemd user instance；登出後 user service 會停止時，它會提醒你，
+launcher 接手。`install` 需要 systemd user instance；登出後 user service 會停止時，`install` 會提醒你，
 用 `sudo loginctl enable-linger <user>` 讓它們繼續執行。
 
 沒有 systemd 的環境（容器，例如 Coder workspace）裡，`install` 會停在 `no systemd user instance`。

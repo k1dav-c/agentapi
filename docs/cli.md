@@ -81,7 +81,7 @@ state-db: ~/.agentapi/state/{port}.db
 AgentAPI logs to standard output, one `time=… level=… msg=…` line per entry. `--log-level debug`
 (or `AGENTAPI_LOG_LEVEL`, or `log-level` in the config file) adds what it logs for troubleshooting,
 such as the agent's command line, its login checks and the reads that worked (`GET`, `HEAD` and
-`OPTIONS` requests below 400, which Info leaves out because clients poll `GET /status`); `warn` and
+`OPTIONS` requests below 400, which `info` leaves out because clients poll `GET /status`); `warn` and
 `error` leave out the routine lines. An unknown level stops the server before it starts.
 
 ## `agentapi update`

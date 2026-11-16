@@ -105,7 +105,7 @@ flowchart TB
 | `lib/logctx/`、`lib/util/` | 透過 context 傳遞的 logger 與共用輔助函式 |
 | `internal/version/` | 版本號，建置時寫入 |
 | `chat/` | 聊天介面（Next.js） |
-| `e2e/` | 以腳本化 Claude Code（`e2e/fakeclaude`）進行的端對端測試 |
+| `e2e/` | 對腳本化 Claude Code（`e2e/fakeclaude`）的端對端測試 |
 
 內部的匯入只有一個方向，從指令往末端套件：
 
@@ -126,7 +126,7 @@ flowchart TB
 `agentapi server [旗標] -- <agent 指令>`（`cmd/server/server.go`）：
 
 1. 旗標依序來自命令列、`AGENTAPI_*` 環境變數或 `~/.agentapi/config.yaml`（`--config`；viper）。
-   `cmd/server/userconfig.go` 會記下不是旗標的名稱，讀不了的檔案則略過；檔案中沒有 `{port}` 的
+   `cmd/server/userconfig.go` 會警告不是旗標的名稱，讀不了的檔案則略過；檔案中沒有 `{port}` 的
    `state-db` 或 `pid-file` 也會略過，因為每個伺服器都會讀這個檔案，而資料庫只能由一個伺服器鎖住，
    PID 檔也只能由一個伺服器寫入。路徑設定開頭的 `~` 代表家目錄，`--state-db`、`--pid-file` 和
    `--public-url` 中的 `{port}` 和 `{hostname}` 會填入實際的值（`instanceapi.ExpandPlaceholders`）。
@@ -429,7 +429,7 @@ flowchart LR
   來源 `config` 或 `hub`、模型）；選定的供應商屬於選定的設定，保存在 stored state 裡。每次啟動時，
   adapter 從 `Resume.Provider`（`ProviderRun`：供應商和啟動時用的模型）拿到它。選定的供應商若已不存在，
   對話會放棄這個選擇並發出警告，agent 改用自己的供應商啟動。hub 回應之前（`HubSettled`），選定的供應商若可能是
-  hub 的，就繼續保持選定，agent 這次先用自己的供應商啟動，也不套用選定的模型，因為那是該供應商的模型。
+  hub 的，就仍保持選定，agent 這次先用自己的供應商啟動，也不套用選定的模型，因為那是該供應商的模型。
 - **代理。** agent 透過 `lib/providerproxy` 呼叫供應商，從不帶著金鑰。`cmd/server` 以 `Source` 建立
   `Proxy`，交給 Claude Code 和 Codex 的 adapter（`Config.ProviderProxy`）以及伺服器
   （`NativeConfig.ProviderProxy`），伺服器結束時在 agent 之後關閉它。`native.ProviderEndpoint` 向它詢問
@@ -457,7 +457,7 @@ flowchart LR
   `CLAUDE_CODE_SUBAGENT_MODEL`，接著送 `set_model`。同一個 adapter 的設定與供應商變更一次只做一個，
   舊操作的 rollback 不會蓋掉較新回應。確定失敗時會恢復先前的環境與模型；未確認的回應或 rollback 失敗代表狀態未知，
   不能當成什麼都沒改：目前的 adapter 不能再開始回合，替代的 adapter 會用先前已知的供應商與模型啟動。
-  伺服器當下無法重啟時（回合或壓縮進行中、正在重啟），conversation 會在回合結束後自行啟動替代的
+  伺服器當下無法重啟時（回合或壓縮進行中、正在重啟），對話會在回合結束後自行啟動替代的
   adapter（`recoverProviderLocked`）。
   一開始就用供應商啟動的 agent，啟動時就帶著這些變數（以及 `ANTHROPIC_MODEL`），並略過登入檢查。
 - **重新啟動。** adapter 無法在執行中完成切換時，回傳 `RelaunchError`：Claude Code 換回自己的供應商
@@ -641,8 +641,8 @@ context 結束，避免不再讀取的 agent 佔住 `s.mu`。
   檔案一律拒絕；結構從 1.0 起就沒有改變。
 - `conversation_state` 把為工作階段選擇的設定、用量限制造成的停止和等待重試的失敗回合存成一個
   JSON 物件：`{"version": 2, "settings": {...}, "limit_stop": {...}, "retry_wait": {...}}`；
-  重設時保留。新增欄位不改版本，較舊的 AgentAPI 讀它認得的部分；會誤導舊版的改變才提高版本。第 2 版保護
-  供應商與模型的組合，因為第 1 版的讀取端只認得模型。供應商與模型的組合，因為只還原模型可能在錯誤的端點上使用它。遇到更高版本的 AgentAPI 啟動時不帶保存的狀態，之後的狀態
+  重設時保留。新增欄位不改版本，較舊的 AgentAPI 讀它認得的部分；會誤導舊版的改變才提高版本。第 2 版把
+  供應商與模型存成一組：第 1 版的讀取端只認得模型，而只還原模型可能在錯誤的端點上使用它。遇到更高版本的 AgentAPI 啟動時不帶保存的狀態，之後的狀態
   變更與正常關閉也會保留這個未知的 envelope，不會用預設值覆寫。3.7.2 以前這三項各有一個 key
   （`settings`、`limit_stop`、`retry_wait`），AgentAPI 3.7.3 到 3.16 第一次開啟時會把它們搬進物件；
   AgentAPI 4 不讀這些 key，所以只有 3.7.2 以前版本開啟過的檔案，啟動時不會帶保存的設定、用量限制
@@ -667,8 +667,8 @@ hub（`lib/hub`，`persist.go`）把實例保存在 JSON 檔案裡，格式是
 加上的欄位，例如每個實例的工作時間（`work`：最近 7 天的區段，只在區段開始或結束時寫入），讀得懂這個
 格式的舊 hub 會略過。hub 的設定（和 `instances` 並列的 `"settings": {"favorites": [...]}`，即
 `hubSettings`，經由 `store.updateSettings` 修改）也一樣：這種 hub 下次寫入時會丟掉它，它留下的 `.bak`
-則還保有。3.5 到 3.7 的 hub 把我的最愛放在最上層（`"favorites": [...]`），沒有 `settings` 時 hub 會讀它；
-3.8 到 3.15.1 也會在最上層多寫一份，之後的版本不再寫。改用新的版本號反而會讓所有舊 hub 拒絕這個檔案。hub 處理過的
+則還保有。改用新的版本號反而會讓所有舊 hub 拒絕這個檔案。3.5 到 3.7 的 hub 把我的最愛放在最上層（`"favorites": [...]`），沒有 `settings` 時 hub 會讀它；
+3.8 到 3.15.1 也會在最上層多寫一份，之後的版本不再寫。hub 處理過的
 webhook 事件的 delivery ID 也以同樣方式寫入 `instances.deliveries.json`，保留到各自的簽章失效，所以
 重新啟動後重送的事件同樣會被拒絕。
 
@@ -739,7 +739,7 @@ SIGUSR1 會把排隊中的變更寫入狀態資料庫。`--state-file` 是 1.0 �
 環境變數和 agent 相同，但不含 AgentAPI 自己的變數。第一個用戶端開始觀看時它才啟動，沒有人
 觀看時也會繼續執行。它的輸出會寫進 256 KiB 的捲動緩衝區（從行首截斷）和每個觀看者的緩衝區。
 捲動緩衝區是環狀的，加入一段輸出所花的時間只和那段輸出的長度成正比，與緩衝區大小無關。落後
-512 個區塊的觀看者會被斷開，重新連線後再取得捲動緩衝區。`GET /terminal` 串流 `output`
+512 個區塊的觀看者會斷線，重新連線後再取得捲動緩衝區。`GET /terminal` 串流 `output`
 （base64）和 `exit` 事件，`POST /terminal/input` 輸入按鍵，一次一個請求；程式不讀輸入、終端機的緩衝區滿了時，
 請求最多等 10 秒，之後以 503 放棄（用戶端離開時也會放棄）。`/terminal/resize` 調整大小，
 以最後一次調整為準。關閉時會掛斷終端機，2 秒後終止 shell 的 process group。
@@ -821,7 +821,7 @@ Content-Security-Policy。
   hub 的 API 從不回傳金鑰（`has_key` 只說有沒有）；`POST /api/providers/sync` 會回傳金鑰，但只回應以
   hub secret 簽章的請求，並以從 secret 衍生（HKDF-SHA256）的金鑰用 AES-256-GCM 加密，所以金鑰不會以
   明文經過一般 HTTP。持有 secret 的每台主機都拿得到每一把金鑰。agent 永遠拿不到金鑰：它帶著這個行程的
-  token，透過 `127.0.0.1` 上的供應商代理呼叫供應商，由代理加上金鑰。同一個使用者底下的程序可以從 agent 的
+  token，透過 `127.0.0.1` 上的供應商代理呼叫供應商，由代理加上金鑰。同一個使用者底下的行程可以從 agent 的
   環境變數讀到這個 token，在 AgentAPI 執行期間透過代理呼叫供應商，但看不到金鑰。
 - 上層 agent 工作階段會為它執行的指令設定環境變數（包含機密資訊）；agent 不會繼承這些變數，也不會拿到 AgentAPI 的機密：API token、webhook 與 hub 的 secret 和
   token（`lib/procenv`）。

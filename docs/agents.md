@@ -83,7 +83,7 @@ turn and waits up to 3 seconds for it to end, so the session log doesn't end in
 a tool call without result. Then it closes the agent's input so it can exit; if
 it is still running 3 seconds later, AgentAPI sends SIGTERM to the group, then
 SIGKILL 2 seconds after that. The group outlives the agent while a process in
-it runs, so AgentAPI signals it after the agent exited too, on its own or in a
+it runs, so AgentAPI signals the group after the agent exited too, on its own or in a
 restart: SIGTERM, then SIGKILL 2 seconds later.
 
 </details>
@@ -448,7 +448,7 @@ state-db: ~/.agentapi/state/{port}.db
 - A file belongs to one agent type and working directory; AgentAPI refuses to
   start with another one's file. A file AgentAPI 2 wrote for a PTY agent
   opens: the agent starts a new session below its conversation, which goes
-  on natively. It is locked while AgentAPI runs,
+  on natively. The file is locked while AgentAPI runs,
   so a second AgentAPI (or `sqlite3`) can't open it.
 - A new file is created readable and writable by its owner only (0600), and missing
   directories are created (0700).
@@ -731,7 +731,7 @@ AgentAPI runs Pi in its RPC mode (`pi --mode rpc`, JSON over stdin and stdout).
   turn ends as interrupted, without the "This operation was aborted" error Pi
   adds when it aborts during a tool, and if Pi doesn't end the turn within 10
   seconds AgentAPI ends it), resume, and images (attached images go to Pi as
-  base64 `images`; reported unless Pi says its model doesn't take images).
+  base64 `images`; the capability is reported unless Pi says its model doesn't take images).
 - **Messages.** Text and thinking stream into the rich messages as they arrive,
   bash output streams into the tool result, and the final messages have the
   same shape as the ones parsed from Pi's session log. Images in tool results

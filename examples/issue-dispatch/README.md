@@ -113,7 +113,7 @@ runner 只需要 `bash`、`curl`、`jq`，不需要 git、gh 或任何 agent 的
 job 會向 GitHub 查觸發者對這個 repo 的權限，只有 write（含 maintain）或 admin 的人加的 label、留言和
 review 才會派工或轉送；查不到時一律忽略。組織的 MEMBER 不一定有 write 權限，所以不以 author_association
 判斷。issue 範本自動帶上的 `agent` label 也會檢查開 issue 的人。fork 來的 PR 一律不處理。
-留言要以 `/agent` 加空白開頭（`/agents …` 不算）；在不是 agent 開的 PR 上留言 `/agent` 會被忽略。
+留言要以 `/agent` 加空白開頭（`/agents …` 不算）；在不是 agent 分支的 PR 上留言 `/agent` 一律忽略。
 也可以在 hub 的畫面直接打開 job 的 instance 對話。
 
 開工時，hub 一挑好主機、把 job 記為 `starting` 就回應 workflow，主機接著在背景 clone 或 fetch

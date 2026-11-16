@@ -147,13 +147,13 @@ does not run the displayed command.
 
 ![Explorer Index tab with task navigation and settings tabs](../docs/screenshots/explorer-index.png)
 
-Open Explorer with ⌘K / Ctrl+K to jump to a task, open a discovered file, or reach Session and
-Webhook settings.
+Open Explorer with ⌘K / Ctrl+K to jump to a task, open a discovered file, or reach the Session and
+Webhook tabs.
 
 ![Mobile native chat with the prompt, tool output, reply, and session controls](../docs/screenshots/chat-mobile.png)
 
-On phones, thinking collapses into the conversation and the composer stays at the bottom with the
-permission mode, model, and context controls.
+On phones, thinking collapses into the conversation and the composer stays at the bottom. The
+permission mode, model, and context controls take a second row when you ask for it from `⋯`.
 
 The [screenshot guide](../docs/screenshots/README.md) includes native question and plan cards, the
 file viewer, the model menu, and instructions for regenerating the images with

@@ -4,7 +4,7 @@
 
 AgentAPI 沒有使用者或角色的概念：連得到 API 的人，就能做 agent 能做的任何事。預設不需要
 token，在所有網路介面上監聽，只要 `Host` 標頭是 `localhost` 或 IP 位址就接受連線。主機檢查能防止網頁透過 DNS rebinding 呼叫它，但擋不住網路上的程式，
-因為它們可以送出任何 `Host` 標頭。在其他人連得到這個連接埠之前，請先把伺服器保護好。
+因為程式可以送出任何 `Host` 標頭。在其他人連得到這個連接埠之前，請先把伺服器保護好。
 沒有設定 token、又監聽其他主機連得到的位址時，AgentAPI 會在啟動時記錄一則警告。
 
 ## API token 驗證
@@ -115,7 +115,7 @@ agentapi server --allowed-origins 'https://example.com,http://localhost:3000' --
 AGENTAPI_ALLOWED_ORIGINS='https://example.com http://localhost:3000' agentapi server -- claude
 ```
 
-其他來源的網頁不能讓伺服器做任何改動（GET、HEAD、OPTIONS 以外的方法），除非它的來源列在清單上。
+其他來源的網頁不能讓伺服器做任何改動（GET、HEAD、OPTIONS 以外的方法），除非該網頁的來源列在清單上。
 瀏覽器送這類請求前不會先詢問（表單、`no-cors` 模式的 `fetch`）；CORS 只擋住網頁讀取回應，所以沒有
 `--api-token` 時，你開過的任何網站都能替 agent 送任務，或在終端機裡打字。`*` 讓每個網頁都能讀取
 回應，但不信任任何網頁送出這類請求：需要的來源要明確列出。伺服器依瀏覽器加上的 `Sec-Fetch-Site`

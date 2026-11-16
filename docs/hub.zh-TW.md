@@ -7,7 +7,7 @@ hub 在一個頁面上監看多台主機的 AgentAPI：列出每個實例，需�
 
 ![hub：所有實例、需要你處理的排最前面，以及在聊天介面中開啟的一個](screenshots/hub-desktop.png)
 
-[HTTP API 說明](api.zh-TW.md#執行-hub)有精簡版說明。
+[HTTP API 說明](api.zh-TW.md#執行-hub)裡有精簡版。
 
 ## 目錄
 
@@ -196,7 +196,7 @@ hub 沒有回應時（它停了，或它前面的 proxy 回了錯誤頁），頁
 ![總覽：需要你處理的數量、每種狀態一格，以及每個請求一張卡片](screenshots/hub-desktop.png)
 
 沒有開啟任何 agent 時，右側會顯示有幾個 agent 需要你、各自為了什麼。每種狀態一格（需要你、工作中、
-已完成未讀、離線），點一下就會依該狀態篩選清單，已選的 agent 不變（見[下方](#清單)）。下方每個需要你的 agent 各有一張卡片，寫出它在等什麼（核准
+已完成未讀、離線），點一下就會依該狀態篩選清單，已選的 agent 種類不變（見[下方](#清單)）。下方每個需要你的 agent 各有一張卡片，寫出它在等什麼（核准
 的指令、提問、登入、用量限制）和等了多久，並有 **Answer** 或 **Open** 按鈕。工作中的 agent 會顯示
 提示和已經跑了多久；你還沒看過的已完成 agent 會顯示標題。狀態格和這些卡片之間是[花費](#花費)、
 [Token 用量](#token-用量)、[供應商用量](#供應商用量)、[工作時間](#工作時間)和[活動](#活動)卡片；最下方的[版本](#版本)卡片
@@ -209,7 +209,7 @@ hub 沒有回應時（它停了，或它前面的 proxy 回了錯誤頁），頁
 
 ![agent 的花費：最近 24 小時和 7 天、花最多的 agent，以及各主機](screenshots/hub-spend.png)
 
-每個 AgentAPI 每分鐘從 agent 的 session log 算出工作目錄裡所有 session 在最近 24 小時和最近
+每個 AgentAPI 每分鐘從 agent 的工作階段紀錄算出工作目錄裡所有工作階段在最近 24 小時和最近
 7 天花了多少，放進摘要（`spend`）。這是換算成 API 的金額：依模型供應商的牌價計算 token，訂閱方案
 並不會實際收取。Claude Code、Codex 和 Pi 有這個數字；`native-demo` 和 AgentAPI 2 的 PTY agent
 不會顯示。
@@ -218,7 +218,7 @@ hub 沒有回應時（它停了，或它前面的 proxy 回了錯誤頁），頁
 滑鼠移上去還會看到 7 天的金額。桌面版的總覽有一張 **Spend** 卡片：所有回報花費的 agent 最近 24 小時
 和 7 天的合計、這週花最多的五個，以及 agent 分散在不只一台主機時的 **By machine**（各主機的小計）。
 
-同一台主機上，同一個 agent 在同一個目錄的兩個 AgentAPI 讀的是同一批 session，回報的金額也相同，
+同一台主機上，同一個 agent 在同一個目錄的兩個 AgentAPI 讀的是同一批工作階段，回報的金額也相同，
 而且帶著相同的 `scope`（由主機、agent、目錄和 agent 存放 log 的位置算出的雜湊值）。合計時每個
 scope 只算一次，取最新的數字（`updated_at`）。hub 目前沒在追蹤的 agent（已停止、連不到或連線中）
 會以淡色顯示最後一次的數字，標示為最後已知的金額，不算進合計。一個 scope 只屬於一台主機，所以各主機的
@@ -234,8 +234,8 @@ scope 只算一次，取最新的數字（`updated_at`）。hub 目前沒在追�
 
 算花費的同一輪也會算出同一批呼叫的 token：`spend` 裡有最近 24 小時（`day_tokens`）和 7 天
 （`week_tokens`）的 `input`、`output`、`cache_write`（Anthropic 五分鐘和一小時的快取合計）、
-`cache_read`，以及四者的合計 `total`。每個呼叫只算一次，和它的金額算在同一個地方：session 副本
-複製自先前 session 的呼叫，算在先前那個 session。沒有已知價格的模型只計 token、不計金額。Claude Code
+`cache_read`，以及四者的合計 `total`。每個呼叫只算一次，和它的金額算在同一個地方：副本（fork）
+從先前工作階段複製來的呼叫，算在先前那個工作階段。沒有已知價格的模型只計 token、不計金額。Claude Code
 自己算了、但沒有逐筆記在 log 裡的部分（壓縮 context 等），token 取自它自己的計數。
 
 `spend.providers` 把同一批呼叫依[模型供應商](providers.zh-TW.md)分開：最近 7 天有呼叫的每個
@@ -322,7 +322,7 @@ hub 舊。
 重新啟動之前，AgentAPI 會用自己的設定以 `agentapi server --validate` 執行新程式。新程式用這些設定
 無法啟動時（有它不接受的旗標或 agent），AgentAPI 會繼續服務，更新則以失敗結束並說明原因。AgentAPI 3
 只執行 Claude Code、Codex 和 Pi：執行其他 agent、或任何以 `--transport pty` 執行的 AgentAPI 2 都會
-這樣失敗，但它的主機上已經換成 AgentAPI 3。請在那個 AgentAPI 重新啟動之前，把 v2.5.1 裝回去。
+這樣失敗，但它的主機上已經換成新版本。請在那個 AgentAPI 重新啟動之前，把 v2.5.1 裝回去。
 
 更新期間，那一列會顯示進度：檢查中、下載中、等任務結束、重新啟動中。還在等任務結束時，可以用
 **⋯** 選單的 **Cancel the update**，或開啟的 agent 上方那一列的 **Cancel** 取消。更新失敗時會標示
@@ -406,7 +406,7 @@ aider、`native-demo`，或還沒回報是哪種 agent 的實例），hub 有監
 ![清單篩選成需要你處理的 Claude Code 和 Codex agent](screenshots/hub-agent-filter.png)
 
 頁首顯示 hub 的串流是否連線中，以及共有幾個 agent；分頁的標題和圖示會顯示需要你處理的數量，釘選的
-分頁也看得到。這條串流和聊天介面一樣會重新連線，45 秒沒有動靜就視為斷線（hub 每 15 秒送一次心跳）。
+分頁也看得到。這條串流和聊天介面一樣會重新連線，45 秒沒有動靜就視為斷線（hub 每 15 秒送一次 heartbeat）。
 
 「Finished」依據 agent 的未讀標記，這個標記由該 AgentAPI 的所有用戶端共用：在 hub 或它自己的聊天
 介面開啟，各處都會變成已讀。
@@ -560,7 +560,7 @@ base URL、可省略的 Anthropic base URL、API 金鑰，以及它提供的模�
 供應商的 `<base_url>/models` 查詢。hub 最多保存 50 個。金鑰只能寫入：頁面只顯示供應商有沒有金鑰，
 只有在供應商 ID 與端點都不變時，編輯器金鑰欄留空才會保留原本的金鑰；更改任一端點後都要重新輸入金鑰，
 勾選 **Remove the key** 則移除。ID 新增後就不能更改。保存時會帶上清單的 revision，如果另一個分頁在你開啟
-這個分頁後已經保存，會回報衝突，而不是悄悄讓其中一邊的變更消失。
+這個分頁後已經保存，你保存時會回報衝突，而不是覆蓋那個分頁的變更。
 
 ![按下 Check connection 之後的編輯器：供應商回了六個模型，其中兩個已選取](screenshots/hub-settings-provider-check.png)
 
@@ -580,7 +580,7 @@ token 與金額（或 **no price**），算法和 [Providers 卡片](#供應商�
 **No calls in the last 7 days**。過去一小時有 agent 呼叫過的供應商，會再多一行，寫出它透過各 AgentAPI 的
 [供應商代理](providers.zh-TW.md)回應得如何：呼叫次數、失敗的比例、收到第一個 byte 的時間中位數，以及最後
 一次錯誤和發生時間，加總 hub 追蹤的所有實例（摘要裡的 `provider_health`）。供應商呼叫失敗時（最近一次呼叫
-失敗，或這一小時有一半失敗），這一行會變成琥珀色；游標移上去可以看到完整的數字。
+失敗，或這一小時有一半失敗），這一行會變成琥珀色；滑鼠移上去可以看到完整的數字。
 
 hub 用 OpenRouter 的牌價替供應商的模型定價（[價格](providers.zh-TW.md#價格)），各 AgentAPI 就用這些
 價格計算送往供應商的呼叫。有供應商時，hub 每天取得一次 OpenRouter 公開的清單（不需要金鑰），按下分頁上方的
@@ -922,7 +922,7 @@ AgentAPI 1.1 以上。在這裡輸入的 token 會為這個實例保存，取代
 | 已連線的 agent，**⋯** 選單裡沒有任何更新項目 | 它的 AgentAPI 太舊，還不支援從 hub 更新 | 手動更新（見[手動更新](#手動更新)） |
 | hub 的 log 有「The hub's file of instances doesn't parse」 | 檔案損壞，例如手動改壞了；或是 2.2 以前的 hub 讀到較新 hub 寫的檔案 | hub 已把它改名放到一旁（`instances.json.corrupt-<時間>`），從空的清單開始。用 webhook 加入的實例會在下一次 heartbeat 回來。其餘的要找回來，先停掉 hub，再用 `instances.json.bak`（hub 上次啟動時看到的檔案）覆蓋 `instances.json`；2.2 以前的 hub 請見[檔案](#檔案) |
 | hub 無法啟動：`instances.json is of a newer hub` | 檔案是較新的 hub 寫的 | 改用較新的 hub，或從 `instances.json.bak` 開始 |
-| Issues 裡某台主機一直離線，hub 的 log 有 "Refused a host event with another launcher's token than the machine's" | hub 會把主機名稱綁定到它第一次帶來的 launcher token。這台 launcher 換了 token（`~/.agentapi/host.token` 被刪除，或主機重新安裝），或是另一台持有 hub secret 的機器冒用這個名稱 | 是你自己的主機時：先停掉它的 job，等它顯示離線後在 [Issues](#issues) 按它的 **×** 移除，下一次 heartbeat 就會重新加入。不是你的主機時，更換 hub 的 `--secret`，再讓你的主機重新 join |
+| Issues 裡某台主機一直離線，hub 的 log 有 "Refused a host event with another launcher's token than the machine's" | hub 會把主機名稱綁定到它第一次帶來的 launcher token。launcher 換了 token（`~/.agentapi/host.token` 被刪除，或主機重新安裝），或是另一台持有 hub secret 的機器冒用這個名稱 | 是你自己的主機時：先停掉它的 job，等它顯示離線後在 [Issues](#issues) 按它的 **×** 移除，下一次 heartbeat 就會重新加入。不是你的主機時，更換 hub 的 `--secret`，再讓你的主機重新 join |
 | 主機沒出現在 Issues，或一直離線；hub 的 log 有 "Refused a host event with a URL the hub doesn't call" | launcher 回報的網址是 hub 不會呼叫的：loopback（在 hub 這台主機上以 `localhost` 加入）、link-local，或含有帳號密碼（見 [`agentapi host`](#agentapi-host)） | 用 hub 的內網位址讓主機加入（`agentapi hub join http://<hub 的內網位址>:3290/hooks …`）再重新啟動 launcher，或設定 `host` 區段的 `public-url`；hub 這台主機上的 launcher，也可以改用 `--allow-loopback-launchers` 啟動 hub |
 | issue 停在 **Starting** 好幾分鐘 | 主機正在 clone 或 fetch 大的 repo（最多 10 分鐘），之後再等 agent 最多 1 分鐘 | 稍候；主機上的 `~/.agentapi/jobs/<owner>~<repo>~<issue>/agentapi.log` 有 agent 這端的紀錄。hub 沒收到回應的啟動，會在主機下一次 heartbeat 時改為工作中或失敗 |
 
@@ -1030,7 +1030,7 @@ loopback（`127.0.0.1`、`::1`）、link-local 位址（`169.254.0.0/16`、`fe80
 | `POST /api/providers/prices` | 重新取得 OpenRouter 的清單，並讓沒有定義模型的供應商列出模型，再以 `GET /api/providers` 的格式回應；OpenRouter 失敗時寫在 `prices.error`。不查價格的 hub 回 409 |
 | `GET /api/providers/openrouter?q=` | hub 保存的清單裡，ID 或名稱含有 `q` 每個字的 OpenRouter 模型，最多 50 個：`{"models": [{"id", "name", "price"}], "fetched_at"}` |
 | `POST /api/providers/sync` | AgentAPI 取得含金鑰和模型價格的供應商，以 hub 的 secret 加密：`{"sealed", "nonce", "proof"}`，`proof` 把 `sealed` 綁定到請求的 `nonce`。請求和事件一樣以 `--secret` 簽章，不需要 session。沒有價格功能的舊版 AgentAPI 會忽略價格 |
-| `GET /api/events` | Server-sent events：先送 `instances`（全部實例和 `hub_version`，格式同 `GET /api/instances`）和 `favorites`（格式同 `GET /api/favorites`），再送 `instance`（某個實例有頁面看得到的變動，或工作時間變動滿一分鐘；最後聯絡時間只在它離線時才算）、`removed`（`{"id"}`）、`favorites`（有變動時送出全部）、`dispatch`（[issue 派工](#issues)的主機和 job，格式同 `GET /api/hosts` 和 `GET /api/jobs`，一開始和每次變動時送出），以及每 15 秒一次的 `heartbeat`。瀏覽器 30 秒都沒收下事件，就會失去串流 |
+| `GET /api/events` | Server-sent events：先送 `instances`（全部實例和 `hub_version`，格式同 `GET /api/instances`）和 `favorites`（格式同 `GET /api/favorites`），再送 `instance`（某個實例有頁面看得到的變動，或工作時間變動滿一分鐘；最後聯絡時間只在它離線時才算）、`removed`（`{"id"}`）、`favorites`（有變動時送出全部）、`dispatch`（[issue 派工](#issues)的主機和 job，格式同 `GET /api/hosts` 和 `GET /api/jobs`，一開始和每次變動時送出），以及每 15 秒一次的 `heartbeat`。瀏覽器 30 秒沒有讀取串流，就會失去串流 |
 | `GET /api/hosts` | 有 launcher 回報的主機：能跑的 agent、有的 repo、job 與上限，以及是否在線（`online`） |
 | `DELETE /api/hosts/{name}` | 移除主機，以及 hub 為這個主機名稱記下的 launcher token，讓換了 token 的 launcher 能以同一個名稱重新加入。主機在線（`host_online`）或還有進行中的 job（`host_busy`）時回 409，請先停掉它的 job；hub 沒有這台主機時回 404 |
 | `POST /api/jobs/clear` | 移除 `{"keys": [...]}`（最多 1,000 個）中已結束的 job：已完成，或已停止且主機上已經沒有它的；其他的保留。回應 `{"cleared": [...]}`，即實際移除的 key |
@@ -1075,7 +1075,7 @@ cd ~/.agentapi/hub && jq .instances instances.json > instances.json.new && mv in
 每個實例的工作時間是同一個 version 1 裡多出來的欄位（`work`）。2.3 和 2.4 的 hub 會略過它，下次寫入
 檔案時就把它丟掉。3.0.1 以前的 hub 對 `confirmed_url`（hub 最後一次讀到實例摘要的網址）也一樣，
 3.5 以前的 hub 對我的最愛（和 `instances` 並列的 `"favorites": [...]`）也一樣。改回這種 hub 之後，
-它啟動時留下的 `.bak` 仍保有我的最愛。hub 把我的最愛存在 `"settings": {"favorites": [...]}`；
+它啟動時留下的 `.bak` 仍保有這些資料。hub 把我的最愛存在 `"settings": {"favorites": [...]}`；
 沒有 `settings` 時，讀 3.5 到 3.7 的 hub 寫在最上層的 `"favorites"`。3.8 到 3.15.1 的 hub 也會在最上層
 多寫一份，現在不寫了，所以用 3.5 到 3.7 的 hub 開這個檔案時沒有我的最愛；它啟動時留下的 `.bak` 仍保有，可以給新版 hub 用。
 

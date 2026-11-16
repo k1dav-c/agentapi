@@ -18,7 +18,7 @@ Use AgentAPI to:
 - Create tools that delegate pull request reviews to an agent.
 - Watch many agents from one dashboard. Each AgentAPI pushes its tasks, the requests that need
   you, its messages and heartbeats there with [webhooks](docs/api.md#webhooks), and a client that connects
-  to many follows each through its [summary](docs/api.md#watching-many-instances). The built-in
+  to many AgentAPIs follows each through its [summary](docs/api.md#watching-many-instances). The built-in
   [hub](docs/api.md#running-a-hub) is such a dashboard, on a desktop or a phone.
 - Hand GitHub issues to agents on your machines from the hub's [Issues](docs/hub.md#issues) page:
   each works on its own branch and opens a pull request.
@@ -87,10 +87,10 @@ has the complete commit history.
   are, and [compact](docs/agents.md#slash-commands-and-compaction) the context; the chat
   suggests it once Claude Code's prompt cache has expired.
 - When a [usage limit](docs/agents.md#usage-limits) stops a turn, the queue waits until the
-  limit resets, and the turn can continue by itself then.
+  limit resets, and the turn can then continue by itself.
 - A turn that fails on a [transient API error](docs/agents.md#transient-api-errors) (a 502
   from a gateway, an overloaded API) is tried again after 30 seconds, 1 and 2
-  minutes, then every 5 minutes, 15 times, before the queue goes on.
+  minutes, then every 5 minutes, 15 times in all, before the queue goes on.
 - AgentAPI reports a missing or expired [login](docs/agents.md#logging-in) with the command
   to run, and starts the agent by itself once it is logged in.
 - A shared [terminal](docs/agents.md#terminal) in the agent's working directory, for logins
@@ -108,7 +108,7 @@ has the complete commit history.
 
 - [Tasks](docs/chat-ui.md#tasks-and-the-transcript) read as a transcript, with tool calls as
   rows, thinking as margin notes and what each task cost, and can be exported
-  as Markdown; the
+  as Markdown. The
   [Session Explorer](docs/chat-ui.md#session-explorer) has links, files, a task index, the
   agent's [earlier sessions](docs/agents.md#earlier-sessions), Restart and the
   [webhook](docs/api.md#webhooks).
@@ -117,9 +117,9 @@ has the complete commit history.
 - [Decision cards](docs/chat-ui.md#requests-and-decision-cards) for requests,
   menus for the agent's settings, a ring for its context, and slash commands.
 - A [file viewer](docs/chat-ui.md#files) with the file, its git diff and a preview of
-  HTML, Markdown and images, which finds a file the agent named relative to a
-  repository below its working directory; the [terminal](docs/agents.md#terminal), also on
-  phones.
+  HTML, Markdown and images. It finds a file the agent named relative to a
+  repository below its working directory. The [terminal](docs/agents.md#terminal) works on
+  phones too.
 - [Background alerts](docs/chat-ui.md#session-details-and-alerts), browser
   notifications, a transcript cache, and recovery from dropped connections.
 
@@ -137,7 +137,7 @@ has the complete commit history.
   same agent, and the page shows each job's state and what its runs cost.
 - [Webhooks](docs/api.md#webhooks) push HMAC-signed tasks, requests, messages and
   heartbeats to a dashboard that watches many agents. A client that connects
-  to many follows each through one [summary stream](docs/api.md#watching-many-instances).
+  to many AgentAPIs follows each through one [summary stream](docs/api.md#watching-many-instances).
   With the [human-reply API](docs/api.md#human-reply-api), a bot can tell you when the
   agent stops and pass your answer back.
 - [Self-update](docs/cli.md#agentapi-update), verified against the release's checksums,

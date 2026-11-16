@@ -23,7 +23,7 @@ Codex 呼叫 `<base_url>/responses`。Claude Code 呼叫同一個網址去掉 `/
 hub 可以替每台向它回報的主機保存供應商（見[執行 hub](api.zh-TW.md#執行-hub)）。在主機上，設定檔和 hub 有
 相同 `id` 的供應商時，以設定檔的為準。
 
-`GET /settings` 在 `options.providers` 列出供應商和它們的模型，設定 `provider` 則表示 agent 目前
+`GET /settings` 在 `options.providers` 列出供應商和各自的模型，設定 `provider` 則表示 agent 目前
 用哪一個：`default` 是 agent 自己的（Claude Code 的 Anthropic 登入或金鑰，Codex 的 OpenAI 登入或
 它設定檔裡的 `model_provider`）。用 `PUT /settings` 切換：
 
@@ -42,7 +42,7 @@ curl -X PUT localhost:3284/settings -d '{"provider": "default"}'
 
 - **Claude Code** 在執行中切換，從下一次 API 呼叫起生效，回合進行中也可以。換回自己的供應商時，
   會以同一個工作階段重新啟動，需要幾秒鐘；回合進行中會回 409。切換失敗時，AgentAPI 會恢復原先的環境與模型。
-  如果回應未確認或恢復失敗，則會用先前已知的供應商啟動替代 adapter，不讓下一個回合在設定可能與介面不一致的
+  如果 Claude Code 沒有確認切換或恢復失敗，則會用先前已知的供應商啟動替代 adapter，不讓下一個回合在設定可能與介面不一致的
   狀態下繼續。
 - **Codex** 的 thread 綁定建立時的供應商，而 OpenAI 的 thread 裡有其他供應商不接受的項目（OpenAI
   的工具定義、加密的推理內容）。切換時會在另一個供應商上重新啟動 app-server，開一個新的 thread，
@@ -67,7 +67,7 @@ agent 用供應商時，代理開始在隨機的連接埠上監聽，直到 Agen
 回 404。代理跟隨重新導向時，只把金鑰送往同一個 origin。供應商的模型清單仍由 AgentAPI 自己帶著金鑰
 查詢。代理無法啟動時，agent 就無法使用供應商，而不會改拿金鑰。設有 HTTP proxy 時（`HTTP_PROXY`、
 `HTTPS_PROXY`、`ALL_PROXY`），AgentAPI 會把 `127.0.0.1`、`localhost` 和 `::1` 加進 agent 的
-`NO_PROXY` 和 `no_proxy`，讓 agent 直接連到代理。你的使用者底下的其他程序，在 AgentAPI 執行期間
+`NO_PROXY` 和 `no_proxy`，讓 agent 直接連到代理。你的使用者底下的其他行程，在 AgentAPI 執行期間
 仍可以從 agent 的環境變數讀到 token，透過代理呼叫供應商，但看不到金鑰。
 
 代理也會得知每個供應商的回應狀況。它計算過去一小時內的呼叫次數、失敗（網路錯誤或逾時、5xx 或 429
