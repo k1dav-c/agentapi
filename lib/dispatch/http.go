@@ -238,6 +238,17 @@ func (s *Service) MountSession(r chi.Router) {
 	r.Get("/api/jobs", func(w http.ResponseWriter, _ *http.Request) {
 		jsonapi.Write(w, http.StatusOK, JobsBody{Jobs: s.Jobs()})
 	})
+	r.Post("/api/jobs/clear", func(w http.ResponseWriter, r *http.Request) {
+		var body ClearJobsRequest
+		if !jsonapi.Read(w, r, &body) {
+			return
+		}
+		if len(body.Keys) > maxClearJobs {
+			jsonapi.WriteError(w, jsonapi.Errorf(http.StatusBadRequest, "too_many_jobs", "at most %d jobs at once", maxClearJobs))
+			return
+		}
+		jsonapi.Write(w, http.StatusOK, ClearJobsBody{Cleared: s.ClearJobs(body.Keys)})
+	})
 	r.Get("/api/github", func(w http.ResponseWriter, _ *http.Request) {
 		jsonapi.Write(w, http.StatusOK, githubStatus(s.gh.Web, s.currentApp()))
 	})
@@ -345,6 +356,21 @@ type (
 	}
 	IssuesBody struct {
 		Issues []github.Issue `json:"issues"`
+	}
+)
+
+// maxClearJobs bounds the jobs POST /api/jobs/clear takes at once.
+const maxClearJobs = 1000
+
+// ClearJobsRequest is POST /api/jobs/clear: the ended jobs to forget, by
+// key; ClearJobsBody its answer, those the hub forgot (one that hasn't
+// ended, or is still on its machine, stays).
+type (
+	ClearJobsRequest struct {
+		Keys []string `json:"keys" nullable:"false" maxItems:"1000"`
+	}
+	ClearJobsBody struct {
+		Cleared []string `json:"cleared" nullable:"false"`
 	}
 )
 

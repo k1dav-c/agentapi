@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Features
+
+- The hub's Issues page can clear its ended jobs at once: **Clear** beside the Done heading forgets
+  the jobs the section shows (done, or stopped and gone from their machine) after you confirm,
+  instead of waiting 30 days. The cost comments stay on GitHub; `POST /api/jobs/clear` does the
+  same through the API.
+
+## v5.5.1
+
 ### Bug fixes
 
 - The hub's Assign menu tells the machines apart again: the start most machines' names share

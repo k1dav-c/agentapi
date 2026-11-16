@@ -763,7 +763,11 @@ issues, by section:
   pull request to review.
 - **Working**: the agents at work, the longest first, each with what it does now.
 - **To do**: the open issues no agent has.
-- **Done**: those done or stopped, the latest first; **Show all** past three.
+- **Done**: those done or stopped, the latest first; **Show all** past three. The hub keeps an
+  ended job for 30 days; **Clear** beside the heading forgets those the section shows now, after
+  you confirm: their runs and spend go, the cost comments stay on GitHub, and an issue still open
+  is back under To do. A job stopped while its machine was offline stays until the machine lets
+  it go.
 
 A card shows the issue's number, state and title, the agent and machine on it, its pull request,
 what its runs cost and how many there were, and the one thing its state asks for: **Assign**,
@@ -1201,6 +1205,7 @@ running AgentAPIs, which then no longer follow their conversation for the webhoo
 | `GET /api/events` | Server-sent events: `instances` (all of them and `hub_version`, as `GET /api/instances` has them) and `favorites` (as `GET /api/favorites` has them), then `instance` (one changed what the page shows, or its work time moved by a minute; when it was last heard of counts only while it is offline), `removed` (`{"id"}`), `favorites` (all of them, after a change), `dispatch` (the [issue dispatch's](#issues) machines and jobs, as `GET /api/hosts` and `GET /api/jobs` have them, at first and after each change) and a `heartbeat` every 15 s. A browser that takes no event for 30 s loses the stream |
 | `GET /api/hosts` | The machines whose launchers report: their agents, repositories, jobs and room, and whether each is `online` |
 | `DELETE /api/hosts/{name}` | Forgets a machine and the launcher token the hub pinned its name to, so a launcher with a new token can join under the name. 409 while the machine is online (`host_online`) or has a job that works (`host_busy`): stop its jobs first; 404 for a machine the hub doesn't have |
+| `POST /api/jobs/clear` | Forgets the ended jobs of `{"keys": [...]}` (at most 1,000): done, or stopped and no longer on their machine; the others stay. Answers `{"cleared": [...]}`, the keys it forgot |
 | `GET /api/jobs` | The jobs, each an issue's work: its state, agent and machine, pull request, runs with their cost, and the last 50 messages its agents were sent (`messages`: `at`, `source` `hub`, `review` or `comment`, `author`, `agent`, `text`, up to 2,000 characters) |
 | `GET /api/github` | The hub's GitHub App, if any (`slug`, `owner`, `owner_type` `User` or `Organization` when the hub knows it, `html_url`, `settings_url`, `install_url`), and where it is installed (`installations`: `account`, `account_type`, `repository_selection` `all` or `selected`, `avatar_url`, `settings_url`); `DELETE` forgets the app, which stays on GitHub |
 | `GET /api/github/repos` | The repositories the app can see, the latest pushed to or changed first (`pushed_at`, `updated_at`) |

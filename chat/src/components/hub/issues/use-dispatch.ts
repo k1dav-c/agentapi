@@ -52,6 +52,9 @@ export interface DispatchActions {
   // forgetHost has the hub forget an offline machine with no working jobs;
   // it throws the hub's refusal for its dialog to show.
   forgetHost: (hostname: string) => Promise<void>;
+  // clearJobs has the hub forget the ended jobs of keys and returns how
+  // many it forgot; it throws the hub's refusal for its dialog to show.
+  clearJobs: (keys: string[]) => Promise<number>;
 }
 
 // What a refused dispatch's status means to a person; the hub's message
@@ -214,6 +217,18 @@ export function useDispatch(root: string, live?: DispatchBoard) {
       refresh: () => void readIssues(),
       // The stream drops the machine once the hub forgot it.
       forgetHost: (hostname: string) => api.forgetHost(hostname),
+      // The stream drops the jobs once the hub forgot them; an answer the
+      // page holds for one goes too, so it doesn't come back.
+      clearJobs: async (keys: string[]) => {
+        const cleared = await api.clearJobs(keys);
+        setAnswered((answers) => {
+          if (!cleared.some((key) => answers.has(key))) return answers;
+          const left = new Map(answers);
+          for (const key of cleared) left.delete(key);
+          return left;
+        });
+        return cleared.length;
+      },
     }),
     [api, run, merge, setPreferred, readIssues],
   );

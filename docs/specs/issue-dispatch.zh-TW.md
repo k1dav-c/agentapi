@@ -315,7 +315,7 @@ GitHub App 另外存在 `~/.agentapi/hub/github-app.json`（0600，不併入 `in
 1. 轉給 launcher `DELETE /jobs/{key}`。
 2. 以 App 身分刪除遠端分支 `agent/issue-<n>`（`DELETE /repos/{o}/{r}/git/refs/heads/agent/issue-<n>`）；422 / 404（已被 GitHub 自動刪除）視為成功。
 3. 結束目前的 run，照 §5.8 留言花費彙總。
-4. job 標為 `done`，保留紀錄 30 天（花費統計需要）。
+4. job 標為 `done`，保留紀錄 30 天（花費統計需要）；在 Issues 頁 Done 區按 **Clear**（`POST /api/jobs/clear`）可以提早移除。
 - 主機離線時仍刪遠端分支，job 標為 `stopped (host offline)`；主機回來後由下一次 heartbeat 比對，自動清理已不存在的 job。
 
 - 停止還在背景啟動中的 job：hub 立即把它標為 `done`，等 launcher 回應啟動後再呼叫 `DELETE /jobs/{key}` 停掉它；在那之前同一個 issue 的 `start` 回 409 `job_busy`。

@@ -54,6 +54,12 @@ export interface components {
             hosts: components["schemas"]["DispatchHost"][] | null;
             jobs: components["schemas"]["DispatchJob"][] | null;
         };
+        DispatchClearJobsBody: {
+            cleared: string[];
+        };
+        DispatchClearJobsRequest: {
+            keys: string[];
+        };
         DispatchCost: {
             /** Format: int64 */
             calls: number;

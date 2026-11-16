@@ -5,7 +5,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import {ArrowLeft, Plus, RefreshCw, Settings2, TriangleAlert} from "lucide-react";
 import {Button} from "@/components/ui/button";
 import type {DispatchBoard, HubInstance} from "@/lib/hub";
-import {jobCost, type DispatchHost} from "@/lib/hub-dispatch";
+import {clearable, jobCost, type DispatchHost} from "@/lib/hub-dispatch";
 import {boardCards, bySection, headline, sections, stageCounts, suggest, whyNoOption, type Card, type Option, type SectionID} from "@/lib/hub-issues";
 import {prefersReducedMotion} from "@/lib/reduced-motion";
 import {useMediaQuery} from "@/lib/use-media-query";
@@ -13,6 +13,7 @@ import {cn} from "@/lib/utils";
 import {Constellation} from "../brand";
 import {ReadError} from "../read-error";
 import {sectionClass} from "../styles";
+import {ClearJobsDialog} from "./clear-jobs-dialog";
 import {IssueCard, type CardActions} from "./issue-card";
 import {IssueDetail, type DetailActions} from "./issue-detail";
 import {MachinesStrip} from "./machines-strip";
@@ -81,6 +82,12 @@ export function IssuesView({
   const repoNames = useMemo(() => d.repos.map((repo) => repo.full_name), [d.repos]);
   const cards = useMemo(() => boardCards(d.issues, d.jobs, d.scope, instances), [d.issues, d.jobs, d.scope, instances]);
   const grouped = useMemo(() => bySection(cards), [cards]);
+  // The ended jobs the Done section shows that the hub would forget.
+  const clearableJobs = useMemo(
+    () => grouped.done.flatMap((card) => (card.job && clearable(card.job, hosts) ? [card.job] : [])),
+    [grouped.done, hosts],
+  );
+  const [clearing, setClearing] = useState(false);
   const counts = useMemo(() => stageCounts(cards), [cards]);
   const flashing = useFlashes(cards);
   const setSelectedKey = onSelect;
@@ -384,6 +391,16 @@ export function IssuesView({
                       <h3 id={`issues-${id}-title`} data-flip={`section ${id}`} className={cn("flex items-center gap-2", sectionClass, id === "attention" && "text-state-needs")}>
                         {sectionTitle}
                         <span className="tabular-nums opacity-60">{list.length}</span>
+                        {id === "done" && clearableJobs.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setClearing(true)}
+                            title={`Have the hub forget the ${clearableJobs.length} ended ${clearableJobs.length === 1 ? "job" : "jobs"} shown here`}
+                            className="ml-auto rounded-md px-1.5 py-0.5 font-sans text-xs font-medium tracking-normal text-muted-foreground normal-case outline-none hover:bg-accent hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                          >
+                            Clear
+                          </button>
+                        )}
                       </h3>
                       {failed.length > 0 && (
                         <p role="alert" className="mt-3 flex items-center gap-2 text-sm text-state-fault">
@@ -456,6 +473,8 @@ export function IssuesView({
           </DialogPrimitive.Portal>
         </DialogPrimitive.Root>
       )}
+
+      <ClearJobsDialog jobs={clearableJobs} open={clearing} onClose={() => setClearing(false)} onClear={d.actions.clearJobs} />
 
       {connected && (
         <NewIssueDialog
