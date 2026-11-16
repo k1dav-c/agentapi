@@ -5,6 +5,7 @@ import {AgentMark} from "@/components/agent-mark";
 import {DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger} from "@/components/ui/dropdown-menu";
 import {agentLabel, type DispatchHost} from "@/lib/hub-dispatch";
 import {assignOptions, type Option} from "@/lib/hub-issues";
+import {hostPrefix} from "@/lib/hub-machines";
 import {cn} from "@/lib/utils";
 
 // Capacity draws a machine's jobs against its room as pips: filled for a
@@ -33,14 +34,27 @@ export function Capacity({host, className}: {host: Pick<DispatchHost, "active" |
   );
 }
 
+// HostName is a machine's name in a pick: the start most machines' names
+// share (hostPrefix) dimmed, and cut short before the rest, which tells
+// the machines apart; the whole name in its title.
+export function HostName({hostname, prefix, className}: {hostname: string; prefix: string; className?: string}) {
+  const shared = prefix && hostname.startsWith(prefix) && hostname.length > prefix.length ? prefix : "";
+  return (
+    <span className={cn("flex min-w-0", className)} title={hostname}>
+      {shared && <span className="min-w-[2ch] shrink-[1000] truncate text-muted-foreground/60">{shared}</span>}
+      <span className="min-w-0 truncate">{hostname.slice(shared.length)}</span>
+    </span>
+  );
+}
+
 // OptionLine is an agent on a machine, as a pick shows it.
-function OptionLine({option, suggested}: {option: Option; suggested: boolean}) {
+function OptionLine({option, suggested, prefix}: {option: Option; suggested: boolean; prefix: string}) {
   return (
     <>
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-1.5 font-mono text-[13px]">
-          <span className="truncate">{option.host.hostname}</span>
-          {suggested && <span className="rounded-full bg-foreground/8 px-1.5 font-sans text-[10px] font-medium text-muted-foreground">suggested</span>}
+          <HostName hostname={option.host.hostname} prefix={prefix} />
+          {suggested && <span className="shrink-0 rounded-full bg-foreground/8 px-1.5 font-sans text-[10px] font-medium text-muted-foreground">suggested</span>}
         </span>
         <span className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
           {option.hasRepo ? (
@@ -63,6 +77,7 @@ function OptionLine({option, suggested}: {option: Option; suggested: boolean}) {
 // repository), so none goes missing without a word.
 function AssignMenuItems({hosts, repo, suggested, onPick}: {hosts: DispatchHost[]; repo: string; suggested?: Option; onPick: (agent: string, host: string) => void}) {
   const groups = assignOptions(hosts, repo);
+  const prefix = hostPrefix(hosts.map((host) => host.hostname));
   if (groups.length === 0) return <p className="px-3 py-4 text-sm text-muted-foreground">No machine online runs an agent.</p>;
   return groups.map(({agent, options, unavailable}, i) => (
     <DropdownMenuGroup key={agent}>
@@ -81,7 +96,7 @@ function AssignMenuItems({hosts, repo, suggested, onPick}: {hosts: DispatchHost[
             onSelect={() => onPick(agent, option.host.hostname)}
             aria-label={`${agentLabel(agent)} on ${option.host.hostname}`}
           >
-            <OptionLine option={option} suggested={isSuggested} />
+            <OptionLine option={option} suggested={isSuggested} prefix={prefix} />
           </DropdownMenuItem>
         );
       })}
@@ -92,7 +107,7 @@ function AssignMenuItems({hosts, repo, suggested, onPick}: {hosts: DispatchHost[
           className="mx-1 gap-3 rounded-lg py-1.5 pr-2.5 pl-8 data-[disabled]:opacity-100"
           aria-label={`${agentLabel(agent)} on ${host.hostname}: ${reason}`}
         >
-          <span className="min-w-0 flex-1 truncate font-mono text-[12.5px] text-muted-foreground/70">{host.hostname}</span>
+          <HostName hostname={host.hostname} prefix={prefix} className="flex-1 font-mono text-[12.5px] text-muted-foreground/70" />
           <span className="shrink-0 text-[11px] text-muted-foreground">{reason}</span>
         </DropdownMenuItem>
       ))}

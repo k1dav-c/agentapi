@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Bug fixes
+
+- The hub's Assign menu tells the machines apart again: the start most machines' names share
+  (`coder-k1dave6412-`) is dimmed and cut short first, so the rest of the name stays readable,
+  and the whole name is in its tooltip. Long names used to be cut at the end, which left them
+  all looking alike.
+
+## v5.5.0
+
 ### Features
 
 - An issue job's spend and agent time no longer depend on task events reaching the hub. The hub
