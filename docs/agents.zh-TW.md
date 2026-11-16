@@ -23,7 +23,7 @@ agentapi server -- pi --provider openai-codex --model gpt-5.6-luna --thinking lo
 
 - 回覆、工具結果和思考內容會隨回合進行即時更新。
 - 需要你核准或回答時，輸入框上方會顯示決策卡片，詳見[請求處理](#請求核准提問與計畫)。
-- 關閉或重新啟動 agent 時，若它在輸入關閉後 3 秒內沒有自行結束，AgentAPI 會向整個行程
+- 關閉或重新啟動 agent 時，若在輸入關閉後 3 秒內沒有自行結束，AgentAPI 會向整個行程
   群組送出訊號，它啟動的 MCP 伺服器和指令也會一併停止。agent 結束後（不論如何結束），它啟動
   而仍在執行的行程會收到 SIGTERM，2 秒後再收到 SIGKILL。
 - agent 自行結束或啟動失敗時，AgentAPI 會在 2、10、30 秒後接續原工作階段重新啟動。每次嘗試
@@ -153,7 +153,7 @@ agent 回報登入失效後才結束時，不會像當掉那樣重新啟動，�
 
 工具呼叫列會標示等待核准、已核准或已拒絕。`AskUserQuestion`、`request_user_input` 和
 `ExitPlanMode` 呼叫需在卡片上回答。已在其他地方回覆，或已不再待處理的請求會離開卡片。
-若提問隨回合過期或被 agent 撤回，介面會提示你仍可用一般訊息回答。
+若提問隨回合過期，或 agent 撤回了提問，介面會提示你仍可用一般訊息回答。
 
 有待處理請求時，標頭和分頁標題會顯示「Needs you」，分頁圖示會出現琥珀色圓點，embed 狀態列
 的圖示也會變成琥珀色；開啟通知時，背景分頁也會跳出 agent 需要你回應的通知。
@@ -596,7 +596,7 @@ Codex 自己的斜線指令是 TUI 功能；`/model`、`/compact` 以及[斜線�
 AgentAPI 會以 RPC 模式執行 Pi（`pi --mode rpc`，經由 stdin 與 stdout 傳送 JSON）。
 
 - **旗標。** AgentAPI 會加上 `--mode rpc --session-id <id>`（每個新工作階段都會用新的
-  `agentapi-<hex>` ID，重新啟動後也是）。會挑選模式或工作階段、或讓 Pi 直接結束的選項
+  `agentapi-<hex>` ID，重新啟動後也是）。會決定模式或工作階段、或讓 Pi 直接結束的選項
   （`--mode`、`--print`/`-p`、`--session`、`--session-id`、`--continue`/`-c`、
   `--resume`/`-r`、`--fork`、`--no-session`、`--export`、`--list-models`、`--help`/`-h`、
   `--version`/`-v`）、`@file` 參數、訊息（`--` 之後的，或是 RPC 模式會忽略的單純參數），以及
@@ -642,4 +642,4 @@ AgentAPI 會以 RPC 模式執行 Pi（`pi --mode rpc`，經由 stdin 與 stdout 
 - 沒有 `--state-db` 時，AgentAPI 下次啟動就是新的工作階段，不會接續 agent 先前的工作階段。
   [原地重新啟動](cli.zh-TW.md#agentapi-restart)是例外：它會接續工作階段。
 - 圖片只能當成訊息附件（`@"<路徑>"`）交給 agent，不能用命令列旗標（`codex -i` 和 Pi
-  的 `@file` 都會被拒絕）。
+  的 `@file` 都會拒絕）。

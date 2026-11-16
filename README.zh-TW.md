@@ -2,7 +2,7 @@
 
 [English](README.md) | 繁體中文
 
-AgentAPI 提供統一的 HTTP API，讓你控制 [Claude Code](https://github.com/anthropics/claude-code)、[Codex](https://github.com/openai/codex) 和 [Pi](https://pi.dev/)。
+AgentAPI 提供 HTTP API，讓你控制 [Claude Code](https://github.com/anthropics/claude-code)、[Codex](https://github.com/openai/codex) 和 [Pi](https://pi.dev/)。
 
 ![AgentAPI 聊天介面中的兩個任務：提示詞、工具呼叫、思考旁註和輸入框](docs/screenshots/chat-desktop.png)
 
@@ -56,7 +56,7 @@ AgentAPI 可以用來：
 - 從 `GET /rich-messages` 和 `GET /timeline` 讀取結構化的活動：思考內容、工具呼叫與結果、
   token 用量。
 - agent 工作中時送出的訊息會在可以編輯、重新排序的[佇列](docs/api.zh-TW.md#訊息佇列)中等待；也可以把訊息 [steer 進執行中的回合或中斷它](docs/agents.zh-TW.md#steerinterrupt-與佇列)。
-- 你的每則訊息和 agent 處理它的回合都是伺服器追蹤的[任務](docs/api.zh-TW.md#任務)：執行中、已完成、失敗，
+- 你的每則訊息和 agent 處理該訊息的回合都是伺服器追蹤的[任務](docs/api.zh-TW.md#任務)：執行中、已完成、失敗，
   或因用量限制而停止。
 - 透過 [server-sent events](docs/api.zh-TW.md#事件與增量同步) 即時追蹤一切，有心跳，重新連線後只重播
   有變動的部分。
@@ -81,7 +81,7 @@ AgentAPI 可以用來：
 - AgentAPI 會回報缺少或過期的[登入](docs/agents.zh-TW.md#登入)並附上要執行的指令，登入之後會自己啟動 agent。
 - agent 工作目錄中共用的[終端機](docs/agents.zh-TW.md#終端機)，方便登入和執行簡單的指令。
 - [持久保存的工作階段](docs/agents.zh-TW.md#持久保存的工作階段)：使用 `--state-db` 時，對話在 AgentAPI 重新啟動後
-  會保留，agent 也會接續它自己的工作階段。
+  會保留，agent 也會接續自己的工作階段。
 - 開啟 agent 在工作目錄中的[先前的工作階段](docs/agents.zh-TW.md#先前的工作階段)，或從其中一個開始一份副本。
 - 以模型供應商的牌價查看每個[工作階段與任務的花費](docs/agents.zh-TW.md#工作階段花費)（API 等價金額），含 sub agent，
   並加總今天、最近 7 天和 30 天的花費。

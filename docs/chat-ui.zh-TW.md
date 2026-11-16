@@ -91,7 +91,7 @@ Claude Code、Codex 和 Pi 另會顯示任務執行期間的模型呼叫花費�
 對話紀錄只顯示最近 5 個任務，**Show *n* older tasks** 會顯示聊天介面已有的其他任務。連線時，
 介面只向伺服器取得最近 20 個任務，而不是整段對話，所以跑了好幾個月的對話也能和新對話一樣快
 打開。捲到最上面，或按 **Show earlier tasks**，介面會再讀之前的 20 個任務，你正在看的內容會留在
-原位。任務編號由伺服器提供，所以會把還沒載入的任務也算進去。AgentAPI 4.3 以前的伺服器會一次
+原位。任務編號由伺服器提供，所以會把還沒載入的任務也算進去。早於 AgentAPI 4.3 的伺服器會一次
 送出所有任務。
 
 長對話會分批送達：最新的任務先到，每個任務連同回覆一起送來，較早的任務隨後補在上方。全部到齊
@@ -102,7 +102,7 @@ Claude Code、Codex 和 Pi 另會顯示任務執行期間的模型呼叫花費�
 
 ![任務選單，包含 Preview Markdown、Copy task and output 和 Export Markdown](screenshots/task-menu.png)
 
-任務標頭的 ⋯ 按鈕會把任務轉成 Markdown：提示詞、agent 的輸出，以及每個工具呼叫和它的輸入與
+任務標頭的 ⋯ 按鈕會把任務轉成 Markdown：提示詞、agent 的輸出，以及每個工具呼叫及其輸入與
 結果。**Copy task and output** 複製到剪貼簿，**Export Markdown** 下載成檔案，
 **Preview Markdown** 則先預覽，並提供 Copy 和 Download 按鈕。
 
@@ -129,7 +129,7 @@ Claude Code、Codex 和 Pi 另會顯示任務執行期間的模型呼叫花費�
 ![附加了一張圖片的輸入框](screenshots/attachments.png)
 
 agent 收到的是每個附件的路徑，PNG、JPEG、GIF 和 WebP 附件也會以圖片的形式收到。
-上傳的檔案滿 7 天、對話也不再提到時，AgentAPI 會刪除它。瀏覽器支援語音辨識時，
+上傳的檔案滿 7 天、對話也不再提到時，AgentAPI 就會刪除。瀏覽器支援語音辨識時，
 **More input options**（⋯）提供語音輸入：以瀏覽器的語言把你說的話聽寫進輸入框。
 
 草稿和附件在重新載入頁面後仍會保留。沒有送達伺服器的訊息會留在聊天中並標示為未送出，
@@ -272,7 +272,7 @@ agent 需要你回應時，會在輸入框上方顯示卡片並等待。卡片�
 
 需要你核准的指令或檔案變更（在 ask 模式下，或 agent 自己的政策要求詢問時）會顯示
 將要執行什麼，以及原因。**Allow** 只執行這一次，**Always allow** 在這個工作階段剩下的時間裡
-都允許這個工具，**Deny** 則拒絕它；可選的附註會告訴 agent 改做什麼。
+都允許這個工具，**Deny** 則拒絕；可選的附註會告訴 agent 改做什麼。
 
 ![核准指令：卡片出現，按下 Allow，回合繼續進行](screenshots/demo-approval.gif)
 
@@ -289,7 +289,7 @@ agent 的提問一次一個步驟：單選、複選或自由輸入文字。**Nex
 
 ![計畫卡片，包含以 Markdown 顯示的計畫、Approve the plan、Keep planning 和回饋欄](screenshots/native-plan.png)
 
-計畫以 Markdown 顯示。你可以核准它，或繼續規劃並告訴 agent 要改什麼。Claude Code
+計畫以 Markdown 顯示。你可以核准，或繼續規劃並告訴 agent 要改什麼。Claude Code
 和 Codex 還會讓你選擇 agent 接下來如何實作計畫：Claude Code 可以略過權限、自動接受編輯，或由你
 核准編輯；Codex 則是 bypass、auto review 或 ask 模式。
 
@@ -299,7 +299,7 @@ agent 的提問一次一個步驟：單選、複選或自由輸入文字。**Nex
 
 agent 尚未登入，或在工作階段中登入失效時，登入卡片會列出要執行的指令（`claude auth login`、
 `codex login --device-auth` 或 Pi 的 `/login`），以及要在哪台主機上、以哪個使用者執行。
-Codex 以裝置代碼登入：在任何裝置上開啟它印出的連結，再輸入它的一次性代碼，所以執行 AgentAPI
+Codex 以裝置代碼登入：在任何裝置上開啟 Codex 印出的連結，再輸入一次性代碼，所以執行 AgentAPI
 的地方不需要瀏覽器。
 **Run in terminal** 會在 [shell 終端機](#shell-終端機)中執行它；**Check again** 會立刻檢查。
 AgentAPI 也會每 5 秒重試一次，期間的訊息會在佇列中等待，標示 *held until the agent is logged in*。（截圖以 `dev-machine` 和 `dev`
@@ -335,7 +335,7 @@ HTML、Markdown 和 SVG 檔案有 **Preview** 分頁，圖片檔則直接顯示�
 
 呈現 HTML 頁面時，頁面以相對路徑引用的樣式表、腳本、圖片、字型和影音都會內嵌進去（`GET /files/preview`；每個檔案
 最多 4 MiB，合計 16 MiB；沒有內嵌的項目會列在提示中）。頁面在有 sandbox、沒有自己 origin
-的 frame 中執行：腳本可以執行，但無法存取聊天介面、它的登入狀態或 API，儲存空間和
+的 frame 中執行：腳本可以執行，但無法存取聊天介面、其登入狀態或 API，儲存空間和
 cookie 也只在預覽開著的期間保留。頁面的 Content-Security-Policy 允許載入它引用的資源，
 但不能送出任何東西：不能發出請求、開啟 socket 或送出表單。會 import 其他檔案的腳本模組也不會載入。
 
@@ -387,7 +387,7 @@ agent 用過自己以外的[模型供應商](providers.zh-TW.md)之後，卡片�
 
 ![Explorer 的 Session 分頁要求再點一次才會重新啟動 agent](screenshots/explorer-session.png)
 
-**Restart agent** 會停止 agent、清除對話，並在新的工作階段中重新啟動它；需要再點一次。
+**Restart agent** 會停止 agent、清除對話，並在新的工作階段中重新啟動；需要再點一次。
 agent 一再結束、AgentAPI 已放棄重新啟動時，也用這個按鈕重新啟動。
 AgentAPI 直接啟動 Codex 和 Pi 的 CLI 時，它們會先更新到最新的發行版。
 **Download conversation JSONL** 會儲存這個工作階段的每則訊息、工具呼叫和結果，每行一個事件，
@@ -415,7 +415,7 @@ AgentAPI 直接啟動 Codex 和 Pi 的 CLI 時，它們會先更新到最新的�
 Claude Code 或 Codex 把工作交給 sub agent 時，標頭上會出現一個按鈕，顯示 sub agent
 的數量和還在執行的數量。點下去會打開 Lineage 面板，列出每個 sub agent 的任務、類型、狀態和
 執行時間。選一個就能看到它做了什麼，呈現方式和對話紀錄裡的任務一樣：思考內容、工具呼叫和
-它的回答，執行中會持續更新。啟動 sub agent 的 Agent（或 spawn_agent）工具呼叫上的 **Steps**
+回答，執行中會持續更新。啟動 sub agent 的 Agent（或 spawn_agent）工具呼叫上的 **Steps**
 按鈕可以直接打開它。這些步驟來自 sub agent 自己的紀錄（Claude Code 的放在工作階段的紀錄旁），所以從 Session 分頁
 開啟的工作階段也能看到它的 sub agent；工作階段副本則不帶原本的 sub agent。`GET /subagents`
 列出 sub agent，`GET /subagents/{id}` 回傳單一 sub agent 的任務和訊息。
@@ -429,8 +429,8 @@ Claude Code sub agent 的狀態取自 Agent 工具呼叫。Codex 的 spawn 呼�
 ![shell 終端機：在 agent 工作目錄中執行的 git status 和 git log，以及按鍵列](screenshots/terminal.png)
 
 終端機按鈕（或 `/terminal`）會在 agent 的工作目錄中開啟一個 shell，方便登入和執行
-簡單的指令。它是真正的終端機，大小會配合視窗。所有開啟它的人共用同一個 shell，沒有人在看時
-它也會繼續執行。按鍵列可以送出手機鍵盤沒有的按鍵：方向鍵、Enter、Esc、Tab、Shift+Tab、
+簡單的指令。它是真正的終端機，大小會配合視窗。所有開啟終端機的人共用同一個 shell，沒有人在看時
+也會繼續執行。按鍵列可以送出手機鍵盤沒有的按鍵：方向鍵、Enter、Esc、Tab、Shift+Tab、
 Ctrl+C，shell 的 Ctrl+R、Ctrl+A、Ctrl+E、Ctrl+U 和 Ctrl+W，Home、End、Page up 和 Page down、
 / - | ~、Alt+↑ 和 Ctrl+L。
 按鍵列的 **Ctrl** 和 **Alt** 按鈕會按住修飾鍵，套用到你輸入的下一個按鍵，任何其他組合鍵都能這樣
@@ -448,7 +448,7 @@ Ctrl+C，shell 的 Ctrl+R、Ctrl+A、Ctrl+E、Ctrl+U 和 Ctrl+W，Home、End、P
 
 點選標頭中的狀態會開啟工作階段詳細資訊：狀態、agent、工作階段名稱、agent 的工作階段
 ID（前幾個字元，附複製按鈕）、AgentAPI 版本、agent 正在做什麼、佇列，以及輸入和輸出的 token
-數。它的選單可以把對話下載成 JSONL（和 Explorer 的 Session 分頁一樣）、開啟瀏覽器通知和提示音、顯示鍵盤快捷鍵，以及說明如何把這個 AgentAPI 加入
+數。選單可以把對話下載成 JSONL（和 Explorer 的 Session 分頁一樣）、開啟瀏覽器通知和提示音、顯示鍵盤快捷鍵，以及說明如何把這個 AgentAPI 加入
 [hub](hub.zh-TW.md)。（context 用了多少和用量限制在輸入框
 的工具列上，見 [Context 與用量限制](#context-與用量限制)。）
 
@@ -478,7 +478,7 @@ agent 的警告和錯誤（失敗的回合、它忽略的設定）會以角落�
 在手機上，對話紀錄會占滿整個寬度，思考內容收合在任務中。輸入框只占一行：訊息欄、`⋯`（附件、
 語音輸入和 agent 的設定）和送出，agent 工作時再加上停止，hub 開啟的聊天介面還有 ☆；訊息換行時才會變高。agent 的模式、
 模型、推理強度和用量平常不顯示，從 `⋯` 打開、用 `/model` 這類指令開啟它們的選單，或用量接近
-上限時，才會出現在第二行。有卡片在等你回覆時，只由卡片說明（上方的狀態列只留給螢幕閱讀器），選項也不顯示手機用不到的數字鍵。請求卡片
+上限時，才會出現在第二行。有卡片在等你回覆時，只由卡片說明（上方的狀態列只留給螢幕閱讀器），選項也不標數字鍵。請求卡片
 最多占螢幕的 60%，截成兩行的標題可以展開看完整內容。檔案檢視器會占滿整個螢幕，終端機
 則有按鍵列。鍵盤打開時，頁面會停在鍵盤上方，輸入框和按鍵列都不會被擋住。
 
@@ -490,8 +490,8 @@ agent 的警告和錯誤（失敗的回合、它忽略的設定）會以角落�
 
 ![手機上的 hub](screenshots/hub-phone.png)
 
-[hub](api.zh-TW.md#執行-hub)（`agentapi hub serve`）會替它監看的每個 AgentAPI 提供這個聊天
-介面。它的清單把釘選的 agent 排在最上方，其他的則依群組把需要你處理的排前面，也可以改成最近變動的
+[hub](api.zh-TW.md#執行-hub)（`agentapi hub serve`）會替所監看的每個 AgentAPI 提供這個聊天
+介面。清單把釘選的 agent 排在最上方，其他的則依群組把需要你處理的排前面，也可以改成最近變動的
 排前面。打開 By machine，兩種排序都會把同一台主機的 agent 收進一張卡片，每個 agent 一個分頁。
 每種狀態都有自己的圖示，並寫出每個 agent 在等什麼（核准的指令、提問）或在做什麼。可以用搜尋和標籤
 （狀態、agent）篩選。桌面上的總覽會統計各種狀態，列出需要你處理、工作中和你上次查看後完成的 agent，並加總最近

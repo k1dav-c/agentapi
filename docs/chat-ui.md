@@ -6,7 +6,7 @@ Open `/chat` to use the chat UI embedded in the `agentapi` binary. It works on d
 and talks to the server through the [HTTP API](api.md#http-api-reference).
 
 Screenshots and animations show AgentAPI v3.1.0 running `native-demo` on a sample site. The demo's
-replies, tool results, models and usage are simulated. A blue dot marks the pointer and clicks. To
+replies, tool results, models and usage are simulated. In the animations, a blue dot marks the pointer and clicks. To
 reproduce the captures, use [scripts/capture-docs.mjs](../scripts/capture-docs.mjs) as described in the
 [screenshot guide](screenshots/README.md).
 
@@ -550,7 +550,7 @@ A [hub](api.md#running-a-hub) (`agentapi hub serve`) serves this chat for every 
 watches. Its list puts the agents you pin on top, then what needs you first by group or the latest
 change first; By machine puts each machine's agents in one card, a tab each, in either order. Each state has a glyph of its own, and each row says what the agent waits for (the
 approval's command, the question) or does; search and chips (state, agent) filter the list. On a desktop, an
-overview counts each state, shows what needs you, works or finished since you looked, and totals the
+overview counts each state and shows what needs you, works or finished since you looked. It totals the
 spend, tokens and work time of the last 24 hours and 7 days, by group and by machine, and what went to each model provider. Picking an agent opens it in this chat
 beside the list (or instead of it on a phone, with a back button), under one bar: the hub's, with
 the chat's own buttons in it, and a button for each other agent of its machine, which opens it in

@@ -339,7 +339,7 @@ type Factory func(resume Resume) (Adapter, error)
   lost login, errors. Sink calls come from the adapter's read loop and never
   overlap. A rich message is sent whole each time it grows (a snapshot, not a
   delta), and message and request IDs never repeat across the adapters of one
-  factory, because the conversation remains active across adapter replacements.
+  factory, because one conversation outlives its adapters.
 - **Optional parts.** An adapter that implements `Configurable` has settings
   (permission mode, model, reasoning effort) and reports the ones the agent
   changes by itself through `SettingsSink`; `Compacter` compacts the context
@@ -377,8 +377,8 @@ type Factory func(resume Resume) (Adapter, error)
 - **Costs.** `sessions.Store.Costs` reads the model calls of every session in
   the directory, its subagents' included, from the same logs (`GET /sessions`,
   `GET /cost`): Claude Code's assistant messages (one per message id), Codex's
-  token counts, Pi's reported costs. `lib/pricing` prices each call but one to
-  a provider with a price of its model, priced at that
+  token counts, Pi's reported costs. `lib/pricing` prices each call, except a call
+  to a provider that has a price for its model, which gets that price
   ([Prices](#model-providers)); Claude
   Code's `cost-state` records add the tokens its log doesn't list
   (compaction) as unitemized calls at the same prices; a cost that differs
@@ -616,8 +616,8 @@ flowchart LR
   the providers (`wireProvider.prices`, which AgentAPIs before them ignore; a hub before them sends
   none). `sessions.Config.ProviderPrices` (`Source.Prices`) gives the cost reading a
   `provider.PriceTable`; once the calls are attributed, `atProviderPrices` prices a call to a provider
-  with a price of its model at it, and one priced so before at `lib/pricing`'s again when the price is
-  gone (a copy, as attributing makes). The reading keeps a digest of the table (`pricesKey`): when it
+  with a price of its model at that price, and a call it priced so before at `lib/pricing`'s again when
+  the provider's price is gone (on a copy, as attributing does). The reading keeps a digest of the table (`pricesKey`): when it
   changes, every session is priced again, though no log changed. On the hub, `lib/hub/prices.go`
   keeps OpenRouter's list (`openrouter.go`: fetched within 30 s, `pricing` per token converted to per
   million, models without a price, and routers with one below zero, left out) in `openrouter.json` beside `providers.json`,
@@ -771,7 +771,7 @@ the observer as part of the state:
 5. Run `make gen` and `bun run gen:api` in `chat/`, and document it.
 
 A field of `StoredState` is stored, restored and given back to the conversation without other
-changes, inside version 1 of `conversation_state` (below).
+changes, inside version 2 of `conversation_state` (below).
 
 ## The message queue
 
@@ -1134,9 +1134,9 @@ of the content's SHA-256, so a path never changes; unused ones are removed after
 
 When AgentAPI starts inside another agent session, it removes inherited session
 markers and secrets before launching the agent, and before the
-CLI update that precedes a restart (`codex update`, `pi update --self`). This
-prevents a child agent from inheriting the parent session's identity or sandbox
-markers. The filtering is implemented in [lib/procenv/procenv.go](../lib/procenv/procenv.go).
+CLI update that precedes a restart (`codex update`, `pi update --self`), so a
+child agent doesn't inherit the parent session's identity or sandbox markers.
+The filter is in [lib/procenv/procenv.go](../lib/procenv/procenv.go).
 
 **Claude Code session variables**
 
@@ -1207,8 +1207,8 @@ props in `HubListContext`; its logic in `lib/hub.ts`, the instance, its state an
 events, and beside it `lib/hub-groups.ts`, `hub-machines.ts`, `hub-filter.ts`, `hub-format.ts`,
 `hub-spend.ts`, `hub-work.ts`, `hub-version.ts` and `hub-order.ts`; the changes it makes through
 `lib/hub-api.ts`; what the browser keeps through `lib/hub-settings.ts`), which `agentapi hub serve`
-serves with the same build. Where the page is, the agent open and whether Issues is open below it,
-is a page of the browser's history each (`lib/hub-route.ts`, `useHubRoute`). Its Issues page
+serves with the same build. Each agent opened, and the Issues page, is a page of its own in the
+browser's history (`lib/hub-route.ts`, `useHubRoute`). Its Issues page
 (`components/hub/issues/`: the view, its cards, the detail with its status and the runs' timeline,
 the assign menu; `use-dispatch.ts` reads the issues and acts) works on the board model of
 `lib/hub-issues.ts` (the cards by section, the suggested agent and machine, the timeline), with the

@@ -42,7 +42,7 @@ hub never has to be on the public internet.
    stops trying until its next heartbeat. These events only add instances and say where they are;
    what each one does comes from its summary. An event that names another URL moves the instance
    there only once the old URL is dead to the hub: it failed there past the 10 s grace
-   (unreachable, or stopped after missed heartbeats), or another AgentAPI answers there. Never while
+   (unreachable, or stopped after missed heartbeats), or another AgentAPI answers there. It never moves one while
    the hub is connected or still connecting (after the hub restarts, or within 10 s of a dropped
    stream), and never one added by hand. One stopped by `instance.stopped` is tried at its old URL
    first. An AgentAPI whose machine got another address (`{ip}` in its `--public-url`) moves with
@@ -138,7 +138,7 @@ agentapi hub join http://hub.vpn:3290/hooks --secret "$HUB_SECRET" \
 The hub's page has this command ready, with the hub's address and secret filled in, and a prompt
 for an agent on the machine: [Joining a machine from the page](#joining-a-machine-from-the-page).
 
-- `join` first sends the hub a signed test event and stops if the hub doesn't take it (unreached, a
+- `join` first sends the hub a signed test event and stops if the hub doesn't take it (unreachable, a
   sign-in page in the way, or another secret); see the [reference](#agentapi-hub-join-leave-status).
 - `join` writes the hub into `~/.agentapi/config.yaml`. Every `agentapi server` of this user reads
   that file when it starts, so AgentAPIs started by a script with fixed flags, such as a Coder
@@ -256,7 +256,7 @@ as last known, and the totals leave it out. A scope belongs to one machine, so t
 to the totals.
 
 The overview's tables name each agent's machine after its name, since agents on different machines
-often share one (their home directory's). **By machine** puts the most this week first and leaves
+often share a name (their home directory's). **By machine** puts the most this week first and leaves
 out the machines with none. With more than eight, the seven with the most show and the rest add up
 in one row (**Other 9 machines**). Agents that don't report their machine add up under
 **Not reported**.
@@ -265,7 +265,7 @@ in one row (**Other 9 machines**). Agents that don't report their machine add up
 
 ![The tokens the agents used: the last 24 hours and 7 days, by kind, the agents that used the most, each group and each machine](screenshots/hub-tokens.png)
 
-The spend's pass also counts the tokens of the same calls: `spend` has them for the last 24 hours
+The pass that works out the spend also counts the tokens of the same calls: `spend` has them for the last 24 hours
 (`day_tokens`) and 7 days (`week_tokens`), as `input`, `output`, `cache_write` (Anthropic's
 five-minute and one-hour caches together), `cache_read` and their `total`. A call counts once, where
 its cost does: a fork's copy of an earlier session's call counts in that session. Calls to a model
@@ -276,7 +276,7 @@ by call (compacting the context) counts with the tokens its own count gives it.
 provider with calls in the last 7 days, its `provider` (`default` for the agent's own), `day_usd`,
 `week_usd`, `day_tokens` and `week_tokens`, the most expensive this week first. A Codex call counts
 toward the provider its log names; a Claude Code call toward the provider AgentAPI last recorded
-its session on (`~/.agentapi/provider-ledger.jsonl`). Earlier releases don't send it.
+its session on (`~/.agentapi/provider-ledger.jsonl`). AgentAPIs before 5.0 don't send it.
 
 Below Spend, the overview's **Tokens** card has the 24 hours and 7 days of every agent that reports
 them, by kind, the five that used the most this week, each group's when there are groups, and each
@@ -295,7 +295,7 @@ tokens; a gateway's models often have no known price, so a provider whose calls 
 used tokens says **no price** rather than `$0`. The most spent this week comes first, then the most
 tokens. The card's totals are the tokens that went to providers other than the agents' own; it
 counts each scope once, connected agents only, and says how many agents report it. AgentAPIs
-before this release, and those without calls in the last 7 days, don't.
+before 5.0, and those without calls in the last 7 days, don't.
 
 ### Work time
 
@@ -330,7 +330,7 @@ four that each take a quarter of the days with any, so one busy day doesn't wash
 focus the grid and move with the arrow keys, for that day's three figures. The days are those of
 your browser's time zone; the page reads them again every 10 minutes and when you come back to it.
 
-The hub records the activity from the day it runs a release with it, hour by hour, and keeps a year
+The hub records the activity from the day it first runs 4.2 or later, hour by hour, and keeps a year
 (366 days) in `activity.json` next to its file of instances. Days before that are blank, and the
 card says since when it keeps them. Work time adds up each agent's spans, as the Work time card
 counts them; at the first start, the hub adds the 7 days its file of instances has. Spend and
@@ -370,7 +370,7 @@ Before it restarts, the AgentAPI runs the new program with its own settings unde
 `agentapi server --validate`. If the new program wouldn't start with them (a flag or an agent it
 doesn't take), the AgentAPI keeps serving and the update fails, saying why. AgentAPI 3 runs only
 Claude Code, Codex and Pi: an AgentAPI 2 that runs another agent, or any agent with
-`--transport pty`, fails this way, but its machine already has AgentAPI 3 on disk. Put v2.5.1 back
+`--transport pty`, fails this way, but its machine already has the new version on disk. Put v2.5.1 back
 there before that AgentAPI restarts.
 
 The row shows how far the update got: checking, downloading, waiting for the task, restarting.
@@ -653,8 +653,8 @@ URL, an API key and the models it offers; without models, each AgentAPI asks the
 provider's `<base_url>/models`. The hub keeps up to 50. The key is write-only: the page shows
 whether a provider has one, and a key left empty in the editor keeps it only while the provider ID and
 endpoints stay the same. Enter the key again after changing either endpoint; **Remove the key**
-removes it. An ID can't change once added. Saving includes the list's revision, so another tab that
-saved since you opened yours gets a conflict rather than silently losing either tab's changes.
+removes it. An ID can't change once added. Saving includes the list's revision, so saving after another tab
+saved since you opened yours gets a conflict instead of overwriting that tab's changes.
 
 ![The editor after Check connection: the provider answered with six models, two of them picked](screenshots/hub-settings-provider-check.png)
 
@@ -705,7 +705,7 @@ The **GitHub** tab of **Hub settings** shows the hub's GitHub App. The app lists
 the app's name beside **Issues**, and **GitHub settings…** at the foot of the repository menu, open
 it too. It has the app's name, linked to its page on GitHub, and the account or organization that
 owns it. Below, each account the app is installed on has its picture, **All repositories** or how
-many were selected, and their first names. The section and the Issues page read the app again when
+many were selected, and the names of the first few. The tab and the Issues page read the app again when
 the hub's page shows again, so coming back from GitHub is enough to see a change.
 
 The app asks for read and write on Contents, Pull requests, Issues and Workflows. GitHub refuses a
@@ -1010,8 +1010,8 @@ right is forgotten, it closes.
   a machine with the secret can still have the hub send requests (`POST /jobs`, `DELETE
   /jobs/<key>`) to another machine on the network.
 - The hub forwards an instance's requests (the chat, approvals, updates) only while it is
-  connected: it reads that instance's summary at its URL. While it connects, after the hub
-  restarts, a stream drops or an event moved the instance, the proxy answers 503 and sends
+  connected: it reads that instance's summary at its URL. While it connects (after the hub
+  restarts, a stream drops or an event moved the instance), the proxy answers 503 and sends
   nothing.
 - The session cookie is HttpOnly and SameSite=Lax, and holds the time it was issued, signed with
   the hub token (HMAC), rather than the token. The hub refuses one older than 30 days, whatever the
@@ -1202,7 +1202,7 @@ running AgentAPIs, which then no longer follow their conversation for the webhoo
 | `POST /api/providers/prices` | Gets OpenRouter's list again and has the providers without models list theirs, then answers as `GET /api/providers`; OpenRouter failing is in `prices.error`. 409 for a hub that doesn't look prices up |
 | `GET /api/providers/openrouter?q=` | The OpenRouter models of the hub's copy whose ID or name has every word of `q`, at most 50: `{"models": [{"id", "name", "price"}], "fetched_at"}` |
 | `POST /api/providers/sync` | An AgentAPI gets the providers with their keys and their models' prices, sealed with the hub's secret: `{"sealed", "nonce", "proof"}`, `proof` binding `sealed` to the request's `nonce`. Signed with `--secret` as events are, no session needed. AgentAPIs before the prices ignore them |
-| `GET /api/events` | Server-sent events: `instances` (all of them and `hub_version`, as `GET /api/instances` has them) and `favorites` (as `GET /api/favorites` has them), then `instance` (one changed what the page shows, or its work time moved by a minute; when it was last heard of counts only while it is offline), `removed` (`{"id"}`), `favorites` (all of them, after a change), `dispatch` (the [issue dispatch's](#issues) machines and jobs, as `GET /api/hosts` and `GET /api/jobs` have them, at first and after each change) and a `heartbeat` every 15 s. A browser that takes no event for 30 s loses the stream |
+| `GET /api/events` | Server-sent events: `instances` (all of them and `hub_version`, as `GET /api/instances` has them) and `favorites` (as `GET /api/favorites` has them), then `instance` (one changed what the page shows, or its work time moved by a minute; when it was last heard of counts only while it is offline), `removed` (`{"id"}`), `favorites` (all of them, after a change), `dispatch` (the [issue dispatch's](#issues) machines and jobs, as `GET /api/hosts` and `GET /api/jobs` have them, at first and after each change) and a `heartbeat` every 15 s. A browser that stops reading the stream for 30 s loses it |
 | `GET /api/hosts` | The machines whose launchers report: their agents, repositories, jobs and room, and whether each is `online` |
 | `DELETE /api/hosts/{name}` | Forgets a machine and the launcher token the hub pinned its name to, so a launcher with a new token can join under the name. 409 while the machine is online (`host_online`) or has a job that works (`host_busy`): stop its jobs first; 404 for a machine the hub doesn't have |
 | `POST /api/jobs/clear` | Forgets the ended jobs of `{"keys": [...]}` (at most 1,000): done, or stopped and no longer on their machine; the others stay. Answers `{"cleared": [...]}`, the keys it forgot |
