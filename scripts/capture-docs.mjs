@@ -1126,16 +1126,16 @@ try {
       await settingsDialog.waitFor({state: 'detached'});
       // An instance that waits for an approval, open in the chat.
       await page.getByRole('list', {name: 'Instances'}).getByText('checkout-api').click();
-      await page.frameLocator('iframe').getByRole('button', {name: 'Allow'}).first().waitFor();
+      await page.frameLocator('iframe:not([inert])').getByRole('button', {name: 'Allow'}).first().waitFor();
       await page.waitForTimeout(800);
       await shot(page, 'hub-instance.png');
       // An idle agent open from the hub, with the composer's menu of favorites.
       await page.getByRole('list', {name: 'Instances'}).getByText('design-system').click();
-      const favoritesButton = page.frameLocator('iframe').getByRole('button', {name: 'Favorites'});
+      const favoritesButton = page.frameLocator('iframe:not([inert])').getByRole('button', {name: 'Favorites'});
       await favoritesButton.waitFor();
-      await page.frameLocator('iframe').getByRole('textbox', {name: 'Task message'}).fill('The button tokens changed in this branch.');
+      await page.frameLocator('iframe:not([inert])').getByRole('textbox', {name: 'Task message'}).fill('The button tokens changed in this branch.');
       await favoritesButton.click();
-      await page.frameLocator('iframe').getByRole('menuitem', {name: /^Review the diff/}).waitFor();
+      await page.frameLocator('iframe:not([inert])').getByRole('menuitem', {name: /^Review the diff/}).waitFor();
       await page.waitForTimeout(300);
       await shot(page, 'composer-favorites.png');
       await page.keyboard.press('Escape');
@@ -1196,7 +1196,7 @@ try {
   await fetch(`${hubAPI}/api/instances/${encodeURIComponent(mobileApp.id)}`, {method: 'PATCH',
     headers: {Authorization: 'Bearer docs-token', 'Content-Type': 'application/json'}, body: JSON.stringify({muted: false})});
   await tap(hubPhonePage, hubPhonePage.getByRole('list', {name: 'Instances'}).getByText('checkout-api'));
-  await hubPhonePage.frameLocator('iframe').getByRole('button', {name: 'Allow'}).first().waitFor();
+  await hubPhonePage.frameLocator('iframe:not([inert])').getByRole('button', {name: 'Allow'}).first().waitFor();
   await hubPhonePage.waitForTimeout(800);
   await shot(hubPhonePage, 'hub-phone-chat.png');
   await hubPhonePage.context().close();
@@ -1206,12 +1206,12 @@ try {
   await recordGif(hubGif, 'demo-hub.gif', async () => {
     await hubGif.waitForTimeout(600);
     await tap(hubGif, hubGif.getByRole('list', {name: 'Instances'}).getByText('checkout-api'));
-    const allow = hubGif.frameLocator('iframe').getByRole('button', {name: 'Allow'}).first();
+    const allow = hubGif.frameLocator('iframe:not([inert])').getByRole('button', {name: 'Allow'}).first();
     await allow.waitFor();
     await hubGif.waitForTimeout(700);
     await tap(hubGif, allow);
     await hubGif.waitForTimeout(1500);
-    await tap(hubGif, hubGif.frameLocator('iframe').getByRole('button', {name: 'Back to Agents'}));
+    await tap(hubGif, hubGif.frameLocator('iframe:not([inert])').getByRole('button', {name: 'Back to Agents'}));
     await hubGif.getByRole('list', {name: 'Instances'}).getByText('checkout-api').waitFor();
     await hubGif.waitForTimeout(1200);
   });

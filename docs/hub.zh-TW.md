@@ -551,7 +551,7 @@ AgentAPI 正在更新時，上方那一列也會顯示進度，還在等任務�
 
 ### 模型供應商
 
-![Hub settings：Providers 分頁，列出兩個供應商和它們的端點、模型與金鑰狀態](screenshots/hub-settings-providers.png)
+![Hub settings：Providers 分頁，列出兩個供應商的端點、模型、金鑰狀態、用量和健康度，以及其中一個的模型價格](screenshots/hub-settings-providers.png)
 
 hub 會替每台向它回報的主機保存[模型供應商](providers.zh-TW.md)：Claude Code 和 Codex
 的工作階段可以換用的端點，例如 LiteLLM gateway。**Hub settings** 的 **Providers** 分頁列出所有
@@ -649,6 +649,8 @@ agent。離線的主機有 **×**，確認後 hub 會移除這台主機，以及
   按標題旁的 **Clear** 並確認後，會移除這一區目前列出的 job：它們的 run 和花費紀錄一併移除，GitHub 上的花費
   留言保留，還開著的 issue 會回到 To do。主機離線時停止的 job，要等主機放掉它才能清除。
 
+![Clear 會先確認，並列出要移除的已結束 job](screenshots/dispatch-clear.png)
+
 每張卡片顯示 issue 編號、狀態和標題，負責的 agent 與主機、PR、各次 run 的花費與次數，以及這個狀態
 下該做的那件事：**Assign**、**Answer**、**Review #21**、**Retry**。卡片換狀態時，會移到新的區塊。主機
 和 job 有變動時，hub 會透過串流推給頁面。你在頁面上做的操作，hub 一回應就會顯示，之後再以串流為準。
@@ -686,7 +688,7 @@ chat**、**Review #…**、**Open chat**；再下面是 **Switch agent**（保�
 | --- | --- |
 | ![換 agent 前先確認](screenshots/dispatch-confirm-switch.png) | ![Stop 前先確認](screenshots/dispatch-confirm-stop.png) |
 
-接著是這個 job 的花費、run 數、agent 工作時間和 token 數，以及由新到舊的時間軸：每次 run（agent 與
+接著是這個 job 的花費、run 數、agent 工作時間、總經歷時間和 token 數、issue 的說明，以及由新到舊的時間軸：每次 run（agent 與
 主機、執行時間、花費、怎麼結束），和每則送給 agent 的訊息，不論來自這一頁，還是 GitHub 上的 review 或
 `/agent` 留言。hub 為每個 job 保留最近 50 則訊息。**On the machine** 列出分支和 worktree，可以複製。
 agent 還在工作時，可以從最下面的輸入框傳訊息給它（⌘/Ctrl+Enter 送出）。
@@ -735,6 +737,25 @@ hub 還沒有 GitHub App 時，Issues 會顯示 **Connect GitHub**，從 manifes
 | 手機上的看板 | 手機上的 issue |
 | --- | --- |
 | ![手機上的 Issues](screenshots/dispatch-phone.png) | ![手機上 issue 的詳細資料](screenshots/dispatch-phone-detail.png) |
+
+#### 在 GitHub 上
+
+以下是一個 issue 的工作在 GitHub 上的樣子，取自專為這些截圖保留的公開 repo
+[k1dav-c/agentapi-demo](https://github.com/k1dav-c/agentapi-demo)。agent 開始工作時，hub 以它的
+GitHub App 在 issue 上留言，並附上在 hub 開啟的實例：
+
+![hub 在 issue 上的留言：Claude Code 已在某台主機上開始，以及要開啟的實例](screenshots/github-issue.png)
+
+agent 開的 PR 會關閉這個 issue。要求修改的 review，或以 `/agent` 開頭的留言，會經過
+[workflow](../examples/issue-dispatch/README.md) 交給同一個 agent；它 push 到同一個分支，並在 PR
+上說明改了什麼：
+
+![PR 上的 review 和 /agent 留言，agent 各自 push 並回覆摘要](screenshots/github-pr-review.png)
+
+PR 合併或關閉時，hub 留言列出這個 job 的花費：各次 run、任務數、工作時間、tokens 和總經歷時間，並刪除
+分支：
+
+![hub 在已合併的 PR 上留的花費彙總，以及它刪除的分支](screenshots/github-pr-cost.png)
 
 ### 快捷鍵與通知
 

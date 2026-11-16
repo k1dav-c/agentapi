@@ -150,11 +150,11 @@ does not run the displayed command.
 Open Explorer with ⌘K / Ctrl+K to jump to a task, open a discovered file, or reach the Session and
 Webhook tabs.
 
-![Mobile native chat with the prompt, tool output, reply, and session controls](../docs/screenshots/chat-mobile.png)
+![Mobile native chat with the prompt, tool output and reply](../docs/screenshots/chat-mobile.png)
 
 On phones, thinking collapses into the conversation and the composer stays at the bottom. The
 permission mode, model, and context controls take a second row when you ask for it from `⋯`.
 
 The [screenshot guide](../docs/screenshots/README.md) includes native question and plan cards, the
-file viewer, the model menu, and instructions for regenerating the images with
-[scripts/capture-docs.mjs](../scripts/capture-docs.mjs).
+file viewer, the model menu, the hub, and instructions for regenerating the images with
+[scripts/capture-docs.mjs](../scripts/capture-docs.mjs) and [scripts/capture-dispatch.mjs](../scripts/capture-dispatch.mjs).

@@ -1,9 +1,11 @@
 # Documentation screenshots
 
 The [chat UI guide](../chat-ui.md) and [README](../../README.md) use these screenshots and GIFs.
-Chromium captured them from AgentAPI 3.1.0, built from the source with `make build`, serving the
-production chat UI and API; `retry-card.png` came later, from a 3.3.0 build, and the views of the
-hub's page (with its settings button) and of the favorites from a 3.5.0 build.
+Chromium captured them from AgentAPI 5.6.0, built from the source with `make build`, serving the
+production chat UI and API, with two scripts: `capture-docs.mjs` for the chat and the hub's list
+and overview, and `capture-dispatch.mjs` for the hub's Issues page, its GitHub and Providers
+settings and the model menu with the hub's providers. The `github-*.png` views and two older
+`dispatch-*.png` views came otherwise; see below.
 
 [scripts/capture-docs.mjs](../../scripts/capture-docs.mjs) starts its own servers on a small sample
 project, `my-app` (a page with a stylesheet, a script and release notes, two commits and
@@ -22,42 +24,39 @@ uncommitted changes):
   one needs a login, one hit its usage limit, one works, one finished a task, one is idle, one
   stopped and one was killed, so the hub can't reach it. Six are in two groups, and two of those
   are pinned to the top. The one that asks questions can run a binary stamped with an older
-  version (`AGENTAPI_OLDER_BINARY`), so that it shows as older than the hub: 2.0.0 beside the
-  hub's 3.1.0 in the screenshots. The hub starts on a file that says how long each instance
+  version (`AGENTAPI_OLDER_BINARY`), so that it shows as older than the hub: 5.5.1 beside the
+  hub's 5.6.0 in the screenshots. The hub starts on a file that says how long each instance
   worked over the last week, as a hub that watched them would keep it, since a demo doesn't run
   for hours. A second, empty hub shows the guide for the first agents. The instances all run on
   one machine, so the hub's page gets them as if they ran on three, named `dev-1` to `dev-3`: the
   script renames each one's machine in the hub's events before the page reads them. The rows, the
   By machine views, the overview's cards and the switch of a machine's agents show these names.
-  Screenshots taken before 3.2.0 show `dev-1` and so on in turn, row by row.
 
-The `dispatch-*.png` views of the hub's Issues page came from a build of the hub with fixed data:
-the page's calls to the dispatch (`/api/hosts`, `/api/jobs`, `/api/github*`, `/api/dispatch`)
-and its stream answered from fixtures of three machines (one offline), Claude Code, Codex and Pi,
-and the issues and jobs of `acme/web`, `acme/api` and `acme/infra`, at a fixed time.
+[scripts/capture-dispatch.mjs](../../scripts/capture-dispatch.mjs) runs a real `agentapi hub
+serve` on a scratch home directory: it serves the page, signs the browser in, keeps the favorites
+and two model providers, `gateway` (LiteLLM gateway, three models, a key) and `local` (Local vLLM,
+one model), priced from an OpenRouter list the script writes as the hub's copy, and reads a GitHub
+App the script writes (a key made on the spot, `acme-agents`, installed on the organization `acme`
+with selected repositories and on a user, `dave`). What would need machines, agents and GitHub is
+fixed data fed to the page: the hub's stream gives it the script's agents and its board of three
+machines (`pve-dev` and `mac-mini` online, `gpu-box` offline) and the issues and jobs of
+`acme/web`, `acme/api` and `acme/infra`; Playwright answers the calls that would go to GitHub and
+refuses any other address off the machine; the page's clock is fixed. For the model menu, an
+`agentapi server` joins the hub and runs a small stand-in for Claude Code that the script writes;
+for Check connection, a fake OpenAI-compatible endpoint lists six models.
+
 `dispatch-chat.png` and `dispatch-github-connect.png` came from a development build of the
 `feat/issue-dispatch` branch: a real hub and launcher, `native-demo` posing as Claude Code and
-Codex, a local bare repository in place of github.com, and a fake GitHub API. None of them are
-part of `capture-docs.mjs`.
+Codex, a local bare repository in place of github.com, and a fake GitHub API. Neither script
+takes them.
 
-The Issues side of `dispatch-no-github.png` was taken again from a 3.16 build, for the machines
-it has shown since: a hub of its own with three machines' launchers (one offline) reported by hand,
-and the list beside it kept from the first.
-
-`hub-settings-github.png` came from the same kind of build and fixtures: an app of the `acme`
-organization installed on `acme` (24 selected repositories) and on a user, `dave` (all three of
-his), with the accounts' pictures drawn locally in place of GitHub's. Since the settings dialog
-has tabs, `hub-settings-favorites.png` was taken the same way, with the favorites
-`capture-docs.mjs` puts on its hub; the script takes it again as before. Both were taken again once
-the dialog had a third tab, Providers, from a build of the `feat/custom-providers` branch with the
-same fixtures.
-
-`model-providers.png`, `hub-settings-providers.png` and `hub-settings-provider-check.png` came from
-a development build of the `feat/custom-providers` branch, with a hub that keeps two providers,
-`gateway` (LiteLLM gateway, three models, a key) and `local` (Local vLLM, one model), and a fake
-provider that lists six models for the check. They aren't part of `capture-docs.mjs`, but are taken
-as it takes the others: in the light theme at 1x, the model menu with the composer as
-`model-settings.png`, and the settings dialog as `hub-settings-favorites.png`.
+The `github-*.png` views are of github.com, signed out, at 1280 pixels wide: the issue and pull
+request of [k1dav-c/agentapi-demo](https://github.com/k1dav-c/agentapi-demo), a public repository
+kept for them. A real hub dispatched the issue to Claude Code on a real machine; the review, the
+`/agent` comment, the approval and the merge are a person's. That repository has no dispatch
+workflow (a public repository shouldn't run jobs on self-hosted runners), so the pull request's
+events reached the hub as the workflow sends them, through `POST /api/dispatch` with the hub's
+dispatch token.
 
 ## Gallery
 
@@ -76,7 +75,7 @@ device scale factor of 1.
 | [join-hub.png](join-hub.png) | Add to an AgentAPI hub: the hub's address and the commands to copy |
 | [permission-mode.png](permission-mode.png) | The permission mode menu |
 | [model-settings.png](model-settings.png) | The model and reasoning effort menu |
-| [model-providers.png](model-providers.png) | Claude Code's model menu: its own models, then those of a provider from the hub, LiteLLM gateway, marked **hub** |
+| [model-providers.png](model-providers.png) | Claude Code's model menu: its own models, then those of the hub's two providers, LiteLLM gateway and Local vLLM, marked **hub** |
 | [context-usage.png](context-usage.png) | The context window and the usage limits |
 | [slash-commands.png](slash-commands.png) | The slash commands |
 | [attachments.png](attachments.png) | An image attached in the composer |
@@ -112,8 +111,8 @@ device scale factor of 1.
 | [hub-list.png](hub-list.png) | The hub's list: two pinned agents, then two groups and Ungrouped, with every state's glyph: approval, question, login, usage limit, working, finished, idle, unreachable, stopped; and each agent's AgentAPI version, one older than the hub |
 | [hub-add.png](hub-add.png) | The Add dialog: joining a machine (the hub's address, updates from the hub, the command and a prompt for an agent, the secret masked), or adding an instance by its URL and token |
 | [hub-settings-favorites.png](hub-settings-favorites.png) | Hub settings at its Favorites tab: the favorites, each with its buttons to move, edit and delete it |
-| [hub-settings-providers.png](hub-settings-providers.png) | Hub settings at its Providers tab: two providers, each with its monogram, ID and endpoint, its models and whether it has a key |
-| [hub-settings-provider-check.png](hub-settings-provider-check.png) | A new provider's editor after Check connection: reached in 184 ms with six models, two of them picked to offer |
+| [hub-settings-providers.png](hub-settings-providers.png) | Hub settings at its Providers tab: two providers, each with its monogram, ID and endpoint, its models, whether it has a key, its usage and its health over the last hour; one with its models' prices from OpenRouter open |
+| [hub-settings-provider-check.png](hub-settings-provider-check.png) | A new provider's editor after Check connection: reached in about 180 ms with six models, two of them picked to offer |
 | [hub-settings-github.png](hub-settings-github.png) | Hub settings at its GitHub tab: the hub's GitHub App, the accounts it is installed on with their repositories, and Choose repositories, App settings on GitHub, Reconnect and Disconnect |
 | [hub-recent.png](hub-recent.png) | The hub's list by the agents' latest changes: the pinned agents, then one list without group headers, the most recent first, and each row's group where it has room |
 | [hub-machines.png](hub-machines.png) | The hub's list By machine in the groups: the pinned agents, then each group with a card per machine: the machine with its version and spend once, a tab per agent with its state's dot, and the picked agent below, one older than the hub |
@@ -146,9 +145,10 @@ small.
 | [dispatch-issues.png](dispatch-issues.png) | The hub's Issues page: the stages, the machines, and the issues by section, what needs you first |
 | [dispatch-assign.png](dispatch-assign.png) | Assign's menu: each agent's machines that can take the issue, and those that can't, with why |
 | [dispatch-repos.png](dispatch-repos.png) | The repository menu: the 20 most recent, or any one, found by its name |
-| [dispatch-detail.png](dispatch-detail.png) | An issue's detail beside the board: an agent switch under way, its runs and a comment from GitHub |
+| [dispatch-detail.png](dispatch-detail.png) | An issue's detail beside the board: an agent switch under way, its spend, runs, agent time, elapsed time and tokens, its description, its runs and a comment from GitHub |
+| [dispatch-clear.png](dispatch-clear.png) | Clear asks first: the ended jobs of the Done section it forgets |
 | [dispatch-review.png](dispatch-review.png) | The detail of an issue in review: a review and a message from the hub in its timeline |
-| [dispatch-failed.png](dispatch-failed.png) | A job whose AgentAPI exited 5 times: why, its log, and Retry |
+| [dispatch-failed.png](dispatch-failed.png) | A job whose AgentAPI exited 6 times in 30 minutes: why, its log, and Retry |
 | [dispatch-confirm-stop.png](dispatch-confirm-stop.png) | Stop asks first: the worktree and the branch are deleted |
 | [dispatch-confirm-switch.png](dispatch-confirm-switch.png) | Switch asks first: Codex takes over on the same branch |
 | [dispatch-new-issue.png](dispatch-new-issue.png) | New issue: open an issue and assign it to an agent |
@@ -158,6 +158,9 @@ small.
 | [dispatch-chat.png](dispatch-chat.png) | Open chat on an issue's job: the review that came in from GitHub, fenced as the user's content |
 | [dispatch-no-github.png](dispatch-no-github.png) | Issues before GitHub is connected: Connect GitHub, and start an issue by its reference |
 | [dispatch-github-connect.png](dispatch-github-connect.png) | `/github/connect`, the hub's page that creates its GitHub App |
+| [github-issue.png](github-issue.png) | On github.com: the issue, and the hub's comment that Claude Code started on a machine |
+| [github-pr-review.png](github-pr-review.png) | On github.com: a review asking for a change and an `/agent` comment, each answered by the agent with a push and a summary |
+| [github-pr-cost.png](github-pr-cost.png) | On github.com: the merge, the cost summary the hub posted, and the branch it deleted |
 
 The login card names the host and user to log in as; the script shows `dev-machine` and `dev` in
 their place. The servers get a clean environment (no tokens or workspace links of the shell that
@@ -191,21 +194,29 @@ runs the script) and a neutral shell prompt.
    ```bash
    export AGENTAPI_PLAYWRIGHT_MODULE=/tmp/agentapi-docs-browser/node_modules/playwright-core/index.mjs
    export AGENTAPI_BINARY=out/agentapi        # the default; or a downloaded release binary
-   export AGENTAPI_OLDER_BINARY=/tmp/agentapi-2.0.0  # optional: one hub instance runs it
+   export AGENTAPI_OLDER_BINARY=/tmp/agentapi-5.5.1  # optional: one hub instance runs it
    export CHROMIUM_PATH=/absolute/path/to/chromium   # optional: Playwright's own Chromium otherwise
    node scripts/capture-docs.mjs
    ```
 
    For the older binary, build the same source stamped with an earlier version:
-   `go build -ldflags "-X github.com/coder/agentapi/internal/version.Version=2.0.0" -o /tmp/agentapi-2.0.0 main.go`.
+   `go build -ldflags "-X github.com/coder/agentapi/internal/version.Version=5.5.1" -o /tmp/agentapi-5.5.1 main.go`.
+
+4. Run the second script for the Issues page, the GitHub and Providers settings and the model menu.
+   It needs three free ports (3400 to 3402 unless you set `AGENTAPI_DISPATCH_PORT` to the first of
+   three others), and takes about two minutes:
+
+   ```bash
+   node scripts/capture-dispatch.mjs
+   ```
 
 The script creates a temporary sample project and home directory, then starts its servers on
 127.0.0.1. It captures every view and GIF and writes [capture.json](capture.json) with the binary
 version, browser, capture time, viewports and images. It stops the servers and removes temporary
-files even if a step fails. The run takes about five minutes; a chat error fails it.
+files even if a step fails. The run takes about 25 minutes; a chat error fails it.
 
 The binary's version shows in the chat's header. To show the version a merge will release, build
-with it: `make build VERSION=3.1.0`.
+with it: `make build VERSION=5.6.0`.
 
 Review the new images before updating the [chat UI guide](../chat-ui.md), its
 [Traditional Chinese translation](../chat-ui.zh-TW.md) and the READMEs.
