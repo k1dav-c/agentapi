@@ -3,9 +3,11 @@
 The [chat UI guide](../chat-ui.md) and [README](../../README.md) use these screenshots and GIFs.
 Chromium captured them from AgentAPI 5.6.0, built from the source with `make build`, serving the
 production chat UI and API, with two scripts: `capture-docs.mjs` for the chat and the hub's list
-and overview, and `capture-dispatch.mjs` for the hub's Issues page, its GitHub and Providers
-settings and the model menu with the hub's providers. The `github-*.png` views and two older
-`dispatch-*.png` views came otherwise; see below.
+and overview, and `capture-dispatch.mjs` for the hub's Issues page and an issue's agent in its chat,
+the page that creates the hub's GitHub App, the overview's Activity card, the GitHub and Providers
+settings and the model menu with the hub's providers; `hub-activity.png`, `dispatch-chat.png` and
+`dispatch-github-connect.png` came later, from a 5.6.1 build. The `github-*.png` views came
+otherwise; see below.
 
 [scripts/capture-docs.mjs](../../scripts/capture-docs.mjs) starts its own servers on a small sample
 project, `my-app` (a page with a stylesheet, a script and release notes, two commits and
@@ -37,18 +39,22 @@ serve` on a scratch home directory: it serves the page, signs the browser in, ke
 and two model providers, `gateway` (LiteLLM gateway, three models, a key) and `local` (Local vLLM,
 one model), priced from an OpenRouter list the script writes as the hub's copy, and reads a GitHub
 App the script writes (a key made on the spot, `acme-agents`, installed on the organization `acme`
-with selected repositories and on a user, `dave`). What would need machines, agents and GitHub is
+with selected repositories and on a user, `dave`). The overview's Activity card reads the hub's own
+`/api/activity`, from an `activity.json` the script writes before the hub starts: a year of work,
+hour by hour, mostly on weekdays, more of it lately, with two weeks off. At the end the hub forgets
+its app, as Disconnect has it, so `/github/connect` shows as a hub without one serves it. What would
+need machines, agents and GitHub is
 fixed data fed to the page: the hub's stream gives it the script's agents and its board of three
 machines (`pve-dev` and `mac-mini` online, `gpu-box` offline) and the issues and jobs of
 `acme/web`, `acme/api` and `acme/infra`; Playwright answers the calls that would go to GitHub and
 refuses any other address off the machine; the page's clock is fixed. For the model menu, an
 `agentapi server` joins the hub and runs a small stand-in for Claude Code that the script writes;
-for Check connection, a fake OpenAI-compatible endpoint lists six models.
-
-`dispatch-chat.png` and `dispatch-github-connect.png` came from a development build of the
-`feat/issue-dispatch` branch: a real hub and launcher, `native-demo` posing as Claude Code and
-Codex, a local bare repository in place of github.com, and a fake GitHub API. Neither script
-takes them.
+for Check connection, a fake OpenAI-compatible endpoint lists six models. For `dispatch-chat.png`,
+another `agentapi server` runs `native-demo` posing as Claude Code under the name and instance ID a
+launcher gives the job of `acme/web#12`, joins the hub, and gets the review prompt the dispatch
+sends, rendered as `lib/dispatch/prompts.go` renders it (the review fenced between `BEGIN-` and
+`END-` markers); the list shows the hub's own row for it among the script's, and that page's clock
+is the real one, as the conversation's times are.
 
 The `github-*.png` views are of github.com, signed out, at 1280 pixels wide: the issue and pull
 request of [k1dav-c/agentapi-demo](https://github.com/k1dav-c/agentapi-demo), a public repository
@@ -124,6 +130,7 @@ device scale factor of 1.
 | [hub-spend.png](hub-spend.png) | The overview's Spend card: the last 24 hours and 7 days, the agents that spent the most with their machines, and each machine |
 | [hub-tokens.png](hub-tokens.png) | The overview's Tokens card: the last 24 hours and 7 days, by kind, the agents that used the most, each group and each machine |
 | [hub-work.png](hub-work.png) | The overview's Work time card: the last 24 hours and 7 days, the agents that worked the most, each group and each machine |
+| [hub-activity.png](hub-activity.png) | The overview's Activity card: each day of the last year shaded by work time, a day's tooltip with its work time, tokens and spend |
 | [hub-versions.png](hub-versions.png) | The overview's Versions card: how many agents run each AgentAPI version, on which machines, and how to update the older ones |
 | [hub-phone-chat.png](hub-phone-chat.png) | An instance open from the hub on a phone, with the way back to the list and its machine's agents |
 
@@ -202,9 +209,10 @@ runs the script) and a neutral shell prompt.
    For the older binary, build the same source stamped with an earlier version:
    `go build -ldflags "-X github.com/coder/agentapi/internal/version.Version=5.5.1" -o /tmp/agentapi-5.5.1 main.go`.
 
-4. Run the second script for the Issues page, the GitHub and Providers settings and the model menu.
-   It needs three free ports (3400 to 3402 unless you set `AGENTAPI_DISPATCH_PORT` to the first of
-   three others), and takes about two minutes:
+4. Run the second script for the Issues page and its chat, `/github/connect`, the Activity card,
+   the GitHub and Providers settings and the model menu. It needs four free ports (3400 to 3403
+   unless you set `AGENTAPI_DISPATCH_PORT` to the first of four others), and takes about two
+   minutes:
 
    ```bash
    node scripts/capture-dispatch.mjs
