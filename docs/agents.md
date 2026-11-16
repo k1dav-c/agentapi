@@ -287,7 +287,8 @@ cache after its last use (`ttl_seconds`: an hour on a subscription, five minutes
 Bedrock or Vertex) and when it expires (`expires_at`). Once it has expired, the model reads the
 whole context again on the next message, at the full price and against the usage limits. While the
 agent is idle with an expired cache and at least 50k tokens of context, the chat says so above the
-composer and offers to compact first. A dismissed note stays hidden until the next turn.
+composer and offers to compact first. A dismissed note comes back only once a later
+turn's cache expires too.
 
 ![A note above the composer: the prompt cache expired and the next message reads 120k tokens again, with Compact](screenshots/cold-cache.png)
 

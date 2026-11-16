@@ -238,7 +238,7 @@ Claude Code 也會回報 `prompt_cache`：`ttl_seconds` 是模型供應商在最
 快取的時間（訂閱帳號為一小時，使用 API key、Bedrock 或 Vertex 時為五分鐘），`expires_at` 是快取
 過期的時間。過期之後，下一則訊息會讓模型重新讀取整個 context，以全額計價，也會算進
 用量限制。agent 閒置、快取已過期且 context 至少有 50k token 時，聊天介面會在輸入框上方提醒，
-並提供先壓縮的按鈕；關掉提醒後，要到下一個回合結束才會再出現。
+並提供先壓縮的按鈕；關掉提醒後，要等之後某個回合的快取也過期，才會再出現。
 
 ![輸入框上方的提醒：prompt cache 已過期，下一則訊息會重新讀取 120k token，旁邊是 Compact](screenshots/cold-cache.png)
 

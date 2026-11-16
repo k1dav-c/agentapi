@@ -13,7 +13,7 @@ import { usePersisted } from "@/lib/use-persisted";
 // context (Claude Code reports how long it keeps it): the next message has
 // the model read all of it again, at the full price and against the usage
 // limits. Compacting first makes that message cheap. Dismissed, it stays
-// away until the agent's next turn.
+// away for that cache: it comes back once a later turn's cache expires.
 export function CacheNotice() {
   const agentUsage = useChatSelector((chat) => chat.agentUsage);
   const serverStatus = useChatSelector((chat) => chat.serverStatus);

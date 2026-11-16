@@ -264,7 +264,8 @@ Claude Code keeps the conversation in the model provider's prompt cache for an h
 its last use on a subscription, five minutes with an API key. Once the cache has expired, the next
 message has the model read the whole context again, at the full price and against the usage
 limits. While the agent is idle with an expired cache and at least 50k tokens of context, a note
-above the composer says so, with **Compact**. A closed note stays away until the next turn.
+above the composer says so, with **Compact**. A closed note comes back only once a later
+turn's cache expires too.
 
 ### A usage limit
 
