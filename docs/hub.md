@@ -643,7 +643,7 @@ in a new tab or at its AgentAPI's URL, has no ☆.
 
 ### Model providers
 
-![Hub settings: the Providers tab, with two providers, their endpoints, models and keys](screenshots/hub-settings-providers.png)
+![Hub settings: the Providers tab, with two providers, their endpoints, models, keys, usage and health, and one's model prices](screenshots/hub-settings-providers.png)
 
 The hub keeps [model providers](providers.md) for every machine that reports to it:
 endpoints such as a LiteLLM gateway that Claude Code and Codex sessions can switch to. The
@@ -769,6 +769,8 @@ issues, by section:
   is back under To do. A job stopped while its machine was offline stays until the machine lets
   it go.
 
+![Clear asks first, and lists the ended jobs it forgets](screenshots/dispatch-clear.png)
+
 A card shows the issue's number, state and title, the agent and machine on it, its pull request,
 what its runs cost and how many there were, and the one thing its state asks for: **Assign**,
 **Answer**, **Review #21**, **Retry**. When a card changes state, it moves to its new section. The
@@ -813,7 +815,8 @@ Both ask first:
 | --- | --- |
 | ![Switch asks first](screenshots/dispatch-confirm-switch.png) | ![Stop asks first](screenshots/dispatch-confirm-stop.png) |
 
-Below that are the job's spend, runs, agent time and tokens, and its timeline, the latest first:
+Below that are the job's spend, runs, agent time, elapsed time and tokens, the issue's description,
+and its timeline, the latest first:
 each run (the agent and machine, when it ran, what it cost, how it ended), and each message its
 agents were sent, from this page or from a review or `/agent` comment on GitHub. The hub keeps the
 last 50 messages of each job. **On the machine** has the branch and the worktree to copy. While
@@ -872,6 +875,27 @@ AgentAPIs to show in the list; it needs one only to take issues
 | The board on a phone | An issue on a phone |
 | --- | --- |
 | ![Issues on a phone](screenshots/dispatch-phone.png) | ![An issue's detail on a phone](screenshots/dispatch-phone-detail.png) |
+
+#### On GitHub
+
+What an issue's work looks like on GitHub, from
+[k1dav-c/agentapi-demo](https://github.com/k1dav-c/agentapi-demo), a public repository kept for these
+pictures. When an agent starts, the hub says so on the issue, as its GitHub App, with the
+instance to open in the hub:
+
+![The hub's comment on the issue: Claude Code started on a machine, and the instance to open](screenshots/github-issue.png)
+
+The agent opens a pull request that closes the issue. A review that asks for changes, or a comment
+that starts with `/agent`, goes to the same agent through the
+[workflow](../examples/issue-dispatch/README.md); it pushes to the branch and says on the pull
+request what it changed:
+
+![A review and an /agent comment on the pull request, each answered by the agent with a push and a summary](screenshots/github-pr-review.png)
+
+When the pull request is merged or closed, the hub posts what the job cost, with its runs, tasks,
+work time, tokens and elapsed time, and deletes the branch:
+
+![The cost summary the hub posts on the merged pull request, and the branch it deleted](screenshots/github-pr-cost.png)
 
 ### Keys and notifications
 

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Bug fixes
+
+- An issue's detail fits its totals in a narrow panel: Spend, Runs, Agent time, Elapsed and Tokens
+  were five columns wherever the detail opened, and beside the board or on a phone they were cut
+  short ("Agent tim…", "$1.…"). Where the panel is narrow they now take two rows.
+- The message box at the bottom of an issue's detail no longer comes up one line short, its text
+  cut off, when the detail first opens or a menu closes over it.
+
+## v5.6.0
+
 ### Features
 
 - The hub's Issues page can clear its ended jobs at once: **Clear** beside the Done heading forgets

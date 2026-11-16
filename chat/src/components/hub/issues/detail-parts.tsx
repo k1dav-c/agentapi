@@ -47,15 +47,19 @@ export function Totals({job}: {job: DispatchJob}) {
     {label: "Elapsed", value: formatRunDuration(totals.elapsedSeconds), title: "From its first run's start to its last one's end"},
     {label: "Tokens", value: formatTokens(totals.tokens)},
   ];
+  // Five across where the panel has room; in a narrow one (the detail
+  // beside the board, a phone) three, the last taking the row's rest.
   return (
-    <dl className="grid grid-cols-5 divide-x rounded-2xl border bg-card shadow-xs">
-      {stats.map((stat) => (
-        <div key={stat.label} className="min-w-0 px-3 py-2.5" title={stat.title}>
-          <dt className="truncate text-[11px] text-muted-foreground">{stat.label}</dt>
-          <dd className="mt-0.5 truncate text-[15px] font-semibold sm:text-[17px] tracking-tight tabular-nums">{stat.value}</dd>
-        </div>
-      ))}
-    </dl>
+    <div className="@container">
+      <dl className="grid grid-cols-3 gap-px overflow-hidden rounded-2xl border bg-border shadow-xs @md:grid-cols-5">
+        {stats.map((stat, i) => (
+          <div key={stat.label} className={cn("min-w-0 bg-card px-3 py-2.5", i === stats.length - 1 && "col-span-2 @md:col-span-1")} title={stat.title}>
+            <dt className="truncate text-[11px] text-muted-foreground">{stat.label}</dt>
+            <dd className="mt-0.5 truncate text-[17px] font-semibold tracking-tight tabular-nums">{stat.value}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
   );
 }
 
@@ -89,7 +93,9 @@ export function Composer({job, busy, onSend}: {job: DispatchJob; busy: boolean; 
         }}
         placeholder={`Message ${agentLabel(job.agent)}…`}
         aria-label={`Message to ${agentLabel(job.agent)}`}
-        className="min-w-0 flex-1 resize-none bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground/80"
+        // One row at least: a first measure taken before the panel is laid
+        // out comes out short.
+        className="min-h-9 min-w-0 flex-1 resize-none bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground/80"
       />
       <Button type="submit" size="icon" className="size-9 shrink-0 rounded-xl" disabled={busy || !text.trim()} aria-label="Send" title="Send (⌘↵)">
         <SendHorizontal className="size-4" />
