@@ -645,7 +645,9 @@ agent。離線的主機有 **×**，確認後 hub 會移除這台主機，以及
 - **Needs you**：失敗的 job，接著是在等你回應（核准、問題）的 agent，再來是等你 review 的 PR。
 - **Working**：正在工作的 agent，做最久的排前面，各自附上正在做的事。
 - **To do**：還沒有 agent 處理的 open issue。
-- **Done**：已完成或已停止的，最新的在前；超過三個時按 **Show all** 展開。
+- **Done**：已完成或已停止的，最新的在前；超過三個時按 **Show all** 展開。hub 會保留結束的 job 30 天；
+  按標題旁的 **Clear** 並確認後，會移除這一區目前列出的 job：它們的 run 和花費紀錄一併移除，GitHub 上的花費
+  留言保留，還開著的 issue 會回到 To do。主機離線時停止的 job，要等主機放掉它才能清除。
 
 每張卡片顯示 issue 編號、狀態和標題，負責的 agent 與主機、PR、各次 run 的花費與次數，以及這個狀態
 下該做的那件事：**Assign**、**Answer**、**Review #21**、**Retry**。卡片換狀態時，會移到新的區塊。主機
@@ -1031,6 +1033,7 @@ loopback（`127.0.0.1`、`::1`）、link-local 位址（`169.254.0.0/16`、`fe80
 | `GET /api/events` | Server-sent events：先送 `instances`（全部實例和 `hub_version`，格式同 `GET /api/instances`）和 `favorites`（格式同 `GET /api/favorites`），再送 `instance`（某個實例有頁面看得到的變動，或工作時間變動滿一分鐘；最後聯絡時間只在它離線時才算）、`removed`（`{"id"}`）、`favorites`（有變動時送出全部）、`dispatch`（[issue 派工](#issues)的主機和 job，格式同 `GET /api/hosts` 和 `GET /api/jobs`，一開始和每次變動時送出），以及每 15 秒一次的 `heartbeat`。瀏覽器 30 秒都沒收下事件，就會失去串流 |
 | `GET /api/hosts` | 有 launcher 回報的主機：能跑的 agent、有的 repo、job 與上限，以及是否在線（`online`） |
 | `DELETE /api/hosts/{name}` | 移除主機，以及 hub 為這個主機名稱記下的 launcher token，讓換了 token 的 launcher 能以同一個名稱重新加入。主機在線（`host_online`）或還有進行中的 job（`host_busy`）時回 409，請先停掉它的 job；hub 沒有這台主機時回 404 |
+| `POST /api/jobs/clear` | 移除 `{"keys": [...]}`（最多 1,000 個）中已結束的 job：已完成，或已停止且主機上已經沒有它的；其他的保留。回應 `{"cleared": [...]}`，即實際移除的 key |
 | `GET /api/jobs` | 各 job（一個 issue 的工作）：狀態、agent 與主機、PR、各次 run 與花費，以及最近 50 則送給 agent 的訊息（`messages`：`at`；`source` 為 `hub`、`review` 或 `comment`；`author`、`agent`；`text`，最多 2,000 字） |
 | `GET /api/github` | hub 的 GitHub App（若有：`slug`、`owner`、hub 知道時的 `owner_type`（`User` 或 `Organization`）、`html_url`、`settings_url`、`install_url`）及安裝在哪些帳號（`installations`：`account`、`account_type`、`repository_selection`（`all` 或 `selected`）、`avatar_url`、`settings_url`）；`DELETE` 讓 hub 忘掉 App，GitHub 上的 App 不受影響 |
 | `GET /api/github/repos` | App 看得到的 repo，最近有 push 或變動的在前（`pushed_at`、`updated_at`） |
