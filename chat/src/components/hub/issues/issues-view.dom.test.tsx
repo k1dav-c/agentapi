@@ -1,13 +1,17 @@
-import {afterEach, describe, expect, test} from "bun:test";
-import {act} from "react";
+import {afterEach, describe, expect, mock, test} from "bun:test";
+import React, {act} from "react";
 import type {DispatchBoard} from "@/lib/hub";
 import type {DispatchHost, DispatchJob} from "@/lib/hub-dispatch";
 import {withDOM} from "@/test/dom";
-import {json, mockFetch, restoreFetch} from "@/test/fetch";
+import {json, mockFetch, restoreFetch, routeFetch} from "@/test/fetch";
 import {button, click, key, mount, settle, type Mounted} from "@/test/render";
 import {IssuesView} from "./issues-view";
 
 withDOM();
+
+// Radix's dialogs show only with React's layout effect (see
+// markdown-table.dom.test.tsx): the Clear dialog is one.
+mock.module("@radix-ui/react-use-layout-effect", () => ({useLayoutEffect: React.useLayoutEffect}));
 
 const host: DispatchHost = {
   hostname: "pve-dev",
@@ -129,5 +133,31 @@ describe("IssuesView's focus", () => {
     await click(button(document.body, /Stop$/));
     await click(button(document.body, "Cancel"));
     expect(document.activeElement?.textContent?.trim()).toBe("Stop");
+  });
+});
+
+describe("IssuesView's Done section", () => {
+  test("Clear has the hub forget the ended jobs its machine no longer has", async () => {
+    const calls = routeFetch({
+      "/hub/api/github": () => json({connected: false, installations: []}),
+      "POST /hub/api/jobs/clear": () => json({cleared: ["acme/widget#14"]}),
+    });
+    const live: DispatchBoard = {
+      hosts: [{...host, jobs: [{key: "acme/widget#15"} as NonNullable<DispatchHost["jobs"]>[number]]}],
+      jobs: [job(12), job(14, {state: "done"}), job(15, {state: "stopped"})],
+    };
+    view = await mount(issues(null, live));
+    await settle();
+    await act(async () => button(document.body, "Clear")!.click());
+    await settle();
+    const dialog = document.querySelector("[role=alertdialog]");
+    expect(dialog?.textContent).toContain("Clear 1 ended job?");
+    expect(dialog?.textContent).toContain("acme/widget#14");
+    expect(dialog?.textContent).not.toContain("acme/widget#15");
+    await act(async () => button(dialog!, "Clear")!.click());
+    await settle();
+    const clear = calls.find((call) => call.url.endsWith("/api/jobs/clear"));
+    expect(clear?.init.body).toBe(JSON.stringify({keys: ["acme/widget#14"]}));
+    expect(document.querySelector("[role=alertdialog]")).toBeNull();
   });
 });

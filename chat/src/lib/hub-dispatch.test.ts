@@ -1,6 +1,6 @@
 import {describe, expect, test} from "bun:test";
 import {HubAPIError} from "./hub-api";
-import {active, createDispatchAPI, forgetBlocker, hostAgents, hostsFor, jobCost, parseIssueRef, pendingAnswers, prNumber, rowJobs, withAnswers, type DispatchHost, type DispatchJob, type DispatchRun, type RowJob} from "./hub-dispatch";
+import {active, clearable, createDispatchAPI, forgetBlocker, hostAgents, hostsFor, jobCost, parseIssueRef, pendingAnswers, prNumber, rowJobs, withAnswers, type DispatchHost, type DispatchJob, type DispatchRun, type RowJob} from "./hub-dispatch";
 
 const host = (over: Partial<DispatchHost>): DispatchHost => ({
   hostname: "pve",
@@ -91,6 +91,27 @@ describe("forgetBlocker", () => {
     expect(forgetBlocker(offline, [job({state: "done"}), job({state: "stopped"}), job({state: "failed"}), job({host: "other", state: "working"})])).toBeUndefined();
     expect(forgetBlocker(offline, [job({state: "working"})])).toBe("Stop its job first");
     expect(forgetBlocker(offline, [job({state: "review"}), job({state: "starting"})])).toBe("Stop its 2 jobs first");
+  });
+});
+
+describe("clearable", () => {
+  test("an ended job its machine no longer has", () => {
+    const pve = host({jobs: [{key: "acme/widget#7"} as NonNullable<DispatchHost["jobs"]>[number]]});
+    expect(clearable(job({state: "done"}), [pve])).toBe(true);
+    expect(clearable(job({state: "stopped"}), [])).toBe(true);
+    expect(clearable(job({key: "acme/widget#7", state: "stopped"}), [pve])).toBe(false);
+    expect(clearable(job({state: "failed"}), [pve])).toBe(false);
+    expect(clearable(job({state: "review"}), [pve])).toBe(false);
+  });
+
+  test("the hub answers the jobs it forgot", async () => {
+    const calls: string[] = [];
+    const api = createDispatchAPI("http://hub", async (url, init) => {
+      calls.push(`${init.method} ${url} ${init.body}`);
+      return new Response(JSON.stringify({cleared: ["acme/widget#1", 3]}));
+    });
+    expect(await api.clearJobs(["acme/widget#1", "acme/widget#2"])).toEqual(["acme/widget#1"]);
+    expect(calls).toEqual(['POST http://hub/api/jobs/clear {"keys":["acme/widget#1","acme/widget#2"]}']);
   });
 });
 

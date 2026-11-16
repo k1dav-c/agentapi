@@ -22,6 +22,7 @@ export type GitHubIssue = HubWire["GitHubIssue"];
 export type CreateIssueRequest = HubWire["DispatchCreateIssueRequest"];
 export type CreateIssueResponse = HubWire["DispatchCreateIssueResponse"];
 export type JobState = DispatchJob["state"];
+export type ClearJobsBody = HubWire["DispatchClearJobsBody"];
 
 const agentLabels: Record<string, string> = {claude: "Claude Code", codex: "Codex", pi: "Pi", "native-demo": "Demo"};
 
@@ -59,6 +60,15 @@ const stateLabels: Record<JobState, string> = {
   done: "Done",
   stopped: "Stopped",
 };
+
+// clearable reports whether the hub forgets job when asked to clear it
+// (POST /api/jobs/clear): it ended (done, or stopped) and its machine
+// doesn't have it any more.
+export function clearable(job: Pick<DispatchJob, "key" | "state" | "host">, hosts: Pick<DispatchHost, "hostname" | "jobs">[]): boolean {
+  if (job.state !== "done" && job.state !== "stopped") return false;
+  const machine = hosts.find((h) => h.hostname === job.host);
+  return !machine?.jobs?.some((j) => j.key === job.key);
+}
 
 export function jobStateLabel(state: JobState): string {
   return stateLabels[state] ?? state;
@@ -177,6 +187,11 @@ const read = {
     return Array.isArray(issues) ? issues.filter(isIssue) : [];
   },
   dispatch: (body: unknown): DispatchResponse | undefined => (isObject(body) && isJob(body.job) ? (body as DispatchResponse) : undefined),
+  clearJobs: (body: unknown): string[] | undefined => {
+    if (!isObject(body)) return undefined;
+    const {cleared} = body as Fields<ClearJobsBody>;
+    return Array.isArray(cleared) ? cleared.filter((key): key is string => typeof key === "string") : undefined;
+  },
   createIssue: (body: unknown): CreateIssueResponse | undefined => {
     if (!isObject(body) || !isIssue(body.issue)) return undefined;
     return {issue: body.issue, job: isJob(body.job) ? body.job : undefined};
@@ -199,6 +214,8 @@ export function createDispatchAPI(root: string, fetcher: Fetcher = (url, init) =
     issues: (repo: string) => call(`/api/github/issues?repo=${encodeURIComponent(repo)}`, read.issues),
     dispatch: (request: DispatchRequest) => call("/api/dispatch", read.dispatch, post(request)),
     createIssue: (request: CreateIssueRequest) => call("/api/github/issues", read.createIssue, post(request)),
+    // The hub forgets the ended jobs of keys; it answers those it forgot.
+    clearJobs: (keys: string[]) => call("/api/jobs/clear", read.clearJobs, post({keys})),
     // The hub forgets its GitHub App.
     disconnect: async () => void (await fetchHub("/api/github", {method: "DELETE"})),
     // The hub forgets a machine and the launcher token it pinned its name

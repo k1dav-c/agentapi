@@ -61,6 +61,8 @@ var wireTypes = []reflect.Type{
 	reflect.TypeFor[dispatch.Response](),
 	reflect.TypeFor[dispatch.HostsBody](),
 	reflect.TypeFor[dispatch.JobsBody](),
+	reflect.TypeFor[dispatch.ClearJobsRequest](),
+	reflect.TypeFor[dispatch.ClearJobsBody](),
 	reflect.TypeFor[dispatch.GitHubStatus](),
 	reflect.TypeFor[dispatch.ReposBody](),
 	reflect.TypeFor[dispatch.IssuesBody](),

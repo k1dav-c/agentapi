@@ -624,6 +624,32 @@ func (s *Service) ForgetHost(name string) error {
 	return nil
 }
 
+// ClearJobs forgets the jobs of keys that ended: done, or stopped and gone
+// from their machine (one still there the hub stops again when it reports
+// it). Their comments stay on GitHub; an issue started again later is a
+// new job. It returns the keys it forgot.
+func (s *Service) ClearJobs(keys []string) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cleared := []string{}
+	for _, key := range keys {
+		job := s.jobs[key]
+		if job == nil || !job.State.ended() || s.running[key] != nil || s.attempts[key] != nil {
+			continue
+		}
+		if h := s.hosts[job.Host]; h != nil && slices.ContainsFunc(h.Jobs, func(j host.JobInfo) bool { return j.Key == key }) {
+			continue
+		}
+		delete(s.jobs, key)
+		cleared = append(cleared, key)
+	}
+	if len(cleared) > 0 {
+		s.logger.Info("Cleared ended jobs", "jobs", len(cleared))
+		s.saveLocked()
+	}
+	return cleared
+}
+
 // reconcileLocked compares the jobs of h the hub knows with those the
 // launcher reports: one the launcher dropped while the hub was away ended,
 // one it reports failed failed. A start the hub lost the answer of is

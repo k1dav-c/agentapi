@@ -66,6 +66,7 @@ const detailActions: DetailActions = {
   createIssue: async () => undefined,
   refresh: noop,
   forgetHost: async () => {},
+  clearJobs: async () => 0,
   openChat: noop,
   assignCard: noop,
 };

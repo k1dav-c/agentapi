@@ -1769,3 +1769,40 @@ func TestInstanceToken(t *testing.T) {
 		assert.NotContains(t, string(data), "made-again", "never sent")
 	}
 }
+
+// Clearing forgets the jobs that ended and left their machine; one at
+// work, or stopped while its machine still has it, stays.
+func TestClearJobs(t *testing.T) {
+	s, now := newService(t, nil)
+	s.mu.Lock()
+	for key, state := range map[string]JobState{"acme/widget#1": JobDone, "acme/widget#2": JobStopped, "acme/widget#3": JobStopped, "acme/widget#4": JobWorking, "acme/widget#5": JobFailed} {
+		s.jobs[key] = &Job{Key: key, Repo: "acme/widget", Host: "a", State: state, UpdatedAt: *now}
+	}
+	s.hosts["a"] = &Host{HostInfo: host.HostInfo{Hostname: "a", URL: "http://192.0.2.1:3291", Jobs: []host.JobInfo{{Key: "acme/widget#3", InstanceID: "x"}}}}
+	s.mu.Unlock()
+
+	r := chi.NewRouter()
+	s.MountSession(r)
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+	resp, err := http.Post(srv.URL+"/api/jobs/clear", "application/json",
+		strings.NewReader(`{"keys": ["acme/widget#1", "acme/widget#2", "acme/widget#3", "acme/widget#4", "acme/widget#5", "acme/widget#9"]}`))
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var body ClearJobsBody
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	assert.Equal(t, []string{"acme/widget#1", "acme/widget#2"}, body.Cleared)
+	var left []string
+	for _, job := range s.Jobs() {
+		left = append(left, job.Key)
+	}
+	assert.ElementsMatch(t, []string{"acme/widget#3", "acme/widget#4", "acme/widget#5"}, left)
+
+	// Nothing to clear answers an empty list, not null.
+	resp, err = http.Post(srv.URL+"/api/jobs/clear", "application/json", strings.NewReader(`{"keys": []}`))
+	require.NoError(t, err)
+	data, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	assert.JSONEq(t, `{"cleared": []}`, string(data))
+}
