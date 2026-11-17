@@ -91,10 +91,10 @@ export function AuthDialog() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <KeyRound className="size-4" />
-              Sign in to AgentAPI
+              Sign in to Tendyard
             </DialogTitle>
             <DialogDescription>
-              The AgentAPI server at <span className="font-mono text-xs font-medium text-foreground" data-auth-host>{host}</span> was
+              The Tendyard server at <span className="font-mono text-xs font-medium text-foreground" data-auth-host>{host}</span> was
               started with <code className="font-mono text-xs">--api-token</code>.
               Enter the token to continue. It is exchanged for a session cookie and not stored by the page.
             </DialogDescription>

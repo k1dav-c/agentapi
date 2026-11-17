@@ -98,7 +98,7 @@ func agentName(agent string) string {
 // request (or the issue), with the rounds before in one line.
 func costComment(job *Job, loc *time.Location) string {
 	var b strings.Builder
-	b.WriteString("### agentapi 花費彙總\n\n")
+	b.WriteString("### Tendyard 花費彙總\n\n")
 	b.WriteString("| # | Agent | 主機 | 期間 | 任務數 | 工作時間 | Tokens（in / out / cache） | API 等價花費 |\n")
 	b.WriteString("|---|---|---|---|---|---|---|---|\n")
 	var total, before Cost

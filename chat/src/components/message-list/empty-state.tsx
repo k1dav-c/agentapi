@@ -60,7 +60,7 @@ export function EmptyState({
     : "Connecting to the agent";
   const detail =
     serverStatus === "offline"
-      ? "AgentAPI keeps trying to reconnect. Check that the server and the agent process are running."
+      ? "Tendyard keeps trying to reconnect. Check that the server and the agent process are running."
       : "Describe a task below. Tasks you send while the agent is busy wait in the queue and run in order.";
 
   return (

@@ -384,7 +384,7 @@ hub 的 **Issues** 頁（標題列的 ◎，或按 `i`）取代總覽的位置�
  "assign": {"agent": "claude", "host": "選填"}}
 ```
 
-1. 以 App 身分建立 issue（作者會是 `<slug>[bot]`；內文最後加一行「由 <hub 使用者> 在 agentapi hub 建立」）。
+1. 以 App 身分建立 issue（作者會是 `<slug>[bot]`；內文最後加一行「由 <hub 使用者> 在 Tendyard hub 建立」）。
 2. 有 `assign` 時：
    - 加上 `agent:<type>` label，讓 issue 上看得出由誰處理。
    - 直接在 hub 內執行 `start`，`delivery_id` 為 `hub-issue-<repo>#<n>`。
@@ -415,7 +415,7 @@ job 已結束（`done`）時：視為新的一輪開發。遠端與本機分支�
 - job 結束（`stop`）時，hub 以 App 身分在 PR 留言（沒有 PR 時在 issue），一個 job 只留一則，之後重做時更新同一則（`cost_comment_id`）：
 
   ```
-  ### agentapi 花費彙總
+  ### Tendyard 花費彙總
 
   | # | Agent | 主機 | 期間 | 任務數 | 工作時間 | Tokens（in / out / cache） | API 等價花費 |
   |---|---|---|---|---|---|---|---|
@@ -447,7 +447,7 @@ job 已結束（`done`）時：視為新的一輪開發。遠端與本機分支�
 
    ```json
    {
-     "name": "agentapi-hub-<6 位十六進位>",
+     "name": "tendyard-hub-<6 位十六進位>",
      "url": "<hub 的網址>",
      "redirect_url": "<hub 的網址>/github/callback",
      "setup_url": "<hub 的網址>/github/setup",
@@ -468,7 +468,7 @@ job 已結束（`done`）時：視為新的一輪開發。遠端與本機分支�
 
 4. 使用者在 GitHub 按 **Create GitHub App** 後，GitHub 把瀏覽器導到 `/github/callback?code=...&state=...`。hub 驗證 `state`，一小時內呼叫 `POST https://api.github.com/app-manifests/{code}/conversions`，取得 `id`、`slug`、`client_id`、`client_secret`、`pem`、`webhook_secret`，存入 `github-app.json`；再查 `GET /users/<slug>[bot]` 取得 bot 的 user id。
 5. hub 把瀏覽器導向 `https://github.com/apps/<slug>/installations/new?state=<新的 state>`，讓使用者選要安裝的 repo。
-6. App 的名稱預設為 `agentapi-hub-<6 位隨機十六進位>`（GitHub 上 App 名稱不能重複），可在 GitHub 的表單上修改。
+6. App 的名稱預設為 `tendyard-hub-<6 位隨機十六進位>`（GitHub 上 App 名稱不能重複），可在 GitHub 的表單上修改。
 
 ### 6.2 安裝
 

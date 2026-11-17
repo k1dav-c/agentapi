@@ -87,7 +87,7 @@ device scale factor of 1.
 | [search.png](search.png) | Searching the transcript, with highlighted and counted matches |
 | [session-details.png](session-details.png) | The session details menu opened from the status, with the agent's session ID |
 | [keyboard-shortcuts.png](keyboard-shortcuts.png) | The keyboard shortcuts |
-| [join-hub.png](join-hub.png) | Add to an AgentAPI hub: the hub's address and the commands to copy |
+| [join-hub.png](join-hub.png) | Add to a Tendyard hub: the hub's address and the commands to copy |
 | [permission-mode.png](permission-mode.png) | The permission mode menu |
 | [model-settings.png](model-settings.png) | The model and reasoning effort menu |
 | [model-providers.png](model-providers.png) | Claude Code's model menu: its own models, then those of the hub's two providers, LiteLLM gateway and Local vLLM, marked **hub** |

@@ -39,9 +39,9 @@ describe("versions", () => {
     expect(olderThanHub(running("a", "1.6.1"), "0.0.0-dev")).toBe(false);
     expect(olderThanHub(running("a", "1.6.1"), undefined)).toBe(false);
     expect(olderThanHub(running("a", "1.6.1", {connection: "stopped", state: "stopped"}), "2.1.0")).toBe(false);
-    expect(versionTitle("1.6.1", "2.1.0")).toBe("AgentAPI v1.6.1, older than the hub (v2.1.0)");
-    expect(versionTitle("0.0.0-dev", "2.1.0")).toBe("AgentAPI v0.0.0-dev, a development build");
-    expect(versionTitle("1.6.1", "2.1.0", true)).toBe("Last known: AgentAPI v1.6.1");
+    expect(versionTitle("1.6.1", "2.1.0")).toBe("Tendyard v1.6.1, older than the hub (v2.1.0)");
+    expect(versionTitle("0.0.0-dev", "2.1.0")).toBe("Tendyard v0.0.0-dev, a development build");
+    expect(versionTitle("1.6.1", "2.1.0", true)).toBe("Last known: Tendyard v1.6.1");
   });
 
   test("versions: the overview counts each version of the instances the hub follows, and those older than the hub", () => {

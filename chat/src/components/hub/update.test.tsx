@@ -40,8 +40,8 @@ const body = (target: HubInstance, props: {error?: string} = {}) =>
 describe("UpdateChip", () => {
   test("says the state in short, the whole of it to a tooltip and a screen reader", () => {
     const html = renderToStaticMarkup(<UpdateChip update={update({state: "failed", error: "no network"})} />);
-    expect(html).toContain('title="The AgentAPI update failed: no network"');
-    expect(html).toContain('<span class="sr-only">The AgentAPI update failed: no network</span>');
+    expect(html).toContain('title="The Tendyard update failed: no network"');
+    expect(html).toContain('<span class="sr-only">The Tendyard update failed: no network</span>');
     expect(html).toContain(">Update failed</span>");
     expect(html).toContain("text-state-fault");
     expect(html).toContain('data-update-state="failed"');
@@ -68,7 +68,7 @@ describe("UpdateDialogBody", () => {
   test("confirms: it waits for the task, or doesn't when updated now", () => {
     const shown = text(body(instance({})));
     expect(shown).toContain("Update checkout-api?");
-    expect(shown).toContain("It installs the latest AgentAPI release on dev-1 and restarts into it. It runs v2.0.0; the hub runs v2.1.0.");
+    expect(shown).toContain("It installs the latest Tendyard release on dev-1 and restarts into it. It runs v2.0.0; the hub runs v2.1.0.");
     expect(shown).toContain("The update waits for the current task to finish, and for any approval or question to be answered.");
     expect(shown).toContain("Update now doesn't wait: it interrupts the running task.");
     expect(shown).toContain("Update now");
@@ -138,7 +138,7 @@ describe("InstanceRow", () => {
   test("shows an update under way, and says it to a screen reader", () => {
     const html = row(instance({state: "waiting", target: "2.1.0"}));
     expect(html).toContain(">Update waits for the task</span>");
-    expect(html).toContain("Older than the hub. Updating AgentAPI to v2.1.0 once the agent is idle");
+    expect(html).toContain("Older than the hub. Updating Tendyard to v2.1.0 once the agent is idle");
   });
 
   test("no chip while no update is under way, or for an older AgentAPI", () => {

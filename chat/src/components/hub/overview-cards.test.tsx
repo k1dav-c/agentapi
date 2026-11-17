@@ -32,7 +32,7 @@ describe("VersionsCard", () => {
     expect(shown).toContain("v2.1.0 the hub's dev-3 1 v2.0.0 older dev-3 1 v1.6.1 older dev-1, dev-2 2");
     expect(shown).not.toContain("v1.2.0");
     expect(shown).toContain("sudo agentapi update --restart");
-    expect(shown).toContain("before v2.1.0, update, then restart each AgentAPI once");
+    expect(shown).toContain("before v2.1.0, update, then restart each instance once");
   });
 
   test("with every agent on the hub's version, there is nothing to update", () => {
@@ -80,7 +80,7 @@ describe("VersionsCard", () => {
     expect(shown).toContain("Update the older ones");
     expect(shown).toContain("1 of 4 can update from here; each waits for its task to finish.");
     expect(shown).toContain(
-      "Can't update from here: 1 needs a one-time setup (dev-2); 1 has updates from the hub off (dev-3); 1 runs an AgentAPI from before updates from the hub.",
+      "Can't update from here: 1 needs a one-time setup (dev-2); 1 has updates from the hub off (dev-3); 1 runs a version from before updates from the hub.",
     );
     expect(shown).toContain("sudo agentapi update --restart");
   });

@@ -127,7 +127,7 @@ export function JoinSteps({root, info}: {root: string; info: JoinInfo | "failed"
         <span>
           <span className="block text-sm font-medium">Allow updates from the hub</span>
           <span className="block text-xs text-muted-foreground">
-            <Code>--allow-update</Code>: the hub may update the machine&apos;s AgentAPIs to the latest release.
+            <Code>--allow-update</Code>: the hub may update the machine&apos;s Tendyard instances to the latest release.
           </span>
         </span>
       </label>
@@ -147,8 +147,8 @@ export function JoinSteps({root, info}: {root: string; info: JoinInfo | "failed"
         </div>
         <CopyCommand text={joinCommand(onScreen)} copy={joinCommand(asIs)} wrap />
         <p className="mt-1.5 text-xs text-muted-foreground">
-          <Code>{"{ip}"}</Code> is the machine&apos;s address on the route to the hub: its AgentAPIs look it up again while they run, so the hub follows the machine
-          when it gets another address. It needs AgentAPI {JOIN_SINCE} or later there: <Code>sudo agentapi update</Code>.{secretNote}
+          <Code>{"{ip}"}</Code> is the machine&apos;s address on the route to the hub: its instances look it up again while they run, so the hub follows the machine
+          when it gets another address. It needs version {JOIN_SINCE} or later there: <Code>sudo agentapi update</Code>.{secretNote}
         </p>
       </div>
       <div>

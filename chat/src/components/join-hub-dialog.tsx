@@ -43,7 +43,7 @@ export function JoinHubDialog({open, onOpenChange}: {open: boolean; onOpenChange
     },
     {
       title: "Join this machine",
-      body: "On this machine. Its AgentAPIs, this one included, join now and on every start. If the hub can't resolve this machine's name, put its address in place of {hostname}.",
+      body: "On this machine. Its Tendyard instances, this one included, join now and on every start. If the hub can't resolve this machine's name, put its address in place of {hostname}.",
       command: commands.join,
     },
   ];
@@ -51,14 +51,14 @@ export function JoinHubDialog({open, onOpenChange}: {open: boolean; onOpenChange
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90dvh] grid-cols-[minmax(0,1fr)] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>Add to an AgentAPI hub</DialogTitle>
-          <DialogDescription>A hub lists the AgentAPIs of all your machines on one page and opens any of them here.</DialogDescription>
+          <DialogTitle>Add to a Tendyard hub</DialogTitle>
+          <DialogDescription>A hub lists the Tendyard instances of all your machines on one page and opens any of them here.</DialogDescription>
         </DialogHeader>
         {joined && (
           <p className="flex items-start gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-sm" role="status">
             <CircleCheck className="mt-0.5 size-4 shrink-0 text-state-ready" aria-hidden="true" />
             <span>
-              This AgentAPI reports to the hub at <code className="font-mono text-[12.5px] [overflow-wrap:anywhere]">{joined}</code>.
+              This instance reports to the hub at <code className="font-mono text-[12.5px] [overflow-wrap:anywhere]">{joined}</code>.
             </span>
           </p>
         )}
@@ -107,7 +107,7 @@ export function JoinHubDialog({open, onOpenChange}: {open: boolean; onOpenChange
           </li>
         </ol>
         <p className="text-xs text-muted-foreground">
-          The hub and this machine need AgentAPI 1.3 or later: <code className="font-mono">sudo agentapi update</code>.
+          The hub and this machine need version 1.3 or later: <code className="font-mono">sudo agentapi update</code>.
         </p>
       </DialogContent>
     </Dialog>

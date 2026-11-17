@@ -113,7 +113,7 @@ export function useSlashCommandRunner() {
       case "terminal":
       case "login":
         if (!features.shell) {
-          toast.error("There is no terminal", {description: "AgentAPI runs with --terminal=false."});
+          toast.error("There is no terminal", {description: "Tendyard runs with --terminal=false."});
           return;
         }
         openTerminal(info.kind === "login" ? (loginRequired?.command ?? loginCommand(agentType)) : undefined);

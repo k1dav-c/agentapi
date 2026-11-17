@@ -1,6 +1,6 @@
 import type { AgentStateKind } from "./session-status";
 
-const DEFAULT_TITLE = "AgentAPI — Live Agent Session";
+const DEFAULT_TITLE = "Tendyard — Live Agent Session";
 const MAX_TASK_LENGTH = 60;
 
 function summarizeTask(content: string) {
@@ -29,7 +29,7 @@ export function getDocumentTitle({
     connecting: "○ Connecting",
   }[agentState];
   const taskSummary = task ? summarizeTask(task) : "";
-  const suffix = customTitle || "AgentAPI";
+  const suffix = customTitle || "Tendyard";
 
   return taskSummary
     ? `${status} · ${taskSummary} — ${suffix}`

@@ -337,7 +337,7 @@ hub 舊。
 
 #### 從 hub 更新
 
-主機允許的話，Tendyard 會在 hub 要求時自行更新。在那一列的 **⋯** 選單選 **Update AgentAPI…**，
+主機允許的話，Tendyard 會在 hub 要求時自行更新。在那一列的 **⋯** 選單選 **Update Tendyard…**，
 會先請你確認。預設會等 agent 閒置才更新：手上的任務做完，也沒有核准、提問或計畫在等回覆。
 **Update now** 不等，會直接中斷正在跑的任務。Tendyard 下載符合主機作業系統和架構的最新正式版，用
 該版的 `checksums.txt` 驗證後安裝，依指定的方式等待，再像
@@ -351,7 +351,7 @@ hub 舊。
 
 更新期間，那一列會顯示進度：檢查中、下載中、等任務結束、重新啟動中。還在等任務結束時，可以用
 **⋯** 選單的 **Cancel the update**，或開啟的 agent 上方那一列的 **Cancel** 取消。更新失敗時會標示
-出來；滑鼠移上去可以看到錯誤，或再開一次 **Update AgentAPI…** 查看並重試。Tendyard 回來之後，那一列
+出來；滑鼠移上去可以看到錯誤，或再開一次 **Update Tendyard…** 查看並重試。Tendyard 回來之後，那一列
 就會顯示新版本。
 
 **Versions** 卡片上的 **Update the older ones**，會一次替所有比 hub 舊、又能這樣更新的已連線 agent
@@ -837,7 +837,7 @@ PR 合併或關閉時，hub 留言列出這個 job 的花費：各次 run、任�
 
 還沒有 agent 加入的 hub，會顯示怎麼讓主機加入，內容和[新增對話框](#從頁面讓主機加入)相同，接著提醒
 agent 要重新啟動一次。Tendyard 自己的聊天介面也有針對它所在主機的步驟：標頭狀態選單裡的
-**Add to an AgentAPI hub…**（見[工作階段詳細資訊](chat-ui.zh-TW.md#工作階段詳細資訊與提醒)）。
+**Add to a Tendyard hub…**（見[工作階段詳細資訊](chat-ui.zh-TW.md#工作階段詳細資訊與提醒)）。
 
 <a id="從頁面讓主機加入"></a>
 
@@ -984,9 +984,9 @@ AgentAPI 1.1 以上。在這裡輸入的 token 會為這個實例保存，取代
 | 頁面說 hub 沒有回應 | 位址錯誤，或 hub 沒有執行 | 開啟 `http://<hub>:3290/api/session`；hub 執行中會回傳 JSON |
 | 透過 Coder 的 port 網址開啟時，先要求登入 Coder | Coder 的 port 網址需要登入 Coder | 在那個瀏覽器先登入 Coder，再登入 hub |
 | `the hub doesn't answer to <name>; add it to --allowed-hosts` | hub 設了 `--allowed-hosts`，而你用了別的名稱開啟 | 把這個名稱加進 `--allowed-hosts` |
-| **Update AgentAPI…** 說更新已關閉 | 這台主機不接受 hub 的更新 | 在那台主機的 `~/.agentapi/config.yaml` 加上 `allow-update: true`，再執行 `agentapi restart --all` |
-| **Update AgentAPI…** 要求一次性設定 | Tendyard 無法寫入 binary 所在的目錄，例如 root 擁有的 `/usr/local/bin` | 在那台主機上執行一次畫面上的指令 |
-| 那一列顯示 **Update failed** | 檢查或下載新版時出錯，或新版無法以這個實例的設定啟動，例如執行 PTY agent 的 AgentAPI 2 | 滑鼠移上去，或開啟 **Update AgentAPI…** 查看錯誤，再試一次。AgentAPI 4.3.1 以後，磁碟上的程式會維持原樣；更舊的版本則已經把新版放到磁碟上：如果錯誤指出某個設定（例如 AgentAPI 4 移除的 `unknown flag: --transport`），請在那個實例重新啟動前，從啟動方式拿掉那個設定，否則它會起不來。AgentAPI 2 要保留原本的 agent 時，在它的主機上把 v2.5.1 裝回去（見[從 hub 更新](#從-hub-更新)） |
+| **Update Tendyard…** 說更新已關閉 | 這台主機不接受 hub 的更新 | 在那台主機的 `~/.agentapi/config.yaml` 加上 `allow-update: true`，再執行 `agentapi restart --all` |
+| **Update Tendyard…** 要求一次性設定 | Tendyard 無法寫入 binary 所在的目錄，例如 root 擁有的 `/usr/local/bin` | 在那台主機上執行一次畫面上的指令 |
+| 那一列顯示 **Update failed** | 檢查或下載新版時出錯，或新版無法以這個實例的設定啟動，例如執行 PTY agent 的 AgentAPI 2 | 滑鼠移上去，或開啟 **Update Tendyard…** 查看錯誤，再試一次。AgentAPI 4.3.1 以後，磁碟上的程式會維持原樣；更舊的版本則已經把新版放到磁碟上：如果錯誤指出某個設定（例如 AgentAPI 4 移除的 `unknown flag: --transport`），請在那個實例重新啟動前，從啟動方式拿掉那個設定，否則它會起不來。AgentAPI 2 要保留原本的 agent 時，在它的主機上把 v2.5.1 裝回去（見[從 hub 更新](#從-hub-更新)） |
 | 已連線的 agent，**⋯** 選單裡沒有任何更新項目 | 它的 Tendyard 太舊，還不支援從 hub 更新 | 手動更新（見[手動更新](#手動更新)） |
 | hub 的 log 有「The hub's file of instances doesn't parse」 | 檔案損壞，例如手動改壞了；或是 2.2 以前的 hub 讀到較新 hub 寫的檔案 | hub 已把它改名放到一旁（`instances.json.corrupt-<時間>`），從空的清單開始。用 webhook 加入的實例會在下一次 heartbeat 回來。其餘的要找回來，先停掉 hub，再用 `instances.json.bak`（hub 上次啟動時看到的檔案）覆蓋 `instances.json`；2.2 以前的 hub 請見[檔案](#檔案) |
 | hub 無法啟動：`instances.json is of a newer hub` | 檔案是較新的 hub 寫的 | 改用較新的 hub，或從 `instances.json.bak` 開始 |

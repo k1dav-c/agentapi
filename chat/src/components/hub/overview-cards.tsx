@@ -529,7 +529,7 @@ export function VersionsCard({root, instances, hubVersion}: {root: string; insta
   return (
     <section className="mt-10" aria-labelledby="hub-versions">
       <CardHeading id="hub-versions" title="Versions">
-        {release ? `The AgentAPI version of each agent; the hub runs v${hubVersion}` : "The hub is a development build, so no version counts as older"}
+        {release ? `The Tendyard version of each agent; the hub runs v${hubVersion}` : "The hub is a development build, so no version counts as older"}
       </CardHeading>
       <div className={cn("mt-3 grid gap-6 rounded-2xl border bg-card p-5 shadow-xs", release && "md:grid-cols-[auto_minmax(0,1fr)]")}>
         {release && (
@@ -580,7 +580,7 @@ export function VersionsCard({root, instances, hubVersion}: {root: string; insta
             {byHand > 0 && (
               <p>
                 To update: <code className="font-mono text-[12px] text-foreground">sudo agentapi update --restart</code> on machines with {RESTARTS_IN_PLACE} or later (no{" "}
-                <code className="font-mono text-[12px] text-foreground">sudo</code> if the binary is yours); before {RESTARTS_IN_PLACE}, update, then restart each AgentAPI once.
+                <code className="font-mono text-[12px] text-foreground">sudo</code> if the binary is yours); before {RESTARTS_IN_PLACE}, update, then restart each instance once.
               </p>
             )}
           </div>

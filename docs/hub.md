@@ -382,7 +382,7 @@ with their machines, and says how many run an older version than the hub.
 
 #### Updating from the hub
 
-A Tendyard instance updates itself when the hub asks, if its machine allows it. **Update AgentAPI…** in the
+A Tendyard instance updates itself when the hub asks, if its machine allows it. **Update Tendyard…** in the
 row's **⋯** menu asks you first. By default the update waits until the agent is idle: its task
 finished, and no approval, question or plan waits for an answer. **Update now** doesn't wait: it
 interrupts the task. The Tendyard installs the latest official release for its OS and architecture,
@@ -400,7 +400,7 @@ there before that instance restarts.
 The row shows how far the update got: checking, downloading, waiting for the task, restarting.
 While it waits for the task, **Cancel the update** in the **⋯** menu, or **Cancel** in the bar above
 the open agent, calls it off. A failed update says so; hover for the error, or open
-**Update AgentAPI…** to read it and try again. Once the instance is back, the row shows its new
+**Update Tendyard…** to read it and try again. Once the instance is back, the row shows its new
 version.
 
 On the **Versions** card, **Update the older ones** does this for every connected agent that runs an
@@ -979,7 +979,7 @@ it, with only the marks of the machine's other agents, and the composer one row,
 
 A hub no agent has joined yet shows how to join a machine, as the
 [Add dialog](#joining-a-machine-from-the-page) does, and then to restart the agents once. A
-Tendyard's own chat has steps for its machine too: **Add to an AgentAPI hub…** in the menu of the
+Tendyard's own chat has steps for its machine too: **Add to a Tendyard hub…** in the menu of the
 status in its header ([Session details](chat-ui.md#session-details-and-alerts)).
 
 <a id="joining-a-machine-from-the-page"></a>
@@ -1149,9 +1149,9 @@ right is forgotten, it closes.
 | The page says the hub didn't answer | Wrong address, or the hub isn't running | Open `http://<hub>:3290/api/session`; it answers JSON when the hub runs |
 | Behind Coder's port URL, the page asks for Coder first | Coder's port URLs need a Coder login | Sign in to Coder in that browser, then to the hub |
 | `the hub doesn't answer to <name>; add it to --allowed-hosts` | The hub runs with `--allowed-hosts` and you opened it by another name | Add the name to `--allowed-hosts` |
-| **Update AgentAPI…** says updates are off | The machine doesn't allow updates from the hub | Add `allow-update: true` to `~/.agentapi/config.yaml` there, then run `agentapi restart --all` |
-| **Update AgentAPI…** asks for a one-time setup | The Tendyard can't write its binary's directory, such as a root-owned `/usr/local/bin` | Run the command it shows on that machine, once |
-| A row says **Update failed** | Checking or downloading the release failed, or the new version wouldn't start with this instance's settings, such as an AgentAPI 2 that runs a PTY agent | Hover it, or open **Update AgentAPI…**, for the error; then try again. An AgentAPI 4.3.1 or later then keeps its program. An older one already has the new version on disk: if the error names a setting (`unknown flag: --transport`, say, which AgentAPI 4 removed), drop it from how that instance starts before it restarts, or it won't start. For an AgentAPI 2 that must keep its agent, put v2.5.1 back on its machine ([Updating from the hub](#updating-from-the-hub)) |
+| **Update Tendyard…** says updates are off | The machine doesn't allow updates from the hub | Add `allow-update: true` to `~/.agentapi/config.yaml` there, then run `agentapi restart --all` |
+| **Update Tendyard…** asks for a one-time setup | The Tendyard can't write its binary's directory, such as a root-owned `/usr/local/bin` | Run the command it shows on that machine, once |
+| A row says **Update failed** | Checking or downloading the release failed, or the new version wouldn't start with this instance's settings, such as an AgentAPI 2 that runs a PTY agent | Hover it, or open **Update Tendyard…**, for the error; then try again. An AgentAPI 4.3.1 or later then keeps its program. An older one already has the new version on disk: if the error names a setting (`unknown flag: --transport`, say, which AgentAPI 4 removed), drop it from how that instance starts before it restarts, or it won't start. For an AgentAPI 2 that must keep its agent, put v2.5.1 back on its machine ([Updating from the hub](#updating-from-the-hub)) |
 | A connected agent's **⋯** menu has nothing about updating it | Its Tendyard is too old to update from the hub | Update it by hand ([Updating by hand](#updating-by-hand)) |
 | The hub logs "The hub's file of instances doesn't parse" | The file was damaged, such as by an edit by hand, or a hub of 2.2 or earlier started on a newer hub's file | The hub moved it aside (`instances.json.corrupt-<time>`) and started empty. Joined instances come back with their next heartbeat. To get the rest back, stop the hub and copy `instances.json.bak` (the file as the hub's previous start found it) over `instances.json`; for a hub of 2.2 or earlier, see [Files](#files) |
 | The hub doesn't start: `instances.json is of a newer hub` | A newer hub wrote the file | Run the newer hub, or start from `instances.json.bak` |

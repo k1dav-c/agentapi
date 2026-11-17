@@ -22,7 +22,7 @@ export function faviconUrl(waiting: number, working: boolean): string {
 // marks its icon (faviconUrl).
 export function useHubTab(waiting: number, working: boolean) {
   useEffect(() => {
-    document.title = waiting > 0 ? `(${waiting}) AgentAPI Hub` : "AgentAPI Hub";
+    document.title = waiting > 0 ? `(${waiting}) Tendyard Hub` : "Tendyard Hub";
     let link = document.querySelector<HTMLLinkElement>("link[data-hub-icon]");
     if (!link) {
       document.querySelectorAll<HTMLLinkElement>('link[rel~="icon"]').forEach((icon) => icon.remove());

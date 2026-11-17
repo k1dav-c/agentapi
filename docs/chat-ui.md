@@ -578,7 +578,7 @@ sound**), a chime plays while you look away from the page, rising when the agent
 falling when it finishes; it works over plain http too. The hub's bell offers the same notifications and sound. In a chat the hub opens, the hub chimes for
 an agent that needs you, and the chat only when it finishes.
 
-**Add to an AgentAPI hub…** has the steps to copy: run a hub, join this machine to it, open it.
+**Add to a Tendyard hub…** has the steps to copy: run a hub, join this machine to it, open it.
 The hub address you type goes into the commands. When this instance already reports to a hub,
 it says which.
 

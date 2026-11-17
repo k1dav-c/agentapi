@@ -20,7 +20,7 @@ export const WEBHOOK_EVENT_GROUPS: WebhookEventGroup[] = [
     events: ["request.opened", "request.closed", "login.required", "login.completed", "limit.stopped", "limit.cleared"],
     patterns: ["request.*", "login.*", "limit.*"],
   },
-  {id: "instance", label: "Heartbeats", detail: "When AgentAPI starts and stops, and what the agent does every interval", events: ["instance.started", "instance.heartbeat", "instance.stopped"], patterns: ["instance.*"]},
+  {id: "instance", label: "Heartbeats", detail: "When Tendyard starts and stops, and what the agent does every interval", events: ["instance.started", "instance.heartbeat", "instance.stopped"], patterns: ["instance.*"]},
   {id: "status", label: "Run status", detail: "The agent changes between running and stable", events: ["run.status_changed"], patterns: ["run.status_changed"]},
   {id: "errors", label: "Agent errors", detail: "Errors and warnings the agent reports", events: ["agent.error"], patterns: ["agent.error"]},
   {id: "messages", label: "Messages", detail: "Every message of yours and the agent's final ones", events: ["message.created"], patterns: ["message.created"]},

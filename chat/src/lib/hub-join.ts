@@ -89,13 +89,13 @@ export function joinPrompt(options: JoinOptions): string {
   const alternatives = others.map(named);
   const otherURL = alternatives.length === 1 ? alternatives[0] : `the one it reaches of ${alternatives.join(", ")}`;
   const lines = [
-    "Join this machine's AgentAPIs to my AgentAPI hub (agentapi hub join). If the agentapi-hub-join skill is available, follow it; here are the values it asks for:",
+    "Join this machine's Tendyard instances to my Tendyard hub (agentapi hub join). If the agentapi-hub-join skill is available, follow it; here are the values it asks for:",
     `- The hub's webhook URL: ${hub.url}${hub.interface ? ` (the hub's ${hub.interface})` : ""}.` +
       (alternatives.length > 0 ? ` If this machine isn't on that network, use ${otherURL} instead, in the steps below too.` : ""),
     secret === undefined
       ? "- The hub secret: ask me for it (the one given to agentapi hub serve). Pass it to agentapi hub join only through the environment; never print it, or write it to a file or a commit."
       : `- The hub secret: \`${secret}\`. Pass it to agentapi hub join only through the environment; never print it, or write it to a file or a commit.`,
-    `- Where the hub reaches this machine: --public-url '${PUBLIC_URL}', exactly as written. Don't look up the IP: each AgentAPI fills in {ip} with this machine's address on the route to the hub, and follows it when the address changes, and {port} with its port.`,
+    `- Where the hub reaches this machine: --public-url '${PUBLIC_URL}', exactly as written. Don't look up the IP: each instance fills in {ip} with this machine's address on the route to the hub, and follows it when the address changes, and {port} with its port.`,
     allowUpdate ? "- Updates from the hub: yes, join with --allow-update (see Updates below)." : "- Updates from the hub: no, join without --allow-update.",
     "",
     "Steps:",
@@ -107,21 +107,21 @@ export function joinPrompt(options: JoinOptions): string {
       : "   000 or a timeout: no route to the hub. 302, 303 or an HTML page: a sign-in page is in the way. Then stop and tell me.",
     "3. Join. It sends the hub a signed test event first; if that fails, follow its message, and don't use --no-check:",
     `   AGENTAPI_HUB_SECRET=${shellQuote(secret ?? SECRET_PLACEHOLDER)} agentapi hub join ${url} --public-url ${shellQuote(PUBLIC_URL)}${allowUpdate ? " --allow-update" : ""}`,
-    "   It prints the address {ip} stands for now. A running AgentAPI it calls too old for {ip} reports that address until it restarts.",
-    `4. agentapi hub status: each running AgentAPI should report to ${hub.url}.`,
+    "   It prints the address {ip} stands for now. A running instance it calls too old for {ip} reports that address until it restarts.",
+    `4. agentapi hub status: each running instance should report to ${hub.url}.`,
   ];
   if (allowUpdate) {
     lines.push(
       "",
-      "Updates: if join prints that the hub can't update them yet because AgentAPI can't replace its binary, explain the one-time setup it prints (it copies the binary to ~/.local/bin and leaves a symlink in its place, with sudo) and ask me before you run it. Also suggest this line in ~/.agentapi/config.yaml, so an update keeps each AgentAPI's conversation, and ask me before you add it:",
+      "Updates: if join prints that the hub can't update them yet because it can't replace its binary, explain the one-time setup it prints (it copies the binary to ~/.local/bin and leaves a symlink in its place, with sudo) and ask me before you run it. Also suggest this line in ~/.agentapi/config.yaml, so an update keeps each instance's conversation, and ask me before you add it:",
       "   state-db: ~/.agentapi/state/{port}.db",
     );
   }
   lines.push(
     "",
-    "Rules: don't restart or stop any AgentAPI (one of them runs this conversation); list the ones that need a restart and let me decide. Don't print, log or commit the secret.",
+    "Rules: don't restart or stop any instance (one of them runs this conversation); list the ones that need a restart and let me decide. Don't print, log or commit the secret.",
     "",
-    `Report: the hub URL you used, the address join printed for {ip}, agentapi --version, each AgentAPI's join result, ${allowUpdate ? "whether the hub can update them, " : ""}and which ones need a restart (those too old for {ip}).`,
+    `Report: the hub URL you used, the address join printed for {ip}, agentapi --version, each instance's join result, ${allowUpdate ? "whether the hub can update them, " : ""}and which ones need a restart (those too old for {ip}).`,
   );
   return lines.join("\n");
 }

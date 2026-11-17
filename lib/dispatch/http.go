@@ -401,7 +401,7 @@ func (s *Service) createIssue(w http.ResponseWriter, r *http.Request) {
 	if req.Assign != nil {
 		labels = append(labels, agentLabel(req.Assign.Agent))
 	}
-	body := strings.TrimRight(req.Body, "\n") + "\n\n_由 agentapi hub 建立。_"
+	body := strings.TrimRight(req.Body, "\n") + "\n\n_由 Tendyard hub 建立。_"
 	issue, err := as.CreateIssue(r.Context(), req.Repo, req.Title, body, labels)
 	if err != nil {
 		jsonapi.WriteError(w, jsonapi.Errorf(http.StatusBadGateway, "github_failed", "%v", err))
@@ -486,7 +486,7 @@ func Manifest(hubURL, name string) map[string]any {
 var connectPage = template.Must(template.New("").Parse(`<!doctype html>
 <html lang="zh-Hant"><head><meta charset="utf-8"><title>連接 GitHub</title></head>
 <body style="font-family:system-ui;max-width:40rem;margin:3rem auto">
-<h1>建立 agentapi hub 的 GitHub App</h1>
+<h1>建立 Tendyard hub 的 GitHub App</h1>
 <p>按下按鈕後到 GitHub 確認建立。名稱可以在 GitHub 上修改（GitHub 上不能重名）。建立後會接著請你選擇要安裝的 repository。</p>
 {{if .Current}}<p>這個 hub 現在用的是 {{.Current}}。新的 App 建立後才會取代它；在 GitHub 上取消的話，{{.Current}} 照常運作。舊的 App 會留在 GitHub 上，不用時到它的設定頁刪除。</p>{{end}}
 <form id="f" method="post" action="{{.Action}}">
@@ -518,7 +518,7 @@ func (s *Service) connect(w http.ResponseWriter, r *http.Request) {
 	}
 	suffix := make([]byte, 3)
 	_, _ = rand.Read(suffix)
-	manifest, _ := json.Marshal(Manifest(origin(r), "agentapi-hub-"+hex.EncodeToString(suffix)))
+	manifest, _ := json.Marshal(Manifest(origin(r), "tendyard-hub-"+hex.EncodeToString(suffix)))
 	action += "?state=" + url.QueryEscape(s.newState())
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	current := ""

@@ -47,7 +47,7 @@ export function AddInstance({root, open, onOpenChange, onAdded}: {root: string; 
       <DialogContent className="max-h-[90dvh] grid-cols-[minmax(0,1fr)] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Add agents</DialogTitle>
-          <DialogDescription>Join a machine, and its AgentAPIs show up here by themselves, now and after restarts.</DialogDescription>
+          <DialogDescription>Join a machine, and its Tendyard instances show up here by themselves, now and after restarts.</DialogDescription>
         </DialogHeader>
         <section aria-labelledby="hub-join-machine" className="space-y-3">
           <h3 id="hub-join-machine" className={sectionClass}>
@@ -59,7 +59,7 @@ export function AddInstance({root, open, onOpenChange, onAdded}: {root: string; 
           <div className="space-y-1">
             <h3 className={sectionClass}>Add one by its URL</h3>
             <p className="text-sm text-muted-foreground">
-              For an AgentAPI that can&apos;t run <code className="font-mono text-[12px]">agentapi hub join</code>.
+              For an instance that can&apos;t run <code className="font-mono text-[12px]">agentapi hub join</code>.
             </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_11rem_auto] sm:items-end">
