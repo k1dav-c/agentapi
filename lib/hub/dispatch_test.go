@@ -43,6 +43,8 @@ func TestHubDispatch(t *testing.T) {
 	dir := t.TempDir()
 	d, err := dispatch.New(dispatch.Config{StatePath: filepath.Join(dir, "dispatch.json"), AppPath: filepath.Join(dir, "github-app.json"), Secret: hubSecret, DispatchToken: "dispatch-token", AllowLoopback: true})
 	require.NoError(t, err)
+	// Stops its writes before the directory is removed.
+	t.Cleanup(d.Close)
 	config := following("")
 	config.Dispatch = d
 	srv := startHubWith(t, config, true)
@@ -144,6 +146,8 @@ func TestHubSendsAJobItsLaunchersToken(t *testing.T) {
 	dir := t.TempDir()
 	d, err := dispatch.New(dispatch.Config{StatePath: filepath.Join(dir, "dispatch.json"), Secret: hubSecret, DispatchToken: "dispatch-token", AllowLoopback: true})
 	require.NoError(t, err)
+	// Stops its writes before the directory is removed.
+	t.Cleanup(d.Close)
 	config := following("")
 	config.InstanceToken = "not-the-launchers"
 	config.Dispatch = d
