@@ -2,14 +2,39 @@
 
 English | [繁體中文](security.zh-TW.md)
 
-AgentAPI has no users or roles: whoever can reach the API can do what the agent can. Out of the box
-it takes no token and accepts any connection whose `Host` header is `localhost` or an IP address,
-on every network interface. The host check keeps web pages
-from calling it through DNS rebinding; it doesn't stop a program on the network, which can send any
-`Host` header. Protect the server before anyone else can reach the port. When it takes no token and
-listens on an address other machines can reach, AgentAPI logs a warning at startup.
+Protect Tendyard before other people can reach its port: anyone with API access can use the
+agent's capabilities, and there are no individual users or roles.
 
-## API token authentication
+- **Restrict connections:** choose a bind address or a network boundary that reaches only trusted clients.
+- **Require credentials:** enable an API token before sharing access; authentication is off by default.
+- **Constrain browser access:** allowed hosts and origins check browser requests; they do not replace network access controls.
+- **Review capabilities:** access includes sending work, using the terminal and reading workspace files.
+
+By default, the server listens on every network interface and accepts `Host` headers naming
+`localhost` or an IP address. The host check prevents DNS rebinding from web pages, but network
+programs can send any `Host` header. Tendyard logs a startup warning when it takes no token and
+listens on an address other machines can reach.
+
+<a id="bind-address"></a>
+
+## The bind address limits which network interfaces accept connections
+
+By default, the server listens on all network interfaces. Use `--bind` (or `AGENTAPI_BIND`) to
+listen on one address only, e.g. loopback so nothing else on the network can connect. It takes an IP
+address or hostname without a port; the port stays `--port`.
+
+```bash
+agentapi server --bind 127.0.0.1 -- claude
+agentapi server --bind ::1 -- claude          # IPv6 loopback
+AGENTAPI_BIND=127.0.0.1 agentapi server -- claude
+```
+
+`--bind` decides who can connect; `--allowed-hosts` below decides which `Host` headers are accepted
+from those who can.
+
+<a id="api-token-authentication"></a>
+
+## An API token restricts access to clients that hold it
 
 All API endpoints can be protected with a Bearer token. Authentication is **disabled by default**
 for backward compatibility.
@@ -58,30 +83,17 @@ site, and the default allowed origins include `http://localhost:3000` and `http:
 for chat development. On a shared machine, set `--allowed-origins` to the origins you use, so a
 signed-in browser's cookie only works for them.
 
-## Bind address
+<a id="allowed-hosts"></a>
 
-By default, the server listens on all network interfaces. Use `--bind` (or `AGENTAPI_BIND`) to
-listen on one address only, e.g. loopback so nothing else on the network can connect. It takes an IP
-address or hostname without a port; the port stays `--port`.
-
-```bash
-agentapi server --bind 127.0.0.1 -- claude
-agentapi server --bind ::1 -- claude          # IPv6 loopback
-AGENTAPI_BIND=127.0.0.1 agentapi server -- claude
-```
-
-`--bind` decides who can connect; `--allowed-hosts` below decides which `Host` headers are accepted
-from those who can.
-
-## Allowed hosts
+## Allowed hosts reject unrecognized Host headers
 
 By default, the server only allows requests with the `Host` header set to `localhost`, `127.0.0.1`
 or `[::1]`, or to any other IP address: DNS rebinding needs a name the attacker's page controls, so
-an address (a LAN's, a VPN's, one DHCP changes) needs no entry. To open AgentAPI by a name, set
+an address (a LAN's, a VPN's, one DHCP changes) needs no entry. To open Tendyard by a name, set
 `AGENTAPI_ALLOWED_HOSTS` or `--allowed-hosts`. A network such as `192.168.9.0/24` isn't accepted.
 Hosts must be hostnames only (no ports); the server ignores the port portion of incoming requests
 when authorizing. This checks the `Host` header only; to keep the server off the network
-altogether, also listen on loopback with `--bind 127.0.0.1` (see [Bind address](#bind-address)).
+altogether, also listen on loopback with `--bind 127.0.0.1` (see [The bind address limits which network interfaces accept connections](#bind-address)).
 
 To allow requests from any host, use `*` as the allowed host.
 
@@ -104,7 +116,9 @@ agentapi server --allowed-hosts 'example.com,example.org' -- claude
 AGENTAPI_ALLOWED_HOSTS='example.com example.org' agentapi server -- claude
 ```
 
-## Allowed origins
+<a id="allowed-origins"></a>
+
+## Allowed origins control browser access across origins
 
 By default, the server allows CORS requests from `http://localhost:3284`, `http://localhost:3000`,
 and `http://localhost:3001`. Set `AGENTAPI_ALLOWED_ORIGINS` or `--allowed-origins` to change which
@@ -133,15 +147,17 @@ agentapi server --allowed-origins 'https://example.com,http://localhost:3000' --
 AGENTAPI_ALLOWED_ORIGINS='https://example.com http://localhost:3000' agentapi server -- claude
 ```
 
-A page of another origin can't make the server change anything (any method but GET, HEAD and
-OPTIONS) unless its origin is listed. Browsers send such requests without asking first (a form, a
-`fetch` in `no-cors` mode); CORS only keeps the page from reading the answer, so without
-`--api-token` any site you open could send the agent a task or type into the terminal. `*` lets
-every page read the answers but trusts none to send these: list the origins that need to. The
-server tells pages apart by the `Sec-Fetch-Site` and `Origin` headers browsers add, so clients
-other than browsers (curl, SDKs, the hub) aren't affected.
+The server blocks changes from a page on another origin unless that origin is listed. This
+covers methods other than GET, HEAD and OPTIONS. CORS alone would only stop the page from reading
+the response: browsers can send forms or `fetch` requests in `no-cors` mode without a preflight.
+The server therefore checks the `Sec-Fetch-Site` and `Origin` headers as well. Without that check
+or `--api-token`, a site you open could send the agent a task or type into the terminal.
+`*` lets every page read responses, but doesn't authorize these changes; list the origins that
+need them. Non-browser clients (curl, SDKs, the hub) aren't affected by this browser-origin check.
 
-## What an API client can do
+<a id="what-an-api-client-can-do"></a>
+
+## An authenticated client can use the agent’s capabilities
 
 - Have the agent run anything it can. Agents start in the bypass
   permission mode, where tools run without asking, unless the command line
@@ -164,7 +180,7 @@ other than browsers (curl, SDKs, the hub) aren't affected.
 - Change the webhook and restart the agent. The webhook can send the
   conversation (`message.created`, `tool.completed`) to any URL; `GET /webhook` never returns its
   secret.
-- With `--allow-update`, [update AgentAPI](api.md#updating-through-the-api) to the latest official
+- With `--allow-update`, [update Tendyard](api.md#updating-through-the-api) to the latest official
   release and restart it. A client can't choose the version or where it comes from.
 
 Use `--api-token` together with `--bind` or a reverse proxy whenever someone else can reach the

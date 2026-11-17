@@ -7,8 +7,8 @@
 - An issue's detail fits its totals in a narrow panel: Spend, Runs, Agent time, Elapsed and Tokens
   were five columns wherever the detail opened, and beside the board or on a phone they were cut
   short ("Agent tim…", "$1.…"). Where the panel is narrow they now take two rows.
-- The message box at the bottom of an issue's detail no longer comes up one line short, its text
-  cut off, when the detail first opens or a menu closes over it.
+- The message box at the bottom of an issue's detail no longer clips its text when the detail first
+  opens or a menu closes over it. It previously rendered one line too short.
 
 ## v5.6.0
 
@@ -230,8 +230,8 @@ hub's own machine.
 ### Fixes
 
 - An update through the API (`POST /update`, or from the hub) checks that the new version would
-  start with this AgentAPI's settings and state database before it replaces the program, where it
-  replaced it first: the next start of AgentAPI then failed on a release that refuses a setting.
+  start with this AgentAPI's settings and state database before replacing the program. Previously,
+  it replaced the program first, so a release that refused a setting failed on the next start.
   AgentAPI before 4.3.1 still updates the old way: if its update fails naming a setting, drop the
   setting before that AgentAPI restarts.
 
@@ -239,9 +239,9 @@ hub's own machine.
 
 ### Features
 
-- A long conversation opens as fast as a new one: the chat gets the latest 20 tasks, and reads the
-  20 before them when you scroll to the top or click **Show earlier tasks**, keeping what you read
-  in place. Task numbers still count from the first task. The search goes through the tasks
+- The chat opens a conversation with its latest 20 tasks and loads the previous 20 when you scroll
+  to the top or click **Show earlier tasks**, keeping what you read in place. It no longer loads
+  the whole conversation at once. Task numbers still count from the first task. The search goes through the tasks
   loaded, and **+*n* earlier** in its bar loads the rest.
 - `GET /messages`, `GET /rich-messages`, `GET /timeline` and `GET /tasks` take `before` (a task's
   ID) and `limit` (tasks, up to 100) and answer `has_more` and `next_before`, the cursor of the page
@@ -416,8 +416,8 @@ hub's own machine.
 
 ### Fixes
 
-- An issue card's ring in Issues ends after its 1.6 s again: every event of the hub's stream
-  cancelled the timer that ends it, so a card's ring could stay on for good.
+- An issue card's ring in Issues disappears after 1.6 s again. Each event on the hub's stream
+  previously cancelled its timer, so the ring could remain visible indefinitely.
 - The chat no longer reads `GET /queue` every minute while the queue sits idle: it reads it on a
   timer only from an AgentAPI older than 1.0.0 (or one that doesn't say its version), which sends
   no queue events, and only until one comes.
@@ -1414,8 +1414,8 @@ hub's own machine.
 - `GET /cost` sends only the calls made since, to a client that sends `from` and the `digest` it
   got: the chat read all 3,451 calls of that session (670 KB) when it opened and every 15 seconds
   while a turn ran, and now reads a few new ones.
-- The chat's build files, named by their content, are kept by the browser for good
-  (`Cache-Control: immutable`); its pages are checked every time.
+- The chat's build files, named by their content, use `Cache-Control: immutable` so browsers can
+  reuse them without revalidation while they remain fresh; pages are checked every time.
 
 ## v1.8.0
 
@@ -1466,8 +1466,8 @@ hub's own machine.
 
 ### Features
 
-- `agentapi hub serve --no-token` runs a hub without a sign-in, for one only a sign-in of its own
-  reaches (a Coder workspace app, a private VPN): everyone who reaches it is in. A hub still needs
+- `agentapi hub serve --no-token` runs a hub behind an existing access control, such as a Coder
+  workspace app or a private VPN. It requires no hub sign-in: everyone who can reach it has access. A hub still needs
   `--token` or `--no-token`, and takes only one of them.
 
 ## v1.4.1

@@ -1,15 +1,22 @@
 # Issue 派工：架設
 
-把 GitHub issue 交給內網主機上的 agent 開發，PR 的 review 再轉給同一個 agent。設計見
-[docs/specs/issue-dispatch.zh-TW.md](../../docs/specs/issue-dispatch.zh-TW.md)。
+設定 hub、launcher、GitHub App 與內網 runner，即可讓 agent 處理 GitHub issue，並把 PR 的 review
+交回同一個 agent。依相依順序完成四項設定：
+
+1. **hub 接收派工：**設定專用 dispatch token，供 runner 呼叫。
+2. **launcher 執行工作：**每台主機先加入 hub，再啟動 launcher。
+3. **GitHub App 提供身分：**授權 repo，讓 job 能 push 與開 PR。
+4. **runner 傳回事件：**在內網執行 workflow，把 issue 與 PR 事件送到 hub。
+
+設計細節見 [docs/specs/issue-dispatch.zh-TW.md](../../docs/specs/issue-dispatch.zh-TW.md)。
 
 ```
-GitHub ──(runner 主動拉 job)──► 內網 runner ──POST /api/dispatch──► hub ──► 各主機的 launcher ──► 每個 issue 一個 AgentAPI
+GitHub ──(runner 主動拉 job)──► 內網 runner ──POST /api/dispatch──► hub ──► 各主機的 launcher ──► 每個 issue 一個實例
 ```
 
-需要四樣東西：hub、每台主機的 launcher、hub 的 GitHub App、內網的 self-hosted runner 加 workflow。
+<a id="1-hub"></a>
 
-## 1. hub
+## 1. hub 用 dispatch token 接收 runner 的派工
 
 在 hub 啟動參數加上 dispatch token（只能呼叫 `/api/dispatch`，給 runner 用）：
 
@@ -20,9 +27,11 @@ agentapi hub serve --token "$HUB_TOKEN" --secret "$HUB_SECRET" --instance-token 
 
 hub 把機器與 job 存在 `~/.agentapi/hub/dispatch.json`，GitHub App 存在 `github-app.json`（都是 0600）。
 
-`--instance-token` 只給手動開的 AgentAPI 用；launcher 開的 job 用各主機自己產生的 token（`~/.agentapi/instance.token`），launcher 會在事件裡交給 hub，不必複製到各台主機。
+`--instance-token` 只給手動開的 Tendyard 用；launcher 開的 job 用各主機自己產生的 token（`~/.agentapi/instance.token`），launcher 會在事件裡交給 hub，不必複製到各台主機。
 
-## 2. 每台主機的 launcher
+<a id="2-每台主機的-launcher"></a>
+
+## 2. 每台主機加入 hub 後，以 launcher 啟動 issue job
 
 主機先加入 hub（`agentapi hub join`），再把 launcher 裝成 systemd user service：
 
@@ -50,7 +59,9 @@ systemd 的主機（容器、Coder 工作區）上 `agentapi host install` 會�
 `nohup agentapi host serve >~/.agentapi/host.log 2>&1 &`，或從 Coder 範本的 `coder_script` 啟動，見
 [`agentapi host`](../../docs/cli.zh-TW.md#agentapi-host)。
 
-## 3. GitHub App
+<a id="3-github-app"></a>
+
+## 3. GitHub App 提供 repo 存取權與 bot 身分
 
 登入 hub 後，用瀏覽器開：
 
@@ -66,9 +77,13 @@ http://<hub>:3290/github/connect?org=<組織>     # 個人帳號就不加 ?org=
 
 沒有 App 時派工照常運作，但 job 用主機自己的憑證（SSH key、`gh auth login`），也不會留言。
 
-## 4. 內網 runner 與 workflow
+<a id="4-內網-runner-與-workflow"></a>
 
-### runner
+## 4. 內網 runner 透過 workflow 把事件送回 hub
+
+<a id="runner"></a>
+
+### runner 必須連得到 hub
 
 找一台連得到 hub 的機器，用一個**專用的使用者**（不要用跑 agent 的使用者）裝 GitHub Actions runner：
 
@@ -93,15 +108,19 @@ http://<hub>:3290/github/connect?org=<組織>     # 個人帳號就不加 ?org=
 
 runner 只需要 `bash`、`curl`、`jq`，不需要 git、gh 或任何 agent 的登入。
 
-### workflow
+<a id="workflow"></a>
+
+### workflow 把 issue 與 PR 事件轉成派工請求
 
 1. 把 [`agent-dispatch.yml`](agent-dispatch.yml) 放到中央 repo，例如 `<組織>/.github` 的
    `.github/workflows/agent-dispatch.yml`。私有的中央 repo 要在它的 Settings → Actions → General →
-   Access 允許組織內的 repo 使用；公開的 repo 呼叫不到私有中央 repo 的 workflow（反正公開 repo 也不該用這個 runner）。
+   Access 允許組織內的 repo 使用。公開 repo 無法呼叫私有中央 repo 的 workflow，也不應開放使用這個 runner。
 2. 每個要派工的 repo 加上 [`caller.yml`](caller.yml)（例如 `.github/workflows/agent.yml`），
    把裡面的 `k1dav-c/.github` 換成中央 repo。
 
-### 使用
+<a id="使用"></a>
+
+### 加上 label 即可開工，review 會回到同一個 agent
 
 | 在 GitHub 上 | 結果 |
 |---|---|

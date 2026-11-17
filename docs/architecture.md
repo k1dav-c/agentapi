@@ -2,31 +2,39 @@
 
 English | [繁體中文](architecture.zh-TW.md)
 
-Each AgentAPI process runs one coding agent (Claude Code, Codex or Pi) through its structured
-protocol, the native transport, and exposes it through an HTTP API, an event stream and an embedded
-chat UI. This guide covers the implementation of the single Go binary; see the [README](../README.md) for features and usage.
+Tendyard ships one Go binary, `agentapi`, with separate roles for running an agent, coordinating
+machines and launching issue jobs. Its implementation separates process control, state and clients.
+
+- **Execution:** native adapters drive Claude Code, Codex and Pi; each `agentapi server` runs one agent.
+- **State:** the conversation emitter owns the state clients read, with queues and persistence around it.
+- **Access:** the HTTP API, event streams and embedded chat expose that state through shared controls.
+- **Coordination:** the hub monitors instances and dispatches issues; host launchers run jobs on workers.
+
+This guide explains the implementation; see the [README](../README.md) for features and usage.
 
 ## Contents
 
-- [Overview](#overview)
-- [Repository layout](#repository-layout)
-- [Startup and shutdown](#startup-and-shutdown)
-- [The HTTP server](#the-http-server)
-- [The native transport](#the-native-transport)
-  - [Model providers](#model-providers)
-- [Events and the conversation state](#events-and-the-conversation-state)
-- [The message queue](#the-message-queue)
-- [Persistence](#persistence)
-- [Restarts and updates](#restarts-and-updates)
-- [The shell terminal](#the-shell-terminal)
-- [Files](#files)
-- [Security model](#security-model)
-  - [Child process environment](#child-process-environment)
-- [The chat UI](#the-chat-ui)
-- [Testing](#testing)
-- [Design principles](#design-principles)
+- [Adapters report changes through one conversation emitter](#overview)
+- [Packages separate transport, state and HTTP concerns](#repository-layout)
+- [Startup wires the agent and server; shutdown closes their resources](#startup-and-shutdown)
+- [HTTP handlers call the conversation and read the emitter](#the-http-server)
+- [Native adapters translate each agent protocol into shared events](#the-native-transport)
+  - [A local proxy keeps provider keys out of agent environments](#model-providers)
+- [The emitter keeps conversation state and notifies subscribers](#events-and-the-conversation-state)
+- [The queue serializes messages around agent readiness](#the-message-queue)
+- [Stored state restores conversations and hub records after restarts](#persistence)
+- [Restarts validate the replacement before handing work over](#restarts-and-updates)
+- [The server owns a shared shell alongside the agent](#the-shell-terminal)
+- [File endpoints read the workspace through bounded operations](#files)
+- [Access controls protect the same capabilities the agent has](#security-model)
+  - [Child processes inherit login settings without parent-session secrets](#child-process-environment)
+- [The embedded chat reads the same HTTP API as other clients](#the-chat-ui)
+- [Package, UI and end-to-end tests cover different boundaries](#testing)
+- [Shared contracts keep agents and clients independent](#design-principles)
 
-## Overview
+<a id="overview"></a>
+
+## Adapters report changes through one conversation emitter
 
 ```mermaid
 flowchart TB
@@ -58,11 +66,13 @@ flowchart TB
 The server drives the agent through a `native.Conversation`, which reports changes to the event
 emitter. Handlers call the conversation and read state from the emitter.
 
-## Repository layout
+<a id="repository-layout"></a>
+
+## Packages separate transport, state and HTTP concerns
 
 | Path | What it holds |
 | --- | --- |
-| `main.go`, `cmd/` | The Cobra CLI: `server` (flags, agent type, starting the agent, signals, restarting in place), `list` (the registered AgentAPIs and their summaries), `hub` (`serve`: the hub; `join`, `leave` and `status`: a hub's webhook in the config file and in the running AgentAPIs), `restart` (has registered AgentAPIs restart in place), `update` (self-update with checksum verification) and `host` (`cmd/host`: the issue dispatch's launcher, `serve`, `status`, `install` and `uninstall` of its systemd user service, and the hidden `git-credential` and `gh-token` its jobs run) |
+| `main.go`, `cmd/` | The Cobra CLI: `server` (flags, agent type, starting the agent, signals, restarting in place), `list` (the registered Tendyard instances and their summaries), `hub` (`serve`: the hub; `join`, `leave` and `status`: a hub's webhook in the config file and in the running Tendyard instances), `restart` (has registered Tendyard instances restart in place), `update` (self-update with checksum verification) and `host` (`cmd/host`: the issue dispatch's launcher, `serve`, `status`, `install` and `uninstall` of its systemd user service, and the hidden `git-credential` and `gh-token` its jobs run) |
 | `lib/httpapi/` | The HTTP server: routes and handlers, the queue, token auth, CORS, the event streams, the files, terminal and webhook endpoints; it wires the three packages below |
 | `lib/httpmw/` | What the server and the hub share of HTTP: the `Host` check and the parsing of `--allowed-hosts`, `--allowed-origins` and `--bind`, cross-origin protection, compression, and the embedded chat UI's file server (`lib/httpmw/chat/`) |
 | `lib/convstate/` | The conversation state clients read, without HTTP: the `EventEmitter` (its changes numbered by epoch and seq, subscriptions and replay), the tasks and the summary it derives, the queue as the server reported it, and the `Persister` it hands every change to |
@@ -84,23 +94,23 @@ emitter. Handlers call the conversation and read state from the emitter.
 | `lib/native/nativetest` | A scriptable fake adapter for tests |
 | `lib/native/procutil` | Child process groups and graceful shutdown |
 | `lib/statedb/` | SQLite persistence for `--state-db` |
-| `lib/instanceapi/` | The contract between an AgentAPI and the clients that watch many: who it is (`WebhookInstance`, in its webhook events, summary and registry entry, with its `AgentType`), its summary, the webhook envelope with its signature (`Sign`, `Verify`), and the state a hub shows of each instance (`StateOf`). It imports only `lib/agentstate` and `lib/util` |
-| `lib/hub/` | `agentapi hub serve`, over `lib/instanceapi` and `lib/httpmw` rather than the server: the instances, the groups and pins set on its page, when each last changed what its row shows and when the hub saw each working (`store.go`, `work.go`, kept in a file by `persist.go`), the activity of the last year hour by hour (`activity.go`, `activity.json`, `GET /api/activity`: the work, and each scope's spend from the summaries' `spend.hours`), the favorite prompts (`favorites.go`, `GET`/`PUT /api/favorites`, among the hub's settings in the same file), the model providers (`providers.go`, `providers.json`, `GET`/`PUT /api/providers`, `POST /api/providers/check` for the editor's Check connection, and `POST /api/providers/sync` for the AgentAPIs) and their models' prices from OpenRouter (`prices.go`, `openrouter.go`, `openrouter.json`, `POST /api/providers/prices`, `GET /api/providers/openrouter`), the schema of its wire types (`schema.go`, `hub-schema.json`, for the page's types), the signed webhook receiver (`webhook.go`), each instance's summary stream (`watch.go`), sign-in, the browser's event stream and the proxy to the instances (`hub.go`, `proxy.go`), where machines join it (`join.go`: its addresses for `GET /api/join` and the startup log); the user guide is [hub.md](hub.md) |
-| `lib/dispatch/` | The hub's issue dispatch, which `lib/hub` mounts: the machines whose launchers report (`host.*` events; each name pinned to the launcher token it first came with), the jobs with their runs' costs (the tasks from `task.*` events; the spend and work time from what the hub reads of the run's AgentAPI, `Saw`) and the last 50 messages their agents were sent (`send`, from the hub's page, a review or an `/agent` comment), `POST /api/dispatch` (a start answers once its job is `starting`; the hub calls the launcher in the background and keeps the start until it ends, adopting it from the machine's next report if the answer was lost), the GitHub App, kept in `dispatch.json` and `github-app.json`. `Subscribe` and `Board` give the hub's stream the machines and jobs after each change (its `dispatch` event); the spec is [issue-dispatch.zh-TW.md](specs/issue-dispatch.zh-TW.md) |
-| `lib/host/` | `agentapi host`, the launcher on each machine: its settings (the `host` section of the config file), the repositories it has or clones, a git worktree and an AgentAPI for each job the hub starts (restarted after it exits, kept in `jobs.json`), its API for the hub behind its token (`server.go`), its `host.*` events and heartbeats to the hub (`hub.go`), and each job's GitHub token over a unix socket for its `git` and `gh` (`credentials.go`) |
+| `lib/instanceapi/` | The contract between a Tendyard instance and the clients that watch many: who it is (`WebhookInstance`, in its webhook events, summary and registry entry, with its `AgentType`), its summary, the webhook envelope with its signature (`Sign`, `Verify`), and the state a hub shows of each instance (`StateOf`). It imports only `lib/agentstate` and `lib/util` |
+| `lib/hub/` | `agentapi hub serve`, over `lib/instanceapi` and `lib/httpmw` rather than the server: the instances, the groups and pins set on its page, when each last changed what its row shows and when the hub saw each working (`store.go`, `work.go`, kept in a file by `persist.go`), the activity of the last year hour by hour (`activity.go`, `activity.json`, `GET /api/activity`: the work, and each scope's spend from the summaries' `spend.hours`), the favorite prompts (`favorites.go`, `GET`/`PUT /api/favorites`, among the hub's settings in the same file), the model providers (`providers.go`, `providers.json`, `GET`/`PUT /api/providers`, `POST /api/providers/check` for the editor's Check connection, and `POST /api/providers/sync` for the Tendyard instances) and their models' prices from OpenRouter (`prices.go`, `openrouter.go`, `openrouter.json`, `POST /api/providers/prices`, `GET /api/providers/openrouter`), the schema of its wire types (`schema.go`, `hub-schema.json`, for the page's types), the signed webhook receiver (`webhook.go`), each instance's summary stream (`watch.go`), sign-in, the browser's event stream and the proxy to the instances (`hub.go`, `proxy.go`), where machines join it (`join.go`: its addresses for `GET /api/join` and the startup log); the user guide is [hub.md](hub.md) |
+| `lib/dispatch/` | The hub's issue dispatch, which `lib/hub` mounts: the machines whose launchers report (`host.*` events; each name pinned to the launcher token it first came with), the jobs with their runs' costs (the tasks from `task.*` events; the spend and work time from what the hub reads of the run's Tendyard, `Saw`) and the last 50 messages their agents were sent (`send`, from the hub's page, a review or an `/agent` comment), `POST /api/dispatch` (a start answers once its job is `starting`; the hub calls the launcher in the background and keeps the start until it ends, adopting it from the machine's next report if the answer was lost), the GitHub App, kept in `dispatch.json` and `github-app.json`. `Subscribe` and `Board` give the hub's stream the machines and jobs after each change (its `dispatch` event); the spec is [issue-dispatch.zh-TW.md](specs/issue-dispatch.zh-TW.md) |
+| `lib/host/` | `agentapi host`, the launcher on each machine: its settings (the `host` section of the config file), the repositories it has or clones, a git worktree and a Tendyard instance for each job the hub starts (restarted after it exits, kept in `jobs.json`), its API for the hub behind its token (`server.go`), its `host.*` events and heartbeats to the hub (`hub.go`), and each job's GitHub token over a unix socket for its `git` and `gh` (`credentials.go`) |
 | `lib/github/` | The hub's GitHub App, with no dependency beyond the standard library: registering it from a manifest, its JWT, installation tokens for one repository (kept until five minutes before they expire) or all, and the REST calls the dispatch makes as the app |
 | `lib/jsonapi/` | The JSON plumbing the hub, the dispatch and the launcher share: reading a body (1 MiB at most), writing an answer, and `Error`, a refusal with its status and a code, answered as `{"code", "message", "error"}` |
 | `lib/hub/schemagen` | The command `go generate` runs to write `lib/hub/hub-schema.json` from `hub.Schema` |
 | `lib/sse/` | Server-sent events as the HTML standard defines them: a reader (data: lines joined, comments skipped, CR, LF or CRLF line ends) and a writer, used by the hub for the instances' summary streams and the browser's stream. `lib/httpapi` writes its streams with huma's `sse` |
 | `lib/netaddr/` | The machine's IPv4 addresses: those other machines may reach it at (the hub's join URLs), and the one it reaches a host from (`Resolver`, for `{ip}` in `--public-url`) |
 | `lib/userconfig/` | The user's settings file, `~/.agentapi/config.yaml`: flags by name, read by `agentapi server`, written by `agentapi hub` |
-| `lib/registry/` | The entries of the AgentAPIs running on a machine (`~/.agentapi/instances`): writing one atomically, listing them and removing those whose process is gone, or whose PID another process got (its start time differs, on Linux and macOS) |
+| `lib/registry/` | The entries of the Tendyard instances running on a machine (`~/.agentapi/instances`): writing one atomically, listing them and removing those whose process is gone, or whose PID another process got (its start time differs, on Linux and macOS) |
 | `lib/atomicfile/` | Replacing a file at once so a crash leaves the old data or the new: a temporary file, synced, renamed into place, then the directory synced (the settings file, registry entries, the hub's file of instances) |
 | `lib/selfupdate/` | Installs the latest release of k1dav-c/agentapi in place of the program (`agentapi update`, `POST /update`): the lookup on GitHub, the binary for the platform, its check against the release's `checksums.txt` and that it runs as that version, and the rename under a lock file next to the program, the file and then the directory synced to disk (`Install`); whether the user can replace the program, with the one-time fix (`Program.Blocked`); `selfupdatetest` serves a fake release for tests |
 | `lib/shellterm/` | The shared shell terminal |
 | `lib/htmlpreview/` | Makes HTML previews self-contained for `GET /files/preview` by embedding resources referenced by relative paths as data: URLs |
-| `lib/filelock/` | The flock that AgentAPIs on one machine take in turn: replacing the program (`selfupdate`), an agent CLI updating itself before a restart |
-| `lib/procenv/` | The environment of the processes AgentAPI starts: the agent, the terminal's shell |
+| `lib/filelock/` | The flock that Tendyard instances on one machine take in turn: replacing the program (`selfupdate`), an agent CLI updating itself before a restart |
+| `lib/procenv/` | The environment of the processes Tendyard starts: the agent, the terminal's shell |
 | `lib/agenthome/` | Where the agents keep their state (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `PI_CODING_AGENT_DIR`) |
 | `lib/handoff/` | Types of the human-reply API |
 | `lib/logctx/`, `lib/util/` | Context-based logging and shared helpers |
@@ -124,7 +134,9 @@ The internal imports point one way, from the commands to the leaves:
 - `cmd/host` → `lib/host` → `lib/instanceapi`, `lib/jsonapi`: the launcher doesn't build the
   server or the hub
 
-## Startup and shutdown
+<a id="startup-and-shutdown"></a>
+
+## Startup wires the agent and server; shutdown closes their resources
 
 `agentapi server [flags] -- <agent command>` (`cmd/server/server.go`):
 
@@ -165,7 +177,7 @@ The internal imports point one way, from the commands to the leaves:
    agent and the shell terminal are closed, and the state DB is flushed and
    closed. SIGUSR1 flushes the state DB without stopping. An agent that exits
    doesn't stop the server: the conversation starts it again (see
-   [The native transport](#the-native-transport)).
+   [Native adapters translate each agent protocol into shared events](#the-native-transport)).
 6. SIGUSR2, or an update through the API, restarts the server in place
    (`cmd/server/reexec.go`, `selfExec.restart`). `selfExec` is the first
    thing the server sets up. It catches SIGUSR2, whose default action ends
@@ -218,7 +230,9 @@ The internal imports point one way, from the commands to the leaves:
    during the stop wins. Each registry entry says the server restarts in
    place (`restarts_in_place`), for `agentapi restart`.
 
-## The HTTP server
+<a id="the-http-server"></a>
+
+## HTTP handlers call the conversation and read the emitter
 
 `lib/httpapi` uses chi for routing and huma for typed API operations. Huma also produces the OpenAPI
 schema, which `make gen` writes to `openapi.json`. Requests pass through the following middleware
@@ -237,7 +251,9 @@ in order:
    instance's compressed responses on as they are.
 4. CORS for the allowed origins, with credentials, so the chat's cookie works
    from another origin.
-5. Token auth, with `--api-token`: a Bearer token or the chat's session
+5. Cross-origin protection (`lib/httpmw.CrossOriginProtection`): reject state-changing browser
+   requests unless their origin is trusted.
+6. Token auth, with `--api-token`: a Bearer token or the chat's session
    cookie. It runs after CORS, so preflights pass and a 401 carries the CORS
    headers the chat needs to read it.
 
@@ -249,14 +265,14 @@ The handlers are grouped by file:
 | `conversation_api.go`, `queue.go`, `turngate.go`, `sse.go` | Messages, status and timeline; the queue, its dispatch (with a continuation that is due first, `beforeQueue`) and `queue_update`; whether a turn may start now (`turnGateLocked`); `GET /events` |
 | `tasks_api.go` | `GET /tasks`: the tasks the emitter derives (`lib/convstate`) |
 | `history.go` | The pages of the lists (`before`, `limit`, `has_more`), read from memory or the state database; `GET /timeline/export` |
-| `summary_api.go`, `spend.go`, `registry.go` | `GET /summary` and `POST /tasks/seen`, the summary the emitter keeps for clients that watch many AgentAPIs; the spend worked out once a minute; the server's registry entry (`instanceRegistry`) |
+| `summary_api.go`, `spend.go`, `registry.go` | `GET /summary` and `POST /tasks/seen`, the summary the emitter keeps for clients that watch many Tendyard instances; the spend worked out once a minute; the server's registry entry (`instanceRegistry`) |
 | `native.go` | Delivering a message, requests, settings, interrupt, compaction, login retry; the observer (`nativeObserver`) |
 | `limit.go`, `retry.go`, `sessions.go`, `subagents.go` | A turn a usage limit stopped (`/limit`); a failed turn that waits to be tried again (`/retry`); the agent's earlier sessions and what they cost (`/sessions`, `/cost`); its subagents (`/subagents`) |
 | `terminal.go`, `files_api.go` | The shell terminal (`terminalAPI`); the file viewer and the search for a file the agent named relative to a repository (`fileAPI`, over `lib/workspacefs`) |
 | `webhook_api.go`, `handoff.go` | The webhook's configuration (`GET`/`PUT /webhook`, `POST /webhook/test`), the instance it describes and its start (`lib/webhook` delivers); the human-reply API |
 | `auth.go` | Token auth and the chat's sign-in (`authAPI`) |
 | `restart.go`, `statedb.go` | Restarts (`beginRestart`); restoring and persisting the state |
-| `update.go` | Updating AgentAPI through its API (`POST /update`, `DELETE /update`, the `updater`) and the summary's `update`; see [Restarts and updates](#restarts-and-updates) |
+| `update.go` | Updating Tendyard through its API (`POST /update`, `DELETE /update`, the `updater`) and the summary's `update`; see [Restarts validate the replacement before handing work over](#restarts-and-updates) |
 | `models.go` | The API's types |
 | `uploads.go` | Uploaded files (`uploadAPI`: `POST /upload`, and the images `GET /uploads` serves) |
 
@@ -286,7 +302,9 @@ Huma names an OpenAPI schema after its Go type's name, whichever package
 declares it, so the handlers use `convstate.StatusChangeBody`,
 `instanceapi.SummaryBody` or `webhook.Config` as they are, without aliases.
 
-## The native transport
+<a id="the-native-transport"></a>
+
+## Native adapters translate each agent protocol into shared events
 
 ```go
 // lib/conversation (imported as conv)
@@ -464,8 +482,8 @@ type Factory func(resume Resume) (Adapter, error)
   which the server implements to update the emitter. The conversation's
   state (`agentstate.ConversationState`: capabilities, login, the agent's
   settings, usage, and its `StoredState`: the settings chosen, a limit stop,
-  a retry wait) comes whole through `StateChanged`, where a part changes and
-  only if something did; what changes together comes as one. The rest are
+  a retry wait) is reported as a whole through `StateChanged`. It is sent only when a part changes;
+  related changes are reported together. The rest are
   events: an agent accepts turns (`Started`), rich messages, the timeline,
   requests, the session's name and reference, an exit. It is called with
   the conversation's lock held, so it must not call back into the
@@ -501,7 +519,9 @@ The adapters:
 | `pi` | `pi --mode rpc --session-id <id>` (`--fork <id>` for a copy) | JSON lines: `prompt` (also for steering), `abort`, `get_state`, `get_available_models`, `set_model`, `set_thinking_level`, `compact`; extension dialogs arrive as UI requests and are answered with `extension_ui_response` |
 | `demo` | none | A simulated agent that streams thinking, a tool call and a reply, and opens every kind of request |
 
-### Model providers
+<a id="model-providers"></a>
+
+### A local proxy keeps provider keys out of agent environments
 
 Claude Code and Codex can run on another model provider than their own
 ([Model providers](providers.md)): an endpoint such as a LiteLLM gateway, defined
@@ -601,8 +621,8 @@ flowchart LR
   `SessionCost.providers`, the summary's `spend.providers`). Codex's log names it: `session_meta`
   has the thread's `model_provider` and each `thread_settings_applied` event the one it changed to;
   `agentapi-<id>` is provider `<id>` (`codexlog.ProviderID`), any other is the agent's own. Claude
-  Code's log doesn't, as its endpoint comes from the environment, so AgentAPI records it in the
-  provider ledger (`lib/providerlog`, see [Persistence](#persistence)). `native.Config.ProviderUsed`
+  Code's log doesn't, as its endpoint comes from the environment, so Tendyard records it in the
+  provider ledger (`lib/providerlog`, see [Stored state restores conversations and hub records after restarts](#persistence)). `native.Config.ProviderUsed`
   reports `ProviderUse` (the session, the provider, since when) once an agent that can switch
   providers started and its session is known, when the session becomes known later (dated from
   the start, so a new session's first calls count), and after a switch in place; never the session
@@ -610,10 +630,11 @@ flowchart LR
   order, as the conversation reports it with its lock held. `sessions.Store` gives each call of a
   Claude Code session (its subagents' included; a fork's copy of an earlier call counts in that
   session) the provider of the session's latest entry at or before the call, and the agent's own
-  before the first entry or without one. Pi has no providers: its calls are its own.
+  before the first entry or without one. Pi doesn't support Tendyard's provider switching, so its
+  calls are attributed to its own provider.
 - **Prices.** A provider carries prices of its models (`Provider.Prices`, by model ID, per million
   tokens, with their `source`): the config file's `prices`, or the hub's, which travel sealed with
-  the providers (`wireProvider.prices`, which AgentAPIs before them ignore; a hub before them sends
+  the providers (`wireProvider.prices`, which Tendyard instances before them ignore; a hub before them sends
   none). `sessions.Config.ProviderPrices` (`Source.Prices`) gives the cost reading a
   `provider.PriceTable`; once the calls are attributed, `atProviderPrices` prices a call to a provider
   with a price of its model at that price, and a call it priced so before at `lib/pricing`'s again when
@@ -628,7 +649,9 @@ flowchart LR
   without the vendor prefix and a precision suffix such as `-nvfp4`) is the model's, among those
   without `:` or a leading `~`, and only if one is.
 
-## Events and the conversation state
+<a id="events-and-the-conversation-state"></a>
+
+## The emitter keeps conversation state and notifies subscribers
 
 The `EventEmitter` (`lib/convstate`) stores the state clients read: the messages, rich
 messages, the timeline, requests, the tasks, the queue, the status snapshot (status, lifecycle,
@@ -718,7 +741,7 @@ usage limit stop, a retry wait, login).
   providers change; `updated_at` says when they did. Its `scope` hashes the
   machine's host name and ID with `sessions.Store.Scope` (the agent, the
   directory's real path, where the agent keeps its logs), so a hub counts two
-  AgentAPIs that read the same logs once.
+  Tendyard instances that read the same logs once.
 - The emitter also records when a client last showed the conversation
   (`POST /tasks/seen`, which the chat calls while it shows it). The latest
   task is `unread` when it ended after that. The state DB keeps the time; a
@@ -732,7 +755,7 @@ usage limit stop, a retry wait, login).
   turns its events into them: the emitter's task updates into `task.*`, an
   agent message once the next one starts or the turn ends. `PUT /webhook`
   starts and stops it. It doesn't send what the emitter held when the
-  observer subscribed, or messages older than AgentAPI's start (a resumed
+  observer subscribed, or messages older than Tendyard's start (a resumed
   session's). A subscription the emitter ended is taken up again from the
   seq the observer got to, as a client resumes with `since`. It keeps only
   how far it got through the messages and tasks, the tool calls waiting for
@@ -752,13 +775,15 @@ usage limit stop, a retry wait, login).
   reference every time it is reported (a reset deleted it, also when it stays
   the same).
 
-### Adding a piece of conversation state
+<a id="adding-a-piece-of-conversation-state"></a>
+
+### New state must follow the observer and persistence contracts
 
 A value the agent reports or the conversation keeps (beyond messages and requests) goes through
 the observer as part of the state:
 
 1. Add a field to `agentstate.ConversationState` (`lib/agentstate/conversation.go`), or to
-   `StoredState` if it survives an AgentAPI restart, with its JSON name. `Clone` copies what it
+   `StoredState` if it survives a Tendyard instance restart, with its JSON name. `Clone` copies what it
    points to.
 2. Set it in `lib/native` where it changes and call `stateChangedLocked`; `stateLocked` puts it in
    the state.
@@ -773,7 +798,9 @@ the observer as part of the state:
 A field of `StoredState` is stored, restored and given back to the conversation without other
 changes, inside version 2 of `conversation_state` (below).
 
-## The message queue
+<a id="the-message-queue"></a>
+
+## The queue serializes messages around agent readiness
 
 Messages sent while the agent is busy wait in `s.queue`, and so does a human reply to the agent's
 last message (`POST /handoff/reply`), which goes out the same way. The queue has its
@@ -782,7 +809,7 @@ checks whether the first message can be delivered. A continuation or retry that 
 first (`beforeQueue`).
 
 `turnGateLocked` (`turngate.go`) decides whether a turn may start, for every caller. Nothing starts
-while AgentAPI stops, restarts for an update or restarts the agent: `POST /message` queues the
+while Tendyard stops, restarts for an update or restarts the agent: `POST /message` queues the
 message, the human-reply protocol offers nothing, and a restart is refused. While an update waits for
 the agent, a continuation, a retry and the queued messages wait too; a message the user sends goes
 to the agent. The head of the queue also waits until the agent is idle and no usage limit stop or
@@ -798,7 +825,9 @@ Messages can also steer or interrupt a running turn. Queue changes reach the emi
 The queue is persisted with the conversation, on every change (`storeQueue`, from the queue's
 `onChange`): a message that went out or was deleted isn't sent again after a crash.
 
-## Persistence
+<a id="persistence"></a>
+
+## Stored state restores conversations and hub records after restarts
 
 `lib/statedb` stores conversations in SQLite using the pure-Go `modernc.org/sqlite`, which supports
 `CGO_ENABLED=0` builds. The emitter sends it every change.
@@ -810,7 +839,7 @@ The queue is persisted with the conversation, on every change (`storeQueue`, fro
   conversation's stored state (`conversation_state`, below), the webhook settings
   changed through the API (with a fingerprint of the startup flags, which win
   when they change) and when a
-  client last showed the conversation (`seen_at`), and which AgentAPI may
+  client last showed the conversation (`seen_at`), and which Tendyard may
   write the file and last did (below).
 - Writes are queued and flushed every 200 ms in a transaction, so streaming
   never waits for the disk. A clean shutdown marks the file clean; after a
@@ -827,7 +856,7 @@ The queue is persisted with the conversation, on every change (`storeQueue`, fro
   between. They serve the timeline export and the upload pruning, which
   reads the earlier rich messages and events outside the server's lock.
 - The file is opened in exclusive locking mode with WAL, so no second
-  AgentAPI can use it, and is created with mode 0600.
+  Tendyard can use it, and is created with mode 0600.
 - On startup the server restores the conversation, the queue and the session
   reference, which the conversation passes to the factory so the agent
   resumes its own session. A file AgentAPI 2 kept for the same agent with
@@ -839,21 +868,21 @@ The queue is persisted with the conversation, on every change (`storeQueue`, fro
   migrations update the schema; `PRAGMA user_version` records its version.
 - Each migration names the oldest schema that may write the file once it
   ran. One that only adds a table or a column keeps the value before it, so
-  an older AgentAPI goes on with a file a newer one migrated and leaves its
-  schema as it is. One that changes what an older AgentAPI writes raises it
+  an older Tendyard goes on with a file a newer one migrated and leaves its
+  schema as it is. One that changes what an older Tendyard writes raises it
   and records it in `meta` (`min_writer_schema`, with the release that
-  brought it); an older AgentAPI then refuses the file and names the
-  version it needs. `meta` also records the AgentAPI that last closed the
+  brought it); an older Tendyard then refuses the file and names the
+  version it needs. `meta` also records the instance that last closed the
   file (`writer_version`). Releases up to 1.9.0 read neither and refuse any
   schema newer than theirs; the schema hasn't changed since 1.0.
 - `conversation_state` holds the settings chosen for the session, a usage
   limit stop and a retry wait as one JSON object,
   `{"version": 2, "settings": {...}, "limit_stop": {...}, "retry_wait": {...}}`;
   a reset keeps it. A field added to it keeps the version, which an older
-  AgentAPI reads as far as it knows; one that would mislead it raises the
+  Tendyard reads as far as it knows; one that would mislead it raises the
   version. Version 2 carries the provider/model pair together because restoring only the model can
-  select it on the wrong endpoint. An
-  AgentAPI that finds a higher version starts without stored state, and preserves the unknown envelope
+  select it on the wrong endpoint. A
+  Tendyard that finds a higher version starts without stored state, and preserves the unknown envelope
   through later status changes and a clean close instead of replacing it with defaults. Up to 3.7.2 the three had a key each
   (`settings`, `limit_stop`, `retry_wait`), which AgentAPI 3.7.3 to 3.16
   moved into the object on the first open; AgentAPI 4 doesn't read them, so
@@ -861,7 +890,7 @@ The queue is persisted with the conversation, on every change (`storeQueue`, fro
   settings, limit stop and retry wait (the conversation is kept). AgentAPI
   3.7.2 or earlier opened on a newer file starts without them too, and what
   it stores there is ignored.
-- What an older AgentAPI doesn't know, its resets and truncations don't
+- What an older Tendyard doesn't know, its resets and truncations don't
   clear. A restored task whose message is gone or is another one now is
   dropped, as is one whose message row couldn't be read.
 - Uploads go to `<state-db>.uploads`, kept with the file (without a state
@@ -906,10 +935,10 @@ file that doesn't parse, or of another version, is moved aside and a new one sta
 statistics, not what the hub needs to run.
 
 The provider ledger (`lib/providerlog`) is `provider-ledger.jsonl` beside the config file
-(`~/.agentapi/provider-ledger.jsonl` by default), mode 0600, shared by every AgentAPI of the user on
+(`~/.agentapi/provider-ledger.jsonl` by default), mode 0600, shared by every instance of the user on
 the machine. Each line is an entry,
 `{"at": "<RFC 3339>", "agent": "claude", "session": "<the agent's session ID>", "provider": "<ID or default>"}`,
-appended with `O_APPEND` in one write. An AgentAPI drops the entries older than 90 days at its first
+appended with `O_APPEND` in one write. A Tendyard instance drops the entries older than 90 days at its first
 append, then at most once a day, rewriting the file through `atomicfile` only when one is that old;
 appends and the rewrite take `provider-ledger.jsonl.lock` (`lib/filelock`) in turn, so none is lost
 to it. A reader reads only what was appended since it last read, and reads the file again from the
@@ -921,13 +950,15 @@ SIGUSR1 flushes the state database. `--state-file`, the PTY transport's persiste
 (JSON written on shutdown), which AgentAPI 3 imported into a state database next to it, is gone
 in AgentAPI 4.
 
-## Restarts and updates
+<a id="restarts-and-updates"></a>
+
+## Restarts validate the replacement before handing work over
 
 - `DELETE /messages` clears the conversation, requests and queue and restarts
-  the agent; before the new agent starts, AgentAPI runs `codex update` or
+  the agent; before the new agent starts, Tendyard runs `codex update` or
   `pi update --self` for Codex and Pi, for up to 3 minutes, in its own
   process group, and under a lock in the user's cache directory
-  (`~/.cache/agentapi/codex-update.lock` on Linux), so the AgentAPIs that
+  (`~/.cache/agentapi/codex-update.lock` on Linux), so the Tendyard instances that
   run one CLI update it one at a time. The agent is closed and `Restart`
   starts a new session.
 - A replacement of the agent (a restart, opening another session)
@@ -941,12 +972,12 @@ in AgentAPI 4.
   answer. Stop cancels a restart under way. A resumed session's history is
   read before `s.mu` is taken.
 - An agent that exits is started again by its conversation (see
-  [The native transport](#the-native-transport)), without `s.mu` or
+  [Native adapters translate each agent protocol into shared events](#the-native-transport)), without `s.mu` or
   `s.restarting`: messages wait in the queue because no agent is idle. After the last failed attempt the server goes on
   serving, with the lifecycle `failed`, until a restart or a switch starts an
   agent.
-- AgentAPI itself restarts in place on SIGUSR2 (see
-  [Startup and shutdown](#startup-and-shutdown)), into the binary an update
+- Tendyard itself restarts in place on SIGUSR2 (see
+  [Startup wires the agent and server; shutdown closes their resources](#startup-and-shutdown)), into the binary an update
   put where it was started from. With `--state-db` the conversation is
   restored and the agent resumes its session; without it the agent
   resumes its session (`AGENTAPI_RESUME_SESSION`), and the conversation is
@@ -960,14 +991,14 @@ in AgentAPI 4.
   new binary failed the checks before the stop (`--version`, `--validate`)
   still runs as before, which the command reports once `--timeout` passes;
   its log says why. `agentapi update --restart` does that for the
-  AgentAPIs that run the binary it replaced.
+  Tendyard instances that run the binary it replaced.
   The hub doesn't restart in place; its service manager restarts it.
-- With `--allow-update`, `POST /update` (`update.go`) updates AgentAPI to the
+- With `--allow-update`, `POST /update` (`update.go`) updates Tendyard to the
   latest release and restarts it in place. A goroutine bound to the server's
   life drives it. `checking` looks up the release and runs the program on
   disk with `--version`. `downloading` installs the release in the
   program's place (`lib/selfupdate`), unless the program on disk is that
-  new already because another AgentAPI that shares it updated it.
+  new already because another Tendyard that shares it updated it.
   `waiting` holds the queue, and continuations and retries that fall due,
   until the agent has no turn, compaction or open request
   (`native.Conversation.Busy`; an agent that exited has none), checked at
@@ -990,10 +1021,12 @@ in AgentAPI 4.
   `ReleaseLifecycle`: when a restart is done, or an agent the
   conversation started again accepts turns or waits for a login.
 
-## The shell terminal
+<a id="the-shell-terminal"></a>
+
+## The server owns a shared shell alongside the agent
 
 `lib/shellterm` runs one login shell in a pseudo-terminal (`creack/pty`) in the agent's working
-directory, with the agent's environment minus AgentAPI's own variables. It starts when the first
+directory, with the agent's environment minus Tendyard's own variables. It starts when the first
 client subscribes and keeps running after all clients disconnect. Its output goes to a 256 KiB
 scrollback, trimmed at a line start, and to each watcher's buffer. The scrollback is a ring, so adding
 output takes time in proportion to the output, not to the scrollback. A watcher that falls 512 chunks
@@ -1004,7 +1037,9 @@ with 503 (also when the client leaves). `/terminal/resize` changes the
 dimensions; the most recent resize applies. Closing hangs up the terminal and kills the shell's
 process group after 2 seconds.
 
-## Files
+<a id="files"></a>
+
+## File endpoints read the workspace through bounded operations
 
 `GET /files/content` and `GET /files/diff` serve the chat's file viewer. When a path isn't there,
 the viewer asks `GET /files/find` for the files below the working directory whose path ends with it,
@@ -1024,16 +1059,18 @@ each and 16 MiB in all. Each file is read once, however often stylesheets import
 16 MiB are spent nothing more is read, and a request that ends stops the work. The chat shows the
 page in an iframe sandboxed with `allow-scripts` but without `allow-same-origin`: the page has no
 origin, so its scripts can't read the chat, send its
-session cookie or call the API with it, and nothing it refers to is loaded from AgentAPI (which a
+session cookie or call the API with it, and nothing it refers to is loaded from Tendyard (which a
 proxy's cookie wouldn't reach either). `GET /files/image` serves raster images judged by content, as
 `GET /uploads` does, and SVG judged by extension, which `GET /uploads` never serves; both send
 `nosniff` and a sandboxing Content-Security-Policy.
 
 Uploads are stored as `<checksum>/<name>` (`upload_store.go`), the checksum being the first 8 bytes
 of the content's SHA-256, so a path never changes; unused ones are removed after 7 days
-([Persistence](#persistence)).
+([Stored state restores conversations and hub records after restarts](#persistence)).
 
-## Security model
+<a id="security-model"></a>
+
+## Access controls protect the same capabilities the agent has
 
 - There are no separate user accounts or roles. A client that passes the
   host and origin checks, and token authentication when enabled, has the
@@ -1045,8 +1082,7 @@ of the content's SHA-256, so a path never changes; unused ones are removed after
   every browser out. The static chat files and `/auth/session` skip the
   token check; signing in checks the token itself.
 - `--bind` limits who can connect, `--allowed-hosts` which `Host` headers are
-  accepted (by default `localhost`, `127.0.0.1` and `[::1]`, against DNS
-  rebinding), and `--allowed-origins` which origins may call the API from a
+  accepted (`localhost` and any IP address by default, to prevent DNS rebinding), and `--allowed-origins` which origins may call the API from a
   browser. A request that changes something (not GET, HEAD or OPTIONS) from
   a page of another origin is refused unless that origin is listed; `*`
   trusts none (`lib/httpmw/crossorigin.go`: net/http's
@@ -1065,7 +1101,7 @@ of the content's SHA-256, so a path never changes; unused ones are removed after
   `allow-update: true` in the config file) turns them on. They install only
   the latest official release of k1dav-c/agentapi for the platform, from
   GitHub: the download must match the release's `checksums.txt` and run as
-  that version, and a request can't name a version or a URL. AgentAPI never
+  that version, and a request can't name a version or a URL. Tendyard never
   runs `sudo`. It replaces only a program whose directory its user can write
   to, and otherwise reports the one-time fix (`blocked`). `POST /update`
   changes something, so a page of another origin can't send it, and it needs
@@ -1075,21 +1111,21 @@ of the content's SHA-256, so a path never changes; unused ones are removed after
   body, at most 10 minutes old, each delivery once) or added by someone signed
   in. Its proxy forwards only to an instance it is connected to (it reads
   that instance's summary at its URL), so not while it connects, nor where
-  another AgentAPI (another instance ID in the summary) answers. An event
+  another Tendyard (another instance ID in the summary) answers. An event
   must name its run (`server_id`), and moves only an instance whose URL is
   dead to the hub (it failed there past the connect grace, or another
-  AgentAPI answers there), never one it is connected or connecting to, or
+  Tendyard answers there), never one it is connected or connecting to, or
   one added by hand; a moved instance leaves its own token behind. The file
   keeps the URL where the hub last read each summary, which a restarted hub
   follows first. Every joined machine has the same secret, so any of them
   can still point a new instance ID, or one whose address stopped answering,
   at an address of its own and get `--instance-token`; a key per machine
-  would close that. A job's AgentAPI takes its launcher's token instead
+  would close that. A job's Tendyard takes its launcher's token instead
   (`instance.token`, in the launcher's `host.*` events, which its launcher
   token pins), which the hub sends only to an instance whose ID is a job's
   and whose URL is at the address of that job's machine's launcher.
 - The dispatch (`lib/dispatch`) takes a job's `task.*` events only from its
-  current run's AgentAPI process (`server_id`) as the hub reads it: the hub
+  current run's Tendyard process (`server_id`) as the hub reads it: the hub
   passes the URL where it reads that instance's summary as that run
   (`taskInstanceURL`), and `TaskEvent` checks that this URL is on an address of
   the launcher URL of the run's machine, which the launcher's pinned token vouches
@@ -1109,30 +1145,32 @@ of the content's SHA-256, so a path never changes; unused ones are removed after
   after 30 days. The proxy drops their cookies and `Authorization`, `Origin`,
   `Referer` and `Sec-Fetch-*` headers and the instances' `Set-Cookie`, so
   neither side's credentials reach the other. The hub refuses requests that
-  change something from pages of other origins, as AgentAPI does, and with
+  change something from pages of other origins, as Tendyard does, and with
   `--allowed-hosts` answers browsers only by those names and by address. The
   proxy marks every answer `Content-Security-Policy: sandbox`, so nothing an
   instance serves runs as a page of the hub's, and refuses changes to an
   instance's webhook, which names where the hub sends its token. A signed-in
   browser gets the secret, for joining a machine (`GET /api/join`), only from
   a hub with a token; the startup log never has it.
-- Model providers' keys are in the config file, which AgentAPI warns about when others can read
+- Model providers' keys are in the config file, which Tendyard warns about when others can read
   it, and in the hub's `providers.json` (0600). The hub's API never answers a key (`has_key`
   says whether there is one); `POST /api/providers/sync` answers them, to a request signed with
   the hub's secret, sealed with AES-256-GCM under a key derived from the secret (HKDF-SHA256), so
   they don't cross plain HTTP in the clear. Every machine with the secret gets every key. An
   agent never gets one: it calls the providers with a token of the process, through the provider
   proxy on `127.0.0.1`, which adds the key. A process of the same user can read that token in the
-  agent's environment and call the providers through the proxy while AgentAPI runs, but not see
+  agent's environment and call the providers through the proxy while Tendyard runs, but not see
   a key.
 - Agents don't inherit the variables (one of them a
   secret) that a parent agent session sets for the commands it runs, nor
-  AgentAPI's secrets: its API token, the webhook and hub secrets and tokens
+  Tendyard's secrets: its API token, the webhook and hub secrets and tokens
   (`lib/procenv`).
 
-### Child process environment
+<a id="child-process-environment"></a>
 
-When AgentAPI starts inside another agent session, it removes inherited session
+### Child processes inherit login settings without parent-session secrets
+
+When Tendyard starts inside another agent session, it removes inherited session
 markers and secrets before launching the agent, and before the
 CLI update that precedes a restart (`codex update`, `pi update --self`), so a
 child agent doesn't inherit the parent session's identity or sandbox markers.
@@ -1175,15 +1213,17 @@ The filter is in [lib/procenv/procenv.go](../lib/procenv/procenv.go).
 | --- |
 | `PI_CODING_AGENT` |
 | `AI_AGENT` |
-| AgentAPI's secrets: `AGENTAPI_*_TOKEN` and `AGENTAPI_*_SECRET` (`AGENTAPI_API_TOKEN`, `AGENTAPI_WEBHOOK_SECRET`, `AGENTAPI_HUB_SECRET`, `AGENTAPI_HUB_TOKEN`, `AGENTAPI_HUB_INSTANCE_TOKEN`, `AGENTAPI_GENERATED_API_TOKEN`) |
+| Tendyard's secrets: `AGENTAPI_*_TOKEN` and `AGENTAPI_*_SECRET` (`AGENTAPI_API_TOKEN`, `AGENTAPI_WEBHOOK_SECRET`, `AGENTAPI_HUB_SECRET`, `AGENTAPI_HUB_TOKEN`, `AGENTAPI_HUB_INSTANCE_TOKEN`, `AGENTAPI_GENERATED_API_TOKEN`) |
 
 Configuration such as `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `PI_CODING_AGENT_DIR`,
 and `ANTHROPIC_*` is preserved. After filtering, the Claude Code adapter
 sets `CLAUDE_CODE_ENTRYPOINT=sdk-cli` and `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1`
 again, with the values its protocol relies on. The shared shell also removes
-AgentAPI's own `AGENTAPI_*` variables.
+Tendyard's own `AGENTAPI_*` variables.
 
-## The chat UI
+<a id="the-chat-ui"></a>
+
+## The embedded chat reads the same HTTP API as other clients
 
 `chat/` is a Next.js 15 and React 19 app, built with bun as a static export. `make embed` copies the
 build into `lib/httpmw/chat/`, which `fileserver.go` embeds with `go:embed`. The build uses a
@@ -1318,7 +1358,9 @@ chat and `parseFromFrame` in the hub.
   (`src/test/dom.ts`) for happy-dom's document, the others render on the
   server.
 
-## Testing
+<a id="testing"></a>
+
+## Package, UI and end-to-end tests cover different boundaries
 
 - Go tests sit next to the code and run with `CGO_ENABLED=0`; code that
   depends on time uses `coder/quartz` clocks.
@@ -1345,9 +1387,11 @@ chat and `parseFromFrame` in the hub.
   each binary is built for its platform, and a push that a later push's
   release already holds, or that is no longer on `main`, releases nothing.
 
-## Design principles
+<a id="design-principles"></a>
 
-- AgentAPI drives Claude Code, Codex and Pi through their structured
+## Shared contracts keep agents and clients independent
+
+- Tendyard drives Claude Code, Codex and Pi through their structured
   protocols, not their terminal UIs.
 - Clients decide what to offer from capabilities, never from the agent type.
 - Adapters report full snapshots; the conversation and the emitter turn them

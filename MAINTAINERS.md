@@ -1,12 +1,22 @@
 # Information for Maintainers
 
-## Release Process
+A release is published only when the commit calls for one and its required tests, race checks and
+lint pass. This matters because instances with `--allow-update` install the latest release.
 
-On every push to `main`, `.github/workflows/release.yml` first asks `release-version.sh` whether
-the push releases anything (job Plan, a few seconds); a push that doesn't, such as one with only `docs:`
-commits, runs nothing more. Otherwise it runs the tests (`.github/workflows/go-test.yml`, as
-a reusable workflow) on that commit, and releases nothing unless its jobs (test, race, lint) pass,
-because AgentAPIs with `--allow-update` install the latest release. The release job asks
+1. **Plan:** Conventional Commits determine whether to release and which version to publish.
+2. **Verify:** the release workflow checks that commit on the test runner.
+3. **Publish:** the separate release runner builds and attaches versioned binaries and checksums.
+4. **Record:** after publication, move Unreleased notes under the released version in a docs commit.
+
+<a id="release-process"></a>
+
+## Release-triggering commits publish only after required checks pass
+
+On every push to `main`, the Plan job in `.github/workflows/release.yml` runs `release-version.sh`
+to decide whether to release. If the push contains only commits that don't trigger a release,
+such as `docs:` commits, the workflow stops there. Otherwise it runs the reusable
+`.github/workflows/go-test.yml` on that commit. The test, race and lint jobs must pass before a
+release is published, because instances with `--allow-update` install the latest release. The release job asks
 `release-version.sh` again, which runs `next-version.sh` to choose the next version from
 [Conventional Commit](https://www.conventionalcommits.org/) messages since the last `vX.Y.Z` tag.
 The highest applicable bump wins:
@@ -39,7 +49,9 @@ too.
   Release workflow, whose checks on the commit are named `Go Tests / …`. A new push to a pull
   request cancels the jobs of the push before it.
 
-### The runners
+<a id="the-runners"></a>
+
+### Separate runners isolate release builds from test jobs
 
 The jobs run on two self-hosted runners on one machine, since the account's GitHub Actions minutes
 ran out; nothing tests macOS or Windows.
@@ -53,9 +65,9 @@ Each is a systemd service, `actions.runner.k1dav-c-agentapi.<runner>`, in its us
 `~/actions-runner`, with a drop-in (`limits.conf`) that keeps it to 8 GB of memory, half the CPU
 and I/O weight of other services, and stops what a job left running along with the runner. The
 users have no sudo and can't read each other's home directories: a pull request's job can't change
-the Go and Bun the release builds with, nor reach the files of the machine's own AgentAPIs and
+the Go and Bun the release builds with, nor reach the files of the machine's own Tendyard instances and
 hub. `ghrunner-firewall.service` (`/usr/local/sbin/ghrunner-firewall`) keeps both users to the
-internet: they can't connect to the machine's services on fixed ports (its AgentAPIs, hub, ssh,
+internet: they can't connect to the machine's services on fixed ports (its Tendyard instances, hub, ssh,
 Coder, Docker), nor to the LAN, Docker's networks, Tailscale or the cloud metadata address. DNS and
 the ports their own tests listen on (20000-60999: the launcher's tests pick theirs below the
 ephemeral ports) stay open. The jobs need `gcc` (the race detector), `shellcheck`, `file`, `unzip`

@@ -2,8 +2,14 @@
 
 [English](chat-ui.md) | 繁體中文
 
-開啟 `/chat` 即可使用 `agentapi` 執行檔內建的聊天介面。適用於桌面與手機，
-透過 [HTTP API](api.zh-TW.md#http-api-參考) 與伺服器溝通。
+`agentapi` 內建的 `/chat` 聊天介面讓你從桌面或手機交辦工作、檢查成果與回答 agent，使用的
+[HTTP API](api.zh-TW.md#http-api-參考) 與其他用戶端相同。
+
+- **交辦工作：**輸入任務、附加檔案，選擇訊息何時送到 agent。
+- **追蹤執行：**閱讀對話、工具呼叫、思考筆記與 subagent 步驟。
+- **做出決定：**回答請求，調整模型、權限與用量控制。
+- **檢查工作區：**開啟檔案、差異、先前工作階段與共用 shell 終端機。
+- **保持連線：**透過提醒、對話快取與 hub 跨主機追蹤 agent。
 
 截圖和動畫是 AgentAPI v5.6.0 搭配內建 `native-demo` agent 處理一個小型範例網站的畫面；
 demo 的回覆、工具結果、模型和用量都是模擬的。動畫會
@@ -12,27 +18,29 @@ demo 的回覆、工具結果、模型和用量都是模擬的。動畫會
 
 ## 目錄
 
-- [視窗](#視窗)
-- [任務與對話紀錄](#任務與對話紀錄)
-- [送出任務](#送出任務)
-- [Agent 設定](#agent-設定)
-- [請求與決策卡片](#請求與決策卡片)
-- [檔案](#檔案)
-- [工作階段瀏覽器](#工作階段瀏覽器)
-- [Lineage](#lineage)
-- [Shell 終端機](#shell-終端機)
-- [工作階段詳細資訊與提醒](#工作階段詳細資訊與提醒)
-- [手機](#手機)
-- [hub](#hub)
-- [連線與快取](#連線與快取)
+- [視窗把 agent 狀態與工作控制放在一起](#視窗)
+- [每項任務把提示、步驟與回覆放在一起](#任務與對話紀錄)
+- [輸入框可立即交辦或把訊息排入佇列](#送出任務)
+- [工作階段控制可調整 agent 的工作方式](#agent-設定)
+- [決策卡片收集 agent 等待的回覆](#請求與決策卡片)
+- [檔案檢視器整合原始內容、預覽與差異](#檔案)
+- [Explorer 集中提供工作階段紀錄、檔案與整合設定](#工作階段瀏覽器)
+- [Lineage 顯示各 subagent 做了什麼](#lineage)
+- [終端機在 agent 目錄中執行 shell 指令](#shell-終端機)
+- [工作階段詳細資訊識別 agent 並設定提醒](#工作階段詳細資訊與提醒)
+- [手機版把對話與決策控制留在可操作範圍](#手機)
+- [hub 在同一個聊天介面開啟各主機的 agent](#hub)
+- [串流重新連線時，快取可先還原對話紀錄](#連線與快取)
 
-## 視窗
+<a id="視窗"></a>
+
+## 視窗把 agent 狀態與工作控制放在一起
 
 ![聊天介面中的兩個已完成任務：提示詞、工具呼叫、思考旁註和輸入框](screenshots/chat-desktop.png)
 
-- **標頭。** agent 的標誌（Claude、OpenAI（Codex）或 Pi 的 logo，其他 agent 則是色塊）和類型、工作階段名稱和 AgentAPI 版本。右側是狀態（Ready、附計時器的
+- **標頭。** agent 的標誌（Claude、OpenAI（Codex）或 Pi 的 logo，其他 agent 則是色塊）和類型、工作階段名稱和 Tendyard 版本。右側是狀態（Ready、附計時器的
   Working 或 Needs you；點一下會開啟[工作階段詳細資訊](#工作階段詳細資訊與提醒)）、到目前為止
-  用掉的 token 數，以及[搜尋](#搜尋)、[shell 終端機](#shell-終端機)、[工作階段瀏覽器](#工作階段瀏覽器)和淺色或深色主題的按鈕。
+  用掉的 token 數，以及[搜尋會尋找已載入任務中的文字](#搜尋)、[shell 終端機](#shell-終端機)、[Explorer 集中提供工作階段紀錄、檔案與整合設定](#工作階段瀏覽器)和淺色或深色主題的按鈕。
 - **對話紀錄。** 每個任務一個區塊，由舊到新排列。左欄顯示每個任務的開始時間和花了多久。
 - **輸入框。** 訊息欄和工具列：權限模式、模型與推理強度，以及 context 用了多少；
   接著是附件按鈕、更多輸入選項和送出按鈕。上方的狀態列顯示 agent 正在做什麼，下方那一行列出可用的按鍵。
@@ -42,7 +50,9 @@ demo 的回覆、工具結果、模型和用量都是模擬的。動畫會
 
 ![送出任務：agent 思考、執行工具，然後回覆](screenshots/demo-task.gif)
 
-## 任務與對話紀錄
+<a id="任務與對話紀錄"></a>
+
+## 每項任務把提示、步驟與回覆放在一起
 
 你送出的每則訊息都會開始一個任務。任務會先在標示「You」的色塊中顯示你的提示詞，接著是 agent 的標誌和名稱，再依序呈現
 它做了什麼：以 Markdown 顯示的回覆、每個工具呼叫各一列，以及思考內容。任務的標頭會
@@ -64,7 +74,9 @@ Claude Code、Codex 和 Pi 另會顯示任務執行期間的模型呼叫花費�
 
 ![任務的時間軸：開始時間、耗時和花費](screenshots/task-cost.png)
 
-### 工具呼叫
+<a id="工具呼叫"></a>
+
+### 展開工具列即可查看輸入與結果
 
 ![展開的工具呼叫，包含它的輸入和結果](screenshots/tool-call.png)
 
@@ -73,24 +85,29 @@ Claude Code、Codex 和 Pi 另會顯示任務執行期間的模型呼叫花費�
 開啟[檔案檢視器](#檔案)；展開的呼叫會列出涉及的檔案，並以 diff 顯示變更，點一下可看原始輸入。圖片
 形式的工具結果（Claude Code 讀取截圖、Codex 的 `view_image`）會顯示為縮圖，點開就能看原尺寸。
 
-### 思考內容
+<a id="思考內容"></a>
+
+### 思考筆記顯示在對應步驟旁
 
 寬螢幕上，思考內容以旁註顯示在對應步驟右側。步驟旁的旁註不會比步驟本身高，放不下的部分會淡出。
 下方的 **Show all** 會顯示全部旁註並讓出空間，所以長篇思考不會在對話中間撐出空白；長旁註先顯示
 六行，點選可展開。窄螢幕上則收合為任務中的一行「Thinking · *標題*」。
 
-### 訊息與較長的任務
+<a id="訊息與較長的任務"></a>
+
+### 長任務依需要展開較早的步驟
 
 每則 agent 訊息都有按鈕，可以改以原始文字而非 Markdown 顯示（每則訊息分開切換）、在訊息中
 搜尋，以及複製；你的提示詞則有複製按鈕。比欄位寬的表格可以左右捲動，右側還有內容時邊緣會
 出現陰影；點選表格右上角的按鈕（觸控螢幕上一律顯示）可在與視窗同寬的彈出視窗中開啟表格。
 步驟很多的任務只會顯示最近的 40 個步驟，**Show *n* earlier steps** 會顯示其餘步驟。
 
-### 長對話
+<a id="長對話"></a>
+
+### 往回捲動時才載入較早任務
 
 對話紀錄只顯示最近 5 個任務，**Show *n* older tasks** 會顯示聊天介面已有的其他任務。連線時，
-介面只向伺服器取得最近 20 個任務，而不是整段對話，所以跑了好幾個月的對話也能和新對話一樣快
-打開。捲到最上面，或按 **Show earlier tasks**，介面會再讀之前的 20 個任務，你正在看的內容會留在
+介面只向伺服器取得最近 20 個任務，所以開啟跑了好幾個月的對話，也不必先載入全部紀錄。捲到最上面，或按 **Show earlier tasks**，介面會再讀之前的 20 個任務，你正在看的內容會留在
 原位。任務編號由伺服器提供，所以會把還沒載入的任務也算進去。早於 AgentAPI 4.3 的伺服器會一次
 送出所有任務。
 
@@ -98,7 +115,9 @@ Claude Code、Codex 和 Pi 另會顯示任務執行期間的模型呼叫花費�
 之前，對話紀錄頂端會顯示 **Loading the conversation…**，還沒收到回覆的任務會在提示下方顯示
 **Loading the reply…**。較舊的伺服器會先送出所有提示，回覆隨後才到。
 
-### 任務選單
+<a id="任務選單"></a>
+
+### 任務選單可預覽、複製與匯出單項任務
 
 ![任務選單，包含 Preview Markdown、Copy task and output 和 Export Markdown](screenshots/task-menu.png)
 
@@ -108,19 +127,25 @@ Claude Code、Codex 和 Pi 另會顯示任務執行期間的模型呼叫花費�
 
 ![任務的 Markdown 預覽，附有 Copy 和 Download](screenshots/task-preview.png)
 
-### 搜尋
+<a id="搜尋"></a>
+
+### 搜尋會尋找已載入任務中的文字
 
 ![在對話紀錄中搜尋「notes」：符合的結果會醒目標示並計數](screenshots/search.png)
 
 搜尋按鈕（⌘F / Ctrl+F）會在對話紀錄上方開啟搜尋列。搜尋列會計算符合的任務數和符合處數並
 醒目標示，可用箭頭逐一切換。旁邊的選單可以只列出執行中、排隊中、失敗、因用量限制停止、
 已完成，或有工具錯誤的任務。搜尋期間，符合的訊息會以純文字顯示，較長任務的每個步驟都會
-顯示出來，含有符合內容的工具呼叫也會展開。搜尋只涵蓋聊天介面已載入的任務：在[長對話](#長對話)
+顯示出來，含有符合內容的工具呼叫也會展開。搜尋只涵蓋聊天介面已載入的任務：在[往回捲動時才載入較早任務](#長對話)
 中，搜尋列的 **+*n* earlier** 會載入較早的任務，一起納入搜尋。
 
-## 送出任務
+<a id="送出任務"></a>
 
-### 輸入框
+## 輸入框可立即交辦或把訊息排入佇列
+
+<a id="輸入框"></a>
+
+### 輸入框整合提示、附件與傳送控制
 
 按 Enter 送出，Shift+Enter 換行。迴紋針按鈕可以附加檔案，每個最大 100 MB；貼上的圖片也會
 成為附件（貼上的文字仍然是文字）。超過 10 MB 的圖片會以路徑交給 agent，不會當成圖片傳送。附件會顯示在輸入框中，圖片以縮圖呈現、點開就能看原尺寸（已送出的訊息也是），
@@ -129,7 +154,7 @@ Claude Code、Codex 和 Pi 另會顯示任務執行期間的模型呼叫花費�
 ![附加了一張圖片的輸入框](screenshots/attachments.png)
 
 agent 收到的是每個附件的路徑，PNG、JPEG、GIF 和 WebP 附件也會以圖片的形式收到。
-上傳的檔案滿 7 天、對話也不再提到時，AgentAPI 就會刪除。瀏覽器支援語音辨識時，
+上傳的檔案滿 7 天、對話也不再提到時，Tendyard 就會刪除。瀏覽器支援語音辨識時，
 **More input options**（⋯）提供語音輸入：以瀏覽器的語言把你說的話聽寫進輸入框。
 
 草稿和附件在重新載入頁面後仍會保留。沒有送達伺服器的訊息會留在聊天中並標示為未送出，
@@ -141,7 +166,9 @@ agent 收到的是每個附件的路徑，PNG、JPEG、GIF 和 WebP 附件也會
 
 ![輸入框的 ☆ 我的最愛選單](screenshots/composer-favorites.png)
 
-### Agent 工作中時
+<a id="agent-工作中時"></a>
+
+### Agent 工作時可接受排隊、引導或中斷訊息
 
 ![較長的回合中有兩個排隊中的任務，送出選單已開啟：Queue、Steer 和 Interrupt & send](screenshots/queue-steer.png)
 
@@ -158,7 +185,9 @@ agent 工作中時，訊息會排入伺服器的佇列，顯示在訊息欄下�
 
 ![較長的回合：一個任務排進佇列，另一個 steer 進回合，最後按下 Stop](screenshots/demo-queue.gif)
 
-### 斜線指令
+<a id="斜線指令"></a>
+
+### 斜線指令可直接從輸入框控制工作階段
 
 ![輸入斜線後列出的斜線指令](screenshots/slash-commands.png)
 
@@ -179,32 +208,40 @@ agent 工作中時，訊息會排入伺服器的佇列，顯示在訊息欄下�
 
 `/terminal` 和 `/login` 只在 shell 終端機啟用時出現。
 
-### 鍵盤快捷鍵
+<a id="鍵盤快捷鍵"></a>
+
+### 快捷鍵可傳送訊息與切換位置
 
 ![鍵盤快捷鍵](screenshots/keyboard-shortcuts.png)
 
 按 ? 會顯示快捷鍵；工作階段詳細資訊的選單裡也有。
 
-## Agent 設定
+<a id="agent-設定"></a>
+
+## 工作階段控制可調整 agent 的工作方式
 
 輸入框的工具列可以在 agent 執行時變更設定（`PUT /settings`）。這些設定在整個
-工作階段中都有效：重新啟動、重新登入之後，以及使用 `--state-db` 時 AgentAPI 重新啟動之後，
-AgentAPI 都會再把它們套用到 agent。
+工作階段中都有效：重新啟動、重新登入之後，以及使用 `--state-db` 時 Tendyard 重新啟動之後，
+Tendyard 都會再把它們套用到 agent。
 
 ![切換到 ask 模式和 Deep 模型（推理強度 max），接著查看 context](screenshots/demo-settings.gif)
 
-### 權限模式
+<a id="權限模式"></a>
+
+### 權限模式決定工具何時需要核准
 
 ![權限模式選單：Bypass、Auto、Ask 和 Plan](screenshots/permission-mode.png)
 
 - **Bypass**（預設）：工具直接執行，不會詢問。
 - **Auto**：由 agent 自己的審查決定什麼可以執行。
-- **Ask**：需要核准的工具呼叫會先以[核准](#核准)的形式送到聊天介面。
-- **Plan**：agent 會先提出[計畫](#計畫)，然後才修改任何東西。
+- **Ask**：需要核准的工具呼叫會先以[核准卡片可允許或拒絕工具請求](#核准)的形式送到聊天介面。
+- **Plan**：agent 會先提出[計畫卡片可核准計畫或附上意見退回](#計畫)，然後才修改任何東西。
 
 Pi 沒有權限模式，所以它的工具列沒有模式選單。
 
-### 模型與推理強度
+<a id="模型與推理強度"></a>
+
+### 模型選單可選擇模型、推理強度與供應商
 
 ![模型選單，列出三個模型和所選模型的推理強度](screenshots/model-settings.png)
 
@@ -223,7 +260,9 @@ agent 切換時會怎麼做。選供應商的模型，agent 就換到那個供�
 目前呼叫失敗的供應商（agent 最近一次呼叫它失敗，或過去一小時有一半失敗），名稱旁會有琥珀色的警告；
 游標移上去可以看到失敗的次數和最後一次錯誤，以及發生時間。
 
-### Context 與用量限制
+<a id="context-與用量限制"></a>
+
+### 用量指示顯示 context 與帳號可用容量
 
 ![context 彈出視窗：context window 中的 token 數，以及 5 小時與每週的用量限制](screenshots/context-usage.png)
 
@@ -238,7 +277,9 @@ context 滿了時，agent 會自動壓縮；`/compact` 則會立刻壓縮。
 以全額計價，也會算進用量限制。agent 閒置、快取已過期且 context 至少有 50k token 時，輸入框
 上方會出現提醒和 **Compact** 按鈕。關掉後，要等之後某個回合的快取也過期，才會再出現。
 
-### 達到用量限制
+<a id="達到用量限制"></a>
+
+### 限制卡片可繼續工作或讓佇列往下處理
 
 ![因 5 小時限制而停下、標示為 Limit reached 的任務：卡片顯示重置時間，以及 Continue at reset、Continue now 和 Send queued tasks，佇列中有一個被暫停的任務](screenshots/limit-card.png)
 
@@ -248,25 +289,31 @@ context 滿了時，agent 會自動壓縮；`/compact` 則會立刻壓縮。
 立刻送出，**Send queued tasks** 會讓佇列馬上放行。你自己送的任務會直接送出。重置之前，agent
 和有請求時一樣需要你：標頭、分頁標題和分頁圖示都會顯示，開啟通知的背景分頁也會跳出通知。
 
-### API 請求失敗
+<a id="api-請求失敗"></a>
+
+### 重試卡片可立即重試或取消等待
 
 ![API 的 gateway 回 502 而失敗的任務：卡片倒數到 15 次重試中的第一次，附 Retry now 和 Cancel，佇列中有一個被暫停的任務](screenshots/retry-card.png)
 
-回合因可能自行恢復的 API 錯誤失敗時（例如 gateway 回 502，或 API 過載），AgentAPI 會自己再試
+回合因可能自行恢復的 API 錯誤失敗時（例如 gateway 回 502，或 API 過載），Tendyard 會自己再試
 （見[暫時性的 API 錯誤](agents.zh-TW.md#暫時性的-api-錯誤)）。輸入框上方的卡片會說明 API 回了
 什麼，附上 agent 的訊息，並倒數到下一次重試：*Retrying in 0:28 (1 of 15)*。排隊中的任務會等著，
 標示 *held until the failed task is tried again*。**Retry now** 立刻再試，**Cancel** 放棄這個任務、
 讓佇列放行。你自己送的任務會直接送出。這段期間 agent 算是工作中，狀態列會顯示它在等著再試失敗的
 任務。失敗的那個任務本身顯示 Failed；重試是下一個任務。
 
-## 請求與決策卡片
+<a id="請求與決策卡片"></a>
+
+## 決策卡片收集 agent 等待的回覆
 
 agent 需要你回應時，會在輸入框上方顯示卡片並等待。卡片上方的狀態列（手機上改由卡片自己說明）、
 標頭和分頁標題會顯示「Needs you」，任務會顯示「Waiting for you」，工具呼叫列則標示 agent 在等
 什麼。數字鍵可以選擇選項。每個請求只能回覆一次，任何開著的聊天畫面都能回覆；
 已經無法回覆的請求會註明這一點。
 
-### 核准
+<a id="核准"></a>
+
+### 核准卡片可允許或拒絕工具請求
 
 ![指令的核准卡片：Allow、Always allow Bash in this session，以及可附註的 Deny](screenshots/native-approval.png)
 
@@ -276,7 +323,9 @@ agent 需要你回應時，會在輸入框上方顯示卡片並等待。卡片�
 
 ![核准指令：卡片出現，按下 Allow，回合繼續進行](screenshots/demo-approval.gif)
 
-### 提問
+<a id="提問"></a>
+
+### 問題卡片收集答案後一起送出
 
 ![提問卡片停在三個步驟中的第一步：Package manager、Checks 和 Notes](screenshots/native-question.png)
 
@@ -285,7 +334,9 @@ agent 的提問一次一個步驟：單選、複選或自由輸入文字。**Nex
 
 ![回答三個問題：選一個選項、勾選兩個檢查項目，再寫一則備註](screenshots/demo-question.gif)
 
-### 計畫
+<a id="計畫"></a>
+
+### 計畫卡片可核准計畫或附上意見退回
 
 ![計畫卡片，包含以 Markdown 顯示的計畫、Approve the plan、Keep planning 和回饋欄](screenshots/native-plan.png)
 
@@ -293,19 +344,23 @@ agent 的提問一次一個步驟：單選、複選或自由輸入文字。**Nex
 和 Codex 還會讓你選擇 agent 接下來如何實作計畫：Claude Code 可以略過權限、自動接受編輯，或由你
 核准編輯；Codex 則是 bypass、auto review 或 ask 模式。
 
-### 登入
+<a id="登入"></a>
+
+### 登入卡片顯示登入所需的指令與主機
 
 ![登入卡片：要執行的指令、執行它的主機與使用者、Run in terminal 和 Check again](screenshots/login-card.png)
 
 agent 尚未登入，或在工作階段中登入失效時，登入卡片會列出要執行的指令（`claude auth login`、
 `codex login --device-auth` 或 Pi 的 `/login`），以及要在哪台主機上、以哪個使用者執行。
-Codex 以裝置代碼登入：在任何裝置上開啟 Codex 印出的連結，再輸入一次性代碼，所以執行 AgentAPI
+Codex 以裝置代碼登入：在任何裝置上開啟 Codex 印出的連結，再輸入一次性代碼，所以執行 Tendyard
 的地方不需要瀏覽器。
 **Run in terminal** 會在 [shell 終端機](#shell-終端機)中執行它；**Check again** 會立刻檢查。
-AgentAPI 也會每 5 秒重試一次，期間的訊息會在佇列中等待，標示 *held until the agent is logged in*。（截圖以 `dev-machine` 和 `dev`
+Tendyard 也會每 5 秒重試一次，期間的訊息會在佇列中等待，標示 *held until the agent is logged in*。（截圖以 `dev-machine` 和 `dev`
 代替真實的主機和使用者。）
 
-## 檔案
+<a id="檔案"></a>
+
+## 檔案檢視器整合原始內容、預覽與差異
 
 聊天裡的檔名會開啟檢視器，顯示 agent 正在處理的檔案：工具呼叫列上的檔名、agent 回覆中
 inline code 裡的路徑（`lib/foo.go:12` 會開在第 12 行）、指向路徑的 Markdown 連結（`[表格](/home/me/notes.csv)`，
@@ -321,13 +376,17 @@ module cache（除非路徑本身就在裡面），走過 50,000 筆或滿 2 秒
 
 ![開啟 index.html 和它的預覽，接著查看 README.md 的 diff](screenshots/demo-files.gif)
 
-### 檔案內容
+<a id="檔案內容"></a>
+
+### 原始內容檢視會顯示檔案與行號
 
 ![檔案檢視器開啟 index.html，顯示行號與語法高亮](screenshots/file-viewer.png)
 
 **File** 以行號和語法高亮顯示檔案，最多 1 MiB（`GET /files/content`）。
 
-### 預覽
+<a id="預覽"></a>
+
+### 預覽會呈現支援的文件與圖片
 
 HTML、Markdown 和 SVG 檔案有 **Preview** 分頁，圖片檔則直接顯示圖片。
 
@@ -344,7 +403,9 @@ cookie 也只在預覽開著的期間保留。頁面的 Content-Security-Policy 
 Markdown 檔案會直接開在預覽。相對路徑的圖片會從工作目錄載入，相對連結會在檢視器中
 開啟該檔案（`#L12` 會開在那一行）。PNG、JPEG、GIF、WebP、BMP、ICO 和 SVG 檔案會以圖片顯示（`GET /files/image`）。
 
-### 差異
+<a id="差異"></a>
+
+### 差異檢視會顯示修改及前後內容
 
 ![Diff 分頁：README.md 尚未 commit 的變更](screenshots/file-diff.png)
 
@@ -352,7 +413,9 @@ Markdown 檔案會直接開在預覽。相對路徑的圖片會從工作目錄�
 變更（**Uncommitted changes**），最多 1 MiB（`GET /files/diff`）。diff 只讀取 git 儲存庫：不會執行儲存庫或使用者設定的
 diff driver、textconv 或 fsmonitor。
 
-## 工作階段瀏覽器
+<a id="工作階段瀏覽器"></a>
+
+## Explorer 集中提供工作階段紀錄、檔案與整合設定
 
 Explorer（⌘K / Ctrl+K，或資料夾按鈕）有五個分頁。Index、Files 和 Links 清單有篩選框。
 
@@ -388,8 +451,8 @@ agent 用過自己以外的[模型供應商](providers.zh-TW.md)之後，卡片�
 ![Explorer 的 Session 分頁要求再點一次才會重新啟動 agent](screenshots/explorer-session.png)
 
 **Restart agent** 會停止 agent、清除對話，並在新的工作階段中重新啟動；需要再點一次。
-agent 一再結束、AgentAPI 已放棄重新啟動時，也用這個按鈕重新啟動。
-AgentAPI 直接啟動 Codex 和 Pi 的 CLI 時，它們會先更新到最新的發行版。
+agent 一再結束、Tendyard 已放棄重新啟動時，也用這個按鈕重新啟動。
+Tendyard 直接啟動 Codex 和 Pi 的 CLI 時，它們會先更新到最新的發行版。
 **Download conversation JSONL** 會儲存這個工作階段的每則訊息、工具呼叫和結果，每行一個事件，
 後面接著 agent 執行過的 sub agent 事件；工作階段詳細資訊的選單裡也有。檔案由伺服器串流回傳，
 也包含聊天介面可能還沒載入的較早任務。
@@ -398,17 +461,19 @@ AgentAPI 直接啟動 Codex 和 Pi 的 CLI 時，它們會先更新到最新的�
 
 ![Explorer 的 Webhook 分頁：接收端網址、事件群組、簽章 secret、instance ID、心跳和公開網址](screenshots/explorer-webhook.png)
 
-即使 AgentAPI 啟動時沒有設定 webhook，也能在這裡設定接收端網址、簽章 secret、instance ID、
+即使 Tendyard 啟動時沒有設定 webhook，也能在這裡設定接收端網址、簽章 secret、instance ID、
 公開網址和心跳間隔。事件群組包括 **Tasks**、**Needs you**（核准、提問、計畫、
 登入與用量限制）、**Heartbeats**、**Run status**、**Agent errors**、**Messages** 和
 **Tool calls**。secret 可替換或移除，但無法讀回。**Delivery and payload** 提供逾時、嘗試次數與範本。
 
-**Save** 立即套用設定，維持到 AgentAPI 重新啟動；使用 `--state-db` 時也會跨重新啟動保留，
+**Save** 立即套用設定，維持到 Tendyard 重新啟動；使用 `--state-db` 時也會跨重新啟動保留，
 除非新的 webhook 參數覆蓋設定。**Send test event** 向已儲存的網址送出 `webhook.test` 並顯示回應；
 **Turn off** 清除網址。透過 `--webhook-events` 單獨選取的事件，例如 `task.completed`，即使未涵蓋
 整個群組，也會列出並保留。事件與格式見 [Webhook](api.zh-TW.md#webhook)。
 
-## Lineage
+<a id="lineage"></a>
+
+## Lineage 顯示各 subagent 做了什麼
 
 ![Lineage 面板顯示一個 sub agent：Claude Code 交給它的任務、它讀的檔案、跑的指令和它的回答](screenshots/lineage.png)
 
@@ -421,10 +486,12 @@ Claude Code 或 Codex 把工作交給 sub agent 時，標頭上會出現一個�
 列出 sub agent，`GET /subagents/{id}` 回傳單一 sub agent 的任務和訊息。
 
 Claude Code sub agent 的狀態取自 Agent 工具呼叫。Codex 的 spawn 呼叫會在 sub agent 完成前
-回傳，所以 AgentAPI 改從 sub agent 的紀錄讀取狀態。Codex 會加密交給 sub agent 的任務，面板因此
+回傳，所以 Tendyard 改從 sub agent 的紀錄讀取狀態。Codex 會加密交給 sub agent 的任務，面板因此
 以任務名稱和暱稱標示。
 
-## Shell 終端機
+<a id="shell-終端機"></a>
+
+## 終端機在 agent 目錄中執行 shell 指令
 
 ![shell 終端機：在 agent 工作目錄中執行的 git status 和 git log，以及按鍵列](screenshots/terminal.png)
 
@@ -437,20 +504,22 @@ Ctrl+C，shell 的 Ctrl+R、Ctrl+A、Ctrl+E、Ctrl+U 和 Ctrl+W，Home、End、P
 輸入。Ctrl+D 和 Ctrl+Z 會要求你再按一次。
 
 終端機裡的網頁連結點一下就會開啟，折成多行的連結也一樣；指令最後印出的連結（例如登入連結）會
-縮短後顯示在終端機上方，點一下就能開啟或複製。以 `--terminal=false` 啟動 AgentAPI 可以關閉
+縮短後顯示在終端機上方，點一下就能開啟或複製。以 `--terminal=false` 啟動 Tendyard 可以關閉
 終端機。
 
 ![終端機：git status、顯示在終端機上方的連結，以及按住 Ctrl 清除畫面](screenshots/demo-terminal.gif)
 
-## 工作階段詳細資訊與提醒
+<a id="工作階段詳細資訊與提醒"></a>
+
+## 工作階段詳細資訊識別 agent 並設定提醒
 
 ![工作階段詳細資訊選單：狀態、agent、工作階段、附複製按鈕的工作階段 ID、版本、活動、佇列和 token](screenshots/session-details.png)
 
 點選標頭中的狀態會開啟工作階段詳細資訊：狀態、agent、工作階段名稱、agent 的工作階段
-ID（前幾個字元，附複製按鈕）、AgentAPI 版本、agent 正在做什麼、佇列，以及輸入和輸出的 token
-數。選單可以把對話下載成 JSONL（和 Explorer 的 Session 分頁一樣）、開啟瀏覽器通知和提示音、顯示鍵盤快捷鍵，以及說明如何把這個 AgentAPI 加入
+ID（前幾個字元，附複製按鈕）、Tendyard 版本、agent 正在做什麼、佇列，以及輸入和輸出的 token
+數。選單可以把對話下載成 JSONL（和 Explorer 的 Session 分頁一樣）、開啟瀏覽器通知和提示音、顯示鍵盤快捷鍵，以及說明如何把這個實例加入
 [hub](hub.zh-TW.md)。（context 用了多少和用量限制在輸入框
-的工具列上，見 [Context 與用量限制](#context-與用量限制)。）
+的工具列上，見 [用量指示顯示 context 與帳號可用容量](#context-與用量限制)。）
 
 分頁在背景時，圖示會以圓點顯示狀態：琥珀色表示 agent 需要你回應，藍色表示工作中，綠色表示
 任務完成。開啟通知時，瀏覽器也會顯示「*agent 名稱* needs you」或「*agent 名稱* finished」（只限 https
@@ -459,19 +528,21 @@ ID（前幾個字元，附複製按鈕）、AgentAPI 版本、agent 正在做什
 完成時發出。
 
 **Add to an AgentAPI hub…** 列出可以直接複製的步驟：啟動 hub、讓這台主機加入、打開 hub。輸入
-hub 的位址後，指令會自動帶入。這個 AgentAPI 已經回報給某個 hub 時，會顯示是哪一個。
+hub 的位址後，指令會自動帶入。這個實例已經回報給某個 hub 時，會顯示是哪一個。
 
-![把這個 AgentAPI 加入 hub：hub 的位址和可以複製的指令](screenshots/join-hub.png)
+![把這個實例加入 hub：hub 的位址和可以複製的指令](screenshots/join-hub.png)
 
 任務在聊天介面顯示時結束，或任務結束後介面再次顯示時，聊天介面會告訴伺服器你已經看過
-（`POST /tasks/seen`），所以監看多個 AgentAPI 的儀表板、`agentapi list` 和其他分頁都不會再把這個
+（`POST /tasks/seen`），所以監看多個實例的儀表板、`agentapi list` 和其他分頁都不會再把這個
 任務顯示為未讀（見[監看多個實例](api.zh-TW.md#監看多個實例)）。
 
 agent 的警告和錯誤（失敗的回合、它忽略的設定）會以角落的通知顯示，直到你關掉為止。雖然伺服器
 每次連線都會重送最近的通知，關掉的通知在重新載入後也不會再出現；agent 每次啟動都會重複的警告，
 每個頁面只顯示一次。同時有兩則以上時，下方的 **Clear all** 可以一次全部關掉，效果和逐一關掉相同。
 
-## 手機
+<a id="手機"></a>
+
+## 手機版把對話與決策控制留在可操作範圍
 
 ![手機上的聊天介面](screenshots/chat-mobile.png)
 
@@ -486,11 +557,13 @@ agent 的警告和錯誤（失敗的回合、它忽略的設定）會以角落�
 
 ![手機上的終端機：鍵盤按鈕、一個指令，以及按鍵列上的按鍵](screenshots/demo-phone.gif)
 
-## hub
+<a id="hub"></a>
+
+## hub 在同一個聊天介面開啟各主機的 agent
 
 ![手機上的 hub](screenshots/hub-phone.png)
 
-[hub](api.zh-TW.md#執行-hub)（`agentapi hub serve`）會替所監看的每個 AgentAPI 提供這個聊天
+[hub](api.zh-TW.md#執行-hub)（`agentapi hub serve`）會替所監看的每個實例提供這個聊天
 介面。清單把釘選的 agent 排在最上方，其他的則依群組把需要你處理的排前面，也可以改成最近變動的
 排前面。打開 By machine，兩種排序都會把同一台主機的 agent 收進一張卡片，每個 agent 一個分頁。
 每種狀態都有自己的圖示，並寫出每個 agent 在等什麼（核准的指令、提問）或在做什麼。可以用搜尋和標籤
@@ -500,16 +573,18 @@ agent 的警告和錯誤（失敗的回合、它忽略的設定）會以角落�
 按鈕，點了就在原處開啟。
 透過 hub 開啟時，hub 會替你送出實例的 token。
 
-齒輪按鈕會開啟 hub 的設定。在那裡保存的常用提示可以用輸入框的 ☆ 插入（見[輸入框](#輸入框)）；模型選單提供的模型供應商也在那裡設定（見[模型與推理強度](#模型與推理強度)）。
+齒輪按鈕會開啟 hub 的設定。在那裡保存的常用提示可以用輸入框的 ☆ 插入（見[輸入框整合提示、附件與傳送控制](#輸入框)）；模型選單提供的模型供應商也在那裡設定（見[模型選單可選擇模型、推理強度與供應商](#模型與推理強度)）。
 `+` 可以用網址和 token 加入實例。每一列的 `⋯` 選單可以把實例釘選在最上方、放進自己建立的群組（清單
 會為每個群組加上可收合的標題）、把它正在等的事靜音到改變為止，或移除已停止、連不到的實例。各列和
 群組標題會顯示 agent 最近 24 小時的花費（滑鼠移上去可看 7 天），各列也顯示 agent 工作了多久。
-每一列還會顯示 AgentAPI 版本，比 hub 舊的會標出來，總覽也有一張卡片依版本統計。架設方式、群組和每種狀態的細節見[hub 指南](hub.zh-TW.md)。
+每一列還會顯示 Tendyard 版本，比 hub 舊的會標出來，總覽也有一張卡片依版本統計。架設方式、群組和每種狀態的細節見[hub 指南](hub.zh-TW.md)。
 
-## 連線與快取
+<a id="連線與快取"></a>
+
+## 串流重新連線時，快取可先還原對話紀錄
 
 聊天介面追蹤伺服器的事件，並從上次的位置接續，所以重新連線只取得變更的部分。結束的串流會立刻
-重新開啟，不顯示提示。失敗的串流（包括 AgentAPI 前面的 proxy 回的錯誤頁）會在 1 秒後重試，之後
+重新開啟，不顯示提示。失敗的串流（包括 Tendyard 前面的 proxy 回的錯誤頁）會在 1 秒後重試，之後
 間隔逐次拉長，最多 30 秒；一列提示會說明何時重試，並附上 **Reconnect now**。伺服器每 15 秒送一次
 心跳，串流 45 秒沒有動靜就視為斷線，即使分頁在前景也一樣（例如手機切換了網路）。恢復連網或回到
 分頁時會立刻重新連線。網頁標題和標頭會顯示目前的任務、agent 狀態和連線狀態。重新開啟時，介面先顯示 IndexedDB 快取的

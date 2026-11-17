@@ -2,43 +2,52 @@
 
 English | [繁體中文](api.zh-TW.md)
 
-This page covers the [conversation API](#conversation-api), the [integrations](#integrations)
-(watching many AgentAPIs, the hub, webhooks and the human-reply API) and the
-[reference](#http-api-reference) of every endpoint.
+The HTTP API lets clients send work to an agent, follow its state and answer requests without
+using the built-in chat.
 
-## Conversation API
+- **Control the conversation:** send messages, manage the queue and read task results through the
+  [conversation API](#conversation-api).
+- **Follow changes:** use event streams for live updates and pagination for earlier history.
+- **Connect services:** use summaries, webhooks and human replies through the [integrations](#integrations).
+- **Look up a route:** the [endpoint reference](#http-api-reference) lists the available operations.
 
-### Messages and status
+<a id="conversation-api"></a>
+
+## The conversation API controls work and exposes its state
+
+<a id="messages-and-status"></a>
+
+### Message endpoints send work, read replies and reset the session
 
 - `POST /message` sends a message: `{"content": "Hello, agent!", "type": "user"}`.
-  A 200 means AgentAPI saw the agent start on it, or queued it (`queued`)
+  A 200 means the agent started processing the message, or Tendyard queued it (`queued`)
   because the agent is busy; `dispatch_mode` chooses what happens then (see
   [Steer, interrupt and the queue](agents.md#steer-interrupt-and-the-queue)).
 - `GET /messages` returns the conversation; `GET /rich-messages` and
   `GET /timeline` return its structured form (see
-  [Structured activity](#structured-activity)). `GET /messages` returns every message unless asked
+  [Rich messages and timelines expose structured agent activity](#structured-activity)). `GET /messages` returns every message unless asked
   for a page; the other two, and `GET /tasks`, return the latest 20 tasks; all page back with
-  `before` (see [Long conversations](#long-conversations)).
+  `before` (see [Pagination loads recent tasks before earlier history](#long-conversations)).
 - A message that went out but wasn't confirmed (the call timed out, or
-  AgentAPI was stopping) may have reached the agent: it isn't sent again,
+  Tendyard was stopping) may have reached the agent: it isn't sent again,
   but leaves the queue with an error.
 - `DELETE /messages` clears the conversation (messages, rich messages,
   requests, tasks, timeline, errors and the queue) and restarts the agent
   in a new session. While the agent restarts, messages wait in the queue;
-  another restart and opening a session get 409, and so does a restart while AgentAPI is stopping. Before the
-  restart AgentAPI updates Codex (`codex update`) and Pi (`pi update --self`)
-  when it launches those CLIs directly, one AgentAPI at a time; an update that
+  another restart and opening a session get 409, and so does a restart while Tendyard is stopping. Before the
+  restart Tendyard updates Codex (`codex update`) and Pi (`pi update --self`)
+  when it launches those CLIs directly, one Tendyard at a time; an update that
   fails or takes over 3 minutes leaves the installed version. Claude Code
   updates itself.
 - `GET /status` returns the backward-compatible `stable`/`running` status,
   the detailed lifecycle, the transport, `server_id` (a random identifier of
-  this AgentAPI run, new at every start), `turn` (how many times the agent
+  this instance run, new at every start), `turn` (how many times the agent
   started working), the conversation's `epoch`, the session name, the
-  AgentAPI version, `agent_session_id` (the agent's own session, which
+  Tendyard version, `agent_session_id` (the agent's own session, which
   [`GET /sessions`](agents.md#earlier-sessions) lists), `capabilities`,
   `pending_requests`, `settings`, `usage`, `terminal` and `login_required`.
   The lifecycle is `starting`, `ready`, `running`, `restarting`, `exited` or
-  `failed`. An agent that exits is `restarting` while AgentAPI starts
+  `failed`. An agent that exits is `restarting` while Tendyard starts
   it again, until the new agent accepts turns, and `failed` once it gives
   up. `restarting`, `exited` and `failed` don't change with the agent's
   status until the agent is back.
@@ -50,7 +59,9 @@ This page covers the [conversation API](#conversation-api), the [integrations](#
   characters and cut to 255 bytes; a name of `.` or `..` gets 400. A file
   the conversation doesn't refer to is removed after 7 days.
 
-### Structured activity
+<a id="structured-activity"></a>
+
+### Rich messages and timelines expose structured agent activity
 
 - `GET /rich-messages` returns the structured conversation: thinking, tool
   calls with their results, usage and stable message identifiers, from the
@@ -65,12 +76,14 @@ This page covers the [conversation API](#conversation-api), the [integrations](#
 - `GET /timeline/export` streams the whole timeline as JSON Lines, the subagents' events after
   the agent's own with `?subagents=true`: the chat's conversation download.
 
-### Tasks
+<a id="tasks"></a>
 
-AgentAPI groups the conversation into tasks: a task is a message of yours and
+### Tasks group each prompt with the work it starts
+
+Tendyard groups the conversation into tasks: a task is a message of yours and
 the agent's turn on it. Messages you add while it runs (steering) belong to it; the next message
 after it ends starts the next task. A task ends when the agent is idle again with no request open.
-When answering a request leaves the agent idle, AgentAPI waits 3
+When answering a request leaves the agent idle, Tendyard waits 3
 seconds before ending the task, since the agent usually continues working.
 
 `GET /tasks` lists them, the earliest first, each with:
@@ -78,7 +91,7 @@ seconds before ending the task, since the agent usually continues working.
 - `id`: the ID of the message that started it, as in `GET /messages`;
 - `number`: its place in the conversation, from 1 (the chat's Task *n*);
 - `status`: `running`, `completed`, `failed` (the agent reported an error or
-  exited; `errors` says what, also when AgentAPI tries a
+  exited; `errors` says what, also when Tendyard tries a
   [transient error](agents.md#transient-api-errors) again) or `limited` (a
   [usage limit](agents.md#usage-limits) stopped it; `limit` has the stop);
 - `prompt` (the start of the message), `started_at` and `ended_at`;
@@ -87,12 +100,14 @@ seconds before ending the task, since the agent usually continues working.
 
 Each rich message carries the `task_id` of the task it began in, so a client groups the tool calls
 and thinking by task without guessing from timestamps; a resumed session's rich messages have none.
-Messages restored or opened from before AgentAPI started are history: their tasks are completed. The
-[state database](agents.md#persistent-sessions) keeps the tasks, and a task that ran when AgentAPI stopped is
+Messages restored or opened from before Tendyard started are history: their tasks are completed. The
+[state database](agents.md#persistent-sessions) keeps the tasks, and a task that ran when Tendyard stopped is
 over after a restart. `/events?sync=1` sends `task_update` when a task starts or changes, and the
 chat and the [webhook](#webhooks)'s `task.*` events use the same tasks.
 
-### Message queue
+<a id="message-queue"></a>
+
+### The queue holds messages until the agent can take them
 
 Messages submitted while an agent is busy are placed in a FIFO queue instead of being rejected.
 The API and the chat UI can show, edit or delete a queued message before it goes out.
@@ -104,7 +119,7 @@ The API and the chat UI can show, edit or delete a queued message before it goes
   queued message once (409 otherwise).
 - `POST /queue/{id}/steer` moves a queued message into the running turn (409
   if no turn is running; the message stays queued).
-- If the agent refuses a queued message, AgentAPI tries it up to 5 times in
+- If the agent refuses a queued message, Tendyard tries it up to 5 times in
   all, then drops it with an error that quotes it. A message the agent didn't
   answer in time is dropped at once: it may have reached the agent, and
   sending it again could run the task twice.
@@ -112,7 +127,9 @@ The API and the chat UI can show, edit or delete a queued message before it goes
   whenever it changes, so a client sees what another client queued without
   asking.
 
-### Events and incremental sync
+<a id="events-and-incremental-sync"></a>
+
+### Clients can resume event streams with an epoch and sequence
 
 `GET /events` streams server-sent events: `message_update`, `status_change`,
 `rich_message_update`, `agent_error`, `request_update` and a `heartbeat` every
@@ -135,10 +152,12 @@ newest task first: the status and errors, then each task's messages and its rich
 what came before the first task last. Without `sync` it keeps the order it always had: the
 messages, the status, then the rich messages.
 
-### Long conversations
+<a id="long-conversations"></a>
+
+### Pagination loads recent tasks before earlier history
 
 An agent that works for months on one conversation builds up about 100 KB a task (its tool calls,
-their output, the timeline). AgentAPI keeps that bounded:
+their output, the timeline). Tendyard keeps that bounded:
 
 - `GET /rich-messages`, `GET /timeline` and `GET /tasks` return a page of tasks and what belongs to
   them: without parameters the latest 20, as the full `/events` replay holds them. `GET /messages`
@@ -159,15 +178,19 @@ their output, the timeline). AgentAPI keeps that bounded:
 AgentAPI 4.2 and earlier returned every message, rich message, event and task from these lists.
 A client that wants all of them reads the pages until `has_more` is false.
 
-## Integrations
+<a id="integrations"></a>
+
+## Summaries, webhooks and replies connect external clients
 
 Use [webhooks](#webhooks) to send tasks, requests, messages and heartbeats to a receiver,
-the [summary](#watching-many-instances) to monitor several AgentAPIs, and
+the [summary](#watching-many-instances) to monitor several Tendyard instances, and
 the [human-reply API](#human-reply-api) to answer the agent through a bot.
 
-### Watching many instances
+<a id="watching-many-instances"></a>
 
-To display several AgentAPIs in a sidebar or dashboard, read one summary response or stream per
+### One summary stream per instance supports fleet monitoring
+
+To display several Tendyard instances in a sidebar or dashboard, read one summary response or stream per
 instance:
 
 - `GET /summary` returns the `instance` identity (as in [webhook](#webhooks) events: `id`, `name`,
@@ -181,11 +204,11 @@ instance:
   `week_tokens`: `input`, `output`, `cache_write`, `cache_read` and their `total`), when the amounts
   last changed (`updated_at`), a `scope`, and from 4.2 the hours behind them (`hours`: each of the
   last 25 hours with calls, its start in UTC, `usd` and `tokens`; the hub's
-  [activity](hub.md#activity) keeps them for a year). AgentAPIs of one agent in one directory
+  [activity](hub.md#activity) keeps them for a year). Tendyard instances of one agent in one directory
   of a machine report the same sessions, with the same `scope`: a client that adds up many counts each scope
-  once. Its `update` says whether a client can [update the AgentAPI](#updating-through-the-api), and
+  once. Its `update` says whether a client can [update the instance](#updating-through-the-api), and
   how far an update is. For Claude Code and Codex, `provider_health` says how each
-  [model provider](providers.md) the agent called in the last hour answered, through AgentAPI's
+  [model provider](providers.md) the agent called in the last hour answered, through Tendyard's
   proxy: its `provider`, `requests`, `failures` (no answer, 5xx, 429, an answer that broke off),
   `client_errors` (another 4xx), `first_byte_p50_ms` and `first_byte_p95_ms` (of the latest 100
   answers that weren't failures), `last_success_at` and `last_failure` (`at`, `kind`, `status`, `message`), worked out every
@@ -203,7 +226,7 @@ instance:
   instance; the chat calls it while it shows the conversation. The
   [state database](agents.md#persistent-sessions) keeps it, so an unseen task stays unread after a restart.
 
-To find the instances on a machine, read the registry: while it serves, each AgentAPI keeps an
+To find the instances on a machine, read the registry: while it serves, each instance keeps an
 entry in `~/.agentapi/instances` (`--registry-dir`; `--registry=false` turns it off) with its `id`,
 `name`, `server_id`, `url` (`--public-url`, else its listen address), PID, directory, agent,
 `auth_required` (never the token) and `restarts_in_place` (it restarts in place on SIGUSR2, see
@@ -211,7 +234,7 @@ entry in `~/.agentapi/instances` (`--registry-dir`; `--registry=false` turns it 
 started, as the system counts it). It removes the entry when it stops; an entry whose process is
 gone (after a crash) is removed when the registry is listed, also when another process has since
 taken its PID (it started at another time). Check that `GET /summary` returns the
-entry's `server_id` before using one: another AgentAPI may have taken the port.
+entry's `server_id` before using one: another Tendyard may have taken the port.
 [`agentapi list`](cli.md#agentapi-list) shows the registered instances with their summaries.
 
 Set `--instance-id` to identify the instance (default `<hostname>:<port>`), `--name` for its display
@@ -222,10 +245,12 @@ For a browser client on another origin, add that origin to
 [`--allowed-origins`](security.md#allowed-origins). To send an [API token](security.md#api-token-authentication), read the
 stream with `fetch` and an `Authorization` header; `EventSource` can't set that header.
 
-#### Running a hub
+<a id="running-a-hub"></a>
 
-A hub watches many AgentAPIs on any machines it can reach. Run it somewhere that stays up, such as
-an always-on workspace, and reach it and the AgentAPIs over a private network such as your own VPN.
+#### A hub combines instance monitoring in one workspace
+
+A hub watches many Tendyard instances on any machines it can reach. Run it somewhere that stays up, such as
+an always-on workspace, and reach it and the Tendyard instances over a private network such as your own VPN.
 The [hub guide](hub.md) covers setup step by step, every state, tokens, troubleshooting and the
 hub's API.
 
@@ -240,10 +265,10 @@ instance: the ones you pinned on top, then those that need you first by group, o
 first; **By machine** puts each machine's agents together in one card, a tab each, in either order.
 Each shows its state (the reason it waits, such as an approval or question, a login or a usage
 limit; or working, finished a task you haven't seen, idle, unreachable or stopped) with its title,
-agent, machine, AgentAPI version, queue and usage limit. The tab title counts what needs you. Pick
+agent, machine, Tendyard version, queue and usage limit. The tab title counts what needs you. Pick
 one to open it in the chat. On a phone the list and the chat take turns.
 
-- AgentAPIs join it with [`agentapi hub join`](#joining-a-hub): their signed `instance.*` events
+- Tendyard instances join it with [`agentapi hub join`](#joining-a-hub): their signed `instance.*` events
   add them, and the hub follows each one's [summary stream](#watching-many-instances) from one
   connection. `+` has the join command for a machine, with the hub's address and secret filled in,
   and a prompt for an agent there; it also adds an instance by its URL (and token). Each row's `⋯`
@@ -279,14 +304,16 @@ one to open it in the chat. On a phone the list and the chat take turns.
   over HTTPS, or only on the private network: signing in sends the token. A sign-in lasts 30 days.
   To reach the instances through a VPN client running in userspace, set `ALL_PROXY` to its SOCKS5
   proxy.
-- The hub serves the chat of its own version: run the same AgentAPI version on the hub and the
+- The hub serves the chat of its own version: run the same Tendyard version on the hub and the
   instances. A row marks an instance older than the hub, and the overview counts the versions and
   says how to update the older ones.
 
-#### Joining a hub
+<a id="joining-a-hub"></a>
 
-[`agentapi hub join`](cli.md#agentapi-hub) connects a machine's AgentAPIs
-to it without changing how they start, so it also works for AgentAPIs a script starts with fixed
+#### Join once to connect this user’s instances on a machine
+
+[`agentapi hub join`](cli.md#agentapi-hub) connects a machine's Tendyard instances
+to it without changing how they start, so it also works for Tendyard instances a script starts with fixed
 flags, such as a Coder workspace's:
 
 ```bash
@@ -296,13 +323,13 @@ agentapi hub join http://hub.vpn:3290/hooks --secret "$HUB_SECRET" --public-url 
 
 `join` writes the hub's webhook (`webhook-url`, `webhook-secret`, `webhook-events`, `public-url`)
 into `~/.agentapi/config.yaml`, which every `agentapi server` of the user reads when it starts, and
-applies it to the registered AgentAPIs running now: each sends `instance.heartbeat` to the hub at
-once. After a restart (of the workspace, for example), the AgentAPIs send `instance.started` from
+applies it to the registered Tendyard instances running now: each sends `instance.heartbeat` to the hub at
+once. After a restart (of the workspace, for example), the Tendyard instances send `instance.started` from
 the file. `--public-url` is where the hub reaches them; `{port}` and `{hostname}` are filled in for
-each, and `{ip}` with the machine's IPv4 address on the route to the hub, which each AgentAPI looks
+each, and `{ip}` with the machine's IPv4 address on the route to the hub, which each instance looks
 up again while it runs: when DHCP gives the machine another address, the next heartbeat names it and
-the hub follows. AgentAPIs that started before 1.2 aren't registered: restart them once. `agentapi hub status`
-shows the hub and where each running AgentAPI reports; `agentapi hub leave` removes the hub. With
+the hub follows. Tendyard instances that started before 1.2 aren't registered: restart them once. `agentapi hub status`
+shows the hub and where each running Tendyard reports; `agentapi hub leave` removes the hub. With
 `--allow-update`, the hub can also [update them](#updating-through-the-api). `join`
 first sends the hub a signed test event and stops if the hub doesn't take it (not reached, a sign-in
 page in front of it, or another secret); `--no-check` skips that for a hub that doesn't run yet. The
@@ -312,12 +339,14 @@ each of its addresses when it starts, without the secret. An agent can do it for
 [agentapi-hub-join skill](../skills/agentapi-hub-join/SKILL.md); see the
 [hub guide](hub.md#3-join-each-machines-agentapis) to install it.
 
-#### Updating through the API
+<a id="updating-through-the-api"></a>
 
-A client that watches many AgentAPIs, such as the hub, can update one to the latest release. Only
-machines that opt in allow it: start AgentAPI with `--allow-update` (or set
+#### Opted-in instances update and restart through the API
+
+A client that watches many Tendyard instances, such as the hub, can update one to the latest release. Only
+machines that opt in allow it: start Tendyard with `--allow-update` (or set
 `AGENTAPI_ALLOW_UPDATE=true`), or add `allow-update: true` to `~/.agentapi/config.yaml` for every
-AgentAPI of the user, which `agentapi hub join --allow-update` does. AgentAPIs that run take the
+Tendyard of the user, which `agentapi hub join --allow-update` does. Tendyard instances that run take the
 setting up when they restart (`agentapi restart --all`).
 
 ```bash
@@ -325,13 +354,13 @@ curl -X POST localhost:3284/update -H 'Content-Type: application/json' -d '{"whe
 ```
 
 - `POST /update` installs the latest official release of k1dav-c/agentapi for the machine's OS and
-  architecture, then restarts AgentAPI in place into it, as [`agentapi restart`](cli.md#agentapi-restart)
+  architecture, then restarts Tendyard in place into it, as [`agentapi restart`](cli.md#agentapi-restart)
   does: the same PID, a new `server_id` and version. The download must match the release's
   `checksums.txt` and run as that version. The request can't choose a version or a URL. A release
-  that wouldn't start with this AgentAPI's settings or state database fails the update before it
-  replaces the program, which stays as it was, and AgentAPI goes on serving. (Before 4.3.1 the
-  update replaced the program first: such an AgentAPI keeps serving, but its next start runs the
-  release that refuses the setting; drop the setting before it restarts.)
+  that wouldn't start with this instance's settings or state database fails the update before it
+  replaces the program, which stays as it was, and Tendyard goes on serving. (Before 4.3.1 the
+  update replaced the program before this check. The instance keeps serving, but its next start
+  uses the release that rejects the setting; remove that setting before restarting.)
 - `"when": "idle"`, the default, installs at once and restarts once the agent is idle: no turn
   runs and no request (approval, question or plan) is open. An agent that exited and isn't started
   again counts as idle. Queued messages stay queued and go out after the restart, and so does a
@@ -341,21 +370,21 @@ curl -X POST localhost:3284/update -H 'Content-Type: application/json' -d '{"whe
   the restart. Without it, the agent resumes its session and the chat reads the conversation back
   from the session's log, as when you open it from the [earlier sessions](agents.md#earlier-sessions); the
   queue, open requests and chosen settings start anew.
-- It answers 200 with `"up_to_date": true` when AgentAPI runs the latest release already, else 202
+- It answers 200 with `"up_to_date": true` when Tendyard runs the latest release already, else 202
   with the `state` and the `target` version. While an update is under way it answers its state,
   and `"now"` hurries it. `DELETE /update` cancels it until it restarts; what it installed stays.
-  403 means updates are off, 409 that AgentAPI can't replace its program (see below) or stops, and
+  403 means updates are off, 409 that instance can't replace its program (see below) or stops, and
   502 that GitHub didn't answer.
 - The [summary](#watching-many-instances)'s `update` follows it: `allowed`, `blocked`, the `state`
   (`idle`, `checking`, `downloading`, `waiting`, `restarting`, or `failed` with an `error`), the
   `target`, `keeps_conversation` (it runs with `--state-db`), and `keeps_session` (the agent resumes
   its session after the restart; earlier releases don't send it). Every change sends
   `summary_update`. Earlier releases have no `update`.
-- AgentAPIs that share a binary replace it one at a time, under a lock file next to it
+- Tendyard instances that share a binary replace it one at a time, under a lock file next to it
   (`.agentapi.lock`). One that finds the binary on disk newer than the one it runs, because another
   updated it, only restarts.
 
-AgentAPI never runs `sudo`. It writes the new binary next to the real file behind any symlinks and
+Tendyard never runs `sudo`. It writes the new binary next to the real file behind any symlinks and
 renames it over that file, so the user it runs as must be able to write to that directory. Move a
 binary in a system directory such as `/usr/local/bin` once to a directory of yours, and leave a
 symlink behind:
@@ -365,19 +394,21 @@ mkdir -p ~/.local/bin && cp /usr/local/bin/agentapi ~/.local/bin/agentapi && sud
 ```
 
 Until then the summary's `blocked` says why and gives this command with the actual paths. Running
-AgentAPIs notice the move within a minute, without a restart, and `agentapi update` no longer needs
+Tendyard instances notice the move within a minute, without a restart, and `agentapi update` no longer needs
 `sudo`.
 
-### Webhooks
+<a id="webhooks"></a>
 
-AgentAPI POSTs JSON events to `--webhook-url`, for example to a dashboard monitoring several agents.
+### Signed webhooks deliver agent events to a receiver
+
+Tendyard POSTs JSON events to `--webhook-url`, for example to a dashboard monitoring several agents.
 It sends only `run.status_changed` by default. Select events with `--webhook-events` by type
 (`task.completed`), group (`task.*`) or all events (`*`):
 
 | Event | Sent when | `data` |
 | --- | --- | --- |
 | `run.status_changed` | The agent changes between `running` and `stable` | `status`, `previous_status`, `server_id`, `agent_type`, `transport` |
-| `instance.started`, `instance.heartbeat`, `instance.stopped` | AgentAPI starts, every `--webhook-heartbeat` (60s) and when `PUT /webhook` points the webhook at a new URL, and shuts down | What the agent does: `status`, `lifecycle`, `session_name`, `pending_requests`, `queued_messages`, and `agent_session_id`, `login_required`, `limit_stop`, `retry_wait`, `usage`, `settings` when set; `heartbeat_seconds`, how often the heartbeat comes (missing when it is off) |
+| `instance.started`, `instance.heartbeat`, `instance.stopped` | Tendyard starts, every `--webhook-heartbeat` (60s) and when `PUT /webhook` points the webhook at a new URL, and shuts down | What the agent does: `status`, `lifecycle`, `session_name`, `pending_requests`, `queued_messages`, and `agent_session_id`, `login_required`, `limit_stop`, `retry_wait`, `usage`, `settings` when set; `heartbeat_seconds`, how often the heartbeat comes (missing when it is off) |
 | `task.started` | A [task](#tasks) starts: a message of yours reaches the agent | The task as `GET /tasks` has it: `id` (the message's), `status`, `prompt`, `started_at` |
 | `task.completed`, `task.failed` | The [task](#tasks) ends: `completed`, or `failed` and `limited` (`task.failed`) | The task with `status`, `ended_at`, `duration_seconds`, the agent's last message (`reply`, `reply_id`), `steered`, `errors`, `limit`, `session_name`, and for Claude Code, Codex and Pi its API-equivalent `cost` (see [Session costs](agents.md#session-costs)) |
 | `request.opened`, `request.closed` | An approval, question or plan (the request as `GET /requests` has it) opens or closes | The request |
@@ -387,7 +418,7 @@ It sends only `run.status_changed` by default. Select events with `--webhook-eve
 | `message.created` | A message of yours or a final message of the agent's | `id`, `role`, `content` (cut at 64 KiB, with `truncated`), `time` |
 | `tool.completed` | A tool call returned | `tool_use_id`, `name`, `input`, `result` and `is_error`, each cut at 4 KiB |
 
-Every event names the AgentAPI it comes from, so one receiver can tell many apart:
+Every event names the instance it comes from, so one receiver can tell many apart:
 
 ```json
 {
@@ -424,8 +455,8 @@ Every event names the AgentAPI it comes from, so one receiver can tell many apar
 
 The instance `id` is `--instance-id`, by default `<hostname>:<port>`, and `name` is `--name`, by
 default the working directory's name. `url` is `--public-url`, where the receiver can reach this
-AgentAPI to open its chat or call its API, and `workspace_url` the Coder workspace it runs in, if
-any. Messages and tool calls from before AgentAPI started, or of a session it opened from the
+Tendyard to open its chat or call its API, and `workspace_url` the Coder workspace it runs in, if
+any. Messages and tool calls from before Tendyard started, or of a session it opened from the
 agent's history, are not sent again.
 
 ```bash
@@ -455,7 +486,7 @@ doesn't count as a delivery; the log names where it pointed. Each delivery allow
 deliveries are logged and discarded.
 
 The queue holds 1,024 events and drops new ones when full. A receiver that misses events should
-read the current state from the API or the next heartbeat. On shutdown, AgentAPI waits up to
+read the current state from the API or the next heartbeat. On shutdown, Tendyard waits up to
 2 seconds to deliver `instance.stopped`.
 
 An optional Go `text/template` (`--webhook-payload-template`) reshapes the body for the receiver,
@@ -474,16 +505,16 @@ events and the summary fill them in.
 
 The Explorer's Webhook tab configures the receiver URL, event groups, signing secret, instance ID,
 heartbeat and public URL. **Delivery and payload** contains the timeout, attempt count and template.
-You can configure a webhook here even if AgentAPI started without one.
+You can configure a webhook here even if Tendyard started without one.
 
-Changes made here or through `PUT /webhook` last until AgentAPI restarts. With
+Changes made here or through `PUT /webhook` last until Tendyard restarts. With
 [`--state-db`](agents.md#persistent-sessions), they survive restarts unless different webhook flags override
 them. **Send test event** (`POST /webhook/test`) sends one signed `webhook.test` event to the saved
 URL, regardless of the event selection, and shows the receiver's response.
 
 ![The Explorer's Webhook tab: the receiver URL, event groups, signing secret, instance ID, heartbeat and public URL](screenshots/explorer-webhook.png)
 
-The run-status event, which AgentAPI sends when `--webhook-events` isn't given:
+The run-status event, which Tendyard sends when `--webhook-events` isn't given:
 
 ```json
 {
@@ -501,7 +532,9 @@ The run-status event, which AgentAPI sends when `--webhook-events` isn't given:
 }
 ```
 
-### Human-reply API
+<a id="human-reply-api"></a>
+
+### Handoffs turn pending requests into replies from another client
 
 Another client, such as a chat bot, can answer the agent without the web UI. While the agent waits
 for you, `GET /handoff` returns what it waits on, with an `id` and a `kind`: the oldest pending
@@ -526,7 +559,7 @@ default.
 
 | Endpoint | Description |
 | --- | --- |
-| `GET /messages` | Every message of the conversation; with `before` or `limit`, those of a page of tasks ([Long conversations](#long-conversations)) |
+| `GET /messages` | Every message of the conversation; with `before` or `limit`, those of a page of tasks ([Pagination loads recent tasks before earlier history](#long-conversations)) |
 | `POST /message` | Send a message, or queue it while the agent is busy; `dispatch_mode` is `queue` (default), `steer` or `interrupt` |
 | `DELETE /messages` | Clear the conversation and the queue, and restart the agent in a new session |
 | `GET /rich-messages` | The structured conversation: thinking, tool calls with results, usage; paged as `GET /messages` |
@@ -535,10 +568,10 @@ default.
 | `GET /status` | Status, lifecycle, server ID, turn, epoch, session name, version, the agent's session ID, capabilities, pending requests, settings, usage, usage limit stop, retry wait, terminal, login |
 | `GET /title` | The session's human-readable title |
 | `GET /events` | Server-sent events; `?sync=1` for incremental replay on reconnect, and task and queue updates; `?only=summary` for the summary alone |
-| `GET /summary` | What a client that watches many AgentAPIs shows of this one: instance, status, attention, title, latest task, requests, queue, usage; see [Watching many instances](#watching-many-instances) |
+| `GET /summary` | What a client that watches many Tendyard instances shows of this one: instance, status, attention, title, latest task, requests, queue, usage; see [One summary stream per instance supports fleet monitoring](#watching-many-instances) |
 | `GET /tasks` | The conversation's [tasks](#tasks), the latest 20 by default: each message of yours and the agent's turn on it |
 | `POST /tasks/seen` | Mark the tasks seen for every client: the summary's `unread` is false until a task ends again |
-| `GET /workspace` | The Coder workspace URL, when AgentAPI runs in one |
+| `GET /workspace` | The Coder workspace URL, when Tendyard runs in one |
 
 ### Queue
 
@@ -593,7 +626,7 @@ default.
 | `GET /handoff`, `POST /handoff/reply` | The [human-reply API](#human-reply-api): what the agent waits on, and an answer to it |
 | `GET /webhook`, `PUT /webhook` | Read or change the [webhook](#webhooks): its URL, events, secret, heartbeat and instance |
 | `POST /webhook/test` | Send a `webhook.test` event to the webhook URL once, and return the receiver's answer |
-| `POST /update`, `DELETE /update` | [Update AgentAPI](#updating-through-the-api) to the latest release and restart it in place, once the agent is idle or now (`--allow-update`); cancel an update until it restarts |
+| `POST /update`, `DELETE /update` | [Update Tendyard](#updating-through-the-api) to the latest release and restart it in place, once the agent is idle or now (`--allow-update`); cancel an update until it restarts |
 
 ### Authentication
 

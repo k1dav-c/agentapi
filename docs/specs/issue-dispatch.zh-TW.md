@@ -1,11 +1,23 @@
 # Spec：Issue 派工（hub + 主機 launcher + 內網 runner）
 
+本設計以 hub 派工、主機 launcher 執行與內網 runner 傳送事件，讓同一個 issue 的開發和 review
+留在同一個 job。PR 關閉時，系統停止工作並清理分支。
+
+- **執行分工：**hub 保存派工狀態，launcher 管理各主機的 worktree 與 agent，runner 轉送 GitHub 事件。
+- **存取分工：**hub 保存 GitHub App 金鑰，job 經 launcher 換取 repo token。
+- **工作流程：**由 label、hub 或 API 開工，review 與留言交回原 job，換 agent 時保留分支。
+- **驗收方式：**依 launcher、hub 派工、介面與部署的順序分階段驗證。
+
+以下狀態與實作備註保留本規格撰寫時的紀錄。
+
 - 狀態：草稿 v7（階段 1～3 已實作，含 review 後的修正，見 §14）
 - 對象：`k1dav-c/agentapi`（以 v3.9.0 為基礎）、`k1dav-c/.github` 的 reusable workflow、`k1dav-c/coder-templates`
 - 日期：2026-11-08
 - 流程圖：[issue-dispatch-flow.zh-TW.md](issue-dispatch-flow.zh-TW.md)
 
-## 0. 已決定
+<a id="0-已決定"></a>
+
+## 0. 派工方式、憑證與收尾規則已決定
 
 | # | 問題 | 決定 |
 |---|---|---|
@@ -17,11 +29,13 @@
 | 6 | 換 agent 重做 | 可以：同一個 issue 換 agent 時，停掉舊的 instance，在同一個分支上以新 agent 接手（§5.7） |
 | 7 | 花費彙總 | 要：job 結束時，hub 在 PR（沒有 PR 時在 issue）留言列出每一次執行的花費（§5.8） |
 
-## 1. 目標
+<a id="1-目標"></a>
+
+## 1. 同一個 issue 的開發與 review 留在同一個 job
 
 把 GitHub issue 交給內網主機上的 coding agent 開發，並在同一個對話裡處理 review：
 
-1. issue 加上 `agent[:<type>]` label，或在 hub 畫面選 issue 並 Assign，主機開 worktree、啟動一個 issue 專用的 AgentAPI instance 開始開發。
+1. issue 加上 `agent[:<type>]` label，或在 hub 畫面選 issue 並 Assign，主機開 worktree、啟動一個 issue 專用的 Tendyard instance 開始開發。
 2. agent 以 GitHub App 的身分 push 並開 PR，你以 reviewer 身分 review、approve。
 3. PR 上的 review，以及 issue 或 PR 上的 `/agent ...` 留言，轉送給同一個 instance；你也能直接在 hub 打開那個 instance 對話。
 4. PR 關閉後，主機停掉 instance、移除 worktree，hub 刪除遠端分支。
@@ -35,7 +49,9 @@
 - 不取代現有的手動 instance（Coder template 啟動的 3285、3286、3288 不受影響）。
 - 不支援 GitHub Enterprise Server（第一版）。
 
-## 2. 名詞
+<a id="2-名詞"></a>
+
+## 2. 名詞區分調度中心、執行主機與 issue 工作
 
 | 名詞 | 意思 |
 |---|---|
@@ -46,7 +62,9 @@
 | dispatch | 對 hub 下的指令：`start`、`send`、`link_pr`、`stop` |
 | runner | 內網的 GitHub Actions self-hosted runner，只負責把事件轉成 dispatch |
 
-## 3. 架構
+<a id="3-架構"></a>
+
+## 3. hub 管派工、launcher 跑工作、runner 傳事件
 
 ```
                  ┌──────── 瀏覽器跳轉（設定 App、安裝）────────┐
@@ -71,7 +89,9 @@ GitHub ──(runner 主動拉 job)──► 內網 runner                    �
 - GitHub 相關的寫入（issue 留言、刪分支）由 hub 以 App 身分執行；workflow 只負責轉送事件，不持有 App 的任何 secret。
 - launcher 加入 hub 的方式跟 instance 一樣：讀 `~/.agentapi/config.yaml` 的 `webhook-url`、`webhook-secret`。
 
-## 4. launcher：`agentapi host`
+<a id="4-launcheragentapi-host"></a>
+
+## 4. launcher 用 `agentapi host` 管理主機上的 job
 
 新增 `cmd/host`、`lib/host`。子指令：
 
@@ -125,7 +145,7 @@ host:
 7. 分配 port，啟動子行程（§4.4）。
 8. 等 `/status` 回 `ready`（最多 60 秒），回 201 與 job。
 
-整個啟動不隨 hub 的請求取消：hub 的連線中斷、逾時或 hub 重啟時，launcher 仍會做完，只受自己的時限約束（git 合計最多 10 分鐘，AgentAPI 最多 60 秒，合計 `StartTimeout` 11 分鐘），hub 再從下一次 heartbeat 接回（§5.3）。還在準備（clone、fetch）的 job 在 `GET /jobs` 與 `host.*` 事件裡以 `starting`、沒有 `instance_id` 回報，讓 hub 知道它還在路上。
+整個啟動不隨 hub 的請求取消：hub 的連線中斷、逾時或 hub 重啟時，launcher 仍會做完，只受自己的時限約束（git 合計最多 10 分鐘，Tendyard 最多 60 秒，合計 `StartTimeout` 11 分鐘），hub 再從下一次 heartbeat 接回（§5.3）。還在準備（clone、fetch）的 job 在 `GET /jobs` 與 `host.*` 事件裡以 `starting`、沒有 `instance_id` 回報，讓 hub 知道它還在路上。
 
 ### 4.4 子行程
 
@@ -146,13 +166,13 @@ agentapi server
   - `PATH=~/.agentapi/jobs/<key>/bin:$PATH`（放 `gh` shim）
 - （e2e 測過：繼承 `AGENTAPI_PID_FILE` 會蓋掉別的 instance 的 PID 檔；`--api-token <值>` 用空白分隔時會被當成 agent 指令。）
 - run 從 1 起算，每換一次 agent 加 1（取第一個還沒有 state db 的編號），所以不同 agent 的對話不會混在同一個 db。
-- 子行程用 `setsid` 脫離 launcher；launcher 重啟後依 `jobs.json` 記下的 PID 接回（某個參數必須完全等於 instance ID，才算是這個 job 的 AgentAPI；`--pid-file` 只是讓同一個 job 不會跑兩個 server），行程已不在的 job 以同樣參數重啟（`--state-db` 會接回對話，initial prompt 不會重送）。啟動後如果初始的 job metadata 保存失敗，launcher 會停掉新 process 並回報失敗，不讓不受 `jobs.json` 管理的 process 隨成功結果留下。
-- launcher 每 5 秒檢查一次。AgentAPI 自己結束（或 60 秒內沒開始服務而被停掉）時，job 進入 `restarting`，依最近 30 分鐘內已重啟的次數等 5 秒、15 秒、45 秒、2 分鐘、5 分鐘後再啟動；重啟 5 次後又結束，job 就標為 `failed`（約 8 分鐘內反覆當掉才會失敗，30 分鐘前的重啟不再計入）。重啟時間與下一次的時間記在 `jobs.json`（`restarts`、`restart_at`），launcher 重啟後照樣等待、累計。launcher 自己重啟時接回已停的 job 不算一次重啟。
+- 子行程用 `setsid` 脫離 launcher；launcher 重啟後依 `jobs.json` 記下的 PID 接回（某個參數必須完全等於 instance ID，才算是這個 job 的 Tendyard；`--pid-file` 只是讓同一個 job 不會跑兩個 server），行程已不在的 job 以同樣參數重啟（`--state-db` 會接回對話，initial prompt 不會重送）。啟動後如果初始的 job metadata 保存失敗，launcher 會停掉新 process 並回報失敗，不讓不受 `jobs.json` 管理的 process 隨成功結果留下。
+- launcher 每 5 秒檢查一次。Tendyard 自己結束（或 60 秒內沒開始服務而被停掉）時，job 進入 `restarting`，依最近 30 分鐘內已重啟的次數等 5 秒、15 秒、45 秒、2 分鐘、5 分鐘後再啟動；重啟 5 次後又結束，job 就標為 `failed`（約 8 分鐘內反覆當掉才會失敗，30 分鐘前的重啟不再計入）。重啟時間與下一次的時間記在 `jobs.json`（`restarts`、`restart_at`），launcher 重啟後照樣等待、累計。launcher 自己重啟時接回已停的 job 不算一次重啟。
 - 工作目錄是 worktree。webhook 設定沿用 `config.yaml`，所以 instance 會自動出現在 hub。
 
 ### 4.5 GitHub 憑證（自動續期）
 
-job 從不持有長期憑證；需要時經 launcher 向 hub 換一組 installation token。
+使用 hub 的 GitHub App 時，job 不持有 App 的長期憑證；需要時經 launcher 向 hub 換一組 installation token。
 
 ```
 git / gh ──► agentapi host git-credential | gh-token
@@ -174,7 +194,7 @@ git / gh ──► agentapi host git-credential | gh-token
 - **launcher → hub 驗證**：用 `config.yaml` 的 webhook secret 對請求簽章（同 `X-AgentAPI-Signature-256` 格式，時間戳記前後 10 分鐘內有效），body 帶 `hostname`、`job`。
 - **commit 作者**：`git_user` 由 hub 在 `start` 時一併給（`<app-slug>[bot]`、`<app-user-id>+<app-slug>[bot]@users.noreply.github.com`）。launcher 同時設 `user.name`/`user.email` 與 `GIT_AUTHOR_*`、`GIT_COMMITTER_*`，因為 Coder 的 git-config 模組會以 `GIT_AUTHOR_*` 環境變數覆蓋 git config。
 - launcher 與 job 子行程之間用 `~/.agentapi/host.sock`（0600，目錄 0700），不經網路。
-- **只發給 job 自己的 process**：Linux 上以 `SO_PEERCRED` 取得提出請求的 process，沿 parent 往上必須遇到該 job 的 AgentAPI（或啟動中的 job 由 launcher 自己跑的 git）；另一個 job 的 agent 改了 `AGENTAPI_HOST_JOB` 也拿不到。macOS 不檢查，以 socket 權限限制在同一個使用者。
+- **只發給 job 自己的 process**：Linux 上以 `SO_PEERCRED` 取得提出請求的 process，沿 parent 往上必須遇到該 job 的 Tendyard（或啟動中的 job 由 launcher 自己跑的 git）；另一個 job 的 agent 改了 `AGENTAPI_HOST_JOB` 也拿不到。macOS 不檢查，以 socket 權限限制在同一個使用者。
 - git 設定加上 `credential.https://github.com.useHttpPath=true`，helper 才收得到 repo 路徑並只回應該 job 的 repo。
 - 啟動中的 job（clone、fetch 期間，還沒寫進 jobs.json）先「預留」：算進 max-jobs、占住 port，它的 git 也能拿 token。
 - 向 hub 換 token 時除了 secret 簽章，另帶 launcher 的 host token（`Authorization: Bearer`）。
@@ -220,7 +240,7 @@ TCP 介面全部需要 `Authorization: Bearer <host token>`（hub 呼叫）；un
 `agentapi host install` 是唯一的安裝路徑，Coder template 與手動安裝都呼叫它：
 
 1. 檢查 agentapi 版本支援 `host`，`config.yaml` 已有 hub 的 webhook 設定（沒有時提示先執行 `agentapi hub join`）。
-2. 寫入 `~/.config/systemd/user/agentapi-host.service`（`ExecStart=<agentapi 路徑> host serve`，`Restart=on-failure`，`KillMode=process`：重啟 launcher 時只停 launcher，job 的 AgentAPI 繼續跑，新的 launcher 會接回）。
+2. 寫入 `~/.config/systemd/user/agentapi-host.service`（`ExecStart=<agentapi 路徑> host serve`，`Restart=on-failure`，`KillMode=process`：重啟 launcher 時只停 launcher，job 的 Tendyard 繼續跑，新的 launcher 會接回）。
 3. `systemctl --user daemon-reload && systemctl --user enable [--now] agentapi-host`。
 4. 檢查 `loginctl show-user $USER -p Linger`，沒開時提示 `sudo loginctl enable-linger $USER`（否則登出後 service 會停）。
 5. 沒有 systemd user 時（容器等）：印出錯誤，請改用其他 supervisor 執行 `agentapi host serve`。
@@ -235,7 +255,9 @@ agentapi host install --now
 
 hub 畫面的 **+**（加入主機）同時列出這三行。
 
-## 5. hub 變更
+<a id="5-hub-變更"></a>
+
+## 5. hub 保存派工狀態並提供操作介面
 
 ### 5.1 儲存
 
@@ -332,7 +354,7 @@ starting ──► working ──► review ──► done
     └────────► failed     stopped
 ```
 
-- `starting`：hub 已替 job 保留主機上的名額，launcher 正在 clone、fetch 或啟動 AgentAPI（§5.3）。
+- `starting`：hub 已替 job 保留主機上的名額，launcher 正在 clone、fetch 或啟動 Tendyard（§5.3）。
 - `working` / `review` 之間由 instance 的 `task.started`、`task.completed` 與 `link_pr` 推動。
 - 主機離線超過 3 次 heartbeat：job 顯示 `host offline`，不改 state。
 - 每次 `host.*` 事件，hub 比對主機回報的 job 與自己的紀錄：
@@ -376,7 +398,7 @@ hub 的 **Issues** 頁（標題列的 ◎，或按 `i`）取代總覽的位置�
 - hub 畫面 **Switch agent**（dispatch `start` 帶不同的 `agent`）。
 
 job 還沒結束時（`working`、`review`、`failed`；還在 `starting` 時回 409 `job_starting`），hub 先把 job 標為 `starting` 並回應，以下在背景進行（§5.3）：
-1. launcher 停掉舊的 instance（SIGTERM：AgentAPI 存好狀態再停 agent，所以不另外先 interrupt），**保留 worktree 與分支**（`DELETE /jobs/{key}?keep_worktree=true&keep_state=true`），舊 run 標 `replaced`，記下花費。
+1. launcher 停掉舊的 instance（SIGTERM：Tendyard 存好狀態再停 agent，所以不另外先 interrupt），**保留 worktree 與分支**（`DELETE /jobs/{key}?keep_worktree=true&keep_state=true`），舊 run 標 `replaced`，記下花費。
 2. 以新 agent 在同一個 worktree 啟動 instance，state db 另開新檔（`state-<n>.db`；不同 agent 的對話無法互通），用 §8 的「接手」prompt。
 3. job 的 `agent` 改為新的，PR 保持不變。
 4. hub 以 App 身分移除 issue 上其他的 `agent:*` label，並留言「改由 <agent> 接手」。
@@ -388,8 +410,8 @@ job 已結束（`done`）時：視為新的一輪開發。遠端與本機分支�
 - job 每次「重新開一輪」（done 之後再開工）`round` 加 1；花費留言只列本輪的 run，之前幾輪另列一行合計。
 - hub 收到 instance 的 `task.completed` / `task.failed` 時，把 `data.cost` 累加到這個 instance 所屬 run 的 `events`（以 `instance.id` 與 `server_id` 對應 job 和 process generation）；`work_seconds` 取任務的 `duration_seconds` 總和。換 agent 後舊 process 重試送來的延遲事件與目前 run 的 `server_id` 不同，不會改到新 run 的狀態或花費。run 或事件沒有 `server_id`（舊版 launcher 啟動的 run）時不採計，不猜測歸屬；launcher 需與 hub 一起升級，升級後的 launcher 接手 job 時會從 `/status` 取得 `server_id`，下一次回報時由 hub 補上。
 - 事件裡的 `instance.id` 與 `server_id` 是送出者自己寫的，所以 hub 還要求自己讀得到這個實例：hub 正從某個網址讀到實例的摘要、而且是同一次執行（`server_id`），這個網址的主機也必須和 run 所在主機的 launcher 網址是同一個位址（相同的主機名稱，或解析出共同的位址）。hub 還沒連上實例時送到的事件丟掉，run 標記為可能漏算（`missed`）；在別台主機上讀到的實例，事件一律不採計（§11 第 9 點）。
-- run 的金額、tokens 和工作時間另外取自 hub 讀到的 run 的 AgentAPI（同樣要求同一次執行、在 run 所在主機的位址上讀到，`Saw`）：摘要 `spend.hours` 裡從 run 開始那個小時起的每小時花費（`seen.hours`；離開摘要 25 小時清單的小時已定案，併入 `seen.earlier`；同一個 scope 的下一次 run 回報的小時歸下一次 run），以及 hub 看到它在工作的時段（`seen.work_seconds`，每段只算一次，從 run 開始算起）。run 顯示的 `cost`：任務數與呼叫數取自 `events`；金額與 tokens 取 hub 讀到的，除非 `events` 的金額比較多；工作時間取兩者較長的。
-- 金額是 AgentAPI 換算的 **API 等價價格**；以訂閱方案登入的 agent 實際不必付這筆錢，留言內要註明。
+- run 的金額、tokens 和工作時間另外取自 hub 讀到的 run 的 Tendyard（同樣要求同一次執行、在 run 所在主機的位址上讀到，`Saw`）：摘要 `spend.hours` 裡從 run 開始那個小時起的每小時花費（`seen.hours`；離開摘要 25 小時清單的小時已定案，併入 `seen.earlier`；同一個 scope 的下一次 run 回報的小時歸下一次 run），以及 hub 看到它在工作的時段（`seen.work_seconds`，每段只算一次，從 run 開始算起）。run 顯示的 `cost`：任務數與呼叫數取自 `events`；金額與 tokens 取 hub 讀到的，除非 `events` 的金額比較多；工作時間取兩者較長的。
+- 金額是 Tendyard 換算的 **API 等價價格**；以訂閱方案登入的 agent 實際不必付這筆錢，留言內要註明。
 - job 結束（`stop`）時，hub 以 App 身分在 PR 留言（沒有 PR 時在 issue），一個 job 只留一則，之後重做時更新同一則（`cost_comment_id`）：
 
   ```
@@ -409,7 +431,9 @@ job 已結束（`done`）時：視為新的一輪開發。遠端與本機分支�
 - 總經歷時間是本輪第一次 run 開始到最後一次 run 結束；還有 run 進行中時不列。
 - 只有某次 run 的金額取自事件、而且 hub 可能漏收事件（離線、重啟、還沒連上實例）時，表格註明「hub 未收到部分事件」。
 
-## 6. GitHub App 設定（manifest flow）
+<a id="6-github-app-設定manifest-flow"></a>
+
+## 6. Manifest flow 讓 hub 建立並保存 GitHub App
 
 在 hub 上按一次 **Connect GitHub** 完成，不必手動貼 key。所有跳轉都經過瀏覽器，所以 hub 在內網也能完成；只有 §6.1 第 4 步是 hub 主動連到 `api.github.com`。
 
@@ -472,7 +496,9 @@ job 已結束（`done`）時：視為新的一輪開發。遠端與本機分支�
 - **Reconnect**：選個人帳號或組織後到 `/github/connect`（§6.1），**不先刪除**目前的 App。`/github/callback` 拿到新 App 才以 `saveApp` 原子地取代 `github-app.json` 與記憶體中的 App，並清掉舊 App 快取的 token；在 GitHub 上取消，舊 App 照常運作。新 App 沒有 installation，裝好之前 job 拿不到 token。舊 App 留在 GitHub，由使用者自己刪除。
 - **Disconnect**：確認後 `DELETE /api/github`，hub 刪掉 `github-app.json` 與快取的 token。執行中的 job 拿不到新 token，手上的 token 到期（≤ 1 小時）後推送與開 PR 會失敗；GitHub 上的 App 與安裝不受影響。
 
-## 7. 資料格式
+<a id="7-資料格式"></a>
+
+## 7. 派工請求以 action 指定操作
 
 ### 7.1 `POST /api/dispatch`
 
@@ -499,7 +525,9 @@ job 已結束（`done`）時：視為新的一輪開發。遠端與本機分支�
 
 回應：`{"job": {...}, "created": true|false}`。`start` 在 job 於主機上進入 `starting` 時就回應（§5.3），不等 clone 與 agent 啟動；之後的結果經 hub 的串流、`GET /api/jobs`，以及有 App 時 issue 上的留言得知。
 
-## 8. Prompt
+<a id="8-prompt"></a>
+
+## 8. Prompt 帶入 issue 與 review，指示 agent 延續工作
 
 prompt 範本由 hub 套用，在 `start` 時交給 launcher。
 
@@ -545,7 +573,9 @@ BEGIN-{{fence}}
 請處理後 push 到同一個分支，完成後在 PR 留言摘要你改了什麼。
 ```
 
-## 9. GitHub Actions 端
+<a id="9-github-actions-端"></a>
+
+## 9. GitHub Actions 透過內網 runner 傳送派工事件
 
 ### 9.1 reusable workflow（`k1dav-c/.github/.github/workflows/agent-dispatch.yml`）
 
@@ -596,7 +626,9 @@ jobs:
 - 只需能連到 hub；不需 git、gh、agent 的登入。
 - runner group 只開放給 private repo。
 
-## 10. Coder template（`k1dav-c/coder-templates`）
+<a id="10-coder-templatek1dav-ccoder-templates"></a>
+
+## 10. Coder template 將以開關控制 launcher 啟動
 
 在 `modules/ai-agents` 加入，改完以 `scripts/sync-modules.sh` 同步到 `pve`、`remote-host`。
 
@@ -615,7 +647,9 @@ jobs:
 - workspace 停止時不停止 job：VM 關機後 job 隨之中斷，開機後 launcher 依 `jobs.json` 重啟，`--state-db` 接回對話。
 - 文件提醒：要讓 job 持續進行，workspace 的 autostop 要關閉或調長。
 
-## 11. 安全性
+<a id="11-安全性"></a>
+
+## 11. 憑證、內容邊界與主機權限共同限制派工
 
 1. **公開 repo 不使用 self-hosted runner。** fork PR 能改 workflow 並在內網執行任意程式。
 2. **Issue 內容是不可信的 prompt。** `start` 只由 label 觸發（加 label 需要 write 權限）或在 hub 手動 Assign；留言與 review 只接受有 write 權限的人。轉送內容一律包在分隔區塊內。
@@ -640,12 +674,14 @@ jobs:
 9. **任務事件綁定主機**：`task.*` 事件同樣只用共用的 webhook secret 簽章，事件裡的實例 ID 是送出者自己宣告的。hub 只在正從 job 所在主機的位址讀到那個實例（摘要裡是同一個 `server_id`）時才採計（§5.8），launcher 網址由第 7 點綁定的 host token 背書，所以持有 secret 的機器在自己的位址宣告別台主機的實例 ID，改不了那個 job 的狀態與花費。剩下的信任邊界仍是 secret：實例 ID 和 `server_id` 都在摘要裡，持有 secret、又讀得到摘要（所有 job 共用 instance token）的機器，照樣能以那個實例的名義送事件；要根除需要每台主機各一把金鑰。
 10. **launcher 網址（避免 SSRF）**：`host.*` 事件裡的 `url` 由送出者決定，hub 會以那台 launcher 的 token 呼叫它（start、send、stop，以及 reconcile 時自動停掉沒人要求的 job）。hub 只接受 http 或 https、不含帳號密碼、有主機的網址，並在每次連線時檢查實際連到的位址（名稱解析後；hub 不經 proxy 直接連線，也不跟隨重新導向）：拒絕 loopback、link-local（`169.254.0.0/16`、`fe80::/10`，含雲端 metadata `169.254.169.254`）與 `0.0.0.0`／`::`，內網位址照常允許。hub 本機上的 launcher 以 hub 的內網位址加入時，回報的就是那個位址，不受影響；以 `localhost` 加入而回報 `127.0.0.1` 的，要以 `agentapi hub serve --allow-loopback-launchers` 啟動 hub。剩下的邊界：持有 secret 的機器仍能讓 hub 對內網其他機器的 `/jobs` 送請求（帶的是它自己的 launcher token）。
 
-## 12. 失敗處理
+<a id="12-失敗處理"></a>
+
+## 12. 失敗時保留可診斷狀態，再決定重試或停止
 
 | 情況 | 處理 |
 |---|---|
 | 主機離線 | dispatch 回 503，workflow 失敗並留言；可在 Actions 重跑 |
-| clone 與 agent 啟動很久 | hub 在 job 進入 `starting` 時就回應 workflow（不受 curl 的 60 秒限制）；launcher 的 git 最多 10 分鐘、AgentAPI 最多 60 秒 |
+| clone 與 agent 啟動很久 | hub 在 job 進入 `starting` 時就回應 workflow（不受 curl 的 60 秒限制）；launcher 的 git 最多 10 分鐘、Tendyard 最多 60 秒 |
 | 背景啟動失敗 | job 標 `failed`，有 App 時在 issue 留言；`delivery_id` 不保留，可在 Actions 重跑 |
 | hub 呼叫 launcher 沒得到回應、或 hub 中途重啟 | launcher 照樣做完；hub 由下一次 heartbeat 接回，主機沒有這個 job 時標 `failed`（§5.4） |
 | 主機上有 hub 不知道的 job | 停掉，保留 worktree 與 state db（§5.4） |
@@ -660,15 +696,19 @@ jobs:
 | App 未安裝在該 repo | `start` 回 412 `github_not_installed`，留言附安裝連結 |
 | 換 token 失敗 | git / gh 回錯誤；agent 回報後停下；hub 畫面在 job 上標示 |
 | job instance 當掉 | launcher 依 PID 檔偵測，等 5 秒到 5 分鐘不等後以同樣參數重啟；30 分鐘內重啟 5 次後又當掉就標 `failed`（§4.4） |
-| 用量限制 / API 暫時錯誤 | 沿用 AgentAPI 既有的 limit stop 與 retry，佇列中的訊息不會遺失 |
+| 用量限制 / API 暫時錯誤 | 沿用 Tendyard 既有的 limit stop 與 retry，佇列中的訊息不會遺失 |
 
-## 13. 相容性
+<a id="13-相容性"></a>
+
+## 13. 新元件使用相同版本，既有 server 行為維持不變
 
 - hub、launcher、job instance 使用相同版本；舊 hub 收到 `host.*` 事件時忽略。
 - `instances.json` 新增欄位不升版本；`github-app.json` 是新檔案。
 - 不改動 `agentapi server` 的旗標與行為。
 
-## 14. 分階段與驗收
+<a id="14-分階段與驗收"></a>
+
+## 14. 先驗收 launcher，再驗收派工、介面與部署
 
 ### 階段 1：launcher（已實作，2026-11-08）
 
@@ -689,7 +729,7 @@ jobs:
 - [x] `/api/dispatch` 四個 action、派工規則、`delivery_id` 去重；dispatch token 打其他路由回 401。
 - [x] 換 agent（§5.7）、`stop` 刪除遠端分支並在 PR 留言花費彙總（§5.8，重開一輪時清掉舊留言 ID）、在 hub 建立 issue（§5.6）。
 - [x] `/api/github/token` 只對「這台主機上進行中、用 hub 憑證的 job」發 token；同一個 delivery 不回第二次。launcher 與 hub 都快取 token 到到期前 5 分鐘。
-- [x] job 的 AgentAPI 讀 launcher 的設定檔（`--config`），並加送 `task.*` 事件（`AGENTAPI_WEBHOOK_EVENTS`），hub 才收得到花費。
+- [x] job 的 Tendyard 讀 launcher 的設定檔（`--config`），並加送 `task.*` 事件（`AGENTAPI_WEBHOOK_EVENTS`），hub 才收得到花費。
 - [x] 測試：假的 launcher 與 GitHub API（含驗證 App JWT 簽章）跑完整流程；e2e：真的 hub + launcher + Claude，經 dispatch token 開工、去重、review 轉送、花費回寫、stop。
 - [ ] **Connect GitHub** 還沒在真的 GitHub 上走過（manifest、安裝、token、留言、刪分支都只有假 API 的測試）。
 
@@ -706,11 +746,15 @@ jobs:
 - [ ] 舊主機以 §4.9 的三行指令加入，行為相同。
 - [ ] 一併修正：移除 Gemini、`--state-db`、instance token、binary 位置。
 
-## 15. 待決定
+<a id="15-待決定"></a>
+
+## 15. 目前沒有待決定事項
 
 目前沒有。
 
-## 16. 實作備註
+<a id="16-實作備註"></a>
+
+## 16. 實作以 v3.9.0 的既有套件與介面為基礎
 
 給實作這份 spec 的人（以 v3.9.0 的程式碼為準）：
 

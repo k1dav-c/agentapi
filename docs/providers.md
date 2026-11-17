@@ -2,10 +2,18 @@
 
 English | [繁體中文](providers.zh-TW.md)
 
-Claude Code and Codex can switch to another model provider while they run: an endpoint that speaks
-the Anthropic Messages API (Claude Code) or the OpenAI Responses API (Codex), such as a LiteLLM or
-vLLM gateway. One gateway that speaks both serves both agents. Define providers in the machine's
-`~/.agentapi/config.yaml` (`--config`):
+Claude Code and Codex can switch model providers within a session, using an endpoint compatible
+with their API: Anthropic Messages for Claude Code, OpenAI Responses for Codex. A LiteLLM or vLLM
+gateway that speaks both can serve both agents.
+
+- **Define providers:** configure one machine or share providers from the hub; local IDs take precedence.
+- **Switch models:** use the chat or `PUT /settings`; the agents have different session-switch behavior.
+- **Protect keys:** a local proxy adds the provider key and reports health without handing the key to the agent.
+- **Account for use:** provider calls carry their own token totals and prices.
+
+## Define providers locally or share them from the hub
+
+Define a machine's providers in `~/.agentapi/config.yaml` (`--config`):
 
 ```yaml
 providers:
@@ -18,12 +26,14 @@ providers:
 
 Codex calls `<base_url>/responses`. Claude Code calls the same URL without `/v1`, plus
 `/v1/messages`; set `anthropic_base_url` when its endpoint is elsewhere. A `base_url` without a
-version gets `/v1` for Codex. AgentAPI reads the file again when it changes. Keep it readable by
-you only (`chmod 600`): it holds the keys, and AgentAPI warns when others can read it.
+version gets `/v1` for Codex. Tendyard reads the file again when it changes. Keep it readable by
+you only (`chmod 600`): it holds the keys, and Tendyard warns when others can read it.
 
-A hub keeps providers for every machine that reports to it (see
+A hub shares its provider settings with every machine that reports to it (see
 [Running a hub](api.md#running-a-hub)). On a machine, a provider in its config file wins over the hub's
 with the same `id`.
+
+## Switch providers through settings while respecting each agent’s session rules
 
 `GET /settings` lists the providers under `options.providers`, with their models, and the setting
 `provider` says which one the agent runs on: `default` for its own (Claude Code's Anthropic login or
@@ -44,7 +54,7 @@ The two agents switch differently:
 
 - **Claude Code** switches while it runs, from its next API call, also during a turn. Going back to
   its own provider starts it again on the same session, which takes a few seconds; during a turn it
-  is refused (409). If a switch fails, AgentAPI restores the previous environment and model. If Claude
+  is refused (409). If a switch fails, Tendyard restores the previous environment and model. If Claude
   Code doesn't confirm the switch or restoration fails, it starts a replacement on the previous known provider
   instead of allowing another turn with settings that might not match the UI.
 - **Codex** binds a thread to its provider, and an OpenAI thread holds items another provider
@@ -52,7 +62,7 @@ The two agents switch differently:
   other provider, in a new thread that gets the conversation's messages as text, without the tool
   calls. During a turn the switch is refused (409).
 
-The chosen provider applies to every agent that starts in the session, also after an AgentAPI
+The chosen provider applies to every agent that starts in the session, also after a Tendyard instance
 restart with `--state-db`. A provider that is no longer defined is dropped, with a warning: the
 agent starts on its own provider. The hub's providers are kept beside the config file
 (`hub-providers.json`, sealed with the hub's secret) for the next start, so a session on one of
@@ -64,27 +74,31 @@ A provider's models (those it lists at `<base_url>/models`) are kept for 10 minu
 again in the background. `GET /settings` waits 3 seconds at most for a provider that doesn't
 answer, and doesn't ask it again for a minute.
 
-The agent never gets a provider's key. AgentAPI calls the provider for it, through a proxy on
+## A local proxy keeps provider keys out of the agent environment
+
+The agent never gets a provider's key. Tendyard calls the provider for it, through a proxy on
 `127.0.0.1` that listens on a random port from the first time an agent runs on a provider, until
-AgentAPI stops. Claude Code gets `ANTHROPIC_BASE_URL=http://127.0.0.1:<port>/<id>/anthropic`,
+Tendyard stops. Claude Code gets `ANTHROPIC_BASE_URL=http://127.0.0.1:<port>/<id>/anthropic`,
 Codex a provider whose `base_url` is `http://127.0.0.1:<port>/<id>/openai`. Both get a token
-AgentAPI makes up for the process instead of the key (`ANTHROPIC_AUTH_TOKEN`, Codex's
+Tendyard makes up for the process instead of the key (`ANTHROPIC_AUTH_TOKEN`, Codex's
 `AGENTAPI_PROVIDER_API_KEY`). The proxy answers a call without that token with 401, and sends the
 others on to the provider with its key as a bearer token, the way the agents send one, and streams
 the answer back as it comes. It looks the provider up on each call: a key or URL changed in the
 config file or on the hub applies at once, and a removed provider answers 404. It follows a
-redirect with the key only to the same origin. AgentAPI still lists a provider's models itself,
+redirect with the key only to the same origin. Tendyard still lists a provider's models itself,
 with the key. If the proxy can't start, the agent can't run on a provider rather than get the key.
-With an HTTP proxy set (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`), AgentAPI adds `127.0.0.1`,
+With an HTTP proxy set (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`), Tendyard adds `127.0.0.1`,
 `localhost` and `::1` to the agent's `NO_PROXY` and `no_proxy`, so it reaches the proxy directly. A
 process of your user can still read the token in the agent's environment and call the providers
-through the proxy while AgentAPI runs, but it can't see a key.
+through the proxy while Tendyard runs, but it can't see a key.
 
-The proxy also learns how each provider answers. Over the last hour it counts the calls, the
-failures (a network error or timeout, a 5xx or 429 answer, an answer that broke off) and the client
-errors (another 4xx, such as a key or model the provider refuses, which aren't the provider's
-failures), the median and 95th percentile time to the first byte of the latest 100 answers that weren't failures, and the
-last success and failure. `GET /settings` has it in each provider's `health`, and the summary in
+## Health and usage reports show each provider’s results
+
+The proxy tracks each provider's health over the last hour: calls, failures and client errors.
+Failures include network errors, timeouts, 5xx or 429 responses, and responses that break off.
+Other 4xx responses, such as a rejected key or model, count as client errors rather than provider
+failures. It also reports the last success and failure, and the median and 95th percentile time
+to the first byte of the latest 100 responses that weren't failures. `GET /settings` has it in each provider's `health`, and the summary in
 `provider_health`, for the providers the agent called in the hour. The chat's model menu marks a
 provider whose latest call failed, or half of the hour's, with how many failed and the last error in
 its tooltip; the hub's Providers settings show each provider's hour over the agents that report it.
@@ -92,17 +106,18 @@ its tooltip; the hub's Providers settings show each provider's hour over the age
 `GET /sessions`, `GET /cost` and the summary's `spend` count each provider's calls, tokens and cost
 apart (`providers`, `default` for the agent's own); `GET /sessions` and `GET /cost` give each
 provider its `name` as the server's providers have it then. Claude Code's log doesn't say which
-endpoint a call went to, so AgentAPI records in `~/.agentapi/provider-ledger.jsonl` which provider
+endpoint a call went to, so Tendyard records in `~/.agentapi/provider-ledger.jsonl` which provider
 each session ran on, and from when.
 
-## Prices
+<a id="prices"></a>
 
-A gateway's models, such as `Kimi-K3-NVFP4`, aren't in AgentAPI's price table, so without a price
+## Provider prices take precedence for calls made through that provider
+
+A gateway's models, such as `Kimi-K3-NVFP4`, aren't in Tendyard's price table, so without a price
 their calls add tokens but no cost (**no price** in the chat). A provider can carry a price for each
 of its models, in USD per million tokens, and a call that went to the provider is priced at it
-before the table (the built-in prices and `--prices`, which still price the other calls). A
-provider of the hub gets prices from OpenRouter; one of the config file gets them under `prices`,
-by model ID:
+before the table (the built-in prices and `--prices`, which still price the other calls). Providers defined on the hub get prices from OpenRouter. In the config file, set them under
+`prices`, by model ID:
 
 ```yaml
 providers:
@@ -135,5 +150,5 @@ refreshes the prices.
 
 These are OpenRouter's list prices, what OpenRouter charges for the model: for a gateway that
 serves the model itself, such as a self-hosted vLLM, they are an estimate of what the calls would
-cost elsewhere, not what they cost you. A provider of the config file with the same ID as the
-hub's wins with its own prices, or none.
+cost elsewhere, not what they cost you. A provider defined in the config file takes precedence over a hub provider with the same ID,
+including its prices. If it has no prices, the hub's prices aren't used.

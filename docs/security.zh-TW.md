@@ -2,12 +2,38 @@
 
 [English](security.md) | 繁體中文
 
-AgentAPI 沒有使用者或角色的概念：連得到 API 的人，就能做 agent 能做的任何事。預設不需要
-token，在所有網路介面上監聽，只要 `Host` 標頭是 `localhost` 或 IP 位址就接受連線。主機檢查能防止網頁透過 DNS rebinding 呼叫它，但擋不住網路上的程式，
-因為程式可以送出任何 `Host` 標頭。在其他人連得到這個連接埠之前，請先把伺服器保護好。
-沒有設定 token、又監聽其他主機連得到的位址時，AgentAPI 會在啟動時記錄一則警告。
+在其他人連得到連接埠之前，先保護 Tendyard：能存取 API 的人就能使用 agent 的操作能力，
+而系統沒有個別使用者或角色。
 
-## API token 驗證
+- **限制連線：**選擇監聽位址或網路邊界，只讓受信任用戶端連入。
+- **要求憑證：**開放存取前啟用 API token；驗證功能預設關閉。
+- **約束瀏覽器存取：**允許的主機與來源會檢查瀏覽器請求，不能取代網路存取控制。
+- **確認操作範圍：**API 存取權包含交辦工作、使用終端機與讀取工作目錄中的檔案。
+
+伺服器預設在所有網路介面監聽，接受 `Host` 標頭為 `localhost` 或 IP 位址的請求。
+主機檢查能防止網頁透過 DNS rebinding 呼叫它，但網路程式可以送出任何 `Host` 標頭。
+沒有 token、又監聽其他主機連得到的位址時，Tendyard 會在啟動時記錄警告。
+
+<a id="監聽位址"></a>
+
+## 監聽位址決定哪些網路介面接受連線
+
+伺服器預設監聽所有網路介面。用 `--bind`（或 `AGENTAPI_BIND`）可以只監聽一個位址，
+例如只監聽 loopback，讓網路上的其他主機無法連線。它接受不含連接埠的 IP 位址或主機
+名稱；連接埠仍由 `--port` 指定。
+
+```bash
+agentapi server --bind 127.0.0.1 -- claude
+agentapi server --bind ::1 -- claude          # IPv6 本機回送位址
+AGENTAPI_BIND=127.0.0.1 agentapi server -- claude
+```
+
+`--bind` 決定誰能連線；下方的 `--allowed-hosts` 決定連得上的請求可以使用哪些
+`Host` 標頭。
+
+<a id="api-token-驗證"></a>
+
+## API token 把存取權限縮小到持有它的用戶端
 
 所有 API 端點都可以用 Bearer token 保護。為了向下相容，驗證功能**預設為停用**。
 
@@ -52,24 +78,11 @@ SameSite=Strict，其他網站的頁面無法帶著它發出請求。從其他 o
 包含給聊天介面開發用的 `http://localhost:3000` 和 `http://localhost:3001`：在共用的主機上，
 請把 `--allowed-origins` 設成你實際使用的來源，讓已登入瀏覽器的 cookie 只對它們有效。
 
-## 監聽位址
+<a id="允許的主機"></a>
 
-伺服器預設監聽所有網路介面。用 `--bind`（或 `AGENTAPI_BIND`）可以只監聽一個位址，
-例如只監聽 loopback，讓網路上的其他主機無法連線。它接受不含連接埠的 IP 位址或主機
-名稱；連接埠仍由 `--port` 指定。
+## 允許的主機清單會拒絕未認可的 Host 標頭
 
-```bash
-agentapi server --bind 127.0.0.1 -- claude
-agentapi server --bind ::1 -- claude          # IPv6 本機回送位址
-AGENTAPI_BIND=127.0.0.1 agentapi server -- claude
-```
-
-`--bind` 決定誰能連線；下方的 `--allowed-hosts` 決定連得上的請求可以使用哪些
-`Host` 標頭。
-
-## 允許的主機
-
-伺服器預設只接受 `Host` 標頭為 `localhost`、`127.0.0.1`、`[::1]` 或其他任何 IP 位址的請求：DNS rebinding 需要攻擊者網頁控制的名稱，所以位址（內網、VPN 或 DHCP 會換的位址）不必列出。要用名稱開啟 AgentAPI，請設定 `AGENTAPI_ALLOWED_HOSTS` 環境變數或 `--allowed-hosts` 旗標。不接受 `192.168.9.0/24` 這種網段。主機只能填主機名稱（不含連接埠）；伺服器授權時會忽略請求中的連接埠。這只檢查 `Host` 標頭；若要讓伺服器完全不對網路開放，請再用 `--bind 127.0.0.1` 只監聽 loopback（見[監聽位址](#監聽位址)）。
+伺服器預設只接受 `Host` 標頭為 `localhost`、`127.0.0.1`、`[::1]` 或其他任何 IP 位址的請求：DNS rebinding 需要攻擊者網頁控制的名稱，所以位址（內網、VPN 或 DHCP 會換的位址）不必列出。要用名稱開啟 Tendyard，請設定 `AGENTAPI_ALLOWED_HOSTS` 環境變數或 `--allowed-hosts` 旗標。不接受 `192.168.9.0/24` 這種網段。主機只能填主機名稱（不含連接埠）；伺服器授權時會忽略請求中的連接埠。這只檢查 `Host` 標頭；若要讓伺服器完全不對網路開放，請再用 `--bind 127.0.0.1` 只監聽 loopback（見[監聽位址決定哪些網路介面接受連線](#監聽位址)）。
 
 要允許來自任何主機的請求，請用 `*` 作為允許的主機。
 
@@ -91,7 +104,9 @@ agentapi server --allowed-hosts 'example.com,example.org' -- claude
 AGENTAPI_ALLOWED_HOSTS='example.com example.org' agentapi server -- claude
 ```
 
-## 允許的來源
+<a id="允許的來源"></a>
+
+## 允許的來源清單控制瀏覽器跨來源存取
 
 伺服器預設允許來自 `http://localhost:3284`、`http://localhost:3000` 和 `http://localhost:3001` 的 CORS 請求。要更改哪些來源可以發出跨來源請求，請設定 `AGENTAPI_ALLOWED_ORIGINS` 環境變數或 `--allowed-origins` 旗標。
 
@@ -115,13 +130,16 @@ agentapi server --allowed-origins 'https://example.com,http://localhost:3000' --
 AGENTAPI_ALLOWED_ORIGINS='https://example.com http://localhost:3000' agentapi server -- claude
 ```
 
-其他來源的網頁不能讓伺服器做任何改動（GET、HEAD、OPTIONS 以外的方法），除非該網頁的來源列在清單上。
-瀏覽器送這類請求前不會先詢問（表單、`no-cors` 模式的 `fetch`）；CORS 只擋住網頁讀取回應，所以沒有
-`--api-token` 時，你開過的任何網站都能替 agent 送任務，或在終端機裡打字。`*` 讓每個網頁都能讀取
-回應，但不信任任何網頁送出這類請求：需要的來源要明確列出。伺服器依瀏覽器加上的 `Sec-Fetch-Site`
-和 `Origin` 標頭判斷來源，所以瀏覽器以外的用戶端（curl、SDK、hub）不受影響。
+除非來源列在清單上，伺服器會拒絕其他來源的網頁送出改動狀態的請求，也就是 GET、HEAD、OPTIONS
+以外的方法。單靠 CORS 只能擋住網頁讀取回應；瀏覽器送出表單或 `no-cors` 模式的 `fetch` 時，
+不需要先做 preflight。因此伺服器還會檢查 `Sec-Fetch-Site` 和 `Origin` 標頭。
+若沒有這項檢查，也沒有 `--api-token`，你開過的網站就可能替 agent 送任務，或在終端機裡打字。
+`*` 讓每個網頁都能讀取回應，但不允許這類改動；需要改動的來源要明確列出。
+瀏覽器以外的用戶端（curl、SDK、hub）不受這項來源檢查影響。
 
-## API 用戶端能做什麼
+<a id="api-用戶端能做什麼"></a>
+
+## 通過驗證的用戶端可以使用 agent 的操作能力
 
 - 讓 agent 執行它能執行的任何事。除非命令列指定了其他模式，或 Claude Code 在沙箱外以 root
   執行（此時以 `default` 啟動），agent 預設以 bypass 權限模式啟動，工具直接執行、不詢問。
@@ -137,7 +155,7 @@ AGENTAPI_ALLOWED_ORIGINS='https://example.com http://localhost:3000' agentapi se
 - 上傳最大 100 MB 的檔案；只有圖片會回傳。
 - 修改 webhook，以及重新啟動 agent。webhook 可以把對話（`message.created`、
   `tool.completed`）送到任何網址；`GET /webhook` 不會回傳它的 secret。
-- 開啟 `--allow-update` 時，把 AgentAPI [更新](api.zh-TW.md#透過-api-更新)到最新正式發行版並重新啟動。用戶端
+- 開啟 `--allow-update` 時，把 Tendyard [更新](api.zh-TW.md#透過-api-更新)到最新正式發行版並重新啟動。用戶端
   無法指定版本或來源。
 
 只要有其他人連得到伺服器，就請使用 `--api-token`，並搭配 `--bind` 或反向代理。

@@ -2,8 +2,14 @@
 
 English | [繁體中文](chat-ui.zh-TW.md)
 
-Open `/chat` to use the chat UI embedded in the `agentapi` binary. It works on desktops and phones,
-and talks to the server through the [HTTP API](api.md#http-api-reference).
+The chat embedded in `agentapi` at `/chat` lets you assign work, inspect results and answer an agent from a
+desktop or phone, through the same [HTTP API](api.md#http-api-reference) other clients use.
+
+- **Send work:** compose tasks, attach files and choose when messages reach the agent.
+- **Follow execution:** read the transcript, tool calls, thinking and subagent steps.
+- **Make decisions:** answer requests and adjust the model, permissions and usage controls.
+- **Inspect the workspace:** open files, diffs, earlier sessions and the shared shell terminal.
+- **Stay connected:** use alerts, cached transcripts and the hub to follow agents across machines.
 
 Screenshots and animations show AgentAPI v5.6.0 running `native-demo` on a sample site. The demo's
 replies, tool results, models and usage are simulated. In the animations, a blue dot marks the pointer and clicks. To
@@ -12,28 +18,30 @@ reproduce the captures, use [scripts/capture-docs.mjs](../scripts/capture-docs.m
 
 ## Contents
 
-- [The window](#the-window)
-- [Tasks and the transcript](#tasks-and-the-transcript)
-- [Sending tasks](#sending-tasks)
-- [Agent settings](#agent-settings)
-- [Requests and decision cards](#requests-and-decision-cards)
-- [Files](#files)
-- [Session Explorer](#session-explorer)
-- [Lineage](#lineage)
-- [Shell terminal](#shell-terminal)
-- [Session details and alerts](#session-details-and-alerts)
-- [Phones](#phones)
-- [The hub](#the-hub)
-- [Connection and caching](#connection-and-caching)
+- [The window keeps agent status and work controls together](#the-window)
+- [Each task keeps its prompt, steps and reply together](#tasks-and-the-transcript)
+- [The composer sends work now or queues it for later](#sending-tasks)
+- [Session controls change how the agent works](#agent-settings)
+- [Decision cards collect the answers the agent needs](#requests-and-decision-cards)
+- [The file viewer combines source, previews and diffs](#files)
+- [Explorer brings session history, files and integrations together](#session-explorer)
+- [Lineage shows what each subagent did](#lineage)
+- [The terminal runs shell commands in the agent’s directory](#shell-terminal)
+- [Session details identify the agent and configure alerts](#session-details-and-alerts)
+- [Phone layouts keep the conversation and decisions within reach](#phones)
+- [The hub opens agents across machines in this chat](#the-hub)
+- [Caching restores the transcript while streams reconnect](#connection-and-caching)
 
-## The window
+<a id="the-window"></a>
+
+## The window keeps agent status and work controls together
 
 ![The chat with two finished tasks: prompts, tool calls, thinking notes and the composer](screenshots/chat-desktop.png)
 
-- **Header.** The agent's mark (the logo of Claude, of OpenAI for Codex, or of Pi; a square for other agents) and type, the session name and the AgentAPI version. On the right:
+- **Header.** The agent's mark (the logo of Claude, of OpenAI for Codex, or of Pi; a square for other agents) and type, the session name and the Tendyard version. On the right:
   the status (Ready, Working with a timer, or Needs you; click it for the
   [session details](#session-details-and-alerts)), the tokens used so far, and buttons for
-  [search](#search), the [shell terminal](#shell-terminal), the [Session Explorer](#session-explorer)
+  [search](#search), the [shell terminal](#shell-terminal), the [Explorer brings session history, files and integrations together](#session-explorer)
   and the light or dark theme.
 - **Transcript.** One block per task, oldest first. The left column shows when each task started
   and how long it took.
@@ -47,7 +55,9 @@ reproduce the captures, use [scripts/capture-docs.mjs](../scripts/capture-docs.m
 
 ![Sending a task: the agent thinks, runs a tool and replies](screenshots/demo-task.gif)
 
-## Tasks and the transcript
+<a id="tasks-and-the-transcript"></a>
+
+## Each task keeps its prompt, steps and reply together
 
 Every message you send starts a task. A task shows your prompt in a tinted block labelled "You",
 then the agent's logo and name, and what it did, in order: its reply in Markdown, a row for each tool call, and its
@@ -73,7 +83,9 @@ for the calculation and price configuration.
 
 ![A task's time rail: its start time, duration and cost](screenshots/task-cost.png)
 
-### Tool calls
+<a id="tool-calls"></a>
+
+### Tool rows reveal inputs and results when expanded
 
 ![An expanded tool call with its input and its result](screenshots/tool-call.png)
 
@@ -84,7 +96,9 @@ its whole result. File names on the row, from the tools that read, write or edit
 input a click away. Tool results that are images (Claude Code reading a screenshot, Codex's
 `view_image`) show as thumbnails that open in full size.
 
-### Thinking
+<a id="thinking"></a>
+
+### Thinking notes appear beside the steps they explain
 
 On wide screens, thinking appears in the right margin beside the relevant step. The notes beside a
 step take no more height than the step, so long thinking doesn't open a gap in the transcript: what
@@ -92,7 +106,9 @@ doesn't fit fades out above **Show all**, which shows every note and makes room 
 notes show six lines; click to expand.
 On narrow screens, thinking collapses into a "Thinking · *title*" line within the task.
 
-### Messages and long tasks
+<a id="messages-and-long-tasks"></a>
+
+### Long tasks reveal earlier steps on demand
 
 Each agent message has buttons to show it as raw text instead of Markdown (each message on its own),
 to search inside it, and to copy it; your prompt has a copy button. A table wider than the column
@@ -100,11 +116,13 @@ scrolls sideways, with a shade at the right edge while there is more; its button
 (always shown on a touch screen) opens it in a popup as wide as the window. A task with many steps
 shows its latest 40; **Show *n* earlier steps** brings back the rest.
 
-### Long conversations
+<a id="long-conversations"></a>
+
+### Earlier tasks load when you scroll back
 
 The transcript shows the latest five tasks; **Show *n* older tasks** shows the others the chat
-has. On connecting it gets the latest 20 tasks from the server, not the whole conversation, so a
-conversation of months opens as fast as a new one. Scroll to the top, or click **Show earlier
+has. On connecting it gets the latest 20 tasks from the server, so opening a months-long
+conversation doesn't require loading its whole history. Scroll to the top, or click **Show earlier
 tasks**, and the chat reads the 20 before them; what you were reading stays where it was. The task
 numbers are the server's, so they count the tasks not loaded yet. A server older than AgentAPI 4.3
 sends every task at once.
@@ -114,7 +132,9 @@ ones above them. Until it is all there, the top of the transcript says **Loading
 conversation…**, and a task whose reply hasn't come yet says **Loading the reply…** under its
 prompt. An older server sends all the prompts first and the replies after them.
 
-### The task menu
+<a id="the-task-menu"></a>
+
+### The task menu previews, copies and exports one task
 
 ![The task menu with Preview Markdown, Copy task and output, and Export Markdown](screenshots/task-menu.png)
 
@@ -125,7 +145,9 @@ Download buttons.
 
 ![The Markdown preview of a task, with Copy and Download](screenshots/task-preview.png)
 
-### Search
+<a id="search"></a>
+
+### Search finds text in the tasks already loaded
 
 ![The transcript searched for "notes": the matches are highlighted and counted](screenshots/search.png)
 
@@ -137,9 +159,13 @@ task shows, and tool calls with a match open. The search goes through the tasks 
 loaded: in a [long conversation](#long-conversations), **+*n* earlier** in the bar loads the
 earlier tasks to search them too.
 
-## Sending tasks
+<a id="sending-tasks"></a>
 
-### The composer
+## The composer sends work now or queues it for later
+
+<a id="the-composer"></a>
+
+### The composer combines prompts, attachments and send controls
 
 Enter sends; Shift+Enter starts a new line. The paperclip attaches files of up to 100 MB each, and
 pasting an image attaches it too (pasted text stays text); an image over 10 MB reaches the agent as
@@ -149,7 +175,7 @@ as thumbnails that open in full size (in sent messages too), and can be removed 
 ![The composer with an image attached](screenshots/attachments.png)
 
 The agent gets the path of each attachment, and PNG, JPEG, GIF and WebP attachments as images too.
-AgentAPI removes an upload once it is 7 days old and the conversation no longer refers to it.
+Tendyard removes an upload once it is 7 days old and the conversation no longer refers to it.
 
 **More input options** (⋯) has voice input where the browser supports speech recognition: it
 dictates into the composer in the browser's language.
@@ -164,7 +190,9 @@ in the hub's settings.
 
 ![The ☆ menu of favorites in the composer](screenshots/composer-favorites.png)
 
-### While the agent works
+<a id="while-the-agent-works"></a>
+
+### Running turns accept queued, steered or interrupting messages
 
 ![A long turn with two queued tasks and the send menu open: Queue, Steer, and Interrupt & send](screenshots/queue-steer.png)
 
@@ -182,7 +210,9 @@ agent waits for an answer to a request, a new message queues behind it, marked *
 
 ![A long turn: a task queued, another steered into the turn, then Stop](screenshots/demo-queue.gif)
 
-### Slash commands
+<a id="slash-commands"></a>
+
+### Slash commands control the session from the composer
 
 ![The slash commands listed after typing a slash](screenshots/slash-commands.png)
 
@@ -203,21 +233,27 @@ commands go directly to the agent, including Claude Code's `/code-review`.
 
 `/terminal` and `/login` appear when the shell terminal is on.
 
-### Keyboard shortcuts
+<a id="keyboard-shortcuts"></a>
+
+### Shortcuts send messages and navigate without the mouse
 
 ![The keyboard shortcuts](screenshots/keyboard-shortcuts.png)
 
 Press ? for the shortcuts; the session details menu has them too.
 
-## Agent settings
+<a id="agent-settings"></a>
+
+## Session controls change how the agent works
 
 The composer's toolbar changes the agent's settings while it runs (`PUT /settings`). They
-stay for the session: AgentAPI gives them to the agent again after it restarts or logs in again and,
-with `--state-db`, after AgentAPI restarts.
+stay for the session: Tendyard gives them to the agent again after it restarts or logs in again and,
+with `--state-db`, after Tendyard restarts.
 
 ![Switching to the ask mode and the Deep model at max effort, then the context](screenshots/demo-settings.gif)
 
-### Permission mode
+<a id="permission-mode"></a>
+
+### Permission mode determines when tools need approval
 
 ![The permission mode menu: Bypass, Auto, Ask and Plan](screenshots/permission-mode.png)
 
@@ -228,7 +264,9 @@ with `--state-db`, after AgentAPI restarts.
 
 Pi has no permission modes, so its toolbar has no mode menu.
 
-### Model and reasoning effort
+<a id="model-and-reasoning-effort"></a>
+
+### The model menu selects the model, effort and provider
 
 ![The model menu with three models and the reasoning efforts of the chosen one](screenshots/model-settings.png)
 
@@ -250,7 +288,9 @@ provider's name after the model. A provider that lists no models isn't in the me
 whose calls fail now (the agent's latest call to it failed, or half of the last hour's did) has an
 amber warning beside its name; hover for how many calls failed and the last error, with when.
 
-### Context and usage limits
+<a id="context-and-usage-limits"></a>
+
+### Usage indicators show context and account capacity
 
 ![The context popover: the tokens in the context window, and the 5-hour and weekly usage limits](screenshots/context-usage.png)
 
@@ -267,7 +307,9 @@ limits. While the agent is idle with an expired cache and at least 50k tokens of
 above the composer says so, with **Compact**. A closed note comes back only once a later
 turn's cache expires too.
 
-### A usage limit
+<a id="a-usage-limit"></a>
+
+### The limit card lets you continue or release the queue
 
 ![A task stopped on the 5-hour limit, marked Limit reached: a card with the reset time and Continue at reset, Continue now and Send queued tasks, and a task held in the queue](screenshots/limit-card.png)
 
@@ -279,12 +321,14 @@ tasks** lets the queue go at once. A task you send yourself goes out right away.
 the agent needs you, as with a request: the header, the tab title and its icon say so, and a background
 tab with notifications on shows a notification.
 
-### A failed API request
+<a id="a-failed-api-request"></a>
+
+### The retry card lets you retry now or cancel the wait
 
 ![A task the API's gateway failed with a 502: the card counting down to the first of 15 retries, with Retry now and Cancel, and a task held in the queue](screenshots/retry-card.png)
 
 When a turn fails on an API error that may pass, such as a 502 from a gateway or an overloaded API,
-AgentAPI tries it again by itself (see [Transient API errors](agents.md#transient-api-errors)).
+Tendyard tries it again by itself (see [Transient API errors](agents.md#transient-api-errors)).
 A card above the composer says what the API returned, with the agent's message, and counts down
 to the retry: *Retrying in 0:28 (1 of 15)*. The queued tasks wait, marked *held until the failed task
 is tried again*. **Retry now** tries at once, and **Cancel** gives up on the task and lets the queue
@@ -292,14 +336,18 @@ go. A task you send yourself goes out right away. The agent counts as working me
 status strip says it waits to try the failed task again. The failed task itself shows Failed; the
 retry is the next task.
 
-## Requests and decision cards
+<a id="requests-and-decision-cards"></a>
+
+## Decision cards collect the answers the agent needs
 
 What the agent asks you appears above the composer as a card, and the agent waits. The status line
 above the card (on a phone, the card itself), the header and the tab title say "Needs you", the
 task shows "Waiting for you", and its tool row shows what it waits for. Number keys pick an option. A request is answered once, from
 any open chat; one that can no longer be answered says so.
 
-### Approvals
+<a id="approvals"></a>
+
+### Approval cards let you allow or deny a tool request
 
 ![An approval card for a command: Allow, Always allow Bash in this session, and Deny with a note](screenshots/native-approval.png)
 
@@ -310,7 +358,9 @@ do instead.
 
 ![Approving a command: the card comes up, Allow, and the turn goes on](screenshots/demo-approval.gif)
 
-### Questions
+<a id="questions"></a>
+
+### Question cards collect answers before submitting them together
 
 ![A question card on the first of three steps: Package manager, Checks and Notes](screenshots/native-question.png)
 
@@ -320,7 +370,9 @@ are masked while you type and stored as `[redacted]`.
 
 ![Answering three questions: a choice, two checks and a note](screenshots/demo-question.gif)
 
-### Plans
+<a id="plans"></a>
+
+### Plan cards let you approve or return a plan with feedback
 
 ![A plan card with the plan in Markdown, Approve the plan, Keep planning and a feedback field](screenshots/native-plan.png)
 
@@ -329,19 +381,23 @@ Claude Code and Codex also let you choose how the agent then implements the plan
 bypassed permissions, auto-accepted edits or edits you approve, Codex in the bypass, auto review or
 ask mode.
 
-### Logging in
+<a id="logging-in"></a>
+
+### Login cards show the command and machine needed to sign in
 
 ![A login card: the command to run, the host and user to run it as, Run in terminal and Check again](screenshots/login-card.png)
 
 When the agent isn't logged in, or loses its login during a session, a login card names the command
 to run (`claude auth login`, `codex login --device-auth`, or Pi's `/login`) and the host and user to
 run it as. Codex signs in with a device code: open the link it prints, on any device, and enter its
-one-time code, so no browser has to run where AgentAPI runs. **Run in terminal** runs it in the
-[shell terminal](#shell-terminal); **Check again** checks right away. AgentAPI also tries again
+one-time code, so no browser has to run where Tendyard runs. **Run in terminal** runs it in the
+[shell terminal](#shell-terminal); **Check again** checks right away. Tendyard also tries again
 every 5 seconds, and messages wait in the queue meanwhile, marked *held until the agent is logged in*. (The screenshot shows `dev-machine` and
 `dev` in place of the real host and user.)
 
-## Files
+<a id="files"></a>
+
+## The file viewer combines source, previews and diffs
 
 File names in the chat open a viewer on the file the agent works on: a file name on a tool call's
 row, a path in inline code in the agent's reply (`lib/foo.go:12` opens at line 12), a Markdown link
@@ -358,13 +414,17 @@ for you to choose from.
 
 ![Opening index.html and its preview, then the diff of README.md](screenshots/demo-files.gif)
 
-### The file
+<a id="the-file"></a>
+
+### Source view shows file contents with line numbers
 
 ![The file viewer on index.html, with line numbers and syntax highlighting](screenshots/file-viewer.png)
 
 **File** shows the file with line numbers and syntax highlighting, up to 1 MiB (`GET /files/content`).
 
-### The preview
+<a id="the-preview"></a>
+
+### Preview renders supported documents and images
 
 HTML, Markdown and SVG files have a **Preview** tab, and an image file shows as the image.
 
@@ -383,7 +443,9 @@ A Markdown file opens on its preview. Relative images load from the working dire
 links open their file in the viewer (`#L12` at its line). PNG, JPEG, GIF, WebP, BMP, ICO and SVG
 files show as images (`GET /files/image`).
 
-### The diff
+<a id="the-diff"></a>
+
+### Diff view shows edits in their file context
 
 ![The Diff tab: the uncommitted changes to README.md](screenshots/file-diff.png)
 
@@ -391,7 +453,9 @@ files show as images (`GET /files/image`).
 against `HEAD` (**Uncommitted changes**), up to 1 MiB (`GET /files/diff`). The diff reads only the git repository: no diff driver,
 textconv or fsmonitor of the repository or the user runs.
 
-## Session Explorer
+<a id="session-explorer"></a>
+
+## Explorer brings session history, files and integrations together
 
 The Explorer (⌘K / Ctrl+K, or the folder button) has five tabs. The Index, Files and Links lists
 have a filter box.
@@ -432,8 +496,8 @@ and queue, and require a second click.
 ![The Explorer's Session tab asking for a second click to restart the agent](screenshots/explorer-session.png)
 
 **Restart agent** stops the agent, clears the conversation and starts it again in a new session; it
-asks for a second click. When AgentAPI has given up on an agent that kept exiting, this starts it
-again. Codex and Pi, when AgentAPI starts their CLI directly, update to their latest release first.
+asks for a second click. When Tendyard has given up on an agent that kept exiting, this starts it
+again. Codex and Pi, when Tendyard starts their CLI directly, update to their latest release first.
 **Download conversation JSONL** saves every message, tool call and result of the session, one event per line, followed by those of the subagents the agent ran; the session
 details menu has it too. The server streams it, including earlier tasks the chat may not have
 loaded.
@@ -442,19 +506,21 @@ loaded.
 
 ![The Explorer's Webhook tab: the receiver URL, event groups, signing secret, instance ID, heartbeat and public URL](screenshots/explorer-webhook.png)
 
-Configure a webhook here even if AgentAPI started without one. Set the receiver URL, signing
+Configure a webhook here even if Tendyard started without one. Set the receiver URL, signing
 secret, instance ID, public URL and heartbeat interval, then choose event groups: **Tasks**,
 **Needs you** (approvals, questions, plans, logins and usage limits), **Heartbeats**,
 **Run status**, **Agent errors**, **Messages** and **Tool calls**. The secret can be replaced or
 removed but never read back. **Delivery and payload** contains the timeout, attempt count and template.
 
-**Save** applies settings immediately. They last until AgentAPI restarts; with `--state-db`, they
+**Save** applies settings immediately. They last until Tendyard restarts; with `--state-db`, they
 survive a restart unless new webhook flags override them. **Send test event** sends `webhook.test`
 to the saved URL and shows the response. **Turn off** clears the URL. Individual events selected
 with `--webhook-events`, such as `task.completed` alone, remain listed even if they don't cover a
 whole group. See [Webhooks](api.md#webhooks) for events and payloads.
 
-## Lineage
+<a id="lineage"></a>
+
+## Lineage shows what each subagent did
 
 ![The Lineage panel on a subagent: the task Claude Code gave it, a file it read, a command it ran and its answer](screenshots/lineage.png)
 
@@ -468,10 +534,12 @@ Session tab shows its subagents too; a copy of a session starts without them. `G
 lists the subagents, and `GET /subagents/{id}` returns one's task and messages.
 
 A Claude Code subagent's state comes from its Agent tool call. Codex's spawn call returns before the
-subagent finishes, so AgentAPI reads its state from the subagent's log. Codex encrypts the task it gives a
+subagent finishes, so Tendyard reads its state from the subagent's log. Codex encrypts the task it gives a
 subagent; the panel labels the subagent with its task name and nickname.
 
-## Shell terminal
+<a id="shell-terminal"></a>
+
+## The terminal runs shell commands in the agent’s directory
 
 ![The shell terminal: git status and git log in the agent's working directory, and the key bar](screenshots/terminal.png)
 
@@ -485,21 +553,23 @@ ask for a second press.
 
 Web links in the terminal open on a click, even when they run over several lines, and the last link
 a command printed (such as a login link) shows above the terminal, shortened, to open or copy with
-one tap. Start AgentAPI with `--terminal=false` to turn the terminal off.
+one tap. Start Tendyard with `--terminal=false` to turn the terminal off.
 
 ![The terminal: git status, a link that shows above the terminal, and a held Ctrl clearing the screen](screenshots/demo-terminal.gif)
 
-## Session details and alerts
+<a id="session-details-and-alerts"></a>
+
+## Session details identify the agent and configure alerts
 
 ![The session details menu: status, agent, session, session ID with a copy button, version, activity, queue and tokens](screenshots/session-details.png)
 
 Clicking the status in the header opens the session details: the status, agent, session name,
-the agent's session ID (its first characters, with a copy button), AgentAPI version, what
+the agent's session ID (its first characters, with a copy button), Tendyard version, what
 the agent is doing, the queue and the tokens in and out. Its menu downloads the conversation as
 JSONL (as the Explorer's Session tab does), turns on browser notifications and a sound, shows the keyboard
-shortcuts, and shows how to add this AgentAPI to a [hub](hub.md). (How full the context is and
+shortcuts, and shows how to add this instance to a [hub](hub.md). (How full the context is and
 the usage limits are in the composer's toolbar; see
-[Context and usage limits](#context-and-usage-limits).)
+[Usage indicators show context and account capacity](#context-and-usage-limits).)
 
 While the tab is in the background, its icon shows an amber dot when the agent needs you, a blue dot
 while it works and a green dot when a task finishes. With notifications on, the browser also shows
@@ -509,13 +579,13 @@ falling when it finishes; it works over plain http too. The hub's bell offers th
 an agent that needs you, and the chat only when it finishes.
 
 **Add to an AgentAPI hub…** has the steps to copy: run a hub, join this machine to it, open it.
-The hub address you type goes into the commands. When this AgentAPI already reports to a hub,
+The hub address you type goes into the commands. When this instance already reports to a hub,
 it says which.
 
-![Adding this AgentAPI to a hub: the hub's address, and the commands to copy](screenshots/join-hub.png)
+![Adding this instance to a hub: the hub's address, and the commands to copy](screenshots/join-hub.png)
 
 When a task ends while the chat is visible, or the chat becomes visible after one ended, the chat tells
-the server you saw it (`POST /tasks/seen`), so a dashboard that watches many AgentAPIs, `agentapi
+the server you saw it (`POST /tasks/seen`), so a dashboard that watches many Tendyard instances, `agentapi
 list` and other tabs stop showing the task as unread (see
 [Watching many instances](api.md#watching-many-instances)).
 
@@ -525,7 +595,9 @@ server sends its recent ones again on every connection; a warning the agent repe
 shows once per page. While two or more show, **Clear all** below them closes them all, as if
 you had closed each one.
 
-## Phones
+<a id="phones"></a>
+
+## Phone layouts keep the conversation and decisions within reach
 
 ![The chat on a phone](screenshots/chat-mobile.png)
 
@@ -543,11 +615,13 @@ While the keyboard is up, the page ends above it, so the composer and the key ba
 
 ![The terminal on a phone: the keyboard button, a command, and keys from the key bar](screenshots/demo-phone.gif)
 
-## The hub
+<a id="the-hub"></a>
+
+## The hub opens agents across machines in this chat
 
 ![The hub on a phone](screenshots/hub-phone.png)
 
-A [hub](api.md#running-a-hub) (`agentapi hub serve`) serves this chat for every AgentAPI it
+A [hub](api.md#running-a-hub) (`agentapi hub serve`) serves this chat for every instance it
 watches. Its list puts the agents you pin on top, then what needs you first by group or the latest
 change first; By machine puts each machine's agents in one card, a tab each, in either order. Each state has a glyph of its own, and each row says what the agent waits for (the
 approval's command, the question) or does; search and chips (state, agent) filter the list. On a desktop, an
@@ -558,20 +632,22 @@ the chat's own buttons in it, and a button for each other agent of its machine, 
 place. It opens through the hub, which sends the instance's token.
 
 The gear opens the hub's settings, where you keep favorite prompts that ☆ in this chat's composer
-inserts ([The composer](#the-composer)), and the model providers the model menu offers
-([Model and reasoning effort](#model-and-reasoning-effort)).
+inserts ([The composer combines prompts, attachments and send controls](#the-composer)), and the model providers the model menu offers
+([The model menu selects the model, effort and provider](#model-and-reasoning-effort)).
 `+` adds an instance by its URL and token. Each row's `⋯` menu pins the instance to the top, puts it in a group of your own (the list
 then shows a folding header per group), mutes what it waits for until that changes, or forgets a
 stopped or unreachable one. Rows and group headers show what the agents spent in the last 24 hours
-(hover for 7 days), and rows how long they worked. Each row shows its AgentAPI version, marked when
+(hover for 7 days), and rows how long they worked. Each row shows its Tendyard version, marked when
 it is older than the hub's, and a card of the overview counts the versions. The [hub guide](hub.md) covers setup, groups
 and every state in detail.
 
-## Connection and caching
+<a id="connection-and-caching"></a>
+
+## Caching restores the transcript while streams reconnect
 
 The chat follows the server's events and resumes from where it left off, so a reconnect only
 fetches what changed. A stream that ends is opened again at once, without a notice. One that fails,
-including an error page from a proxy in front of AgentAPI, is tried again after 1 s, then up to
+including an error page from a proxy in front of Tendyard, is tried again after 1 s, then up to
 every 30 s; a bar says when, with **Reconnect now**. The server sends a heartbeat every 15 s, and a
 stream silent for 45 s counts as lost even while the tab is in front (a phone that switched
 networks). Going back online or back to the tab reconnects at once. The page title and the header show

@@ -1,28 +1,32 @@
-# AgentAPI
+# Tendyard
 
 [English](README.md) | 繁體中文
 
-AgentAPI 提供 HTTP API，讓你控制 [Claude Code](https://github.com/anthropics/claude-code)、[Codex](https://github.com/openai/codex) 和 [Pi](https://pi.dev/)。
+Tendyard 讓開發者在自己的主機上執行 Claude Code、Codex 與 Pi，管理從 issue 到完成 review 的
+pull request。處理單一 agent 可用聊天介面；跨筆電、工作區與伺服器工作則使用 hub。
 
-![AgentAPI 聊天介面中的兩個任務：提示詞、工具呼叫、思考旁註和輸入框](docs/screenshots/chat-desktop.png)
+- **跨主機派工。** Tendyard 是產品名稱，目前以 `agentapi` 執行檔提供：`agentapi server` 執行一個 agent，
+`agentapi hub serve` 提供集中管理的工作介面，`agentapi host` 則是各主機上的 launcher。
+現有設定使用 `~/.agentapi/`，下方的 API 與 repo 連結沿用目前名稱。
+舊版發行名稱與目前介面顯示的文字，仍沿用 AgentAPI。
+
+![Hub：各台主機上的 agent、需要你處理的事，以及其中一個 agent 的聊天介面](docs/screenshots/hub-desktop.png)
 
 截圖使用 AgentAPI v5.6.0 與內建的 `native-demo` agent；回覆、工具結果、模型和用量都是模擬的。
 功能與動畫見[聊天介面導覽](docs/chat-ui.zh-TW.md)，重新擷取的方法見[截圖說明](docs/screenshots/README.md)。
 
-AgentAPI 可以用來：
+從 hub 的 [Issues 頁](docs/hub.zh-TW.md#issues)，把 issue 交給你選的主機與 agent。主機上的 launcher
+會在 issue 分支的 git worktree 裡啟動 agent。你可以追蹤進度、回答問題，再開啟產出的 pull request。
+設好 GitHub workflow 後，review 意見會回到同一個 agent 繼續修改，關閉 PR 時也會停止 job。
 
-- 為各種程式開發代理（coding agent）打造統一的聊天介面
-- 作為 MCP 伺服器的後端，讓一個 agent 控制另一個 coding agent
-- 建立把 pull request 審查交給 agent 處理的工具
-- 從一個中控平台監看多個 agent：每個 AgentAPI 用 [webhook](docs/api.zh-TW.md#webhook) 推送任務、需要你處理的
-  請求、訊息和心跳。連到多個 AgentAPI 的用戶端則透過[摘要](docs/api.zh-TW.md#監看多個實例)追蹤每一個。
-  內建的 [hub](docs/api.zh-TW.md#執行-hub) 就是這樣的儀表板，桌面和手機都能用
-- 從 hub 的 [Issues](docs/hub.zh-TW.md#issues) 頁把 GitHub issue 交給你各台主機上的 agent：每個
-  agent 在自己的分支上工作，完成後開 pull request
+請部署在你信任的環境中：存取權限以 token 管理，沒有個別使用者或角色。
+連接其他主機前，請先看[安全性](docs/security.zh-TW.md)。
 
-## 關於這個 fork
+<a id="關於這個-fork"></a>
 
-[`k1dav-c/agentapi`](https://github.com/k1dav-c/agentapi) 是獨立維護的
+## 此 fork 獨立發版，與上游分開管理相容性
+
+Tendyard 在 [`k1dav-c/agentapi`](https://github.com/k1dav-c/agentapi) 開發；這是獨立維護的
 [`coder/agentapi`](https://github.com/coder/agentapi) fork，使用自己的版本與發版流程。
 執行檔請從[此 fork 的 releases](https://github.com/k1dav-c/agentapi/releases) 下載，
 新增功能的問題請回報至[此 repo](https://github.com/k1dav-c/agentapi/issues)。
@@ -30,142 +34,166 @@ AgentAPI 可以用來：
 
 此 fork 以上游 v0.12.2 為基礎。從 3.0 起只透過 Claude Code、Codex 和 Pi 自己的協定
 （[native transport](docs/agents.zh-TW.md)）驅動這三個 agent；給其他 agent 用的終端機模擬方式（PTY transport）到 v2.5.1
-為止（見 [Agent](#agent)）。工作階段管理與聊天功能可用來處理長時間執行的任務；
+為止（見 [目前版本透過原生協定執行 Claude Code、Codex 與 Pi](#agent)）。工作階段管理與聊天功能可用來處理長時間執行的任務；
 [webhook](docs/api.zh-TW.md#webhook) 會把任務狀態回報給中控平台。[CHANGELOG.md](CHANGELOG.md) 列出變更，
 [docs/architecture.zh-TW.md](docs/architecture.zh-TW.md) 說明架構，
-[docs/hub.zh-TW.md](docs/hub.zh-TW.md) 說明怎麼在一個頁面監看多個 AgentAPI，完整的 commit 歷史
+[docs/hub.zh-TW.md](docs/hub.zh-TW.md) 說明怎麼在一個頁面監看多個實例，完整的 commit 歷史
 請參閱[與上游的完整比較](https://github.com/coder/agentapi/compare/main...k1dav-c:agentapi:main)。
 
 ## 目錄
 
-- [功能總覽](#功能總覽)
-- [快速開始](#快速開始)
-- [Agent](#agent)
-- [文件](#文件)
-- [架構](#架構)
-- [開發](#開發)
-- [執行穩定性](#執行穩定性)
-- [開發藍圖](#開發藍圖)與[長期願景](#長期願景)
+- [四項能力串起 agent 從接案到 review 的工作](#功能總覽)
+- [先啟動一個 agent，再按需要連接其他主機](#快速開始)
+- [目前版本透過原生協定執行 Claude Code、Codex 與 Pi](#agent)
+- [依照要完成的工作選擇指南](#文件)
+- [單一執行檔把 agent 協定接到 API 與聊天介面](#架構)
+- [後端與聊天介面一起建置及測試](#開發)
+- [穩定性修正涵蓋長工作階段與執行中斷](#執行穩定性)
+- [下一步優先改善上手、恢復與追蹤](#開發藍圖)與[開發者應能掌握從 issue 到完成 review 的 PR](#長期願景)
 
-## 功能總覽
+<a id="功能總覽"></a>
 
-**透過 HTTP 驅動 coding agent**
+## 四項能力串起 agent 從接案到 review 的工作
 
-- 透過 Claude Code、Codex 和 Pi 自己的協定（[native transport](docs/agents.zh-TW.md)）驅動
-  這三個 agent。
-- 從 `GET /rich-messages` 和 `GET /timeline` 讀取結構化的活動：思考內容、工具呼叫與結果、
-  token 用量。
-- agent 工作中時送出的訊息會在可以編輯、重新排序的[佇列](docs/api.zh-TW.md#訊息佇列)中等待；也可以把訊息 [steer 進執行中的回合或中斷它](docs/agents.zh-TW.md#steerinterrupt-與佇列)。
-- 你的每則訊息和 agent 處理該訊息的回合都是伺服器追蹤的[任務](docs/api.zh-TW.md#任務)：執行中、已完成、失敗，
-  或因用量限制而停止。
-- 透過 [server-sent events](docs/api.zh-TW.md#事件與增量同步) 即時追蹤一切，有心跳，重新連線後只重播
-  有變動的部分。
-- 跑了好幾個月的對話也不會越來越重：用戶端先拿到最近的任務，較早的再一頁一頁讀；有
-  `--state-db` 時，伺服器只把最近的任務放在記憶體（[長對話](docs/api.zh-TW.md#長對話)）。
+**hub 跨主機派工並監看工作**
 
-**Agent**
+- [hub](docs/api.zh-TW.md#執行-hub) 集中列出各主機的實例，優先顯示需要你處理的事，並在桌面或手機
+  開啟聊天介面。每台主機以 `agentapi hub join` [加入一次](docs/api.zh-TW.md#加入-hub)，
+  重新啟動後仍保留設定；hub 開啟的
+  聊天介面可共用我的最愛提示。
+- [Issue 派工](docs/hub.zh-TW.md#issues)透過 hub 的 GitHub App 列出 open issue，交給 Claude Code、
+  Codex 或 Pi。[Launcher](docs/cli.zh-TW.md#agentapi-host) 建立 worktree 並啟動 agent；agent 推送分支與
+  開 PR，review 回到同一個 agent，hub 追蹤各 job 的 run。
+- 透過比對 checksum 的[更新](docs/cli.zh-TW.md#agentapi-update)與[原地重新啟動](docs/cli.zh-TW.md#agentapi-restart)
+  維護實例。允許更新的主機也能[透過 API 更新](docs/api.zh-TW.md#透過-api-更新)，包括由 hub 發起。
 
-- agent 提出的需求（工具核准、提問、計畫）會以[請求](docs/agents.zh-TW.md#請求核准提問與計畫)送達，可以透過
-  HTTP 或在聊天介面中回覆。
-- 在 agent 執行中切換[權限模式、模型和推理強度](docs/agents.zh-TW.md#工作階段設定)：bypass（預設）、auto、ask
-  或 plan。
-- 在 Claude Code 或 Codex 執行中把它換到[其他模型供應商](docs/providers.zh-TW.md)，例如 LiteLLM
-  gateway，也能換回來，對話照常接續。供應商可以在每台主機各自設定，也可以在 hub 設定一次。agent 透過
-  本機的代理呼叫供應商，永遠拿不到金鑰；模型選單和 hub 會標出呼叫失敗的供應商。
-- 查看 [context 與用量限制](docs/agents.zh-TW.md#context-與用量限制)用了多少，並[壓縮](docs/agents.zh-TW.md#斜線指令與壓縮) context；
-  Claude Code 的 prompt cache 過期後，聊天介面會建議先壓縮。
-- 回合因為[達到用量限制](docs/agents.zh-TW.md#達到用量限制時)而停下時，佇列會等到限制重置，回合也可以在重置後
-  自動繼續。
-- 回合因[暫時性的 API 錯誤](docs/agents.zh-TW.md#暫時性的-api-錯誤)失敗時（例如 gateway 回 502、API 過載），
-  AgentAPI 會在 30 秒、1 分鐘、2 分鐘後再試，之後每 5 分鐘再試，共 15 次，之後才輪到佇列。
-- AgentAPI 會回報缺少或過期的[登入](docs/agents.zh-TW.md#登入)並附上要執行的指令，登入之後會自己啟動 agent。
-- agent 工作目錄中共用的[終端機](docs/agents.zh-TW.md#終端機)，方便登入和執行簡單的指令。
-- [持久保存的工作階段](docs/agents.zh-TW.md#持久保存的工作階段)：使用 `--state-db` 時，對話在 AgentAPI 重新啟動後
-  會保留，agent 也會接續自己的工作階段。
-- 開啟 agent 在工作目錄中的[先前的工作階段](docs/agents.zh-TW.md#先前的工作階段)，或從其中一個開始一份副本。
-- 以模型供應商的牌價查看每個[工作階段與任務的花費](docs/agents.zh-TW.md#工作階段花費)（API 等價金額），含 sub agent，
-  並加總今天、最近 7 天和 30 天的花費。
+**聊天介面集中處理與 agent 的互動**
 
-**聊天介面**（`/chat`）
+- 每項[任務](docs/chat-ui.zh-TW.md#任務與對話紀錄)把工具呼叫、思考與回覆整理成對話紀錄，附上花費並可
+  匯出 Markdown。[Session Explorer](docs/chat-ui.zh-TW.md#工作階段瀏覽器) 集中提供連結、檔案、任務索引、
+  先前工作階段、Restart 與 webhook 設定。
+- 用[決策卡片](docs/chat-ui.zh-TW.md#請求與決策卡片)回覆核准、問題與計畫。在工作階段內調整
+  [權限、模型與推理強度](docs/agents.zh-TW.md#工作階段設定)：bypass 為預設，另有 auto、ask 與 plan。
+- 在[檔案檢視器](docs/chat-ui.zh-TW.md#檔案)查看原始內容、git 差異，以及 HTML、Markdown 與圖片預覽。
+  它能尋找工作目錄下其他 repo 中的路徑；共用[終端機](docs/agents.zh-TW.md#終端機)處理登入與指令，手機也能用。
+- 用 [Lineage](docs/chat-ui.zh-TW.md#lineage) 追蹤各 subagent 的步驟，執行中也能查看。
+- 用[背景提醒](docs/chat-ui.zh-TW.md#工作階段詳細資訊與提醒)、瀏覽器通知與對話快取，在切換分頁或連線中斷後繼續追蹤工作。
 
-- [任務](docs/chat-ui.zh-TW.md#任務與對話紀錄)以對話紀錄呈現：工具呼叫一行一列，思考內容是旁註，每個任務標出花費，
-  可匯出成 Markdown。[工作階段瀏覽器](docs/chat-ui.zh-TW.md#工作階段瀏覽器)提供連結、檔案、任務索引、
-  agent [先前的工作階段](docs/agents.zh-TW.md#先前的工作階段)、重新啟動和 [webhook](docs/api.zh-TW.md#webhook)。
-- [Lineage](docs/chat-ui.zh-TW.md#lineage)：agent 執行過的 sub agent，以及每一個做了什麼，一步一步呈現，執行中也能看。
-- 請求的[決策卡片](docs/chat-ui.zh-TW.md#請求與決策卡片)、agent 設定的選單、顯示 context 的圓環，
-  以及斜線指令。
-- [檔案檢視器](docs/chat-ui.zh-TW.md#檔案)：查看檔案和 git diff，預覽 HTML、Markdown 和圖片。agent 提到的路徑
-  若是相對於工作目錄底下某個 repo，也找得到。[終端機](docs/agents.zh-TW.md#終端機)在手機上也能使用。
-- [背景提醒](docs/chat-ui.zh-TW.md#工作階段詳細資訊與提醒)、瀏覽器通知、對話紀錄快取，以及斷線後的復原。
+**佇列與恢復機制支援長時間工作**
 
-**維運與整合**
+- 訊息先進入可編輯、重排的[佇列](docs/api.zh-TW.md#訊息佇列)，也能[引導或中斷](docs/agents.zh-TW.md#steerinterrupt-與佇列)
+  目前這一輪。[Context 與用量限制](docs/agents.zh-TW.md#context-與用量限制)指示和
+  [壓縮功能](docs/agents.zh-TW.md#斜線指令與壓縮)可協助安排下一輪；Claude Code 的 prompt cache
+  過期後，聊天介面會建議壓縮。
+- [登入](docs/agents.zh-TW.md#登入)缺少或過期時，系統暫停工作並顯示登入指令，登入後再啟動 agent。
+- [用量限制](docs/agents.zh-TW.md#達到用量限制時)會暫停佇列直到重設，也可選擇自動繼續被停止的那一輪。
+- [暫時性 API 錯誤](docs/agents.zh-TW.md#暫時性的-api-錯誤)會在 30 秒、1 分鐘、2 分鐘後重試，之後每 5 分鐘一次，
+  共 15 次，再處理下一則訊息。
+- 使用 `--state-db`，[對話能在重新啟動後保留](docs/agents.zh-TW.md#持久保存的工作階段)，agent 接回原工作階段；
+  也能[重新開啟或分支先前工作階段](docs/agents.zh-TW.md#先前的工作階段)。
+  [長紀錄](docs/api.zh-TW.md#長對話)以分頁載入；最近 100 項任務的 rich message 與 timeline 留在記憶體，
+  一般訊息與任務紀錄仍隨歷史增長。
 
-- [hub](docs/api.zh-TW.md#執行-hub)（`agentapi hub serve`）監看多台主機上的 AgentAPI，需要你處理的排最前面，並能在
-  聊天介面中開啟任何一個，桌面和手機都能用。hub 開啟的聊天介面都能插入保存在 hub 上的我的最愛。
-  [`agentapi hub join`](docs/api.zh-TW.md#加入-hub) 把一台主機上的
-  AgentAPI 接到 hub，重新啟動後也一樣。
-- hub 的 [issue 派工](docs/hub.zh-TW.md#issues)：Issues 頁透過 hub 自己的 GitHub App 列出各 repo
-  的 open issue，按 **Assign** 就交給某台主機上的 Claude Code、Codex 或 Pi；主機上的 launcher
-  （[`agentapi host`](docs/cli.zh-TW.md#agentapi-host)）會在 git worktree 裡為它啟動一個 AgentAPI。agent 推送分支並
-  開 pull request，PR 上的 review 會回到同一個 agent；頁面顯示每個 job 的狀態和各次 run 的花費。
-- [Webhook](docs/api.zh-TW.md#webhook) 把任務、請求、訊息和心跳推送到監看多個 agent 的中控平台，並以 HMAC
-  簽章。連到多個 AgentAPI 的用戶端，每個只要開一條[摘要串流](docs/api.zh-TW.md#監看多個實例)。搭配
-  [人工回覆 API](docs/api.zh-TW.md#人工回覆-api)，機器人可以在 agent 停下來時通知你，並把你的回覆傳回去。
-- AgentAPI [自我更新](docs/cli.zh-TW.md#agentapi-update)時會比對發行版的 checksum，並可[原地重新啟動](docs/cli.zh-TW.md#agentapi-restart)
-  成新的執行檔。選擇開放的主機也能[透過 API 更新](docs/api.zh-TW.md#透過-api-更新)，例如從 hub 更新。
-- [安全性](docs/security.zh-TW.md)：API token（聊天介面以 cookie 登入）、監聽位址，以及允許的主機與來源。
+**整合工具共用 API、用量資料與存取控制**
 
-## 快速開始
+- [Native transport](docs/agents.zh-TW.md) 把 agent 協定接到 HTTP，從 `GET /rich-messages` 與 `GET /timeline`
+  讀取結構化活動，[任務](docs/api.zh-TW.md#任務)記錄每個提示的結果。
+  [事件串流](docs/api.zh-TW.md#事件與增量同步)提供即時更新、心跳與重新連線後的增量重播。
+- [簽章 webhook](docs/api.zh-TW.md#webhook) 推送任務、請求、訊息與心跳事件。每個實例一條
+  [摘要串流](docs/api.zh-TW.md#監看多個實例)即可監看；[人工回覆 API](docs/api.zh-TW.md#人工回覆-api)
+  讓機器人通知你並把答案送回 agent。
+- Claude Code 與 Codex 可切換到其他[模型供應商](docs/providers.zh-TW.md)，例如 LiteLLM gateway，再切回。
+  供應商可在各主機或 hub 定義；本機代理保管金鑰，不交給 agent，並回報供應商失敗狀況。
+- 以模型牌價估算[任務與工作階段花費](docs/agents.zh-TW.md#工作階段花費)，包含 subagent，並加總今天及最近
+  7 天、30 天的花費。這些數字是 API 等值估算。
+- 設定[存取控制](docs/security.zh-TW.md)：API token、監聽位址、允許的主機與來源；聊天介面把 token 換成 session cookie。
 
-1. 安裝 `agentapi`：
+<a id="快速開始"></a>
 
-   ```bash
-   OS=$(uname -s | tr "[:upper:]" "[:lower:]");
-   ARCH=$(uname -m | sed "s/x86_64/amd64/;s/aarch64/arm64/");
-   curl -fsSL "https://github.com/k1dav-c/agentapi/releases/latest/download/agentapi-${OS}-${ARCH}" -o agentapi && chmod +x agentapi
-   ```
+## 先啟動一個 agent，再按需要連接其他主機
 
-   你也可以從[發行頁面](https://github.com/k1dav-c/agentapi/releases)下載這個 fork
-   最新的二進位檔。上游 `coder/agentapi` 的發行版二進位檔不包含這個 fork 的功能。
+<a id="安裝"></a>
 
-1. 確認安裝成功：
+### 安裝此 fork 提供的執行檔
 
-   ```bash
-   agentapi --help
-   ```
+從[此 fork 的 releases](https://github.com/k1dav-c/agentapi/releases) 下載執行檔，或安裝到
+使用者的 `~/.local/bin`：
 
-   > 在 macOS 上，如果系統提示無法驗證此二進位檔，請前往 `System Settings -> Privacy & Security`，點選「Open Anyway」（強制打開），然後再執行一次指令。
+```bash
+OS=$(uname -s | tr "[:upper:]" "[:lower:]")
+ARCH=$(uname -m | sed "s/x86_64/amd64/;s/aarch64/arm64/")
+curl -fsSL "https://github.com/k1dav-c/agentapi/releases/latest/download/agentapi-${OS}-${ARCH}" -o agentapi
+chmod +x agentapi
+mkdir -p "$HOME/.local/bin"
+mv agentapi "$HOME/.local/bin/agentapi"
+export PATH="$HOME/.local/bin:$PATH"
+agentapi --help
+```
 
-1. 執行 Claude Code 伺服器（假設系統已安裝 `claude`，且位於 `PATH` 中）：
+這行 `export` 只對目前的 shell 生效；之後的工作階段也要使用，請把 `~/.local/bin` 加進 shell 的 `PATH`。
+上游 `coder/agentapi` 的執行檔不包含此 fork 的 hub、issue 派工與 native agent 功能。
+在 macOS 上，如果系統提示無法驗證執行檔，請到 `System Settings → Privacy & Security`，
+點選 **Open Anyway** 後再執行。
 
-   ```bash
-   agentapi server -- claude
-   ```
+<a id="先和一個-agent-工作"></a>
 
-   > 如果出現 `claude` 不在 `PATH` 中的錯誤，但你在 shell 裡可以執行它，請用 `which claude` 取得完整路徑，改用完整路徑執行。
+### 一個 server 就能提供本機 agent 工作介面
 
-   這會透過 Claude Code 自己的協定驅動它，也就是 [native transport](docs/agents.zh-TW.md)：
-   核准會以結構化的請求送來、設定可以切換、聊天介面裡有終端機。
+先在主機上安裝 Claude Code、Codex 或 Pi，並完成登入。在你要讓 agent 工作的 repo 目錄中，
+透過 Tendyard 啟動它。以 Claude Code 為例：
 
-1. 傳送訊息給 agent：
+```bash
+agentapi server --bind 127.0.0.1 -- claude
+```
 
-   ```bash
-   curl -X POST localhost:3284/message \
-     -H "Content-Type: application/json" \
-     -d '{"content": "Hello, agent!", "type": "user"}'
-   ```
+開啟 http://localhost:3284/chat，送出一個任務。同一個頁面就能追蹤工具呼叫、查看檔案 diff 和回答問題。
+要用其他 agent，把 `claude` 換成 `codex` 或 `pi`。
 
-1. 取得對話紀錄：
+還沒安裝 agent，也可以用 `agentapi server --bind 127.0.0.1 -- native-demo` 試用介面；
+它的工作和回覆都是模擬的。實際工作若要在重新啟動後保留，請在 `--` 前加上
+`--state-db ~/.agentapi/myproject.db`，每個實例使用各自的資料庫路徑。
+詳見[持久保存的工作階段](docs/agents.zh-TW.md#持久保存的工作階段)。
 
-   ```bash
-   curl localhost:3284/messages
-   ```
+<a id="把一個-issue-做成-pull-request"></a>
 
-1. 開啟 http://localhost:3284/chat 試試聊天網頁介面。
+### hub 與 launcher 把 issue 推進到 pull request
 
-## Agent
+你需要一個瀏覽器與各台 agent 主機都連得到的 hub、各主機上的 launcher，以及用來列出 repo issue 的
+GitHub App。若要把 GitHub review 傳回 agent，並在 PR 關閉時停止 job，還要在連得到 hub 的
+self-hosted GitHub Actions runner 上設好派工 workflow。
 
-從 3.0 起，AgentAPI 透過 Claude Code、Codex 和 Pi 自己的協定驅動它們，也就是
+1. 在一台會持續開機的主機上[架設 hub](docs/hub.zh-TW.md#架設)，再讓各台 agent 主機加入。
+   請使用這些主機連得到的位址；上方單一 agent 範例中的 loopback 位址只供本機使用。
+2. 依[issue 派工架設說明](examples/issue-dispatch/README.md)（繁體中文）安裝 launcher、
+   連接 GitHub App，並設定 runner 與 workflow。
+3. 在 hub 開啟 **Issues**，選擇 repo，在一個 issue 上按 **Assign**，挑選 agent 與主機。
+   issue 應從 **Starting** 進入工作中；如果失敗，開啟詳細資訊查看原因。
+4. 開啟 agent 的聊天介面追蹤工作或回覆請求。agent 開好 PR 後，到 GitHub review。
+   設好 workflow 後，review 意見會回到該 agent；merge 或關閉 PR 就會停止 job。
+   issue 詳細資訊會列出各次 run 與花費。
+
+看板與操作方式見 [Issues](docs/hub.zh-TW.md#issues)。
+
+<a id="使用-http-api"></a>
+
+### 腳本也能透過 HTTP 控制同一個 agent
+
+腳本與整合工具也能把工作送給同一個本機實例：
+
+```bash
+curl -X POST localhost:3284/message \
+  -H "Content-Type: application/json" \
+  -d '{"content": "Summarize this repository", "type": "user"}'
+```
+
+用 `GET /messages` 讀取對話，或透過 SSE 追蹤結構化事件。
+任務、請求、webhook 與驗證方式見 [API 指南](docs/api.zh-TW.md)。
+
+<a id="agent"></a>
+
+## 目前版本透過原生協定執行 Claude Code、Codex 與 Pi
+
+從 3.0 起，Tendyard 透過 Claude Code、Codex 和 Pi 自己的協定驅動它們，也就是
 [native transport](docs/agents.zh-TW.md)：
 
 | Agent | 類型 | 協定 |
@@ -174,9 +202,9 @@ AgentAPI 可以用來：
 | [Codex](https://github.com/openai/codex) | `codex` | `codex app-server` |
 | [Pi](https://pi.dev/) | `pi` | `pi --mode rpc` |
 
-`--type` 指定 agent 類型；沒有指定時，AgentAPI 從指令名稱判斷，所以
+`--type` 指定 agent 類型；沒有指定時，Tendyard 從指令名稱判斷，所以
 `agentapi server -- /usr/local/bin/codex` 不必指定。包裝腳本則需要 `--type`。內建的
-`native-demo` 是模擬的 agent（見[開發](#開發)）。
+`native-demo` 是模擬的 agent（見[後端與聊天介面一起建置及測試](#開發)）。
 
 ```bash
 agentapi server -- claude
@@ -184,18 +212,20 @@ agentapi server --state-db ~/.agentapi/myproject.db -- codex
 agentapi server --type pi -- ./my-pi-wrapper
 ```
 
-其他 agent 會讓 AgentAPI 在啟動時停止，錯誤訊息會指出 v2.5.1。要執行
+其他 agent 會讓 Tendyard 在啟動時停止，錯誤訊息會指出 v2.5.1。要執行
 Aider、Goose、Gemini CLI、Amp、Cursor CLI、Auggie、Amazon Q、Opencode、Copilot、Kimi Code 或其他
 終端機程式，請使用最後一個有 PTY transport 的版本 AgentAPI v2.5.1：從
 [v2.5.1 release](https://github.com/k1dav-c/agentapi/releases/tag/v2.5.1) 下載執行檔並保留它。
 `agentapi update` 只會安裝最新版。以 `--allow-update` 執行這類 agent 的 AgentAPI 2，重新啟動
 成新程式前會先檢查它，所以會拒絕 AgentAPI 3 以後的版本，繼續提供服務。但更新已經換掉磁碟上的程式：
-那個 AgentAPI 以其他方式重新啟動之前，請把 v2.5.1 放回去。
+那個實例以其他方式重新啟動之前，請把 v2.5.1 放回去。
 
 AgentAPI 4 沒有 `--transport` 旗標：請從指令和設定檔中拿掉。實驗性的 ACP transport
-（`--experimental-acp`）先前已移除，使用這個旗標時 AgentAPI 會停止並顯示錯誤。
+（`--experimental-acp`）先前已移除，使用這個旗標時 Tendyard 會停止並顯示錯誤。
 
-## 文件
+<a id="文件"></a>
+
+## 依照要完成的工作選擇指南
 
 - [聊天介面](docs/chat-ui.zh-TW.md)：`/chat` 的聊天介面，桌面與手機都適用。
 - [Agent 與 native transport](docs/agents.zh-TW.md)：登入、請求、steer 與佇列、設定、用量限制、終端機、
@@ -206,18 +236,22 @@ AgentAPI 4 沒有 `--transport` 旗標：請從指令和設定檔中拿掉。實
 - [安全性](docs/security.zh-TW.md)：API token、監聽位址、允許的主機與來源，以及 API 用戶端能做什麼。
 - [CLI 參考](docs/cli.zh-TW.md)：`agentapi server`、`update`、`restart`、`list`、`hub`、`host`，
   以及資源用量。
-- [Hub](docs/hub.zh-TW.md)：在一個頁面監看多個 AgentAPI，並把 GitHub issue 交給 agent。
+- [Hub](docs/hub.zh-TW.md)：在一個頁面監看多個實例，並把 GitHub issue 交給 agent。
 - [架構](docs/architecture.zh-TW.md)：套件、資料流、持久保存與安全模型。
 
-## 架構
+<a id="架構"></a>
 
-AgentAPI 是單一的 Go 執行檔：一個 HTTP 伺服器（chi，並由 huma 產生 OpenAPI schema），
+## 單一執行檔把 agent 協定接到 API 與聊天介面
+
+Tendyard 是單一的 Go 執行檔：一個 HTTP 伺服器（chi，並由 huma 產生 OpenAPI schema），
 負責執行一個 agent 行程，並提供嵌入在執行檔裡的聊天介面（Next.js）。agent 的 native adapter
 回報給事件發送器，HTTP API、事件串流、佇列和聊天介面都從它讀取。套件、資料流、事件串流、
 持久保存與安全模型，請參閱
 [docs/architecture.zh-TW.md](docs/architecture.zh-TW.md)。
 
-## 開發
+<a id="開發"></a>
+
+## 後端與聊天介面一起建置及測試
 
 ```bash
 make build      # 建置 out/agentapi，內含聊天介面
@@ -227,29 +261,40 @@ go test ./...   # 執行 Go 測試，包含端對端冒煙測試
 cd chat && bun test  # 聊天介面的測試
 ```
 
-AgentAPI 以 Go 1.26 建置（見 `go.mod`，`go` 指令會自動下載），聊天介面用 Bun。
+Tendyard 以 Go 1.26 建置（見 `go.mod`，`go` 指令會自動下載），聊天介面用 Bun。
 測試以 `CGO_ENABLED=0` 執行。每次修改 API 都要一併 commit `openapi.json`，而且只能用
 `make gen` 重新產生（見 [AGENTS.md](AGENTS.md)）。聊天介面在 [chat/](chat/README.md)：
-`bun run dev` 會連到執行中的 AgentAPI 提供介面，
+`bun run dev` 會連到執行中的實例提供介面，
 `agentapi server -- native-demo` 則會執行一個模擬的 agent，不需要真正的
 agent 就能開發介面。CI 怎麼測試和發布一個 commit，見 [MAINTAINERS.md](MAINTAINERS.md)。
 
-## 執行穩定性
+<a id="執行穩定性"></a>
+
+## 穩定性修正涵蓋長工作階段與執行中斷
 
 此 fork 修正了並行事件傳送、訊息追蹤的競爭條件，以及 Claude delta 串流期間的內容區塊合併。
 這些修正處理長時間工作階段、行程替換，以及瀏覽器或網路暫時中斷時的問題。
 
-## 開發藍圖
+<a id="開發藍圖"></a>
 
-視使用者回饋而定，我們正在考慮以下功能：
+## 下一步優先改善上手、恢復與追蹤
 
-- [支援 MCP 協定](https://github.com/coder/agentapi/issues/1)
-- [支援 Agent2Agent 協定](https://github.com/coder/agentapi/issues/2)
+後續開發應讓你更容易在自己的主機上完成並監督開發任務，優先處理：
 
-## 長期願景
+- 縮短從安裝 Tendyard 到完成第一個 issue 與 pull request 的架設流程。
+- 讓長時間執行的 job 在 agent 失敗、碰到用量限制或主機重新啟動後能恢復，
+  需要介入時清楚說明原因。
+- 讓 hub 更容易追溯一個 issue 的各次 run、review 意見與花費。
 
-AgentAPI 目前讓開發者能以程式控制 coding agent。我們期待主要的 agent 未來都能提供正式的 SDK。
-屆時是否仍需要 AgentAPI，將取決於各家廠商是採用共同的 API，還是繼續使用各自的格式。
+MCP、Agent2Agent 等協定整合應服務這些工作流程。
+[HTTP API](docs/api.zh-TW.md) 會繼續提供給其他介面與整合工具使用。
 
-若各家採用共同 API，我們會停止維護 AgentAPI，改為推薦官方 SDK。若格式仍各不相同，
-我們會繼續朝通用轉接層的方向開發，讓開發者不必修改程式碼就能切換 agent。
+<a id="長期願景"></a>
+
+## 開發者應能掌握從 issue 到完成 review 的 PR
+
+Tendyard 要讓開發者把工作交給自己主機上的 coding agent，從 issue 到經過 review 的 pull request，
+都能掌握進度並介入。聊天介面、hub 與 launcher 負責這段過程中的對話、派工、人工決策和工作恢復。
+
+官方 agent SDK 或共同協定可以簡化 adapter。Tendyard 的角色是管理跨 agent、跨主機的工作，
+讓工作狀態、成果與花費都能從內建介面和 API 取得。
