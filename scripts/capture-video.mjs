@@ -49,9 +49,7 @@ const scenes = [
     chapter: {en: 'Issues', 'zh-TW': 'Issues'},
     caption: {en: 'Each agent works in its own worktree; follow its runs, spend and time',
       'zh-TW': '每個 agent 在自己的 worktree 工作，執行紀錄、花費與時間一目了然'}},
-  // The reviewer is a real GitHub account: its name and pictures are blurred.
   {id: 'review', kind: 'still', image: 'github-pr-review.png', url: 'github.com', seconds: 4.5, backdrop: '#ffffff',
-    masks: [[28, 16, 46, 46], [126, 30, 84, 26], [102, 85, 84, 25], [126, 206, 14, 26], [28, 517, 46, 46], [102, 527, 84, 25], [126, 649, 14, 26]],
     chapter: {en: 'Issues', 'zh-TW': 'Issues'},
     caption: {en: 'It opens a pull request, and your review goes back to the same agent',
       'zh-TW': 'agent 開出 pull request，你的 review 意見會回到同一個 agent'}},
@@ -115,9 +113,7 @@ const slideCSS = `
     letter-spacing: .02em; }
   .line { font-size: 36px; font-weight: 600; color: #f8fafc; line-height: 1.25; }
   .shot { position: absolute; overflow: hidden; border-radius: 0 0 14px 14px; display: flex; align-items: center; justify-content: center; }
-  .pic { position: relative; flex: none; }
-  .pic img { display: block; width: 100%; height: 100%; }
-  .mask { position: absolute; border-radius: 6px; backdrop-filter: blur(9px); background: rgb(226 232 240 / .35); }
+  .shot img { max-width: 100%; max-height: 100%; }
   .bezel { position: absolute; border-radius: 56px; border: 12px solid #1e293b; box-shadow: 0 30px 80px rgb(0 0 0 / .5); }
   .side { position: absolute; left: 900px; right: 160px; top: 0; bottom: 0; display: flex; flex-direction: column; justify-content: center; gap: 28px; }
   .side .line { font-size: 54px; line-height: 1.2; }
@@ -143,14 +139,7 @@ const windowBar = (slot, url) => `<div class="bar" style="left:${slot.x}px;top:$
   <span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="url">${escape(url)}</span></div>`;
 const captionRow = (scene, language, top) => `<div class="caption" style="top:${top}px">
   <span class="chapter">${escape(scene.chapter[language])}</span><span class="line">${escape(scene.caption[language])}</span></div>`;
-// A still's screenshot goes into its slide as a data: URL, since the slide page may not load files,
-// shrunk to fit its slot, with its masks ([x, y, width, height] in the screenshot's pixels) blurred.
-const picture = (scene, slot) => {
-  const scale = Math.min(1, slot.width / scene.size.width, slot.height / scene.size.height);
-  const masks = (scene.masks ?? []).map(([x, y, w, h]) =>
-    `<div class="mask" style="left:${x * scale}px;top:${y * scale}px;width:${w * scale}px;height:${h * scale}px"></div>`).join('');
-  return `<div class="pic" style="width:${scene.size.width * scale}px;height:${scene.size.height * scale}px"><img src="${scene.dataURL}">${masks}</div>`;
-};
+// A still's screenshot goes into its slide as a data: URL, since the slide page may not load files.
 const slideHTML = (scene, language) => {
   const text = languages[language];
   const {slot} = scene.kind === 'phone' ? phone : desktop;
@@ -180,7 +169,7 @@ const slideHTML = (scene, language) => {
   case 'still':
     body = `<div class="bg"></div>${windowBar(slot, scene.url)}
       <div class="shot" style="left:${slot.x}px;top:${slot.y}px;width:${slot.width}px;height:${slot.height}px;background:${scene.backdrop ?? '#ffffff'}">
-      ${picture(scene, slot)}</div>
+      <img src="${scene.dataURL}"></div>
       ${captionRow(scene, language, slot.y + slot.height + 26)}`;
     break;
   case 'desktop':
@@ -238,11 +227,7 @@ const compose = async (dir, browser, language) => {
   const slides = await browser.newPage({viewport: {width, height}, deviceScaleFactor: 1});
   const parts = [];
   for (const scene of scenes) {
-    if (scene.image && !scene.dataURL) {
-      const png = await readFile(path.join(screenshots, scene.image));
-      scene.dataURL = `data:image/png;base64,${png.toString('base64')}`;
-      scene.size = {width: png.readUInt32BE(16), height: png.readUInt32BE(20)};
-    }
+    if (scene.image && !scene.dataURL) scene.dataURL = `data:image/png;base64,${(await readFile(path.join(screenshots, scene.image))).toString('base64')}`;
     const slide = path.join(dir, `${scene.id}.${language}.png`);
     await slides.setContent(slideHTML(scene, language), {waitUntil: 'load'});
     await slides.evaluate(() => document.fonts.ready);

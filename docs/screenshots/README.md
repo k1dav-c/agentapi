@@ -68,7 +68,8 @@ kept for them. A real hub dispatched the issue to Claude Code on a real machine;
 `/agent` comment, the approval and the merge are a person's. That repository has no dispatch
 workflow (a public repository shouldn't run jobs on self-hosted runners), so the pull request's
 events reached the hub as the workflow sends them, through `POST /api/dispatch` with the hub's
-dispatch token.
+dispatch token. The reviewer's GitHub name and pictures, and the machine's name, which has
+a person's account in it, are blurred.
 
 <a id="gallery"></a>
 

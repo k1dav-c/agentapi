@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-11-17T07:06:25.215Z",
+  "captured_at": "2026-11-17T07:13:19.786Z",
   "agentapi_version": "5.6.1",
   "agents": [
     "native-demo posing as Claude Code",
@@ -12,7 +12,7 @@
     "height": 1080,
     "fps": 30
   },
-  "seconds": 93.9,
+  "seconds": 94.5,
   "scenes": [
     "title",
     "hub",
