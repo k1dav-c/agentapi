@@ -167,7 +167,8 @@ agentapi server --bind 127.0.0.1 -- claude
 
 你需要一個瀏覽器與各台 agent 主機都連得到的 hub、各主機上的 launcher，以及用來列出 repo issue 的
 GitHub App。若要把 GitHub review 傳回 agent，並在 PR 關閉時停止 job，還要在連得到 hub 的
-self-hosted GitHub Actions runner 上設好派工 workflow。
+self-hosted GitHub Actions runner 上設好派工 workflow。[架設 Tendyard](docs/setup.zh-TW.md)
+依序說明全部步驟，每一步後面都附上檢查方式。
 
 1. 在一台會持續開機的主機上[架設 hub](docs/hub.zh-TW.md#架設)，再讓各台 agent 主機加入。
    請使用這些主機連得到的位址；上方單一 agent 範例中的 loopback 位址只供本機使用。
@@ -234,6 +235,8 @@ AgentAPI 4 沒有 `--transport` 旗標：請從指令和設定檔中拿掉。實
 
 ## 依照要完成的工作選擇指南
 
+- [架設 Tendyard](docs/setup.zh-TW.md)：從空白主機到派出 issue：hub、工作主機與 launcher、GitHub App、
+  runner 與 workflow，每一步都附上檢查方式。
 - [聊天介面](docs/chat-ui.zh-TW.md)：`/chat` 的聊天介面，桌面與手機都適用。
 - [Agent 與 native transport](docs/agents.zh-TW.md)：登入、請求、steer 與佇列、設定、用量限制、終端機、
   工作階段與花費，以及 Claude Code、Codex 和 Pi 各自的行為。

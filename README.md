@@ -187,7 +187,8 @@ See [persistent sessions](docs/agents.md#persistent-sessions).
 You need a hub reachable from your browser and the machines that will run agents, a launcher on
 each of those machines, and a GitHub App to list your repositories' issues. To send GitHub reviews
 back to agents and stop jobs when pull requests close, also set up the dispatch workflow on a
-self-hosted GitHub Actions runner that can reach the hub.
+self-hosted GitHub Actions runner that can reach the hub. [Setting up Tendyard](docs/setup.md)
+walks through all of it in order, with a check after each step.
 
 1. [Set up the hub](docs/hub.md#setting-it-up) on a machine that stays on, and join the machines
    that will run agents. Use an address those machines can reach; the loopback address in the
@@ -258,6 +259,8 @@ an error.
 
 ## Choose a guide for the work you need to do
 
+- [Setting up Tendyard](docs/setup.md): from empty machines to a dispatched issue: the hub, the
+  workers and their launchers, the GitHub App, the runner and the workflow, with a check per step.
 - [Chat UI](docs/chat-ui.md): the chat at `/chat`, on a desktop and a phone.
 - [Agents and the native transport](docs/agents.md): logging in, requests, steering and the queue,
   settings, limits, the terminal, sessions and their costs, and what Claude Code, Codex and Pi each

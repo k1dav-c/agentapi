@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Documentation
+
+- A new guide, [Setting up Tendyard](docs/setup.md), goes from empty machines to a dispatched issue
+  in order: the roles and what each machine needs (the network paths, logged-in agents, `git` and
+  `gh`, lingering), the credentials and where each goes, the binary in `~/.local/bin` so it can
+  update itself, the hub as a service, joining workers and starting launchers, the GitHub App, the
+  runner (with a check that it reaches the hub), the workflow and labels, a first issue, updates,
+  and the symptoms seen during setup. The READMEs, the hub guide and the dispatch example link to
+  it; the example's runner steps moved there.
+
+## v5.7.0
+
 ### Changes
 
 - The chat and the hub say Tendyard: the hub's header, sign-in page and tab title read Tendyard Hub,
@@ -19,11 +31,12 @@
 
 - The Traditional Chinese README's four capabilities are back in their list; the paragraph on the
   product name had taken the first one's place.
-
 - The READMEs open with a 93-second overview video, with English or Traditional Chinese captions:
   the hub, Issues, the chat, a phone, the queue and the API. `scripts/capture-video.mjs` records it
   from the same demo servers as the screenshots, which `capture-docs.mjs` now starts from the shared
   `scripts/capture-common.mjs`.
+
+## v5.6.1
 
 ### Bug fixes
 

@@ -65,6 +65,9 @@ hub 和各個 Tendyard 透過你掌控的網路互連，例如你自己的 VPN�
 
 ## 先設定憑證與啟動 hub，再讓工作主機加入
 
+這一節設定監看。[架設 Tendyard](setup.zh-TW.md) 接著說明 issue 派工需要的 launcher、GitHub App、runner
+與 workflow，每一步後面都附上檢查方式。
+
 範例用三個虛構的名稱：hub 在 `hub.vpn`，Tendyard 在 `dev-1.vpn` 和 `dev-2.vpn`。請換成你主機的
 VPN 名稱或位址。
 

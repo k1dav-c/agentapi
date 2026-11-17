@@ -71,6 +71,9 @@ hub never has to be on the public internet.
 
 ## Set credentials, start the hub, then join the worker machines
 
+This section sets up monitoring. [Setting up Tendyard](setup.md) goes on to the launchers, the GitHub
+App, the runner and the workflow for issue dispatch, with a check after each step.
+
 The example uses three made-up names: the hub runs on `hub.vpn`, the Tendyard instances on `dev-1.vpn` and
 `dev-2.vpn`. Use your machines' VPN names or addresses instead.
 
