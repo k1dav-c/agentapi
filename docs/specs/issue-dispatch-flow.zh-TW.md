@@ -1,10 +1,21 @@
 # Issue 派工：目前的流程
 
+Issue 派工把一個 issue 的開發、review 與收尾串在同一個 job：hub 決定交給誰，launcher 在主機上執行，
+內網 runner 把 GitHub 事件送回 hub。
+
+1. **開工：**label、hub 或 API 觸發派工，launcher 建立 worktree 並啟動 agent。
+2. **修改：**review 與留言回到同一個 agent；換 agent 時沿用分支與 worktree。
+3. **收尾：**PR 關閉後停止 job，清理 worktree 與分支。
+
 > 對應 PR [k1dav-c/agentapi#81](https://github.com/k1dav-c/agentapi/pull/81)（`feat/issue-dispatch`）的階段 1～3，設計細節見 [issue-dispatch.zh-TW.md](issue-dispatch.zh-TW.md)。
 >
-> Issues 頁的截圖是 hub 的頁面配上固定的測試資料（三台主機、`acme/web`、`acme/api`、`acme/infra` 的 issue 與 job），見 [docs/screenshots/README.md](../screenshots/README.md)。`dispatch-chat.png` 與 `dispatch-github-connect.png` 來自本機的測試環境：真的 hub 與 launcher，agent 用 `native-demo` 假扮 Claude Code 和 Codex，GitHub 換成本機的 bare repo 加上假的 GitHub API，所以 repo 是 `acme/widget`。
+> Issues 頁的截圖使用真實 hub 與固定測試資料（三台主機，以及 `acme/web`、`acme/api`、`acme/infra` 的 issue 與 job）。`dispatch-chat.png` 使用加入 hub 的真實 server，以 `native-demo` 模擬 Claude Code，呈現 `acme/web#12` 的 review prompt；`dispatch-github-connect.png` 則呈現 hub 尚未連接 App 時的設定頁。各張截圖的來源見 [docs/screenshots/README.md](../screenshots/README.md)。
 
-## 1. 架構
+本文記錄階段 1～3 的流程與驗證進度，下方待辦保留當時的驗證狀態。目前的操作方式請見 [hub 使用指南](../hub.zh-TW.md)。
+
+<a id="1-架構"></a>
+
+## 1. hub 派工、launcher 執行，runner 傳回 GitHub 事件
 
 ```mermaid
 flowchart LR
@@ -24,8 +35,8 @@ flowchart LR
     end
     subgraph HOST["主機（每台一個）"]
       launcher["launcher<br/>agentapi host serve"]
-      job1["job：acme/widget#12<br/>worktree + AgentAPI + agent"]
-      job2["job：acme/api#7<br/>worktree + AgentAPI + agent"]
+      job1["job：acme/widget#12<br/>worktree + Tendyard + agent"]
+      job2["job：acme/api#7<br/>worktree + Tendyard + agent"]
     end
   end
 
@@ -51,7 +62,9 @@ flowchart LR
 
 GitHub 不需要連進內網：事件由 runner 主動去拉，GitHub App 的設定也只靠瀏覽器跳轉。issue 交給哪台主機、哪個 instance，只記在 hub 的 `dispatch.json`。App 的 private key 只在 hub，主機拿到的都是限一個 repo、一小時失效的 token。
 
-## 2. 開工：issue 加上 label
+<a id="2-開工issue-加上-label"></a>
+
+## 2. issue 加上 label 後，由 launcher 啟動專用 job
 
 ```mermaid
 sequenceDiagram
@@ -61,7 +74,7 @@ sequenceDiagram
   participant R as runner
   participant H as hub
   participant L as launcher
-  participant J as job（AgentAPI + agent）
+  participant J as job（Tendyard + agent）
 
   U->>GH: issue 加 label agent:claude
   GH-->>R: issues.labeled
@@ -98,7 +111,9 @@ New issue 會在 GitHub 開一個 issue，打開 Assign to 就直接交給 agent
 
 ![New issue](../screenshots/dispatch-new-issue.png)
 
-## 3. Review 來回
+<a id="3-review-來回"></a>
+
+## 3. Review 與留言會回到同一個 agent
 
 ```mermaid
 sequenceDiagram
@@ -133,7 +148,9 @@ sequenceDiagram
 
 ![Open chat](../screenshots/dispatch-chat.png)
 
-## 4. 結束：PR 關閉
+<a id="4-結束pr-關閉"></a>
+
+## 4. PR 關閉後停止 job 並清理分支
 
 ```mermaid
 sequenceDiagram
@@ -145,7 +162,7 @@ sequenceDiagram
   GH-->>R: pull_request.closed
   R->>H: POST /api/dispatch {stop}
   H->>L: DELETE /jobs/{key}
-  L->>L: 停 AgentAPI、移除 worktree 與本機分支
+  L->>L: 停實例、移除 worktree 與本機分支
   H->>GH: 刪除遠端分支 agent/issue-12
   H->>GH: PR 留言花費彙總（本輪每個 run 一列）
   Note over H: job 狀態 → done（保留 30 天）
@@ -155,7 +172,9 @@ sequenceDiagram
 
 ![Stop 確認](../screenshots/dispatch-confirm-stop.png)
 
-## 5. 換 agent
+<a id="5-換-agent"></a>
+
+## 5. 換 agent 時沿用同一個分支與 worktree
 
 在 issue 加上另一個 `agent:<type>` label，或在 Issues 的詳細資料按 Switch agent 選 agent（會先確認）。
 
@@ -178,7 +197,9 @@ sequenceDiagram
 
 ![Switch 確認](../screenshots/dispatch-confirm-switch.png)
 
-## 6. Token 怎麼給到 job
+<a id="6-token-怎麼給到-job"></a>
+
+## 6. job 經 launcher 向 hub 換取 repo token
 
 ```mermaid
 flowchart TB
@@ -206,7 +227,9 @@ flowchart TB
 
 ![Hub settings 的 GitHub 分頁](../screenshots/hub-settings-github.png)
 
-## 7. Job 狀態
+<a id="7-job-狀態"></a>
+
+## 7. Job 狀態跟隨派工與 agent 的執行結果
 
 ```mermaid
 stateDiagram-v2
@@ -227,11 +250,13 @@ stateDiagram-v2
   done --> working: 再開工（新的一輪）
 ```
 
-AgentAPI 退出後，launcher 依序等 5 秒、15 秒、45 秒、2 分鐘、5 分鐘再重啟；30 分鐘內重啟 5 次後又退出，就不再重啟，job 標為 failed，並附上 log 的位置（可複製）。Retry 用原本的 agent 重來，也可以按 Switch agent 換一個：
+Tendyard 退出後，launcher 依序等 5 秒、15 秒、45 秒、2 分鐘、5 分鐘再重啟；30 分鐘內重啟 5 次後又退出，就不再重啟，job 標為 failed，並附上 log 的位置（可複製）。Retry 用原本的 agent 重來，也可以按 Switch agent 換一個：
 
 ![失敗的 job](../screenshots/dispatch-failed.png)
 
-## 8. 你目前能怎麼用
+<a id="8-你目前能怎麼用"></a>
+
+## 8. 可從 label、hub 或 API 交辦 issue
 
 | 想做的事 | 在 GitHub | 在 hub |
 |---|---|---|
@@ -244,7 +269,9 @@ AgentAPI 退出後，launcher 依序等 5 秒、15 秒、45 秒、2 分鐘、5 �
 | 看花費 | PR 關閉時的花費彙總留言 | 卡片上的金額，詳細資料裡每次 run 的金額 |
 | 看哪些需要你 | — | ◎ 上的數字；清單上處理 issue 的 agent 標出 issue 與 PR |
 
-## 9. 還沒完成
+<a id="9-還沒完成"></a>
+
+## 9. 這些端對端驗證與部署工作仍列為待辦
 
 - [ ] 用真實的 GitHub 走一次：Connect GitHub、安裝 App、內網 runner、bot 身分開 PR。
 - [ ] 階段 4：Coder template 自動啟動 launcher，並修掉 template 的既有問題（Gemini、`--state-db`、instance token、binary 位置）。

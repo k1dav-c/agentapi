@@ -2,11 +2,15 @@
 
 English | [繁體中文](agents.zh-TW.md)
 
-This guide covers how AgentAPI runs Claude Code, Codex and Pi, from logging in to each agent's
-own details; [model providers](providers.md) have a guide of their own.
+Tendyard controls Claude Code, Codex and Pi through their structured protocols, so you can send
+work, answer requests and manage sessions from the chat or API.
 
-Native transport uses the agent's structured protocol to receive replies, tool
-calls, and usage, and to handle approvals, questions, and plans in the chat UI.
+- **Start and configure:** log in and choose the agent, permission mode, model and effort.
+- **Control a turn:** send, queue, steer or interrupt work, and answer approvals, questions and plans.
+- **Recover work:** hold the queue for usage limits, retry temporary errors and preserve conversations.
+- **Inspect history:** reopen sessions and estimate task and session costs from agent logs.
+
+Agent-specific details follow the shared controls; [model providers](providers.md) have a separate guide.
 
 **Running an agent**
 
@@ -16,11 +20,11 @@ agentapi server -- codex -a on-request
 agentapi server -- pi --provider openai-codex --model gpt-5.6-luna --thinking low
 ```
 
-- AgentAPI selects the adapter from the command name. Specify `--type` for
+- Tendyard selects the adapter from the command name. Specify `--type` for
   wrapper scripts.
 - For UI development, `agentapi server -- native-demo` runs a simulated agent;
   see the [development guide](../chat/README.md). With `--type claude`, `codex`
-  or `pi`, the demo poses as that agent, and AgentAPI reads that agent's logs
+  or `pi`, the demo poses as that agent, and Tendyard reads that agent's logs
   for its earlier sessions and subagents.
 
 **What to expect**
@@ -29,19 +33,19 @@ agentapi server -- pi --provider openai-codex --model gpt-5.6-luna --thinking lo
 - Approvals and questions appear as decision cards above the composer; see
   [request handling](#requests-approvals-questions-and-plans).
 - When the agent is stopped or restarted and doesn't exit within 3 seconds of
-  its input closing, AgentAPI signals its whole process group, which also stops
+  its input closing, Tendyard signals its whole process group, which also stops
   its MCP servers and child commands. Once the agent exits, however it exits,
   what it started and left running gets SIGTERM, then SIGKILL 2 seconds later.
 - An agent that exits on its own, or fails to start, is started again on its
   session after 2, 10 and 30 seconds. Each attempt shows in the chat as an
-  error, and the lifecycle is `restarting`. If all three fail, AgentAPI keeps
+  error, and the lifecycle is `restarting`. If all three fail, Tendyard keeps
   serving with the lifecycle `failed` until you restart the agent (Explorer →
   Restart or `DELETE /messages`, which starts a new session; the Session
   Explorer reopens the old one). Once an agent has run 5 minutes, the count
   starts over. One that lost its login before it exited waits for the login
-  instead; see [Logging in](#logging-in).
+  instead; see [Missing logins pause work until the agent can sign in](#logging-in).
 
-AgentAPI removes environment markers and secrets inherited from a parent agent
+Tendyard removes environment markers and secrets inherited from a parent agent
 session while preserving login and provider configuration. See
 [child process environment](architecture.md#child-process-environment) for
 the complete list.
@@ -81,17 +85,19 @@ When the agent is only waiting for a request response, `status` is `stable`.
 The agent runs in its own process group. Shutdown first interrupts a running
 turn and waits up to 3 seconds for it to end, so the session log doesn't end in
 a tool call without result. Then it closes the agent's input so it can exit; if
-it is still running 3 seconds later, AgentAPI sends SIGTERM to the group, then
+it is still running 3 seconds later, Tendyard sends SIGTERM to the group, then
 SIGKILL 2 seconds after that. The group outlives the agent while a process in
-it runs, so AgentAPI signals the group after the agent exited too, on its own or in a
+it runs, so Tendyard signals the group after the agent exited too, on its own or in a
 restart: SIGTERM, then SIGKILL 2 seconds later.
 
 </details>
 
-## Logging in
+<a id="logging-in"></a>
 
-AgentAPI uses the agent CLI's stored login. Log in as the same operating-system user that runs
-AgentAPI. You can use the chat's [terminal](#terminal) or any terminal on the same machine. The login card's **Run in terminal** button and the `/login` command both run the login
+## Missing logins pause work until the agent can sign in
+
+Tendyard uses the agent CLI's stored login. Log in as the same operating-system user that runs
+Tendyard. You can use the chat's [terminal](#terminal) or any terminal on the same machine. The login card's **Run in terminal** button and the `/login` command both run the login
 command in the chat terminal.
 
 ![A login card: the command to run, where to run it, Run in terminal and Check again](screenshots/login-card.png)
@@ -102,16 +108,16 @@ command in the chat terminal.
   Check the login with `claude auth status`.
 - Codex: `codex login --device-auth` signs in with a ChatGPT plan from any
   device: open the link it shows and enter its one-time code. The login card
-  and `/login` run it because AgentAPI usually runs on a server without a
+  and `/login` run it because Tendyard usually runs on a server without a
   browser: `codex login`'s browser sign-in redirects the browser to
   `localhost:1455` on the machine that runs Codex, which a browser elsewhere
   can't reach. `codex login` still works with a browser on the same machine,
   and `printenv OPENAI_API_KEY | codex login --with-api-key` uses an API key.
   Check the login with `codex login status`.
 - Pi: run `/login` inside `pi`, or set a provider key such as
-  `ANTHROPIC_API_KEY` in AgentAPI's environment.
+  `ANTHROPIC_API_KEY` in Tendyard's environment.
 
-AgentAPI checks authentication when starting the agent:
+Tendyard checks authentication when starting the agent:
 
 - Claude Code uses `claude auth status --json`. API keys,
   `CLAUDE_CODE_OAUTH_TOKEN`, `apiKeyHelper`, Bedrock, and Vertex count as
@@ -121,28 +127,69 @@ AgentAPI checks authentication when starting the agent:
 - Pi checks its state: no selected model and no available models indicate a
   missing login.
 
-If authentication is missing, AgentAPI keeps running and queues messages. `GET /status` and
+If authentication is missing, Tendyard keeps running and queues messages. `GET /status` and
 `status_change` report `login_required`, including the agent, problem, login command, help, host,
 and operating-system user. The chat shows these details in a card above the composer, with a button
 to copy the command.
 
-AgentAPI retries startup every 5 seconds and detects a completed login automatically. **Check
+Tendyard retries startup every 5 seconds and detects a completed login automatically. **Check
 again** (`POST /login/retry`) retries immediately; if a startup check is already running, that check
 is reused. Startup warnings appear once rather than on every retry. If the check itself fails, for
-example with an older CLI or a wrapper, AgentAPI starts the agent as before.
+example with an older CLI or a wrapper, Tendyard starts the agent as before.
 
 Authentication can also expire during a session. A turn that fails with a login error reports
 `login_required` in the same way. Recognized errors include `Not logged in`, HTTP 401,
 `Invalid API key`, an unusable refresh token, Pi's `No API key found`, and
 `Authentication failed for "<provider>"` after a subscription login expires.
 
-After logging in, select **Check again**. AgentAPI restarts the agent on the same session and
+After logging in, select **Check again**. Tendyard restarts the agent on the same session and
 preserves the conversation. A completed model turn also clears the login error; interrupted turns
 and messages handled by the agent itself do not. An agent that exits after it reported a lost login
 isn't restarted as after a crash: it waits for the login like one that finds none at startup, and a
 restart that finds no login does too.
 
-## Requests: approvals, questions and plans
+<a id="settings-permission-mode-model-and-effort"></a>
+
+## Change permissions, model and effort within the session
+
+You can change the agent's permission mode, model, and reasoning effort while it runs.
+`GET /settings` returns the current settings and available choices, including models and their
+supported effort levels.
+
+`PUT /settings` updates only the fields in the request body, such as `{"permission_mode": "ask"}` or
+`{"model": "sonnet", "effort": "high"}`. Unsupported values return 400. `GET /status` and
+`status_change` also include the current settings.
+
+The permission modes are **bypass** (tools run without asking; the default), **auto** (the agent's
+own review decides what may run), **ask** (tool calls that need approval come as requests) and
+**plan** (the agent proposes a plan, which comes as a plan request, before it changes anything):
+
+| Mode | Claude Code | Codex | Pi |
+| --- | --- | --- | --- |
+| bypass | `bypassPermissions` | no approvals, no sandbox | how Pi always runs |
+| auto | `auto` | workspace sandbox, escalations decided by Codex's auto review | — |
+| ask | `default` | `untrusted`: asks for every command it doesn't trust | — |
+| plan | `plan` | plan collaboration mode | — |
+
+If the agent uses a policy outside these four modes, such as Claude Code's `acceptEdits` after plan
+approval or a custom Codex command-line policy, the UI does not label it as one of these modes.
+Claude Code and Pi apply changes immediately. Codex applies them on the next turn, when app-server
+accepts settings. Tendyard reapplies your choices after an agent restart or a new login; with
+`--state-db`, it also restores them after a Tendyard instance restart. The UI follows changes the agent
+makes itself, such as switching modes after plan approval.
+
+In the chat, the composer's toolbar has a menu for the mode and one for the model and effort (on a
+phone in a row of their own above the buttons).
+
+![The permission mode menu: Bypass, Auto, Ask and Plan](screenshots/permission-mode.png)
+
+![The model menu with three models and the reasoning efforts of the chosen one](screenshots/model-settings.png)
+
+Swift, Deep, and Plain are demonstration models supplied by `native-demo`.
+
+<a id="requests-approvals-questions-and-plans"></a>
+
+## Requests let you approve tools, answer questions and review plans
 
 Tool approvals, questions (Claude's `AskUserQuestion`, Codex's `request_user_input`, dialogs from
 Pi extensions) and plan approvals (Claude's `ExitPlanMode`) arrive as requests:
@@ -198,8 +245,9 @@ needs you.
 
 ![An approval card for a command: Allow, Always allow Bash in this session, and Deny with a note](screenshots/native-approval.png)
 
-An approval shows what would run and why. **Allow** runs it once, **Always allow** stops asking for
-the rest of the session, and **Deny** refuses it, with an optional note on what to do instead.
+An approval shows what would run and why. **Allow** runs it once. **Always allow** applies the
+suggested permission rule for the rest of the session. **Deny** refuses it, with an optional note
+on what to do instead.
 
 ![A plan card with the plan in Markdown, Approve the plan, Keep planning and a feedback field](screenshots/native-plan.png)
 
@@ -207,7 +255,9 @@ Plans stay above the composer while the agent waits. Read the plan, approve it, 
 and select **Keep planning** to ask for changes. The plan shown here is generated by `native-demo`;
 approving it does not change files.
 
-## Steer, interrupt and the queue
+<a id="steer-interrupt-and-the-queue"></a>
+
+## Queue, steer or interrupt to control when a message reaches the agent
 
 - `POST /message` takes `dispatch_mode`: `queue` (the default: send the
   message once the agent is idle), `steer` (add it to the
@@ -222,7 +272,7 @@ approving it does not change files.
   [Message queue](api.md#message-queue) for the queue's endpoints.
 
 `GET /status` reports the supported `capabilities`: `steer`, `interrupt`, `resume` (the session
-can be resumed when AgentAPI starts again, see [Persistent sessions](#persistent-sessions)),
+can be resumed when Tendyard starts again, see [A state database preserves the conversation across restarts](#persistent-sessions)),
 `settings` (see [Settings](#settings-permission-mode-model-and-effort)), `compact` (see
 [Slash commands](#slash-commands-and-compaction)) and `images`. With `images`, image attachments
 (`@"<path>"` references to PNG, JPEG, GIF or WebP files up to 10 MB) go to the agent as images as
@@ -235,44 +285,9 @@ In the chat, while the agent works, the send button's menu adds **Steer** (⌘/C
 
 ![A long turn with two queued tasks and the send menu open: Queue, Steer, and Interrupt & send](screenshots/queue-steer.png)
 
-## Settings: permission mode, model and effort
+<a id="context-and-rate-limits"></a>
 
-You can change the agent's permission mode, model, and reasoning effort while it runs.
-`GET /settings` returns the current settings and available choices, including models and their
-supported effort levels.
-
-`PUT /settings` updates only the fields in the request body, such as `{"permission_mode": "ask"}` or
-`{"model": "sonnet", "effort": "high"}`. Unsupported values return 400. `GET /status` and
-`status_change` also include the current settings.
-
-The permission modes are **bypass** (tools run without asking; the default), **auto** (the agent's
-own review decides what may run), **ask** (tool calls that need approval come as requests) and
-**plan** (the agent proposes a plan, which comes as a plan request, before it changes anything):
-
-| Mode | Claude Code | Codex | Pi |
-| --- | --- | --- | --- |
-| bypass | `bypassPermissions` | no approvals, no sandbox | how Pi always runs |
-| auto | `auto` | workspace sandbox, escalations decided by Codex's auto review | — |
-| ask | `default` | `untrusted`: asks for every command it doesn't trust | — |
-| plan | `plan` | plan collaboration mode | — |
-
-If the agent uses a policy outside these four modes, such as Claude Code's `acceptEdits` after plan
-approval or a custom Codex command-line policy, the UI does not label it as one of these modes.
-Claude Code and Pi apply changes immediately. Codex applies them on the next turn, when app-server
-accepts settings. AgentAPI reapplies your choices after an agent restart or a new login; with
-`--state-db`, it also restores them after an AgentAPI restart. The UI follows changes the agent
-makes itself, such as switching modes after plan approval.
-
-In the chat, the composer's toolbar has a menu for the mode and one for the model and effort (on a
-phone in a row of their own above the buttons).
-
-![The permission mode menu: Bypass, Auto, Ask and Plan](screenshots/permission-mode.png)
-
-![The model menu with three models and the reasoning efforts of the chosen one](screenshots/model-settings.png)
-
-Swift, Deep, and Plain are demonstration models supplied by `native-demo`.
-
-## Context and rate limits
+## Usage reports show context capacity and account limits
 
 `GET /status` and `status_change` report the agent's `usage`: how full its context window is after
 the last turn (`context`: `used` and `size` in tokens) and the account's rate limits (`rate_limits`:
@@ -294,99 +309,9 @@ turn's cache expires too.
 
 ![The context popover: the tokens in the context window, and the 5-hour and weekly usage limits](screenshots/context-usage.png)
 
-## Usage limits
+<a id="slash-commands-and-compaction"></a>
 
-When the account reaches a usage limit, the agent stops its turn: Claude Code says "You've hit your
-limit", Codex reports `usageLimitExceeded`, Pi the provider's quota error. `GET /status` and
-`status_change` then report `limit_stop`: the agent's `message`, when it stopped and, if the agent
-says, when the limit resets (`resets_at`, else the reset of the limit `rate_limits` reports as
-reached). Queued messages wait until then instead of failing one after another. A message you send
-yourself goes out at once, ahead of them, and ends the stop.
-
-- `POST /limit/continue` with `{"at": "now"}` sends a message that asks the
-  agent to go on with the task; `{"at": "reset"}` schedules it for a minute
-  after the reset (409 without a reset time). The queued messages go after it.
-- `DELETE /limit/continue` cancels a scheduled continuation; the queue still
-  waits for the reset.
-- `DELETE /limit` forgets the stop, so the queued messages go out as soon as
-  the agent can take them.
-- `--auto-continue` schedules the continuation for every stop with a reset
-  time. A continuation the limit stops again is scheduled again.
-
-The stop is kept with `--state-db`, so a scheduled continuation still goes out after AgentAPI
-restarts. In the chat, the stop is a card above the composer with the reset time, **Continue at
-reset**, **Continue now**, and **Send queued tasks**, the queue says it waits for the limit, and the
-header and tab title say "Needs you".
-
-![A task stopped on the 5-hour limit, marked Limit reached: the card with the reset time, and a task held in the queue](screenshots/limit-card.png)
-
-## Transient API errors
-
-The agents retry a failed API request a few times themselves. When they give up on an error that
-may pass, the turn fails: Claude Code says "API Error: 502 Bad Gateway. This is a server-side
-issue, usually temporary", Codex reports `serverOverloaded` or a failed connection, Pi ends its
-retries without success. AgentAPI then waits and tries the turn again instead of moving on to the
-next queued message. It counts as transient:
-
-- an HTTP status of 500 to 599 or 429 (`api_error_status` from Claude Code, `httpStatusCode` from
-  Codex, or the status in the error's text);
-- Codex's `serverOverloaded`, `internalServerError` and `rateLimitExceeded`, and a connection or
-  stream that failed without a status;
-- Pi's retries that ended without success;
-- an error worded as one: bad gateway, service unavailable, overloaded, rate limit, timed out,
-  connection error, and the like.
-
-A usage limit (see [Usage limits](#usage-limits)) and a missing login come first: a 429 that says
-"You've hit your limit" is a limit stop. A 400 or another client error isn't tried again.
-
-`GET /status` and `status_change` report `retry_wait`: the agent's `message`, the `api_status`
-when known, when the turn failed, which retry comes next (`attempt` of `attempts`) and `retry_at`.
-The failure shows as a warning ("… AgentAPI tries again in 30s (1 of 15)."), and the queued messages
-wait. At `retry_at` AgentAPI sends "Continue from where you left off.", so the agent goes on without
-getting your message twice. A retry that fails the same way waits the next delay; after the last, the
-failure is an error and the queue goes on. A turn that works, or a message you send yourself,
-starts the count again.
-
-- `POST /retry` tries again now.
-- `DELETE /retry` cancels the retry, so the queued messages go out.
-- `--retry-delays` sets the waits, one per retry, `5m*12` for 5 minutes twelve times: `30s,1m,2m,5m*12`
-  by default, 15 retries in about an hour; `off` turns retries off.
-
-The wait is kept with `--state-db`, so the retry still goes out after AgentAPI restarts. The failed
-turn's [task](api.md#tasks) ends `failed`; the retry is a task of its own. The summary's `attention` stays
-`none`, and a hub shows the agent as working. In the chat, a card above the composer counts down to
-the retry, with **Retry now** and **Cancel**.
-
-![A task the API's gateway failed with a 502: the card counting down to the first of 15 retries, and a task held in the queue](screenshots/retry-card.png)
-
-## Terminal
-
-AgentAPI provides a shell in the agent's working directory for logins, git commands and
-other work. It supports colors, cursor movement and full-screen programs, and fits the window on
-desktops and phones. Everyone shares the same shell, like a tmux window. It keeps running with no
-viewers; if it exits, opening the terminal starts a new one. Its environment matches the agent's,
-with AgentAPI's own variables removed.
-
-Web links are clickable even when wrapped across lines. The last link printed by a command, such
-as a login URL, also appears above the terminal for opening or copying.
-
-The key bar supplies arrows, Enter, Esc, Tab, Shift+Tab, Ctrl+C, Ctrl+R, Ctrl+A, Ctrl+E, Ctrl+U,
-Ctrl+W, Home, End, Page up, Page down, / - | ~, Alt+↑ and Ctrl+L. Ctrl+D and Ctrl+Z require a second
-press. The Ctrl and Alt buttons hold the modifier for the next key.
-
-- `GET /terminal` streams its output as server-sent events (`output` events
-  with base64 data, the first one the recent output to replay; `exit` when the
-  shell exits) and starts the shell if it doesn't run.
-- `POST /terminal/input` (`{"data": "..."}`) types into it, one request at a
-  time, and `POST /terminal/resize` (`{"cols": 120, "rows": 40}`) sizes it.
-  Input a busy program doesn't read gets 503 after 10 seconds; part of it may
-  have been typed.
-- It is on by default; `--terminal=false` turns it off. It has the same protection as the rest of
-  the API, so use `--api-token` when others can reach the server.
-
-![The shell terminal: git status and git log in the agent's working directory, and the key bar](screenshots/terminal.png)
-
-## Slash commands and compaction
+## Slash commands change settings and compact context from the chat
 
 The agents don't run their interactive terminal UI. The chat handles these slash commands for
 them:
@@ -410,14 +335,114 @@ sends it.
 
 ![The slash commands listed after typing a slash in the composer](screenshots/slash-commands.png)
 
-## Persistent sessions
+<a id="terminal"></a>
+
+## A shared shell handles logins and commands outside the agent
+
+Tendyard provides a shell in the agent's working directory for logins, git commands and
+other work. It supports colors, cursor movement and full-screen programs, and fits the window on
+desktops and phones. Everyone shares the same shell, like a tmux window. It keeps running with no
+viewers; if it exits, opening the terminal starts a new one. Its environment matches the agent's,
+with Tendyard's own variables removed.
+
+Web links are clickable even when wrapped across lines. The last link printed by a command, such
+as a login URL, also appears above the terminal for opening or copying.
+
+The key bar supplies arrows, Enter, Esc, Tab, Shift+Tab, Ctrl+C, Ctrl+R, Ctrl+A, Ctrl+E, Ctrl+U,
+Ctrl+W, Home, End, Page up, Page down, / - | ~, Alt+↑ and Ctrl+L. Ctrl+D and Ctrl+Z require a second
+press. The Ctrl and Alt buttons hold the modifier for the next key.
+
+- `GET /terminal` streams its output as server-sent events (`output` events
+  with base64 data, the first one the recent output to replay; `exit` when the
+  shell exits) and starts the shell if it doesn't run.
+- `POST /terminal/input` (`{"data": "..."}`) types into it, one request at a
+  time, and `POST /terminal/resize` (`{"cols": 120, "rows": 40}`) sizes it.
+  Input a busy program doesn't read gets 503 after 10 seconds; part of it may
+  have been typed.
+- It is on by default; `--terminal=false` turns it off. It has the same protection as the rest of
+  the API, so use `--api-token` when others can reach the server.
+
+![The shell terminal: git status and git log in the agent's working directory, and the key bar](screenshots/terminal.png)
+
+<a id="usage-limits"></a>
+
+## Usage limits hold the queue until work can continue
+
+When the account reaches a usage limit, the agent stops its turn: Claude Code says "You've hit your
+limit", Codex reports `usageLimitExceeded`, Pi the provider's quota error. `GET /status` and
+`status_change` then report `limit_stop`: the agent's `message`, when it stopped and, if the agent
+says, when the limit resets (`resets_at`, else the reset of the limit `rate_limits` reports as
+reached). Queued messages wait until then instead of failing one after another. A message you send
+yourself goes out at once, ahead of them, and ends the stop.
+
+- `POST /limit/continue` with `{"at": "now"}` sends a message that asks the
+  agent to go on with the task; `{"at": "reset"}` schedules it for a minute
+  after the reset (409 without a reset time). The queued messages go after it.
+- `DELETE /limit/continue` cancels a scheduled continuation; the queue still
+  waits for the reset.
+- `DELETE /limit` forgets the stop, so the queued messages go out as soon as
+  the agent can take them.
+- `--auto-continue` schedules the continuation for every stop with a reset
+  time. A continuation the limit stops again is scheduled again.
+
+The stop is kept with `--state-db`, so a scheduled continuation still goes out after Tendyard
+restarts. In the chat, the stop is a card above the composer with the reset time, **Continue at
+reset**, **Continue now**, and **Send queued tasks**, the queue says it waits for the limit, and the
+header and tab title say "Needs you".
+
+![A task stopped on the 5-hour limit, marked Limit reached: the card with the reset time, and a task held in the queue](screenshots/limit-card.png)
+
+<a id="transient-api-errors"></a>
+
+## Temporary API failures retry before the queue moves on
+
+The agents retry a failed API request a few times themselves. When they give up on an error that
+may pass, the turn fails: Claude Code says "API Error: 502 Bad Gateway. This is a server-side
+issue, usually temporary", Codex reports `serverOverloaded` or a failed connection, Pi ends its
+retries without success. Tendyard then waits and tries the turn again instead of moving on to the
+next queued message. It counts as transient:
+
+- an HTTP status of 500 to 599 or 429 (`api_error_status` from Claude Code, `httpStatusCode` from
+  Codex, or the status in the error's text);
+- Codex's `serverOverloaded`, `internalServerError` and `rateLimitExceeded`, and a connection or
+  stream that failed without a status;
+- Pi's retries that ended without success;
+- an error worded as one: bad gateway, service unavailable, overloaded, rate limit, timed out,
+  connection error, and the like.
+
+A usage limit (see [Usage limits hold the queue until work can continue](#usage-limits)) and a missing login come first: a 429 that says
+"You've hit your limit" is a limit stop. A 400 or another client error isn't tried again.
+
+`GET /status` and `status_change` report `retry_wait`: the agent's `message`, the `api_status`
+when known, when the turn failed, which retry comes next (`attempt` of `attempts`) and `retry_at`.
+The failure shows as a warning ("… AgentAPI tries again in 30s (1 of 15)."), and the queued messages
+wait. At `retry_at` Tendyard sends "Continue from where you left off.", so the agent goes on without
+getting your message twice. A retry that fails the same way waits the next delay; after the last, the
+failure is an error and the queue goes on. A turn that works, or a message you send yourself,
+starts the count again.
+
+- `POST /retry` tries again now.
+- `DELETE /retry` cancels the retry, so the queued messages go out.
+- `--retry-delays` sets the waits, one per retry, `5m*12` for 5 minutes twelve times: `30s,1m,2m,5m*12`
+  by default, 15 retries in about an hour; `off` turns retries off.
+
+The wait is kept with `--state-db`, so the retry still goes out after Tendyard restarts. The failed
+turn's [task](api.md#tasks) ends `failed`; the retry is a task of its own. The summary's `attention` stays
+`none`, and a hub shows the agent as working. In the chat, a card above the composer counts down to
+the retry, with **Retry now** and **Cancel**.
+
+![A task the API's gateway failed with a 502: the card counting down to the first of 15 retries, and a task held in the queue](screenshots/retry-card.png)
+
+<a id="persistent-sessions"></a>
+
+## A state database preserves the conversation across restarts
 
 `--state-db <file>` keeps the conversation in a SQLite file: messages, rich messages (tool calls,
 thinking), the timeline, requests and the queue, plus the agent's own session ID and the webhook
-settings changed through the API. When AgentAPI starts again with the same file, the chat shows the
+settings changed through the API. When Tendyard starts again with the same file, the chat shows the
 conversation as it was and queued messages are still queued. The agent resumes its session, so it
 remembers the conversation too. After a clean shutdown, browser caches
-stay valid because the conversation keeps its epoch. Without `--state-db`, every start of AgentAPI
+stay valid because the conversation keeps its epoch. Without `--state-db`, every start of Tendyard
 is a new conversation, except a [restart in place](cli.md#agentapi-restart), which resumes the agent's
 session.
 
@@ -426,8 +451,8 @@ agentapi server --state-db ~/.agentapi/myproject.db -- claude
 ```
 
 `{port}` and `{hostname}` in the path are filled in, so one line in the
-[config file](cli.md#flags) gives every AgentAPI of the user a file of its own, such as the Claude Code
-one on 3286 and the Codex one on 3285 that a Coder workspace starts:
+[config file](cli.md#flags) gives each instance its own database file. For example, a Coder workspace
+can start Claude Code on 3286 and Codex on 3285 with separate databases:
 
 ```yaml
 state-db: ~/.agentapi/state/{port}.db
@@ -437,23 +462,24 @@ state-db: ~/.agentapi/state/{port}.db
   the database, so a `state-db` there without `{port}` is ignored with a
   warning rather than keeping the others from starting. `--state-db` and
   `AGENTAPI_STATE_DB` still set one.
-- Requests that were open when AgentAPI stopped are marked expired: the agent
+- Requests that were open when Tendyard stopped are marked expired: the agent
   that asked is gone.
-- The server holds the tool calls and timeline of the latest 100 tasks in memory and reads earlier
-  ones from the file when a client asks, so a conversation of months starts about as fast as a new
-  one, and its memory stops growing with it ([Long conversations](api.md#long-conversations)).
+- The server holds the rich messages (including tool calls) and timeline of the latest 100 tasks
+  in memory and reads earlier ones from the file on demand. Startup doesn't load the whole history.
+  Plain messages and task records still stay in memory and grow with the conversation
+  ([Long conversations](api.md#long-conversations)).
 - Uploads are kept next to the file (`<file>.uploads`), because messages refer
   to them by path. One that nothing in the conversation (or the queue) refers
   to is removed once it is 7 days old, which leaves time for a draft's
   attachments; this is checked on start, hourly and after a restart.
-- A file belongs to one agent type and working directory; AgentAPI refuses to
+- A file belongs to one agent type and working directory; Tendyard refuses to
   start with another one's file. A file AgentAPI 2 wrote for a PTY agent
   opens: the agent starts a new session below its conversation, which goes
-  on natively. The file is locked while AgentAPI runs,
-  so a second AgentAPI (or `sqlite3`) can't open it.
+  on natively. The file is locked while Tendyard runs,
+  so a second Tendyard (or `sqlite3`) can't open it.
 - A new file is created readable and writable by its owner only (0600), and missing
   directories are created (0700).
-- An older AgentAPI keeps using a file a newer one wrote, unless the newer one
+- An older Tendyard keeps using a file a newer one wrote, unless the newer one
   changed the file in a way the older can't write: then the older refuses to
   start and names the version it needs. Releases after 1.9.0 check this;
   1.9.0 and earlier refuse any file whose schema is newer than theirs (the
@@ -467,7 +493,7 @@ state-db: ~/.agentapi/state/{port}.db
   reported as an error.
 - A restored conversation doesn't get `--initial-prompt` again.
 - Webhook settings changed with `PUT /webhook` or in the Explorer apply after
-  a restart, unless AgentAPI starts with other webhook flags.
+  a restart, unless Tendyard starts with other webhook flags.
 - The time a client last showed the conversation (`POST /tasks/seen`) is
   kept, so a task that ended unseen is still [unread](api.md#watching-many-instances)
   after a restart. A database written before 1.2 treats its tasks as seen.
@@ -479,13 +505,15 @@ state-db: ~/.agentapi/state/{port}.db
   3.16 once with `--state-file`.
 - [`agentapi restart`](cli.md#agentapi-restart) (SIGUSR2) and
   `agentapi update --restart` keep the conversation, and the agent's
-  session, of an AgentAPI with `--state-db`. Without it they keep the
+  session, of a Tendyard instance with `--state-db`. Without it they keep the
   agent's session, and the conversation is read back from its log; the
   queue, open requests and chosen settings start anew.
 
-## Earlier sessions
+<a id="earlier-sessions"></a>
 
-AgentAPI reads Claude Code, Codex and Pi session logs to list and open earlier sessions in the
+## Reopen or fork an earlier session from the agent logs
+
+Tendyard reads Claude Code, Codex and Pi session logs to list and open earlier sessions in the
 working directory. This works without `--state-db`:
 
 - `GET /sessions` lists them, the latest first, with the one the agent has
@@ -496,8 +524,8 @@ working directory. This works without `--state-db`:
   session directory (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
   `PI_CODING_AGENT_DIR`, `PI_CODING_AGENT_SESSION_DIR` and a `--session-dir`
   passed to Pi are honored). A session belongs to the directory its log
-  records, even when AgentAPI runs in it through a symlink. Claude Code gives
-  some directories the same name (`/w/a_b` and `/w/a-b`); AgentAPI keeps their
+  records, even when Tendyard runs in it through a symlink. Claude Code gives
+  some directories the same name (`/w/a_b` and `/w/a-b`); Tendyard keeps their
   sessions apart.
 - `POST /sessions/{id}/resume` restarts the agent on that session, and
   replaces the conversation with the session's, read from its log. With
@@ -514,9 +542,11 @@ ask for a second click.
 
 ![The Explorer's Session tab: what the sessions cost today, in 7 and 30 days and in all, and Claude Code's sessions in the directory with Open and Start a copy](screenshots/explorer-sessions.png)
 
-## Session costs
+<a id="session-costs"></a>
 
-AgentAPI reads model calls from the agent's session logs and prices their tokens in USD at the
+## Session logs provide estimated costs for tasks and sessions
+
+Tendyard reads model calls from the agent's session logs and prices their tokens in USD at the
 providers' list prices. This is an API-equivalent cost: Claude and ChatGPT subscriptions don't
 charge per token, so it estimates what the same work would cost with an API key.
 
@@ -524,7 +554,7 @@ charge per token, so it estimates what the same work would cost with an API key.
   priced as Anthropic's 5-minute or one-hour cache. Tokens Claude Code counts in its own total but
   doesn't log call by call, such as compacting the context, are added from its cost records as
   unitemized calls, priced like the others. Where Claude Code's own cost of the same tokens differs
-  (its prices aren't these), the costs stay AgentAPI's and the server logs a warning once per model.
+  (its prices aren't these), the costs stay Tendyard's and the server logs a warning once per model.
 - Codex: each turn's token counts, its subagents' included; input read from the cache is priced as a
   cache read, and the rest as input.
 - Pi: the cost Pi reports for each call.
@@ -573,7 +603,7 @@ them cost today, in the last 7 and 30 days and in all, by your time zone.
 
 ## Claude Code
 
-AgentAPI runs `claude -p` headless with stream-json on stdin and stdout. Tool calls carry their
+Tendyard runs `claude -p` headless with stream-json on stdin and stdout. Tool calls carry their
 input, result, status and images, and each assistant message has its model, stop reason and token
 usage.
 
@@ -592,7 +622,7 @@ from its initialize response, and the model and effort it runs with from `get_se
   revise the plan and ask again.
 
 Claude Code supports `steer` (a steered message joins the running turn at Claude's next step),
-`interrupt` (if Claude Code doesn't end the interrupted turn within 10 s, AgentAPI ends it),
+`interrupt` (if Claude Code doesn't end the interrupted turn within 10 s, Tendyard ends it),
 `resume` and `images`. The session name is the title Claude Code generates after the first prompt;
 after `/clear` the new session is titled too, and it is the one `--state-db` resumes. A turn ends
 when Claude Code reports it is idle, so a background subagent and the turn it wakes up when it
@@ -601,7 +631,7 @@ conversation, as in the session log, and its tool call shows as running until it
 
 Command line and environment:
 
-- AgentAPI adds `-p --output-format stream-json --input-format stream-json
+- Tendyard adds `-p --output-format stream-json --input-format stream-json
   --verbose --include-partial-messages --replay-user-messages
   --permission-prompt-tool stdio`, and `--session-id` for a new session or
   `--resume` for a resumed one.
@@ -610,10 +640,10 @@ Command line and environment:
   (ExitPlanMode) still come as requests, and approving a plan offers to
   bypass permissions. Pass `--permission-mode default` (or `acceptEdits`,
   `plan`, …) to start in another mode, or switch it while Claude Code runs
-  (see [Settings](#settings-permission-mode-model-and-effort)). AgentAPI also
+  (see [Settings](#settings-permission-mode-model-and-effort)). Tendyard also
   adds `--allow-dangerously-skip-permissions`, so a session can switch to
   bypass later. Claude Code refuses `bypassPermissions` as root outside a
-  sandbox. When AgentAPI runs as root, it adds `--permission-mode default`
+  sandbox. When Tendyard runs as root, it adds `--permission-mode default`
   instead, leaves out `--allow-dangerously-skip-permissions` and logs a
   warning. Set `IS_SANDBOX=1` in a sandbox, or choose a mode yourself
   (`--allow-dangerously-skip-permissions` alone still makes Claude Code exit
@@ -621,7 +651,7 @@ Command line and environment:
   (without it thinking is empty). Your `--permission-mode`,
   `--dangerously-skip-permissions`, `--thinking`, `--max-thinking-tokens` or
   `--thinking-display` wins.
-- Flags that conflict with the protocol or the session AgentAPI manages are
+- Flags that conflict with the protocol or the session Tendyard manages are
   rejected at startup: `-p`/`--print`, `--output-format`, `--input-format`,
   `-r`/`--resume`, `-c`/`--continue`, `--session-id`, `--fork-session`,
   `--from-pr`, `--teleport`, `--permission-prompt-tool`,
@@ -633,7 +663,7 @@ Command line and environment:
   Everything else (`--model`, `--allowedTools`, `--mcp-config`,
   `--append-system-prompt`, ...) is passed through.
 - Besides removing a parent agent session's variables (see
-  [Child process environment](architecture.md#child-process-environment)), AgentAPI sets
+  [Child process environment](architecture.md#child-process-environment)), Tendyard sets
   `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1` and
   `CLAUDE_CODE_ENTRYPOINT=sdk-cli`.
 
@@ -644,7 +674,7 @@ exits or restarts can't be answered anymore. Slash commands that need the intera
 
 ## Codex
 
-AgentAPI starts `codex app-server` and starts or resumes a thread. Messages, rich messages and the
+Tendyard starts `codex app-server` and starts or resumes a thread. Messages, rich messages and the
 timeline have the same shape the session-log parser produces, so the chat shows Codex's replies,
 reasoning summaries, commands (the command itself, not the `bash -lc` wrapper), file edits, MCP tool
 calls, plan updates and token usage as they stream. Every turn asks for detailed reasoning summaries
@@ -681,8 +711,8 @@ Codex supports `steer`, `interrupt`, `resume` and `images`. Command, file-edit a
 approvals, permission requests, MCP form elicitations and `request_user_input` questions arrive as
 requests. Codex asks those questions in the plan mode; with codex-cli 0.160,
 `--enable default_mode_request_user_input` lets it ask them in the default mode too. The plan mode
-is Codex's plan collaboration mode, an experimental part of app-server's API that AgentAPI opts
-into. Codex ends its turn with a plan, and AgentAPI asks "Implement this plan?" as the Codex TUI
+is Codex's plan collaboration mode, an experimental part of app-server's API that instance opts
+into. Codex ends its turn with a plan, and Tendyard asks "Implement this plan?" as the Codex TUI
 does. The Yes options (`implement_bypass`, `implement_auto` and `implement_ask`, the mode before
 the plan first) leave the plan mode for that permission mode, and Codex implements the plan in the
 same turn. No (`keep_planning`) with feedback sends the feedback back to Codex, which keeps
@@ -690,7 +720,7 @@ planning; No alone ends the turn.
 
 The other requests' option IDs are Codex's own decisions (`accept`, `acceptForSession`,
 `acceptWithExecpolicyAmendment`, `decline`, `cancel`, …). Nothing is approved automatically, and
-requests AgentAPI can't show are declined. A command approval shows the command that runs, without
+requests Tendyard can't show are declined. A command approval shows the command that runs, without
 the shell wrapper; Codex's reading of it (files it reads, searches) is in the detail. Requests still
 open when a turn ends are declined (MCP elicitations cancelled), so neither Codex nor an MCP server
 keeps waiting. A steered message joins the running turn at Codex's next model request (the current
@@ -699,7 +729,7 @@ turn within milliseconds, and tool calls it cut short show as failed.
 
 The session reference is Codex's thread ID. Resuming it continues the thread with its context. A
 turn that was running when the process died comes back as interrupted, approvals that were pending
-are gone, and Codex's earlier turns are not loaded into AgentAPI's conversation (the chat shows them
+are gone, and Codex's earlier turns are not loaded into Tendyard's conversation (the chat shows them
 only from the `--state-db` file). A thread that can't be resumed is replaced by a new one, with a
 warning. Codex doesn't name threads itself; a name set elsewhere (`thread/name/updated`) becomes the
 session name.
@@ -711,9 +741,9 @@ the command ends.
 
 ## Pi
 
-AgentAPI runs Pi in its RPC mode (`pi --mode rpc`, JSON over stdin and stdout).
+Tendyard runs Pi in its RPC mode (`pi --mode rpc`, JSON over stdin and stdout).
 
-- **Flags.** AgentAPI adds `--mode rpc --session-id <id>` (a new
+- **Flags.** Tendyard adds `--mode rpc --session-id <id>` (a new
   `agentapi-<hex>` ID for every new session, including after a restart). It
   refuses options that pick the mode or the session or make Pi exit (`--mode`,
   `--print`/`-p`, `--session`, `--session-id`, `--continue`/`-c`,
@@ -731,7 +761,7 @@ AgentAPI runs Pi in its RPC mode (`pi --mode rpc`, JSON over stdin and stdout).
   `streamingBehavior: "steer"`), interrupt (`POST /interrupt` sends `abort`; the
   turn ends as interrupted, without the "This operation was aborted" error Pi
   adds when it aborts during a tool, and if Pi doesn't end the turn within 10
-  seconds AgentAPI ends it), resume, and images (attached images go to Pi as
+  seconds Tendyard ends it), resume, and images (attached images go to Pi as
   base64 `images`; the capability is reported unless Pi says its model doesn't take images).
 - **Messages.** Text and thinking stream into the rich messages as they arrive,
   bash output streams into the tool result, and the final messages have the
@@ -754,7 +784,7 @@ AgentAPI runs Pi in its RPC mode (`pi --mode rpc`, JSON over stdin and stdout).
   the same `--session-id` (keep the same directory and `--session-dir`), so Pi
   keeps the context; Pi doesn't replay earlier messages, so the chat shows them
   only from the `--state-db` file.
-- **Shutdown.** Stopping AgentAPI (or a restart) aborts a running turn first,
+- **Shutdown.** Stopping Tendyard (or a restart) aborts a running turn first,
   so the session log doesn't end in a tool call without result, then stops Pi
   as described at the [start of this guide](#agents-and-the-native-transport).
 - **Settings.** Pi has no permission modes. Its model (`set_model`, from the
@@ -766,7 +796,9 @@ AgentAPI runs Pi in its RPC mode (`pi --mode rpc`, JSON over stdin and stdout).
   [Slash commands](#slash-commands-and-compaction), and extension slash
   commands work. Log in from the chat's terminal (`pi`, then `/login`).
 
-## Limitations
+<a id="limitations"></a>
+
+## Native transport supports only the operations each adapter implements
 
 - The agent has no terminal of its own. The agent's slash commands that need
   its interactive UI don't work, apart from the ones the chat runs itself. The
@@ -775,7 +807,7 @@ AgentAPI runs Pi in its RPC mode (`pi --mode rpc`, JSON over stdin and stdout).
   new one in a new session and clears the conversation and the queue; requests
   still open become `not_resumable`. The `--initial-prompt` is sent to the new
   session again, and Codex and Pi are updated first.
-- Without `--state-db`, the next start of AgentAPI is a new session; the
+- Without `--state-db`, the next start of Tendyard is a new session; the
   agent's earlier session isn't resumed. A [restart in place](cli.md#agentapi-restart)
   is the exception: it resumes the session.
 - Images reach the agent only as `@"<path>"` attachments of a message, not as

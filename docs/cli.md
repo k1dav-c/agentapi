@@ -2,8 +2,14 @@
 
 English | [繁體中文](cli.zh-TW.md)
 
-This page lists the `agentapi` commands and their flags; [Resource usage](#resource-usage) at the
-end gives what a running AgentAPI costs in memory and CPU.
+The `agentapi` CLI starts agents, connects machines to a hub and maintains running instances.
+Choose the command by the role you need:
+
+- **Run an agent:** `server` starts its API and chat.
+- **Coordinate machines:** `hub` monitors instances and dispatches issues; `host` runs the worker launcher.
+- **Maintain instances:** `list`, `restart` and `update` inspect or replace running servers.
+
+Each command below lists its flags; [resource measurements](#resource-usage) follow the command reference.
 
 ## `agentapi server`
 
@@ -27,14 +33,14 @@ Flags can also be set with environment variables: `AGENTAPI_` and the flag's nam
 `_` for `-` (`AGENTAPI_ALLOWED_HOSTS`). Lists are comma-separated in a flag and space-separated in a
 variable.
 
-They can also be set by the flag's name in `~/.agentapi/config.yaml` (`--config` names another
-file) for every server the user starts; a flag or a variable overrides the file. A setting that
-names no flag is reported in the log, and a file AgentAPI can't read is reported and ignored, so the
-agent still starts. [`agentapi hub join`](#agentapi-hub) writes it; keep it readable by its owner
-only (`chmod 600`) when it holds a secret. A leading `~` in a file or directory setting is the home
-directory, wherever the setting comes from. `state-db` and `pid-file` name a file that only one
-server can use, so in the file each needs `{port}` in its path (`{hostname}` is filled in too);
-without it, every server ignores the setting with a warning, and a flag or a variable still sets it.
+You can also set flags by name in `~/.agentapi/config.yaml`; `--config` selects another file.
+Command-line flags and environment variables override the file. Unknown settings and unreadable
+files are logged and ignored, so the agent still starts. [`agentapi hub join`](#agentapi-hub)
+writes this file. Keep it readable by its owner only (`chmod 600`) when it holds a secret.
+A leading `~` in a file or directory setting expands to the home directory, regardless of where
+the setting comes from. In the config file, `state-db` and `pid-file` paths must contain `{port}`
+so servers don't share a file; `{hostname}` is also expanded. Without `{port}`, the server logs a
+warning and ignores that setting. Flags and environment variables can still set either path.
 
 ```yaml
 webhook-url: http://hub.vpn:3290/hooks
@@ -63,13 +69,13 @@ state-db: ~/.agentapi/state/{port}.db
 | `--webhook-events` | `run.status_changed` | Events to send: types, groups (`task.*`) or `*` |
 | `--webhook-secret` | | Secret that signs every delivery (`X-AgentAPI-Signature-256`) |
 | `--webhook-heartbeat` | `60s` | How often `instance.heartbeat` is sent; `0` turns it off |
-| `--instance-id` | `<hostname>:<port>` | Identifies this AgentAPI in `GET /summary` and every webhook event; see [Watching many instances](api.md#watching-many-instances) |
-| `--name` | the working directory's name | What clients that watch many AgentAPIs call this one |
+| `--instance-id` | `<hostname>:<port>` | Identifies this instance in `GET /summary` and every webhook event; see [Watching many instances](api.md#watching-many-instances) |
+| `--name` | the working directory's name | What clients that watch many Tendyard instances call this one |
 | `--registry` | `true` | Keep an entry in the registry directory while serving; see [Watching many instances](api.md#watching-many-instances) |
 | `--registry-dir` | `~/.agentapi/instances` | Registry directory |
-| `--public-url` | | URL this AgentAPI is reached at, in `GET /summary` and every webhook event; `{port}` and `{hostname}` are filled in, and `{ip}` with the machine's IPv4 address on the route to the webhook URL (without one, its first private, then CGNAT, address), looked up again at most every 30 seconds while it runs; when none is found the last one stays |
+| `--public-url` | | URL this instance is reached at, in `GET /summary` and every webhook event; `{port}` and `{hostname}` are filled in, and `{ip}` with the machine's IPv4 address on the route to the webhook URL (without one, its first private, then CGNAT, address), looked up again at most every 30 seconds while it runs; when none is found the last one stays |
 | `--config` | `~/.agentapi/config.yaml` | Settings file: flags by name, below flags and variables |
-| `--allow-update` | `false` | Let API clients, such as the hub, update AgentAPI to the latest release, which then restarts in place; see [Updating through the API](api.md#updating-through-the-api) |
+| `--allow-update` | `false` | Let API clients, such as the hub, update Tendyard to the latest release, which then restarts in place; see [Updating through the API](api.md#updating-through-the-api) |
 | `--webhook-timeout` | `10s` | Timeout of each delivery attempt |
 | `--webhook-max-attempts` | `3` | Delivery attempts |
 | `--webhook-payload-template` | | Go `text/template` for the POST body |
@@ -78,7 +84,7 @@ state-db: ~/.agentapi/state/{port}.db
 | `--log-level` | `info` | Least important level to log: `debug`, `info`, `warn` or `error` |
 | `-P`, `--print-openapi` | | Print the OpenAPI schema and exit |
 
-AgentAPI logs to standard output, one `time=… level=… msg=…` line per entry. `--log-level debug`
+Tendyard logs to standard output, one `time=… level=… msg=…` line per entry. `--log-level debug`
 (or `AGENTAPI_LOG_LEVEL`, or `log-level` in the config file) adds what it logs for troubleshooting,
 such as the agent's command line, its login checks and the reads that worked (`GET`, `HEAD` and
 `OPTIONS` requests below 400, which `info` leaves out because clients poll `GET /status`); `warn` and
@@ -86,13 +92,13 @@ such as the agent's command line, its login checks and the reads that worked (`G
 
 ## `agentapi update`
 
-Update the AgentAPI binary to the latest release from GitHub.
+Update the Tendyard binary to the latest release from GitHub.
 
 ```bash
 agentapi update            # download and install the latest version
 agentapi update --check    # only check if an update is available
 agentapi update --force    # update even if already at the latest version
-agentapi update --restart  # then restart the running AgentAPIs into it
+agentapi update --restart  # then restart the running instances into it
 agentapi update --restart --allow-update  # and let a hub update them from now on
 ```
 
@@ -102,39 +108,39 @@ not match the download, or if the download doesn't run as the release's version.
 replaced under the lock file that [updates through the API](api.md#updating-through-the-api) take too.
 The release lookup gets 1 minute; waiting for the lock, the download and the replacement get 10.
 
-Running AgentAPIs keep the old version until they restart. `--restart` restarts the ones that run
+Running Tendyard instances keep the old version until they restart. `--restart` restarts the ones that run
 the binary it replaced, as [`agentapi restart --all`](#agentapi-restart) does, and restarts them
 when the binary is already up to date too: another update may have replaced it. Under `sudo` (an
-install in `/usr/local/bin`), it restarts the AgentAPIs of the user who ran `sudo`, from that user's
+install in `/usr/local/bin`), it restarts the Tendyard instances of the user who ran `sudo`, from that user's
 registry. The hub isn't one of them: restart it with its service manager, such as
 `systemctl restart agentapi-hub`.
 
 `--allow-update` also writes `allow-update: true` into the config file (`--config`, by default
 `~/.agentapi/config.yaml` of the user who ran `sudo`, which stays theirs), before `--restart`, so
-the restarted AgentAPIs take updates from a [hub](hub.md#updating-from-the-hub) from then on.
+the restarted Tendyard instances take updates from a [hub](hub.md#updating-from-the-hub) from then on.
 It keeps the rest of the file, as `agentapi hub join --allow-update` does. With `--check` it writes
 nothing. An older `agentapi` has no such flag: add the line to the file, then run
 `agentapi update --restart`.
 
 ## `agentapi restart`
 
-Restart running AgentAPIs in place, for example after an update replaced the binary:
+Restart running Tendyard instances in place, for example after an update replaced the binary:
 
 ```bash
-agentapi restart 3285 3286  # the AgentAPIs on these ports
-agentapi restart --all      # every AgentAPI of yours on this machine
+agentapi restart 3285 3286  # the instances on these ports
+agentapi restart --all      # every instance of yours on this machine
 ```
 
 `agentapi restart` finds them in the [registry](api.md#watching-many-instances) and sends each SIGUSR2.
-An AgentAPI first runs the program it was started from with `--version`, then with the arguments
-and environment it will run with and a check that it would start with them: its flags, `AGENTAPI_*`
-variables and config file, its agent's arguments, and a state database it can write. If either
-fails (an update brought a release that refuses a setting, say), it logs why and goes on serving,
-and `agentapi restart` reports that it still runs as before. Otherwise it stops as for a shutdown (the agent is interrupted and closed, the
+Each instance checks the program at its original path before restarting. It first runs it with
+`--version`, then validates the arguments and environment it will use: flags, `AGENTAPI_*`
+variables, config file, agent arguments and a writable state database. If either check fails
+(for example, the new release rejects a setting), the instance logs the reason and keeps serving.
+`agentapi restart` reports that it is still running as before. Otherwise it stops as for a shutdown (the agent is interrupted and closed, the
 state database written, the registry entry removed, and the webhook sends `instance.stopped`), then
 runs the same path again with the same arguments and environment, in the same process. Its PID
 stays, so a PID file and a parent shell that waits for it, such as a Coder workspace's start
-script, stay valid, and its output goes to the same place. The command waits until each AgentAPI
+script, stay valid, and its output goes to the same place. The command waits until each instance
 answers on its port again with a new `server_id`, and prints its new version.
 
 - With `--state-db`, the conversation stays and the agent resumes its
@@ -147,11 +153,11 @@ answers on its port again with a new `server_id`, and prints its new version.
   log is gone starts anew, with a warning in the chat. The restart that
   updates from an earlier release starts a new session: the earlier release
   doesn't carry it.
-- Only your own AgentAPIs restart, and only when the registry entry names a
+- Only your own Tendyard instances restart, and only when the registry entry names a
   running `agentapi server`. Under `sudo`, they are those of the user who ran
-  `sudo`. An AgentAPI of an earlier release can't restart in place:
+  `sudo`. A Tendyard instance of an earlier release can't restart in place:
   `agentapi restart` says so, and you restart that one yourself, once.
-- The AgentAPI this command runs under, if any (an agent that runs
+- The instance this command runs under, if any (an agent that runs
   `agentapi update --restart`), restarts last. Restarting it closes the
   agent, which can end the command.
 - `--registry-dir` reads another registry, and `--timeout` (default `1m`)
@@ -160,7 +166,7 @@ answers on its port again with a new `server_id`, and prints its new version.
 
 ## `agentapi list`
 
-List the AgentAPIs running on this machine from the [registry](api.md#watching-many-instances), with
+List the Tendyard instances running on this machine from the [registry](api.md#watching-many-instances), with
 what each `GET /summary` says: idle, working, what it needs from you (`needs request`), and an
 unread task.
 
@@ -176,7 +182,7 @@ frontend  codex   working                http://localhost:3285  Add the settings
 
 ## `agentapi hub`
 
-Run a hub that watches many AgentAPIs, or connect this machine's AgentAPIs to one; see
+Run a hub that watches many Tendyard instances, or connect this machine's Tendyard instances to one; see
 [Running a hub](api.md#running-a-hub) and [Joining a hub](api.md#joining-a-hub).
 
 ```bash
@@ -188,7 +194,7 @@ agentapi hub leave
 
 `serve` runs the hub: `--token` (or `AGENTAPI_HUB_TOKEN`) is what you sign in with (`--no-token`
 instead skips signing in, for a hub behind a sign-in of its own such as a Coder workspace app),
-`--secret` (or `AGENTAPI_HUB_SECRET`) checks the AgentAPIs' events, `--instance-token` (or
+`--secret` (or `AGENTAPI_HUB_SECRET`) checks the Tendyard instances' events, `--instance-token` (or
 `AGENTAPI_HUB_INSTANCE_TOKEN`, else `AGENTAPI_API_TOKEN`) is sent to them. `--state` keeps the
 instances, `--port` and `--bind` set where it listens, `--allowed-hosts` the names browsers may
 open it by (any without it), and `--log-level` (or
@@ -200,26 +206,26 @@ the hub call a launcher at a loopback address, one on its own machine that joine
 by default it calls launchers at other machines' addresses only.
 
 `join` writes the hub's webhook into `~/.agentapi/config.yaml` and applies it to the registered
-AgentAPIs running now. `--secret` (or `AGENTAPI_HUB_SECRET`) signs the events, `--events` picks them
+Tendyard instances running now. `--secret` (or `AGENTAPI_HUB_SECRET`) signs the events, `--events` picks them
 (default `instance.*`, all the hub needs: it follows the rest from each summary), `--public-url`
 is where the hub reaches them (`{ip}` follows the machine's address; the config file and the
-AgentAPIs newer than 2.1.2 keep it, older ones get the address now), `--api-token` (or `AGENTAPI_API_TOKEN`) is sent to the ones that need
-a token, and `--config` and `--registry-dir` name other files. An AgentAPI that `join` can't
+Tendyard instances newer than 2.1.2 keep it, older ones get the address now), `--api-token` (or `AGENTAPI_API_TOKEN`) is sent to the ones that need
+a token, and `--config` and `--registry-dir` name other files. A Tendyard instance that `join` can't
 change now applies the file when it restarts. `--allow-update` also writes `allow-update: true`, so
-the hub can [update the AgentAPIs through their API](api.md#updating-through-the-api) once they restart;
+the hub can [update the Tendyard instances through their API](api.md#updating-through-the-api) once they restart;
 `leave` keeps it.
 
 ## `agentapi host`
 
 Run the launcher of the [issue dispatch](hub.md#issues) on a machine that joined a hub: it
-starts an AgentAPI for each GitHub issue the hub dispatches here, in a git worktree on the issue's
+starts a Tendyard instance for each GitHub issue the hub dispatches here, in a git worktree on the issue's
 branch, and stops it again. [examples/issue-dispatch](../examples/issue-dispatch/README.md) sets up
 the whole dispatch.
 
-A machine needs the launcher only to take issues. `agentapi hub join` alone has its AgentAPIs report
+A machine needs the launcher only to take issues. `agentapi hub join` alone has its Tendyard instances report
 to the hub, which lists them and opens them. The launcher reports the machine itself (its agents,
 repositories, room and jobs), which Issues shows among the machines, and lets the hub start
-AgentAPIs there; those report like any other. The launcher needs no hub settings of its own: it
+Tendyard instances there; those report like any other. The launcher needs no hub settings of its own: it
 reads the ones `hub join` wrote. The two are separate because the launcher lets the hub start
 programs on the machine, which joining doesn't.
 
@@ -234,9 +240,9 @@ agentapi host status
 | `serve` | `--config`, `--log-level` (`info`) | Runs the launcher in the foreground |
 | `status` | `--config` | Shows the launcher, its hub, agents and repositories, and its jobs |
 | `install` | `--config`, `--now` | Writes `~/.config/systemd/user/agentapi-host.service` (`agentapi host serve`) and enables it; `--now` also starts it, or restarts it if it runs. Running it again rewrites the unit, as after the program moved |
-| `uninstall` | | Disables, stops and removes the service; the jobs' AgentAPIs keep running, and their files stay |
+| `uninstall` | | Disables, stops and removes the service; the jobs' Tendyard instances keep running, and their files stay |
 
-The service has `KillMode=process`: restarting or stopping the launcher leaves the jobs' AgentAPIs
+The service has `KillMode=process`: restarting or stopping the launcher leaves the jobs' Tendyard instances
 running, and the next launcher takes them over. `install` needs a systemd user instance; when your
 services stop at logout, it says so, and `sudo loginctl enable-linger <user>` keeps them running.
 
@@ -272,7 +278,7 @@ host:
   public-url: http://{ip}:3291  # where the hub reaches it
   workdir: ~/work               # clones and worktrees
   scan: [~/work, ~/src]         # where it looks for repositories it has (two levels deep)
-  ports: 4100-4199              # the jobs' AgentAPIs
+  ports: 4100-4199              # the jobs' instances
   max-jobs: 4
   agents: [claude, codex]       # default: those installed (claude, codex, pi)
   agent: claude                 # an issue's agent when the dispatch names none
@@ -282,14 +288,16 @@ host:
 | File | Holds |
 | --- | --- |
 | `~/.agentapi/host.token` | The token the hub calls the launcher with, made on first start. The hub pins the machine's name to it: a launcher with a new one (the file deleted, the machine set up again) joins only after the hub forgets the machine: **×** on it in the hub's Issues, or `DELETE /api/hosts/{name}` ([Troubleshooting](hub.md#troubleshooting)) |
-| `~/.agentapi/instance.token` | The API token of every job's AgentAPI, made on first start. The launcher's events give it to the hub, which sends it to this machine's jobs alone, so each machine has its own and the hub's `--instance-token` needn't be it |
+| `~/.agentapi/instance.token` | The API token of every job's instance, made on first start. The launcher's events give it to the hub, which sends it to this machine's jobs alone, so each machine has its own and the hub's `--instance-token` needn't be it |
 | `~/.agentapi/host.sock` | Where the jobs' `git` and `gh` get their GitHub token from the launcher |
 | `~/.agentapi/jobs.json`, `~/.agentapi/jobs/` | The jobs, and each one's state database, log and `gh` shim |
 
-## Resource usage
+<a id="resource-usage"></a>
 
-AgentAPI itself is small: one Go process of 31–34 MiB that uses less than 0.1% of a CPU core while
-the agent is idle. Most of the cost is the agent CLI it runs, at 120–285 MiB.
+## Resource measurements separate server overhead from agent usage
+
+In these measurements, Tendyard's Go process used 31–34 MiB and less than 0.1% of a CPU core
+while the agent was idle. Most memory use came from the agent CLI, at 120–285 MiB.
 
 These numbers were measured on 2026-11-13 with AgentAPI v5.0.0 (a 33 MiB binary), Claude Code
 2.1.302, codex-cli 0.167.0 and Pi 1.3.0, on Linux with a 4-core Intel Xeon Silver 4210 (2.2 GHz)
@@ -297,7 +305,7 @@ and one chat (an SSE client) connected. Each agent had three short turns: a repl
 words, without tools. Memory is resident memory (RSS); CPU is a share of one core over an idle
 minute, and CPU seconds for a whole turn, the agent's processes together.
 
-| Agent | AgentAPI memory | AgentAPI CPU, idle | AgentAPI CPU per turn | Agent memory | Agent CPU per turn |
+| Agent | Tendyard memory | Tendyard CPU, idle | Tendyard CPU per turn | Agent memory | Agent CPU per turn |
 | --- | --- | --- | --- | --- | --- |
 | Claude Code | 31 MiB | 0.08% | 0.06–0.08 s | 230–285 MiB | 0.5–1.2 s |
 | Codex | 34 MiB | 0.07% | 0.09–0.13 s | 190–265 MiB | 0.3–0.8 s |
@@ -306,9 +314,9 @@ minute, and CPU seconds for a whole turn, the agent's processes together.
 
 - An agent's own memory moves during a session: Claude Code went from 230 MiB idle to 265–285 MiB
   over its turns, and Codex grew to 265 MiB on its first turn, then gave back about 70 MiB.
-- AgentAPI's code (about 17 MiB of its memory) is shared by instances started from the same binary:
+- Tendyard's code (about 17 MiB of its memory) is shared by instances started from the same binary:
   with four running, each costs about 17–21 MiB (PSS).
-- Against the same measurement with v0.24.0 (2026-10-18, a 29.5 MiB binary), AgentAPI takes about
+- Against the same measurement with v0.24.0 (2026-10-18, a 29.5 MiB binary), Tendyard takes about
   4 MiB more (27–30 MiB then) and the same CPU; the agents' own figures changed little.
 - Not counted: MCP servers the agent starts, the commands it runs, the shell terminal (one shell
   while it is open) and the browser tab.
@@ -329,10 +337,10 @@ whole, so very long prompts count in full: on 2026-11-13, in a conversation of 1
 almost entirely of 90 KB prompts (97 MB in its state database), AgentAPI 5.0.0 held 148 MiB (67 MiB
 at 250 tasks), while its first replay, the latest 20 tasks, stayed at 1.8 MB.
 
-To size a machine, plan per session about 35 MiB for AgentAPI plus the agent (about 350 MiB for
+To size a machine, plan per session about 35 MiB for Tendyard plus the agent (about 350 MiB for
 Claude Code or Codex, 150 MiB for Pi) and whatever its MCP servers and commands need.
 
-To measure again, run `bun scripts/measure-resources.mjs` (Linux only) on an isolated AgentAPI: it
+To measure again, run `bun scripts/measure-resources.mjs` (Linux only) on an isolated Tendyard: it
 measures `native-demo` by default, the agents you name with `--agents claude,codex,pi` (their turns
 go to your accounts), and with `--long 0,250,1000` a long conversation, and prints the results as
 these tables.

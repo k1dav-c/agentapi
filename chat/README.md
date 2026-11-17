@@ -1,11 +1,19 @@
-# AgentAPI Chat Interface
+# Tendyard chat interface
 
-The AgentAPI web chat groups conversations by task and displays tool activity, attachments and a
-terminal. It is also an example client for the AgentAPI HTTP API.
+Develop the Tendyard chat by running its UI server against a separate agent or hub backend.
+The chat groups work by task and exposes tool activity, attachments and a terminal through the
+[HTTP API](../docs/api.md).
 
-## Development Setup
+- **Run the UI:** start the backend, install dependencies, then start the development server.
+- **Choose the backend:** connect a real agent, a hub or `native-demo` for simulated work.
+- **Find the code:** rendering, conversation state and generated API types live in separate modules.
+- **Verify presentation:** inspect browser caching and reproduce the documentation screenshots.
 
-1. Start the AgentAPI backend on `localhost:3284`. From the repository root, run:
+<a id="development-setup"></a>
+
+## Run the backend and development UI as separate servers
+
+1. Start the Tendyard backend on `localhost:3284`. From the repository root, run:
 
    ```bash
    go run main.go server -- claude
@@ -25,7 +33,9 @@ terminal. It is also an example client for the AgentAPI HTTP API.
 
 4. Open <http://localhost:3000/chat/?url=http://localhost:3284> in your browser.
 
-### Developing the hub's page
+<a id="developing-the-hubs-page"></a>
+
+### Point the development UI at a running hub
 
 The hub's page (`src/app/hub/`, `src/components/hub-view.tsx`) talks to `agentapi hub serve` on the
 same origin, so build the chat into the binary (`make embed` from the repository root), run a hub
@@ -40,7 +50,9 @@ go run main.go server --config /tmp/hub-dev.yaml -- native-demo
 
 Then open <http://localhost:3290/> and sign in with `dev`.
 
-### Developing without an agent
+<a id="developing-without-an-agent"></a>
+
+### Use native-demo to develop without a real agent
 
 `native-demo` simulates an agent for developing request cards, steering, interrupts, and queue
 controls without installing or paying for a real agent. Select it with this exact program name:
@@ -61,7 +73,7 @@ to try specific interactions:
   Stop, Interrupt & send and reordering the queue
 - `login`: the agent loses its login, so the login card docks above the
   composer. Check again restarts the demo, but its first start still finds no
-  login: the card stays and now says AgentAPI checks by itself. The next start
+  login: the card stays and now says Tendyard checks by itself. The next start
   (about 5 seconds later, or Check again) works
 - `limit`: the account reaches its 5-hour limit after the message's requests,
   so the usage limit card docks above the composer and queued tasks wait
@@ -71,14 +83,14 @@ to try specific interactions:
 - `cold`: the turn leaves a large context whose prompt cache already expired,
   for the note that suggests compacting
 - `delegate`: the agent hands a task to a subagent with an Agent tool call
-- `crash`: the agent's process exits mid-turn. AgentAPI shows the error and
+- `crash`: the agent's process exits mid-turn. Tendyard shows the error and
   starts it again on its session 2 seconds later
 - `crashloop`: the same, and the session can't be resumed: each start fails,
-  so after the attempts at 2, 10 and 30 seconds AgentAPI gives up and shows the
+  so after the attempts at 2, 10 and 30 seconds Tendyard gives up and shows the
   agent failed. Restart starts a new session that works
 
 To try earlier sessions, costs and Lineage, run the demo as Claude Code with
-`--type claude -- native-demo`, or use the Codex or Pi type. AgentAPI reads that agent's log
+`--type claude -- native-demo`, or use the Codex or Pi type. Tendyard reads that agent's log
 directories and shows the sessions, subagents and model calls it finds. The demo writes no session
 log, so its own tasks have no cost.
 
@@ -96,7 +108,9 @@ The demo has no [model providers](../docs/providers.md), even posing as Claude C
 model menu's provider groups need a real Claude Code or Codex. The hub's Providers tab works with
 the hub above.
 
-## Code layout
+<a id="code-layout"></a>
+
+## The code separates rendering, state and generated API types
 
 - `src/app/`: the routes: the chat (`/chat/`), its embeddable version (`/chat/embed`) and the hub's
   page (`/chat/hub/`).
@@ -119,7 +133,9 @@ the hub above.
 
 Run `bun run typecheck`, `bun lint` and `bun test` before a change goes in.
 
-## What the chat keeps in the browser
+<a id="what-the-chat-keeps-in-the-browser"></a>
+
+## The browser stores transcripts and local interface preferences
 
 The chat stores one conversation per server in IndexedDB. Reopening shows the cached transcript
 immediately, then fetches changes; saves write only changed messages. Caches expire after 14 days
@@ -129,10 +145,12 @@ opens each instance as a server of its own.
 Drafts, failed messages and dismissed notices stay in localStorage. If the chat crashes, the error
 screen shows the error and offers to clear that server's cached conversation and reload.
 
-## Interface screenshots
+<a id="interface-screenshots"></a>
+
+## Capture scripts reproduce the documented interface
 
 These Chromium captures show the production chat UI built with `make build`, served by a dedicated
-AgentAPI server running `native-demo`. The backend delivers real native events and requests;
+Tendyard server running `native-demo`. The backend delivers real native events and requests;
 agent replies and tool results are simulated.
 
 ![Native desktop chat with structured tool activity and session controls](../docs/screenshots/chat-desktop.png)

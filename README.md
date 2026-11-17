@@ -1,31 +1,42 @@
-# AgentAPI
+# Tendyard
 
 English | [繁體中文](README.zh-TW.md)
 
-Use AgentAPI to control [Claude Code](https://github.com/anthropics/claude-code),
-[Codex](https://github.com/openai/codex) and [Pi](https://pi.dev/) with an HTTP API.
+Tendyard lets developers run Claude Code, Codex and Pi on their own machines and manage the work
+from an issue to a reviewed pull request. Use one chat for a single agent, or a hub across laptops,
+workspaces and servers.
 
-![The AgentAPI chat with two tasks: prompts, tool calls, thinking notes and the composer](docs/screenshots/chat-desktop.png)
+- **Dispatch across machines.** Assign a GitHub issue from the hub's [Issues page](docs/hub.md#issues).
+  The launcher starts an agent in a worktree on the issue branch; the GitHub workflow returns reviews
+  to that agent and stops the job when the PR closes. The hub shows progress, spend and provider health.
+- **Work with the agent.** Read replies and tool results, inspect diffs and answer requests from the
+  built-in chat on a desktop or a phone. Supported agents are [Claude Code](https://github.com/anthropics/claude-code),
+  [Codex](https://github.com/openai/codex) and [Pi](https://pi.dev/).
+- **Keep work recoverable.** Queues, persistent conversations, retries after temporary API failures
+  and recovery after usage limits support long-running tasks.
+- **Connect other tools.** The [HTTP API and webhooks](docs/api.md) let scripts, bots and other agents
+  control and monitor the same work.
+
+Tendyard is the product name. It currently ships as the `agentapi` binary: `agentapi server`
+runs one agent, `agentapi hub serve` provides the central workspace, and `agentapi host` runs the
+launcher on each machine. Existing configuration uses `~/.agentapi/`; the API and repository
+links below retain their current names. Historical release names and text shown by the current
+interface still use AgentAPI.
+
+![The hub: agents across machines, what needs your attention, and one open in the chat](docs/screenshots/hub-desktop.png)
 
 The screenshots show AgentAPI v5.6.0 running the built-in `native-demo` agent. Its replies, tool
 results, models and usage are simulated. See the [chat UI guide](docs/chat-ui.md) for features and
 animations, or the [screenshot guide](docs/screenshots/README.md) to reproduce the captures.
 
-Use AgentAPI to:
+Deploy it in an environment you trust: access uses tokens, with no individual users or roles.
+See [Security](docs/security.md) before connecting other machines.
 
-- Build a unified chat interface for coding agents.
-- Provide an MCP server backend that lets one agent control another coding agent.
-- Create tools that delegate pull request reviews to an agent.
-- Watch many agents from one dashboard. Each AgentAPI pushes its tasks, the requests that need
-  you, its messages and heartbeats there with [webhooks](docs/api.md#webhooks), and a client that connects
-  to many AgentAPIs follows each through its [summary](docs/api.md#watching-many-instances). The built-in
-  [hub](docs/api.md#running-a-hub) is such a dashboard, on a desktop or a phone.
-- Hand GitHub issues to agents on your machines from the hub's [Issues](docs/hub.md#issues) page:
-  each works on its own branch and opens a pull request.
+<a id="about-this-fork"></a>
 
-## About this fork
+## This fork has its own releases and compatibility rules
 
-[`k1dav-c/agentapi`](https://github.com/k1dav-c/agentapi) is an independently maintained fork of
+Tendyard is developed in [`k1dav-c/agentapi`](https://github.com/k1dav-c/agentapi), an independently maintained fork of
 [`coder/agentapi`](https://github.com/coder/agentapi), with its own versioned releases. Download
 binaries from [this fork's releases](https://github.com/k1dav-c/agentapi/releases) and report
 issues involving its added features in [this repository](https://github.com/k1dav-c/agentapi/issues).
@@ -34,172 +45,181 @@ before integration; upstream and fork version numbers are separate release lines
 
 This fork builds on upstream v0.12.2. Since 3.0 it drives only Claude Code, Codex and Pi, through
 their own protocols (the [native transport](docs/agents.md)); the PTY transport, which emulated
-a terminal for other agents, ended with v2.5.1 (see [Agents](#agents)). Session management and
+a terminal for other agents, ended with v2.5.1 (see [Current releases run Claude Code, Codex and Pi natively](#agents)). Session management and
 chat features support long-running tasks, and [webhooks](docs/api.md#webhooks) report them to a central
 platform. [CHANGELOG.md](CHANGELOG.md) lists what
 changed, [docs/architecture.md](docs/architecture.md) describes how it is built,
-[docs/hub.md](docs/hub.md) how to watch many AgentAPIs from one page, and the
+[docs/hub.md](docs/hub.md) how to watch many Tendyard instances from one page, and the
 [full comparison with upstream](https://github.com/coder/agentapi/compare/main...k1dav-c:agentapi:main)
 has the complete commit history.
 
 ## Contents
 
-- [Features at a glance](#features-at-a-glance)
-- [Quickstart](#quickstart)
-- [Agents](#agents)
-- [Documentation](#documentation)
-- [Architecture](#architecture)
-- [Development](#development)
-- [Runtime reliability](#runtime-reliability)
-- [Roadmap](#roadmap) and [long-term vision](#long-term-vision)
+- [Four capabilities take agent work from assignment to review](#features-at-a-glance)
+- [Start one agent, then connect machines when needed](#quickstart)
+- [Current releases run Claude Code, Codex and Pi natively](#agents)
+- [Choose a guide for the work you need to do](#documentation)
+- [One binary connects agent protocols to the API and chat](#architecture)
+- [Build and test the backend and chat together](#development)
+- [Reliability fixes cover long sessions and interruptions](#runtime-reliability)
+- [Next priorities are setup, recovery and traceability](#roadmap) and [long-term vision](#long-term-vision)
 
-## Features at a glance
+<a id="features-at-a-glance"></a>
 
-**Drive coding agents over HTTP**
+## Four capabilities take agent work from assignment to review
 
-- Drive Claude Code, Codex and Pi through their own protocols with the
-  [native transport](docs/agents.md).
-- Read structured activity (thinking, tool calls and their results, token
-  usage) from `GET /rich-messages` and `GET /timeline`.
-- Messages sent while the agent works wait in a [queue](docs/api.md#message-queue) that
-  you can edit and reorder; they can also
+**The hub dispatches and supervises work across machines**
+
+- The [hub](docs/api.md#running-a-hub) lists instances across machines, puts what needs you first,
+  and opens their chats on a desktop or phone. [Join each machine](docs/api.md#joining-a-hub)
+  once with `agentapi hub join`;
+  it stays configured after a restart. Favorite prompts are shared across chats opened by the hub.
+- [Issue dispatch](docs/hub.md#issues) uses the hub's GitHub App to list open issues and assign one
+  to Claude Code, Codex or Pi. A [launcher](docs/cli.md#agentapi-host) starts its worktree and agent;
+  the agent pushes a branch and opens a PR, reviews return to it, and the hub tracks each job's runs.
+- Maintain instances with checksum-verified [updates](docs/cli.md#agentapi-update) and
+  [restarts in place](docs/cli.md#agentapi-restart). Opted-in machines also accept
+  [updates through the API](docs/api.md#updating-through-the-api), including from the hub.
+
+**The chat keeps agent interaction in one place**
+
+- Read each [task](docs/chat-ui.md#tasks-and-the-transcript) as a transcript of tool calls, thinking
+  and replies, with its cost and Markdown export. The [Session Explorer](docs/chat-ui.md#session-explorer)
+  brings together links, files, the task index, earlier sessions, Restart and webhook settings.
+- Answer approvals, questions and plans with [decision cards](docs/chat-ui.md#requests-and-decision-cards).
+  Change [permissions, model and effort](docs/agents.md#settings-permission-mode-model-and-effort)
+  during the session: bypass is the default, with auto, ask and plan also available.
+- Inspect source, git diffs and HTML, Markdown or image previews in the [file viewer](docs/chat-ui.md#files).
+  It resolves paths inside repositories below the working directory; the shared
+  [terminal](docs/agents.md#terminal) handles logins and commands, on phones too.
+- Follow each subagent's steps in [Lineage](docs/chat-ui.md#lineage), including while it works.
+- Use [background alerts](docs/chat-ui.md#session-details-and-alerts), browser notifications and
+  cached transcripts to follow work through tab changes and dropped connections.
+
+**Queues and recovery mechanisms support long-running work**
+
+- Messages wait in an editable, reorderable [queue](docs/api.md#message-queue), or
   [steer or interrupt](docs/agents.md#steer-interrupt-and-the-queue) the running turn.
-- The server tracks each message and the agent's turn on it as a
-  [task](docs/api.md#tasks): running, completed, failed, or stopped by a usage limit.
-- Follow everything live over [server-sent events](docs/api.md#events-and-incremental-sync),
-  with heartbeats and an incremental replay after a reconnect.
-- A conversation that runs for months stays light: clients get the latest tasks and read earlier
-  ones a page at a time, and with `--state-db` the server holds only the latest in memory
-  ([Long conversations](docs/api.md#long-conversations)).
+  [Context and rate-limit](docs/agents.md#context-and-rate-limits) indicators and
+  [compaction](docs/agents.md#slash-commands-and-compaction) help manage the next turn;
+  the chat suggests compaction after Claude Code's prompt cache expires.
+- A missing or expired [login](docs/agents.md#logging-in) pauses work and shows the command to run;
+  Tendyard starts the agent once it is logged in.
+- A [usage limit](docs/agents.md#usage-limits) holds the queue until the reset, with an option to
+  continue the stopped turn automatically.
+- A [temporary API failure](docs/agents.md#transient-api-errors) retries after 30 seconds, 1 and 2
+  minutes, then every 5 minutes, for 15 attempts before the queue moves on.
+- With `--state-db`, [conversations survive restarts](docs/agents.md#persistent-sessions) and the
+  agent resumes its session. You can also [reopen or fork earlier sessions](docs/agents.md#earlier-sessions).
+  [Long histories](docs/api.md#long-conversations) load in pages; rich messages and timelines for the
+  latest 100 tasks stay in memory, while plain messages and task records still grow with the history.
 
-**Agents**
+**Integrations share the API, usage data and access controls**
 
-- Tool approvals, questions, and plans arrive as
-  [requests](docs/agents.md#requests-approvals-questions-and-plans), answered over HTTP or
-  in the chat.
-- Switch the [permission mode, model and reasoning effort](docs/agents.md#settings-permission-mode-model-and-effort)
-  while the agent runs: bypass (the default), auto, ask or plan.
-- Switch Claude Code or Codex to [another model provider](docs/providers.md), such as a LiteLLM
-  gateway, while it runs, and back; the conversation goes on. Define providers per machine or once
-  on the hub. The agent calls them through a local proxy and never gets their keys; the model menu
-  and the hub show which ones fail.
-- See how full the [context and the rate limits](docs/agents.md#context-and-rate-limits)
-  are, and [compact](docs/agents.md#slash-commands-and-compaction) the context; the chat
-  suggests it once Claude Code's prompt cache has expired.
-- When a [usage limit](docs/agents.md#usage-limits) stops a turn, the queue waits until the
-  limit resets, and the turn can then continue by itself.
-- A turn that fails on a [transient API error](docs/agents.md#transient-api-errors) (a 502
-  from a gateway, an overloaded API) is tried again after 30 seconds, 1 and 2
-  minutes, then every 5 minutes, 15 times in all, before the queue goes on.
-- AgentAPI reports a missing or expired [login](docs/agents.md#logging-in) with the command
-  to run, and starts the agent by itself once it is logged in.
-- A shared [terminal](docs/agents.md#terminal) in the agent's working directory, for logins
-  and quick commands.
-- [Persistent sessions](docs/agents.md#persistent-sessions): with `--state-db`, the
-  conversation survives an AgentAPI restart, and the agent resumes its own
-  session.
-- Open one of the agent's [earlier sessions](docs/agents.md#earlier-sessions) in its working
-  directory, or start a copy of one.
-- See what each [session and task cost](docs/agents.md#session-costs) at the model
-  providers' list prices (the API-equivalent cost), subagents included, with
-  totals for today and the last 7 and 30 days.
+- The [native transport](docs/agents.md) drives agent protocols over HTTP. Read structured activity
+  from `GET /rich-messages` and `GET /timeline`; [tasks](docs/api.md#tasks) track each prompt's
+  outcome. [Event streams](docs/api.md#events-and-incremental-sync) provide live updates, heartbeats
+  and incremental replay after reconnecting.
+- [Signed webhooks](docs/api.md#webhooks) push task, request, message and heartbeat events. One
+  [summary stream](docs/api.md#watching-many-instances) per instance supports monitoring, and the
+  [human-reply API](docs/api.md#human-reply-api) lets a bot notify you and return your answer.
+- Switch Claude Code or Codex to another [model provider](docs/providers.md), such as a LiteLLM
+  gateway, and back. Define providers per machine or on the hub; a local proxy keeps their keys
+  out of agent environments and reports provider failures.
+- Estimate [task and session costs](docs/agents.md#session-costs) at model list prices, including
+  subagents, with totals for today and the last 7 and 30 days. These are API-equivalent costs.
+- Set [access controls](docs/security.md): an API token, a listen address, and allowed hosts and
+  origins. The chat exchanges the token for a session cookie.
 
-**Chat UI** (`/chat`)
+<a id="quickstart"></a>
 
-- [Tasks](docs/chat-ui.md#tasks-and-the-transcript) read as a transcript, with tool calls as
-  rows, thinking as margin notes and what each task cost, and can be exported
-  as Markdown. The
-  [Session Explorer](docs/chat-ui.md#session-explorer) has links, files, a task index, the
-  agent's [earlier sessions](docs/agents.md#earlier-sessions), Restart and the
-  [webhook](docs/api.md#webhooks).
-- [Lineage](docs/chat-ui.md#lineage): the subagents the agent ran, and what each did, step by
-  step, even while it works.
-- [Decision cards](docs/chat-ui.md#requests-and-decision-cards) for requests,
-  menus for the agent's settings, a ring for its context, and slash commands.
-- A [file viewer](docs/chat-ui.md#files) with the file, its git diff and a preview of
-  HTML, Markdown and images. It finds a file the agent named relative to a
-  repository below its working directory. The [terminal](docs/agents.md#terminal) works on
-  phones too.
-- [Background alerts](docs/chat-ui.md#session-details-and-alerts), browser
-  notifications, a transcript cache, and recovery from dropped connections.
+## Start one agent, then connect machines when needed
 
-**Operations and integrations**
+<a id="install"></a>
 
-- [A hub](docs/api.md#running-a-hub) (`agentapi hub serve`) watches the AgentAPIs of many
-  machines, lists what needs you first, and opens any of them in the chat on a
-  desktop or a phone, with favorite prompts it keeps for every chat it opens.
-  [`agentapi hub join`](docs/api.md#joining-a-hub) connects a machine's AgentAPIs to it,
-  and they stay connected after a restart.
-- The hub's [issue dispatch](docs/hub.md#issues): its Issues page lists your repositories' open
-  issues through the hub's own GitHub App, and **Assign** hands one to Claude Code, Codex or Pi on
-  a machine whose launcher ([`agentapi host`](docs/cli.md#agentapi-host)) starts an AgentAPI for it in a git
-  worktree. The agent pushes a branch and opens a pull request; a review on it goes back to the
-  same agent, and the page shows each job's state and what its runs cost.
-- [Webhooks](docs/api.md#webhooks) push HMAC-signed tasks, requests, messages and
-  heartbeats to a dashboard that watches many agents. A client that connects
-  to many AgentAPIs follows each through one [summary stream](docs/api.md#watching-many-instances).
-  With the [human-reply API](docs/api.md#human-reply-api), a bot can tell you when the
-  agent stops and pass your answer back.
-- [Self-update](docs/cli.md#agentapi-update), verified against the release's checksums,
-  and [restarts in place](docs/cli.md#agentapi-restart) into the new binary. Machines
-  that opt in can also be [updated through the API](docs/api.md#updating-through-the-api),
-  such as from the hub.
-- [Security](docs/security.md): an API token (the chat signs in with a cookie), the
-  listen address, and the allowed hosts and origins.
+### Install the binary from this fork
 
-## Quickstart
+Download a binary from [this fork's releases](https://github.com/k1dav-c/agentapi/releases), or
+install it in your user's `~/.local/bin`:
 
-1. Install `agentapi`:
+```bash
+OS=$(uname -s | tr "[:upper:]" "[:lower:]")
+ARCH=$(uname -m | sed "s/x86_64/amd64/;s/aarch64/arm64/")
+curl -fsSL "https://github.com/k1dav-c/agentapi/releases/latest/download/agentapi-${OS}-${ARCH}" -o agentapi
+chmod +x agentapi
+mkdir -p "$HOME/.local/bin"
+mv agentapi "$HOME/.local/bin/agentapi"
+export PATH="$HOME/.local/bin:$PATH"
+agentapi --help
+```
 
-   ```bash
-   OS=$(uname -s | tr "[:upper:]" "[:lower:]");
-   ARCH=$(uname -m | sed "s/x86_64/amd64/;s/aarch64/arm64/");
-   curl -fsSL "https://github.com/k1dav-c/agentapi/releases/latest/download/agentapi-${OS}-${ARCH}" -o agentapi && chmod +x agentapi
-   ```
+The `export` applies to this shell; add `~/.local/bin` to your shell's `PATH` for later sessions.
+Upstream `coder/agentapi` binaries do not include this fork's hub, issue dispatch and native-agent features.
+On macOS, if the system can't verify the binary, go to `System Settings → Privacy & Security`,
+click **Open Anyway**, and run it again.
 
-   Or download this fork's latest binary from the
-   [releases page](https://github.com/k1dav-c/agentapi/releases). Upstream
-   `coder/agentapi` release binaries do not include this fork's features.
+<a id="work-with-one-agent"></a>
 
-1. Verify the installation:
+### One server gives you a local agent workspace
 
-   ```bash
-   agentapi --help
-   ```
+Install and log in to Claude Code, Codex or Pi on the machine first. From the repository you want
+the agent to work in, start it with Tendyard. For Claude Code:
 
-   > On macOS, if the system says it can't verify the binary, go to `System Settings -> Privacy & Security`, click "Open Anyway", and run the command again.
+```bash
+agentapi server --bind 127.0.0.1 -- claude
+```
 
-1. Run a Claude Code server (assumes `claude` is installed on your system and in the `PATH`):
+Open http://localhost:3284/chat and send a task. Follow tool calls, read file diffs and answer
+questions in the same page. Use `codex` or `pi` in place of `claude` for another agent.
 
-   ```bash
-   agentapi server -- claude
-   ```
+To try the interface without an agent installed, use `agentapi server --bind 127.0.0.1 -- native-demo`.
+Its work and replies are simulated. For real work that should survive a restart, add
+`--state-db ~/.agentapi/myproject.db` before `--`, with a separate database path for each instance.
+See [persistent sessions](docs/agents.md#persistent-sessions).
 
-   > If you're getting an error that `claude` is not in the `PATH` but you can run it from your shell, try `which claude` to get the full path and use that instead.
+<a id="take-an-issue-through-to-a-pull-request"></a>
 
-   This drives Claude Code through its own protocol, the
-   [native transport](docs/agents.md): approvals arrive as structured
-   requests, its settings can be switched and the chat has a terminal.
+### A hub and launchers carry an issue through to a pull request
 
-1. Send a message to the agent:
+You need a hub reachable from your browser and the machines that will run agents, a launcher on
+each of those machines, and a GitHub App to list your repositories' issues. To send GitHub reviews
+back to agents and stop jobs when pull requests close, also set up the dispatch workflow on a
+self-hosted GitHub Actions runner that can reach the hub.
 
-   ```bash
-   curl -X POST localhost:3284/message \
-     -H "Content-Type: application/json" \
-     -d '{"content": "Hello, agent!", "type": "user"}'
-   ```
+1. [Set up the hub](docs/hub.md#setting-it-up) on a machine that stays on, and join the machines
+   that will run agents. Use an address those machines can reach; the loopback address in the
+   single-agent example above is only for local use.
+2. Follow the [issue dispatch setup](examples/issue-dispatch/README.md) (in Traditional Chinese)
+   to install the launchers, connect the GitHub App and configure the runner and workflow.
+3. Open **Issues** in the hub, choose a repository and press **Assign** on an issue. Pick the
+   agent and machine. The issue should move from **Starting** to working; if it fails, open its
+   detail to see why.
+4. Open the agent's chat to follow its work or answer a request. When it opens a pull request,
+   review it on GitHub. With the workflow configured, review comments return to that agent;
+   merging or closing the pull request stops the job. Its detail shows the runs and their costs.
 
-1. Get the conversation history:
+For the board and its controls, see [Issues](docs/hub.md#issues).
 
-   ```bash
-   curl localhost:3284/messages
-   ```
+<a id="use-the-http-api"></a>
 
-1. Try the chat web interface at http://localhost:3284/chat.
+### Scripts can control the same agent through HTTP
 
-## Agents
+Scripts and integrations can send work to the same local instance:
 
-Since 3.0, AgentAPI runs Claude Code, Codex and Pi through their own protocols, the
+```bash
+curl -X POST localhost:3284/message \
+  -H "Content-Type: application/json" \
+  -d '{"content": "Summarize this repository", "type": "user"}'
+```
+
+Read its conversation with `GET /messages`, or follow structured events over SSE. See the
+[API guide](docs/api.md) for tasks, requests, webhooks and authentication.
+
+<a id="agents"></a>
+
+## Current releases run Claude Code, Codex and Pi natively
+
+Since 3.0, Tendyard runs Claude Code, Codex and Pi through their own protocols, the
 [native transport](docs/agents.md):
 
 | Agent | Type | Protocol |
@@ -208,9 +228,9 @@ Since 3.0, AgentAPI runs Claude Code, Codex and Pi through their own protocols, 
 | [Codex](https://github.com/openai/codex) | `codex` | `codex app-server` |
 | [Pi](https://pi.dev/) | `pi` | `pi --mode rpc` |
 
-`--type` sets the agent type; without it, AgentAPI takes it from the command's name, so
+`--type` sets the agent type; without it, Tendyard takes it from the command's name, so
 `agentapi server -- /usr/local/bin/codex` needs none. A wrapper script needs `--type`. The built-in
-`native-demo` simulates an agent (see [Development](#development)).
+`native-demo` simulates an agent (see [Build and test the backend and chat together](#development)).
 
 ```bash
 agentapi server -- claude
@@ -218,20 +238,22 @@ agentapi server --state-db ~/.agentapi/myproject.db -- codex
 agentapi server --type pi -- ./my-pi-wrapper
 ```
 
-Any other agent stops AgentAPI at startup with an error that names v2.5.1. To run Aider, Goose,
+Any other agent stops Tendyard at startup with an error that names v2.5.1. To run Aider, Goose,
 Gemini CLI, Amp, Cursor CLI, Auggie, Amazon Q, Opencode, Copilot, Kimi Code or another terminal
 program, use AgentAPI v2.5.1, the last release with the PTY transport:
 download its binary from the [v2.5.1 release](https://github.com/k1dav-c/agentapi/releases/tag/v2.5.1)
 and keep it. `agentapi update` only installs the latest release. An AgentAPI 2 that runs such an
 agent with `--allow-update` checks the new program before it restarts into it, refuses AgentAPI 3
 or later and keeps serving; but the update already replaced the program on disk, so put v2.5.1
-back before that AgentAPI restarts some other way.
+back before that instance restarts some other way.
 
 AgentAPI 4 has no `--transport` flag: drop it from command lines and config files. The
-experimental ACP transport (`--experimental-acp`) was removed earlier; that flag stops AgentAPI with
+experimental ACP transport (`--experimental-acp`) was removed earlier; that flag stops Tendyard with
 an error.
 
-## Documentation
+<a id="documentation"></a>
+
+## Choose a guide for the work you need to do
 
 - [Chat UI](docs/chat-ui.md): the chat at `/chat`, on a desktop and a phone.
 - [Agents and the native transport](docs/agents.md): logging in, requests, steering and the queue,
@@ -245,19 +267,23 @@ an error.
   an API client can do.
 - [CLI reference](docs/cli.md): `agentapi server`, `update`, `restart`, `list`, `hub` and `host`,
   and resource usage.
-- [The hub](docs/hub.md): many AgentAPIs on one page, and GitHub issues handed to agents.
+- [The hub](docs/hub.md): many Tendyard instances on one page, and GitHub issues handed to agents.
 - [Architecture](docs/architecture.md): packages, the data flow, persistence and the security
   model.
 
-## Architecture
+<a id="architecture"></a>
 
-AgentAPI is a single Go binary: an HTTP server (chi, with huma generating the OpenAPI schema) that
+## One binary connects agent protocols to the API and chat
+
+Tendyard is a single Go binary: an HTTP server (chi, with huma generating the OpenAPI schema) that
 runs one agent process and serves the chat UI, a Next.js app embedded in the binary. The agent's
 native adapter reports to an event emitter, which the HTTP API, the event stream, the queue and the
 chat read. See [docs/architecture.md](docs/architecture.md) for the packages, the data flow, the
 event stream, persistence and the security model.
 
-## Development
+<a id="development"></a>
+
+## Build and test the backend and chat together
 
 ```bash
 make build      # out/agentapi, with the chat UI embedded
@@ -267,32 +293,44 @@ go test ./...   # Go tests, including the e2e smoke test
 cd chat && bun test  # the chat UI's tests
 ```
 
-AgentAPI builds with Go 1.26 (`go.mod`; the `go` command fetches it) and the chat with Bun. Tests
+Tendyard builds with Go 1.26 (`go.mod`; the `go` command fetches it) and the chat with Bun. Tests
 run with `CGO_ENABLED=0`. Commit `openapi.json` with every API change, and regenerate it only
 with `make gen` (see [AGENTS.md](AGENTS.md)). The chat UI lives in [chat/](chat/README.md):
-`bun run dev` serves it against a running AgentAPI, and
+`bun run dev` serves it against a running Tendyard, and
 `agentapi server -- native-demo` runs a simulated agent for working on it
 without a real one. [MAINTAINERS.md](MAINTAINERS.md) describes how CI tests and releases a commit.
 
-## Runtime reliability
+<a id="runtime-reliability"></a>
+
+## Reliability fixes cover long sessions and interruptions
 
 The fork fixes concurrent event delivery, message tracking races and content-block merging during
 Claude delta streaming. These fixes address long sessions, process replacement and temporary
 browser or network interruptions.
 
-## Roadmap
+<a id="roadmap"></a>
 
-Pending feedback, we're considering the following features:
+## Next priorities are setup, recovery and traceability
 
-- [Support the MCP protocol](https://github.com/coder/agentapi/issues/1)
-- [Support the Agent2Agent Protocol](https://github.com/coder/agentapi/issues/2)
+Future work should make it easier to complete and supervise development tasks on your own
+machines. Priorities are:
 
-## Long-term vision
+- Shorten the setup from installing Tendyard to finishing a first issue and pull request.
+- Keep long-running jobs recoverable across agent failures, usage limits and machine restarts,
+  with a clear explanation when work needs intervention.
+- Make it easier to trace an issue's runs, review feedback and costs from the hub.
 
-AgentAPI lets developers control coding agents programmatically. We hope the major agents
-will eventually offer official SDKs. Whether AgentAPI is still needed will depend on whether vendors
-adopt a common API or continue to use their own formats.
+Protocol integrations such as MCP and Agent2Agent should serve these workflows. The
+[HTTP API](docs/api.md) remains available for building other interfaces and integrations.
 
-If vendors adopt a common API, we'll deprecate AgentAPI and recommend the official SDKs. If their
-formats remain different, we'll work toward a universal adapter so developers can switch agents
-without changing their code.
+<a id="long-term-vision"></a>
+
+## Developers should stay in control from issue to reviewed PR
+
+Tendyard should let a developer hand work to coding agents on their own machines and stay in
+control as it moves from an issue to a reviewed pull request. The chat, hub and launchers handle
+the conversation, dispatch, human decisions and recovery along the way.
+
+Official agent SDKs or shared protocols can simplify the adapters. Tendyard's role is to manage
+the work across agents and machines, with its state, results and costs available through both
+the built-in interface and the API.

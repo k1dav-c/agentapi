@@ -1,13 +1,20 @@
 # Documentation screenshots
 
-The [chat UI guide](../chat-ui.md) and [README](../../README.md) use these screenshots and GIFs.
-Chromium captured them from AgentAPI 5.6.0, built from the source with `make build`, serving the
-production chat UI and API, with two scripts: `capture-docs.mjs` for the chat and the hub's list
-and overview, and `capture-dispatch.mjs` for the hub's Issues page and an issue's agent in its chat,
-the page that creates the hub's GitHub App, the overview's Activity card, the GitHub and Providers
-settings and the model menu with the hub's providers; `hub-activity.png`, `dispatch-chat.png` and
-`dispatch-github-connect.png` came later, from a 5.6.1 build. The `github-*.png` views came
-otherwise; see below.
+The documentation images show real Tendyard pages with simulated agent data; the `github-*.png`
+views show real work on github.com. They support the [chat UI guide](../chat-ui.md) and [README](../../README.md).
+
+- **Chat and instance monitoring:** `capture-docs.mjs` runs the real server with demo agents.
+- **Issue dispatch and settings:** `capture-dispatch.mjs` combines real pages with fixed test data.
+- **GitHub results:** the public demo repository supplies the issue, review and merged-PR views.
+
+Chromium captured most views from AgentAPI 5.6.0, built from source with `make build` and serving
+the production chat UI and API. `capture-docs.mjs` captures the chat and the hub's list and overview.
+`capture-dispatch.mjs` captures Issues, an issue's chat, GitHub App setup, Activity, GitHub and
+Providers settings, and the model menu with the hub's providers.
+
+`hub-activity.png`, `dispatch-chat.png` and `dispatch-github-connect.png` were captured later from
+a 5.6.1 build. The `github-*.png` images show the public demo repository on github.com; their
+capture setup is described below.
 
 [scripts/capture-docs.mjs](../../scripts/capture-docs.mjs) starts its own servers on a small sample
 project, `my-app` (a page with a stylesheet, a script and release notes, two commits and
@@ -19,7 +26,7 @@ uncommitted changes):
   simulated, so no paid agent runs;
 - the same demo posing as Claude Code (`--type claude -- native-demo`), one directory above
   `my-app`, for the earlier sessions, a subagent and a file found below the working directory.
-  AgentAPI reads Claude Code's logs for it, which the script writes into a temporary home
+  Tendyard reads Claude Code's logs for it, which the script writes into a temporary home
   directory: three earlier sessions, and the log of the subagent the demo's Agent tool call starts;
 - `agentapi hub serve` with nine `native-demo` instances that join it with `agentapi hub join`,
   posing as Claude Code, Codex and Pi, for the hub: one asks for an approval, one asks questions,
@@ -41,10 +48,9 @@ one model), priced from an OpenRouter list the script writes as the hub's copy, 
 App the script writes (a key made on the spot, `acme-agents`, installed on the organization `acme`
 with selected repositories and on a user, `dave`). The overview's Activity card reads the hub's own
 `/api/activity`, from an `activity.json` the script writes before the hub starts: a year of work,
-hour by hour, mostly on weekdays, more of it lately, with two weeks off. At the end the hub forgets
-its app, as Disconnect has it, so `/github/connect` shows as a hub without one serves it. What would
-need machines, agents and GitHub is
-fixed data fed to the page: the hub's stream gives it the script's agents and its board of three
+hour by hour, mostly on weekdays, more of it lately, with two weeks off. At the end, the script disconnects
+the app so `/github/connect` shows the setup page. Machine, agent and GitHub responses are supplied
+as fixed test data: the hub's stream gives it the script's agents and its board of three
 machines (`pve-dev` and `mac-mini` online, `gpu-box` offline) and the issues and jobs of
 `acme/web`, `acme/api` and `acme/infra`; Playwright answers the calls that would go to GitHub and
 refuses any other address off the machine; the page's clock is fixed. For the model menu, an
@@ -64,7 +70,9 @@ workflow (a public repository shouldn't run jobs on self-hosted runners), so the
 events reached the hub as the workflow sends them, through `POST /api/dispatch` with the hub's
 dispatch token.
 
-## Gallery
+<a id="gallery"></a>
+
+## The gallery records each captured view and animation
 
 Desktop views are 1440 × 1000 (or a part of one), phone views 390 × 844, all in the light theme at a
 device scale factor of 1.
@@ -114,7 +122,7 @@ device scale factor of 1.
 | [composer-favorites.png](composer-favorites.png) | An idle agent open from the hub, the composer's ☆ menu of favorites over a draft |
 | [hub-empty.png](hub-empty.png) | The guide an empty hub shows: the hub's address, the join command and a prompt for an agent on the machine, the secret masked |
 | [hub-sign-in.png](hub-sign-in.png) | Signing in to the hub, beside its picture of agents in their states |
-| [hub-list.png](hub-list.png) | The hub's list: two pinned agents, then two groups and Ungrouped, with every state's glyph: approval, question, login, usage limit, working, finished, idle, unreachable, stopped; and each agent's AgentAPI version, one older than the hub |
+| [hub-list.png](hub-list.png) | The hub's list: two pinned agents, then two groups and Ungrouped, with every state's glyph: approval, question, login, usage limit, working, finished, idle, unreachable, stopped; and each agent's Tendyard version, one older than the hub |
 | [hub-add.png](hub-add.png) | The Add dialog: joining a machine (the hub's address, updates from the hub, the command and a prompt for an agent, the secret masked), or adding an instance by its URL and token |
 | [hub-settings-favorites.png](hub-settings-favorites.png) | Hub settings at its Favorites tab: the favorites, each with its buttons to move, edit and delete it |
 | [hub-settings-providers.png](hub-settings-providers.png) | Hub settings at its Providers tab: two providers, each with its monogram, ID and endpoint, its models, whether it has a key, its usage and its health over the last hour; one with its models' prices from OpenRouter open |
@@ -131,7 +139,7 @@ device scale factor of 1.
 | [hub-tokens.png](hub-tokens.png) | The overview's Tokens card: the last 24 hours and 7 days, by kind, the agents that used the most, each group and each machine |
 | [hub-work.png](hub-work.png) | The overview's Work time card: the last 24 hours and 7 days, the agents that worked the most, each group and each machine |
 | [hub-activity.png](hub-activity.png) | The overview's Activity card: each day of the last year shaded by work time, a day's tooltip with its work time, tokens and spend |
-| [hub-versions.png](hub-versions.png) | The overview's Versions card: how many agents run each AgentAPI version, on which machines, and how to update the older ones |
+| [hub-versions.png](hub-versions.png) | The overview's Versions card: how many agents run each instance version, on which machines, and how to update the older ones |
 | [hub-phone-chat.png](hub-phone-chat.png) | An instance open from the hub on a phone, with the way back to the list and its machine's agents |
 
 The GIFs use a 1100 × 720 window, or 390 × 844 for the phone view. A blue dot marks the pointer and
@@ -155,7 +163,7 @@ small.
 | [dispatch-detail.png](dispatch-detail.png) | An issue's detail beside the board: an agent switch under way, its spend, runs, agent time, elapsed time and tokens, its description, its runs and a comment from GitHub |
 | [dispatch-clear.png](dispatch-clear.png) | Clear asks first: the ended jobs of the Done section it forgets |
 | [dispatch-review.png](dispatch-review.png) | The detail of an issue in review: a review and a message from the hub in its timeline |
-| [dispatch-failed.png](dispatch-failed.png) | A job whose AgentAPI exited 6 times in 30 minutes: why, its log, and Retry |
+| [dispatch-failed.png](dispatch-failed.png) | A job whose Tendyard exited 6 times in 30 minutes: why, its log, and Retry |
 | [dispatch-confirm-stop.png](dispatch-confirm-stop.png) | Stop asks first: the worktree and the branch are deleted |
 | [dispatch-confirm-switch.png](dispatch-confirm-switch.png) | Switch asks first: Codex takes over on the same branch |
 | [dispatch-new-issue.png](dispatch-new-issue.png) | New issue: open an issue and assign it to an agent |
@@ -173,7 +181,9 @@ The login card names the host and user to log in as; the script shows `dev-machi
 their place. The servers get a clean environment (no tokens or workspace links of the shell that
 runs the script) and a neutral shell prompt.
 
-## Capture again
+<a id="capture-again"></a>
+
+## Rebuild and run both scripts to reproduce the captures
 
 1. Get the binary to show. Either download a release binary, or build one with the production chat
    assets (`make build` needs Go, Bun and the chat's dependencies; it stamps the version from the

@@ -2,9 +2,17 @@
 
 [English](providers.md) | 繁體中文
 
-Claude Code 和 Codex 可以在執行中換到其他模型供應商，也就是支援 Anthropic Messages API（Claude
-Code）或 OpenAI Responses API（Codex）的端點，例如 LiteLLM 或 vLLM gateway。兩種 API 都支援的
-gateway，兩個 agent 都能用。供應商寫在主機的 `~/.agentapi/config.yaml`（`--config`）：
+Claude Code 與 Codex 可在工作階段內切換模型供應商，端點必須支援各自的 API：Claude Code 使用
+Anthropic Messages，Codex 使用 OpenAI Responses。LiteLLM 或 vLLM gateway 若同時支援兩者，就能供兩個 agent 使用。
+
+- **定義供應商：**在單台主機設定，或由 hub 共用；ID 相同時以本機設定為準。
+- **切換模型：**使用聊天介面或 `PUT /settings`，兩個 agent 的工作階段切換方式不同。
+- **保護金鑰：**本機代理替呼叫加入供應商金鑰並回報健康度，不把金鑰交給 agent。
+- **計算用量：**供應商呼叫分別記錄 token 與價格。
+
+## 在本機定義供應商，或從 hub 共用
+
+主機的供應商寫在 `~/.agentapi/config.yaml`（`--config`）：
 
 ```yaml
 providers:
@@ -17,11 +25,13 @@ providers:
 
 Codex 呼叫 `<base_url>/responses`。Claude Code 呼叫同一個網址去掉 `/v1` 再加上
 `/v1/messages`；它的端點在別處時，設定 `anthropic_base_url`。沒有版本的 `base_url`，Codex 會
-加上 `/v1`。檔案有變動時，AgentAPI 會重新讀取。檔案裡有金鑰，請設成只有你能讀（`chmod 600`），
-其他人讀得到時 AgentAPI 會發出警告。
+加上 `/v1`。檔案有變動時，Tendyard 會重新讀取。檔案裡有金鑰，請設成只有你能讀（`chmod 600`），
+其他人讀得到時 Tendyard 會發出警告。
 
 hub 可以替每台向它回報的主機保存供應商（見[執行 hub](api.zh-TW.md#執行-hub)）。在主機上，設定檔和 hub 有
 相同 `id` 的供應商時，以設定檔的為準。
+
+## 透過設定切換供應商，並遵守各 agent 的工作階段限制
 
 `GET /settings` 在 `options.providers` 列出供應商和各自的模型，設定 `provider` 則表示 agent 目前
 用哪一個：`default` 是 agent 自己的（Claude Code 的 Anthropic 登入或金鑰，Codex 的 OpenAI 登入或
@@ -41,15 +51,15 @@ curl -X PUT localhost:3284/settings -d '{"provider": "default"}'
 兩個 agent 的切換方式不同：
 
 - **Claude Code** 在執行中切換，從下一次 API 呼叫起生效，回合進行中也可以。換回自己的供應商時，
-  會以同一個工作階段重新啟動，需要幾秒鐘；回合進行中會回 409。切換失敗時，AgentAPI 會恢復原先的環境與模型。
+  會以同一個工作階段重新啟動，需要幾秒鐘；回合進行中會回 409。切換失敗時，Tendyard 會恢復原先的環境與模型。
   如果 Claude Code 沒有確認切換或恢復失敗，則會用先前已知的供應商啟動替代 adapter，不讓下一個回合在設定可能與介面不一致的
   狀態下繼續。
 - **Codex** 的 thread 綁定建立時的供應商，而 OpenAI 的 thread 裡有其他供應商不接受的項目（OpenAI
   的工具定義、加密的推理內容）。切換時會在另一個供應商上重新啟動 app-server，開一個新的 thread，
   把對話的訊息以文字帶過去，不含工具呼叫。回合進行中切換會回 409。
 
-選定的供應商適用於這個工作階段之後啟動的每個 agent；使用 `--state-db` 時，AgentAPI 重新啟動後
-也一樣。選定的供應商若已不存在，AgentAPI 會放棄這個選擇並發出警告，agent 改用自己的供應商啟動。
+選定的供應商適用於這個工作階段之後啟動的每個 agent；使用 `--state-db` 時，Tendyard 重新啟動後
+也一樣。選定的供應商若已不存在，Tendyard 會放棄這個選擇並發出警告，agent 改用自己的供應商啟動。
 hub 的供應商會存在設定檔旁邊（`hub-providers.json`，以 hub 的 secret 加密），留給下次啟動用；所以 hub
 暫時連不上時，使用 hub 供應商的工作階段仍會在原本的供應商上啟動。hub 還沒回應前，選定的供應商若可能是 hub 的，
 就仍保持選定，agent 這次先用自己的供應商啟動，等 hub 回應後下次啟動時就會換回去。
@@ -57,22 +67,27 @@ hub 的供應商會存在設定檔旁邊（`hub-providers.json`，以 hub 的 se
 供應商的模型（它在 `<base_url>/models` 列出的）會保留 10 分鐘，之後在背景重新查詢。供應商沒有回應時，
 `GET /settings` 最多等 3 秒，一分鐘內也不會再問。
 
-agent 永遠拿不到供應商的金鑰。AgentAPI 透過 `127.0.0.1` 上的代理替 agent 呼叫供應商：第一次有
-agent 用供應商時，代理開始在隨機的連接埠上監聽，直到 AgentAPI 結束。Claude Code 拿到
+## 本機代理讓供應商金鑰不必交給 agent
+
+agent 永遠拿不到供應商的金鑰。Tendyard 透過 `127.0.0.1` 上的代理替 agent 呼叫供應商：第一次有
+agent 用供應商時，代理開始在隨機的連接埠上監聽，直到 Tendyard 結束。Claude Code 拿到
 `ANTHROPIC_BASE_URL=http://127.0.0.1:<port>/<id>/anthropic`，Codex 拿到 `base_url` 為
-`http://127.0.0.1:<port>/<id>/openai` 的供應商，兩者拿到的都是 AgentAPI 為這個行程產生的 token，
+`http://127.0.0.1:<port>/<id>/openai` 的供應商，兩者拿到的都是 Tendyard 為這個行程產生的 token，
 而不是金鑰（`ANTHROPIC_AUTH_TOKEN`、Codex 的 `AGENTAPI_PROVIDER_API_KEY`）。沒帶這個 token 的呼叫，
 代理回 401；其他的呼叫則照 agent 原本的方式，以 bearer token 帶上供應商的金鑰轉送過去，回應一邊收到
 一邊傳回。代理每次呼叫都重新查詢供應商：在設定檔或 hub 上改了金鑰或網址會立即生效，已移除的供應商
-回 404。代理跟隨重新導向時，只把金鑰送往同一個 origin。供應商的模型清單仍由 AgentAPI 自己帶著金鑰
+回 404。代理跟隨重新導向時，只把金鑰送往同一個 origin。供應商的模型清單仍由 Tendyard 自己帶著金鑰
 查詢。代理無法啟動時，agent 就無法使用供應商，而不會改拿金鑰。設有 HTTP proxy 時（`HTTP_PROXY`、
-`HTTPS_PROXY`、`ALL_PROXY`），AgentAPI 會把 `127.0.0.1`、`localhost` 和 `::1` 加進 agent 的
-`NO_PROXY` 和 `no_proxy`，讓 agent 直接連到代理。你的使用者底下的其他行程，在 AgentAPI 執行期間
+`HTTPS_PROXY`、`ALL_PROXY`），Tendyard 會把 `127.0.0.1`、`localhost` 和 `::1` 加進 agent 的
+`NO_PROXY` 和 `no_proxy`，讓 agent 直接連到代理。你的使用者底下的其他行程，在 Tendyard 執行期間
 仍可以從 agent 的環境變數讀到 token，透過代理呼叫供應商，但看不到金鑰。
 
-代理也會得知每個供應商的回應狀況。它計算過去一小時內的呼叫次數、失敗（網路錯誤或逾時、5xx 或 429
-回應、回應中途斷掉），以及用戶端錯誤（其他 4xx，例如供應商不接受的金鑰或模型，不算供應商的失敗），
-最近 100 次非失敗回應收到第一個 byte 的時間中位數與第 95 百分位數，以及最近一次成功與失敗。`GET /settings`
+## 健康度與用量回報顯示各供應商的結果
+
+代理會追蹤每個供應商過去一小時內的呼叫次數、失敗與用戶端錯誤。
+失敗包括網路錯誤、逾時、5xx 或 429 回應，以及回應中途中斷。其他 4xx（例如供應商不接受的金鑰或模型）
+算用戶端錯誤，不算供應商失敗。代理也會回報最近一次成功與失敗，以及最近 100 次非失敗回應收到第一個
+byte 的時間中位數與第 95 百分位數。`GET /settings`
 把這些放在每個供應商的 `health`，摘要則放在 `provider_health`，列出這一小時內 agent 呼叫過的供應商。
 聊天介面的模型選單會標示最近一次呼叫失敗、或這一小時有一半呼叫失敗的供應商，提示中有失敗的次數和最後
 一次錯誤；hub 的 Providers 設定則顯示每個供應商在回報的 agent 上這一小時的狀況。
@@ -80,11 +95,13 @@ agent 用供應商時，代理開始在隨機的連接埠上監聽，直到 Agen
 `GET /sessions`、`GET /cost` 和摘要的 `spend` 會依供應商分開計算呼叫次數、token 和花費
 （`providers`，agent 自己的是 `default`）；`GET /sessions` 和 `GET /cost` 還會附上每個供應商的
 `name`，也就是伺服器當下設定裡的名稱。Claude Code 的 log 不會寫出呼叫送往哪個端點，所以
-AgentAPI 在 `~/.agentapi/provider-ledger.jsonl` 記錄每個工作階段從什麼時候起用哪個供應商。
+Tendyard 在 `~/.agentapi/provider-ledger.jsonl` 記錄每個工作階段從什麼時候起用哪個供應商。
 
-## 價格
+<a id="價格"></a>
 
-gateway 的模型（例如 `Kimi-K3-NVFP4`）不在 AgentAPI 的價格表裡，沒有價格時，這些呼叫只計
+## 經供應商發出的呼叫，優先使用該供應商的價格
+
+gateway 的模型（例如 `Kimi-K3-NVFP4`）不在 Tendyard 的價格表裡，沒有價格時，這些呼叫只計
 token、不計花費（聊天介面顯示 **no price**）。供應商可以替每個模型帶一個價格，單位是每百萬 token 的
 美元；送往該供應商的呼叫會先用這個價格計算，再輪到價格表（內建價格和 `--prices`，其他呼叫照舊用
 價格表計價）。hub 上的供應商從 OpenRouter 取得價格；設定檔裡的供應商則寫在 `prices` 底下，以模型 ID
@@ -117,5 +134,5 @@ OpenRouter 模型同名時，兩個都不對應。在供應商設定裡，可以
 金鑰列出模型。
 
 這些是 OpenRouter 的牌價，也就是 OpenRouter 對該模型的收費：對自己提供模型的 gateway（例如自架的
-vLLM）來說，這只是估計這些呼叫在別處要花多少，不是你實際的成本。設定檔裡和 hub 同 ID 的供應商以
-設定檔為準，價格也用設定檔裡的（或沒有）。
+vLLM）來說，這只是估計這些呼叫在別處要花多少，不是你實際的成本。設定檔和 hub 有同 ID 的供應商時，以設定檔為準，價格也一樣。
+設定檔沒有提供價格時，不會改用 hub 的價格。

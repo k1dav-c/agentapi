@@ -2,8 +2,13 @@
 
 [English](cli.md) | 繁體中文
 
-這一頁列出 `agentapi` 的各個指令和旗標；最後的[資源用量](#資源用量)說明執行中的 AgentAPI 要用掉多少
-記憶體和 CPU。
+`agentapi` CLI 可啟動 agent、把主機接到 hub，以及維護執行中的實例。依需要的角色選擇指令：
+
+- **執行 agent：**`server` 啟動 API 與聊天介面。
+- **協調主機：**`hub` 監看實例並派發 issue，`host` 執行工作主機上的 launcher。
+- **維護實例：**`list`、`restart` 與 `update` 用來檢查或替換執行中的 server。
+
+下方依指令列出旗標，最後提供[資源量測](#資源用量)。
 
 ## `agentapi server`
 
@@ -60,13 +65,13 @@ state-db: ~/.agentapi/state/{port}.db
 | `--webhook-events` | `run.status_changed` | 要送的事件：類型、群組（`task.*`）或 `*` |
 | `--webhook-secret` | | 為每次傳送簽章的 secret（`X-AgentAPI-Signature-256`） |
 | `--webhook-heartbeat` | `60s` | `instance.heartbeat` 的間隔；`0` 為關閉 |
-| `--instance-id` | `<hostname>:<port>` | 在 `GET /summary` 和每個 webhook 事件中代表這個 AgentAPI 的 ID；見[監看多個實例](api.zh-TW.md#監看多個實例) |
-| `--name` | 工作目錄的名稱 | 監看多個 AgentAPI 的用戶端顯示的名稱 |
+| `--instance-id` | `<hostname>:<port>` | 在 `GET /summary` 和每個 webhook 事件中代表這個實例的 ID；見[監看多個實例](api.zh-TW.md#監看多個實例) |
+| `--name` | 工作目錄的名稱 | 監看多個實例的用戶端顯示的名稱 |
 | `--registry` | `true` | 執行期間在登記目錄保留登記檔；見[監看多個實例](api.zh-TW.md#監看多個實例) |
 | `--registry-dir` | `~/.agentapi/instances` | 登記目錄 |
-| `--public-url` | | 可以連到這個 AgentAPI 的網址，會放在 `GET /summary` 和每個 webhook 事件中；`{port}` 和 `{hostname}` 會填入，`{ip}` 則填入這台主機通往 webhook 網址那條路由上的 IPv4 位址（沒有 webhook 網址或找不到這條路由時，取第一個私有網路位址，其次是 CGNAT 位址），執行期間最多每 30 秒重新查詢一次；查不到時沿用上一個位址 |
+| `--public-url` | | 可以連到這個實例的網址，會放在 `GET /summary` 和每個 webhook 事件中；`{port}` 和 `{hostname}` 會填入，`{ip}` 則填入這台主機通往 webhook 網址那條路由上的 IPv4 位址（沒有 webhook 網址或找不到這條路由時，取第一個私有網路位址，其次是 CGNAT 位址），執行期間最多每 30 秒重新查詢一次；查不到時沿用上一個位址 |
 | `--config` | `~/.agentapi/config.yaml` | 設定檔：以旗標名稱設定，優先順序低於旗標和環境變數 |
-| `--allow-update` | `false` | 讓 API 用戶端（例如 hub）把 AgentAPI 更新到最新發行版，再原地重新啟動；見[透過 API 更新](api.zh-TW.md#透過-api-更新) |
+| `--allow-update` | `false` | 讓 API 用戶端（例如 hub）把 Tendyard 更新到最新發行版，再原地重新啟動；見[透過 API 更新](api.zh-TW.md#透過-api-更新) |
 | `--webhook-timeout` | `10s` | 每次傳送的逾時時間 |
 | `--webhook-max-attempts` | `3` | 傳送的嘗試次數 |
 | `--webhook-payload-template` | | POST 內容的 Go `text/template` 範本 |
@@ -75,58 +80,58 @@ state-db: ~/.agentapi/state/{port}.db
 | `--log-level` | `info` | 記錄的最低層級：`debug`、`info`、`warn` 或 `error` |
 | `-P`, `--print-openapi` | | 印出 OpenAPI schema 後結束 |
 
-AgentAPI 把 log 寫到標準輸出，每筆一行 `time=… level=… msg=…`。`--log-level debug`（或
+Tendyard 把 log 寫到標準輸出，每筆一行 `time=… level=… msg=…`。`--log-level debug`（或
 `AGENTAPI_LOG_LEVEL`、設定檔中的 `log-level`）會加上排查問題用的內容，例如 agent 的命令列、登入
 檢查，以及成功的讀取（狀態碼低於 400 的 `GET`、`HEAD`、`OPTIONS` 請求；用戶端會輪詢 `GET /status`，
 所以 `info` 不記這些）；`warn` 和 `error` 則略過例行的紀錄。層級不正確時，伺服器不會啟動。
 
 ## `agentapi update`
 
-將 AgentAPI 執行檔更新為 GitHub 上的最新發行版。
+將 Tendyard 執行檔更新為 GitHub 上的最新發行版。
 
 ```bash
 agentapi update            # 下載並安裝最新版本
 agentapi update --check    # 僅檢查是否有可用更新
 agentapi update --force    # 即使已是最新版本也執行更新
-agentapi update --restart  # 更新後讓執行中的 AgentAPI 改用新版本
+agentapi update --restart  # 更新後讓執行中的實例改用新版本
 agentapi update --restart --allow-update  # 之後也讓 hub 可以更新它們
 ```
 
-更新前，AgentAPI 會先依據該版本的 `checksums.txt` 清單，以 SHA-256 驗證下載的執行檔，
+更新前，Tendyard 會先依據該版本的 `checksums.txt` 清單，以 SHA-256 驗證下載的執行檔，
 通過後才取代目前的執行檔。若清單不存在、格式錯誤、檢查碼與下載檔案不符，或下載的執行檔執行起來
 不是該版本，就會拒絕更新。取代執行檔時，使用的鎖定檔和[透過 API 更新](api.zh-TW.md#透過-api-更新)相同。
 查詢發行版最多 1 分鐘；等待鎖定檔、下載與取代執行檔則最多 10 分鐘。
 
-執行中的 AgentAPI 在重新啟動前仍是舊版本。`--restart` 會像
-[`agentapi restart --all`](#agentapi-restart) 一樣，重新啟動仍在執行舊執行檔的 AgentAPI；
+執行中的實例在重新啟動前仍是舊版本。`--restart` 會像
+[`agentapi restart --all`](#agentapi-restart) 一樣，重新啟動仍在執行舊執行檔的 Tendyard；
 執行檔已是最新版本時也會重新啟動，因為可能是其他更新取代了它。
-透過 `sudo` 執行時（安裝在 `/usr/local/bin`），重新啟動的是執行 `sudo` 那位使用者的 AgentAPI，
+透過 `sudo` 執行時（安裝在 `/usr/local/bin`），重新啟動的是執行 `sudo` 那位使用者的 Tendyard，
 依據該使用者的登記目錄。hub 不在其中：請用服務管理工具重新啟動，例如
 `systemctl restart agentapi-hub`。
 
 `--allow-update` 會在 `--restart` 之前，先把 `allow-update: true` 寫進設定檔（`--config`，預設是
 執行 `sudo` 那位使用者的 `~/.agentapi/config.yaml`，檔案擁有者仍是該使用者），重新啟動後的
-AgentAPI 從此就能由 [hub](hub.zh-TW.md#從-hub-更新) 更新。設定檔裡的其他設定都會保留，
+Tendyard 從此就能由 [hub](hub.zh-TW.md#從-hub-更新) 更新。設定檔裡的其他設定都會保留，
 和 `agentapi hub join --allow-update` 一樣。搭配 `--check` 時不會寫入任何東西。舊版的 `agentapi`
 沒有這個旗標：先自己把這一行加進設定檔，再執行 `agentapi update --restart`。
 
 ## `agentapi restart`
 
-原地重新啟動執行中的 AgentAPI，例如在更新取代執行檔之後：
+原地重新啟動執行中的實例，例如在更新取代執行檔之後：
 
 ```bash
-agentapi restart 3285 3286  # 這些連接埠上的 AgentAPI
-agentapi restart --all      # 你在這台主機上的所有 AgentAPI
+agentapi restart 3285 3286  # 這些連接埠上的實例
+agentapi restart --all      # 你在這台主機上的所有實例
 ```
 
-`agentapi restart` 從[登記目錄](api.zh-TW.md#監看多個實例)找到這些 AgentAPI，並送出 SIGUSR2。AgentAPI 會先以
+`agentapi restart` 從[登記目錄](api.zh-TW.md#監看多個實例)找到這些 Tendyard，並送出 SIGUSR2。Tendyard 會先以
 `--version` 執行啟動時的程式，再以之後要用的參數和環境變數執行一次，確認它能以這些設定啟動：
 旗標、`AGENTAPI_*` 環境變數和設定檔、agent 的參數，以及它能寫入的狀態資料庫。任一項失敗時（例如
 更新帶來的發行版不接受某個設定），記下原因並繼續提供服務，`agentapi restart` 也會回報它仍照原樣
 執行。成功時就像關閉那樣停止（中斷並關閉 agent、寫入狀態資料庫、刪除登記檔，webhook 也會送出
 `instance.stopped`），再在同一個行程中
 以相同的參數和環境變數執行同一個路徑。PID 不變，所以 PID 檔和等待它的上層 shell（例如 Coder
-workspace 的啟動腳本）仍然有效，輸出也照舊寫到原本的地方。這個指令會等到每個 AgentAPI 以新的
+workspace 的啟動腳本）仍然有效，輸出也照舊寫到原本的地方。這個指令會等到每個實例以新的
 `server_id` 在原連接埠上回應，並印出新版本。
 
 - 使用 `--state-db` 時，對話會保留，agent 也會接續原本的工作階段。沒有時，agent 同樣會接續
@@ -135,17 +140,17 @@ workspace 的啟動腳本）仍然有效，輸出也照舊寫到原本的地方�
   請求、選擇的設定，以及用量限制的停止或重試等待都會重新開始，先前送過的 `--initial-prompt`
   也不會再送出。紀錄已經不在的工作階段會重新開始，聊天介面會顯示警告。從較早的版本更新時，
   那一次重新啟動仍是新的工作階段：較早的版本不會交出工作階段。
-- 只會重新啟動你自己的 AgentAPI，而且登記檔必須對應到執行中的 `agentapi server`。透過 `sudo`
-  執行時，指的是執行 `sudo` 那位使用者的 AgentAPI。較早的版本無法原地重新啟動，
+- 只會重新啟動你自己的 Tendyard，而且登記檔必須對應到執行中的 `agentapi server`。透過 `sudo`
+  執行時，指的是執行 `sudo` 那位使用者的 Tendyard。較早的版本無法原地重新啟動，
   `agentapi restart` 會指出來：這一次請自行重新啟動。
-- 這個指令若是在某個 AgentAPI 底下執行（例如 agent 執行 `agentapi update --restart`），那個
-  AgentAPI 會最後才重新啟動；重新啟動會關閉 agent，這個指令也可能隨之結束。
-- `--registry-dir` 可讀取其他登記目錄，`--timeout`（預設 `1m`）限制等待每個 AgentAPI 的時間。
+- 這個指令若是在某個 Tendyard 底下執行（例如 agent 執行 `agentapi update --restart`），那個
+  Tendyard 會最後才重新啟動；重新啟動會關閉 agent，這個指令也可能隨之結束。
+- `--registry-dir` 可讀取其他登記目錄，`--timeout`（預設 `1m`）限制等待每個實例的時間。
 - Windows 不支援。
 
 ## `agentapi list`
 
-從[登記目錄](api.zh-TW.md#監看多個實例)列出這台主機上執行中的 AgentAPI，以及每個 `GET /summary` 的內容：
+從[登記目錄](api.zh-TW.md#監看多個實例)列出這台主機上執行中的實例，以及每個 `GET /summary` 的內容：
 閒置、工作中、需要你處理什麼（`needs request`），以及未讀的任務。
 
 ```bash
@@ -160,7 +165,7 @@ frontend  codex   working                http://localhost:3285  Add the settings
 
 ## `agentapi hub`
 
-執行監看多個 AgentAPI 的 hub，或把這台主機上的 AgentAPI 接到 hub；見[執行 hub](api.zh-TW.md#執行-hub) 和
+執行監看多個實例的 hub，或把這台主機上的 Tendyard 接到 hub；見[執行 hub](api.zh-TW.md#執行-hub) 和
 [加入 hub](api.zh-TW.md#加入-hub)。
 
 ```bash
@@ -172,7 +177,7 @@ agentapi hub leave
 
 `serve` 執行 hub：`--token`（或 `AGENTAPI_HUB_TOKEN`）是登入用的 token（改用 `--no-token` 則不需登入，
 適合本身已在另一層登入後面的 hub，例如 Coder workspace app），`--secret`（或
-`AGENTAPI_HUB_SECRET`）用來檢查 AgentAPI 的事件，`--instance-token`（或
+`AGENTAPI_HUB_SECRET`）用來檢查 Tendyard 的事件，`--instance-token`（或
 `AGENTAPI_HUB_INSTANCE_TOKEN`，否則 `AGENTAPI_API_TOKEN`）會送給它們。`--state` 保存實例，
 `--port` 和 `--bind` 設定監聽位置，`--allowed-hosts` 是瀏覽器可以用來開啟 hub 的名稱（不設定時任何名稱都可以），`--log-level`（或 `AGENTAPI_HUB_LOG_LEVEL`）設定要記錄多少。
 [issue 派工](hub.zh-TW.md#issues)用到的是 `--dispatch-token`（或 `AGENTAPI_HUB_DISPATCH_TOKEN`）：
@@ -181,23 +186,23 @@ hub 的 GitHub App 存放的檔案（預設是 `--state` 旁的 `github-app.json
 讓 hub 可以呼叫 loopback 位址上的 launcher，也就是在 hub 這台主機上、以 `localhost` 加入的 launcher；
 預設只呼叫其他主機位址上的 launcher。
 
-`join` 把 hub 的 webhook 寫進 `~/.agentapi/config.yaml`，並套用到正在執行、已登記的 AgentAPI。
+`join` 把 hub 的 webhook 寫進 `~/.agentapi/config.yaml`，並套用到正在執行、已登記的 Tendyard。
 `--secret`（或 `AGENTAPI_HUB_SECRET`）為事件簽章，`--events` 選擇事件（預設 `instance.*`，hub 只需要
 這些，其餘都從摘要得知），`--public-url` 是 hub 連回它們的網址（`{ip}` 會跟著主機的位址走；
-設定檔和 2.1.2 之後的 AgentAPI 保留 `{ip}`，較舊的則拿到當下的位址），
+設定檔和 2.1.2 之後的 Tendyard 保留 `{ip}`，較舊的則拿到當下的位址），
 `--api-token`（或 `AGENTAPI_API_TOKEN`）會送給需要 token 的實例，`--config` 和 `--registry-dir`
-可指定其他檔案。當下無法修改的 AgentAPI，會在重新啟動時套用設定檔。`--allow-update` 會另外寫入
-`allow-update: true`，AgentAPI 重新啟動後，hub 就能[透過 API 更新它們](api.zh-TW.md#透過-api-更新)；`leave` 會保留這個設定。
+可指定其他檔案。當下無法修改的 Tendyard，會在重新啟動時套用設定檔。`--allow-update` 會另外寫入
+`allow-update: true`，Tendyard 重新啟動後，hub 就能[透過 API 更新它們](api.zh-TW.md#透過-api-更新)；`leave` 會保留這個設定。
 
 ## `agentapi host`
 
 在已加入 hub 的主機上執行 [issue 派工](hub.zh-TW.md#issues)的 launcher：hub 每派一個 GitHub
-issue 到這台主機，它就在該 issue 分支的 git worktree 裡啟動一個 AgentAPI，之後再停掉。整套派工的
+issue 到這台主機，它就在該 issue 分支的 git worktree 裡啟動一個實例，之後再停掉。整套派工的
 架設見 [examples/issue-dispatch](../examples/issue-dispatch/README.md)。
 
-只有要接 issue 的主機才需要 launcher。光是 `agentapi hub join`，主機上的 AgentAPI 就會回報給 hub，
+只有要接 issue 的主機才需要 launcher。光是 `agentapi hub join`，主機上的 Tendyard 就會回報給 hub，
 在清單裡看得到、也能開啟。launcher 回報的是主機本身（能跑的 agent、repo、容量和 job），顯示在 Issues
-的主機列，並讓 hub 能在這台主機上啟動 AgentAPI；這些 AgentAPI 和其他的一樣會回報。launcher 不需要另外
+的主機列，並讓 hub 能在這台主機上啟動 Tendyard；這些 Tendyard 和其他的一樣會回報。launcher 不需要另外
 設定 hub，直接讀 `hub join` 寫入的設定。兩者分開，是因為 launcher 讓 hub 能在主機上啟動程式，加入 hub
 則不會。
 
@@ -212,9 +217,9 @@ agentapi host status
 | `serve` | `--config`、`--log-level`（`info`） | 在前景執行 launcher |
 | `status` | `--config` | 顯示 launcher、它的 hub、agent、repo 和 job |
 | `install` | `--config`、`--now` | 寫入 `~/.config/systemd/user/agentapi-host.service`（執行 `agentapi host serve`）並啟用；`--now` 會一併啟動，已在執行就重新啟動。再執行一次會重寫 unit，例如程式搬了位置之後 |
-| `uninstall` | | 停用、停止並移除這個 service；job 的 AgentAPI 繼續執行，檔案也都保留 |
+| `uninstall` | | 停用、停止並移除這個 service；job 的 Tendyard 繼續執行，檔案也都保留 |
 
-service 設了 `KillMode=process`：重新啟動或停止 launcher 時，job 的 AgentAPI 繼續執行，由下一個
+service 設了 `KillMode=process`：重新啟動或停止 launcher 時，job 的 Tendyard 繼續執行，由下一個
 launcher 接手。`install` 需要 systemd user instance；登出後 user service 會停止時，`install` 會提醒你，
 用 `sudo loginctl enable-linger <user>` 讓它們繼續執行。
 
@@ -247,7 +252,7 @@ host:
   public-url: http://{ip}:3291  # hub 連回 launcher 的網址
   workdir: ~/work               # clone 和 worktree 的位置
   scan: [~/work, ~/src]         # 找既有 repo 的目錄（深度 2）
-  ports: 4100-4199              # job 的 AgentAPI 用的 port
+  ports: 4100-4199              # job 的實例用的 port
   max-jobs: 4
   agents: [claude, codex]       # 預設為已安裝的（claude、codex、pi）
   agent: claude                 # 派工沒指定 agent 時用的 agent
@@ -257,14 +262,16 @@ host:
 | 檔案 | 內容 |
 | --- | --- |
 | `~/.agentapi/host.token` | hub 呼叫 launcher 用的 token，第一次啟動時產生。hub 會把主機名稱綁定到它：換了 token 的 launcher（檔案被刪、主機重灌）要等 hub 移除這台主機後才能加入：在 hub 的 Issues 按主機的 **×**，或呼叫 `DELETE /api/hosts/{name}`（見[疑難排解](hub.zh-TW.md#疑難排解)） |
-| `~/.agentapi/instance.token` | 這台主機所有 job 的 AgentAPI 的 API token，第一次啟動時產生。launcher 的事件會把它交給 hub，hub 只送給這台主機的 job，所以每台主機各有一組，不必等於 hub 的 `--instance-token` |
+| `~/.agentapi/instance.token` | 這台主機所有 job 的 Tendyard 的 API token，第一次啟動時產生。launcher 的事件會把它交給 hub，hub 只送給這台主機的 job，所以每台主機各有一組，不必等於 hub 的 `--instance-token` |
 | `~/.agentapi/host.sock` | job 的 `git` 和 `gh` 向 launcher 拿 GitHub token 的地方 |
 | `~/.agentapi/jobs.json`、`~/.agentapi/jobs/` | job 清單，以及各 job 的狀態資料庫、log 和 `gh` shim |
 
-## 資源用量
+<a id="資源用量"></a>
 
-AgentAPI 本身很輕量：一個 31–34 MiB 的 Go 行程，agent 閒置時用不到單一 CPU 核心的 0.1%。
-大部分的成本來自它執行的 agent CLI，約 120–285 MiB。
+## 資源量測分開呈現 server 額外負擔與 agent 用量
+
+量測中，Tendyard 的 Go 行程占 31–34 MiB，agent 閒置時使用不到單一 CPU 核心的 0.1%。
+大部分的記憶體用量來自 agent CLI，約 120–285 MiB。
 
 以下數字是 2026-11-13 量測的：AgentAPI v5.0.0（執行檔 33 MiB）、Claude Code 2.1.302、
 codex-cli 0.167.0 和 Pi 1.3.0，在 Linux、4 核心的 Intel Xeon Silver 4210（2.2 GHz）上執行，
@@ -272,7 +279,7 @@ codex-cli 0.167.0 和 Pi 1.3.0，在 Linux、4 核心的 Intel Xeon Silver 4210�
 記憶體是常駐記憶體（RSS）；閒置時的 CPU 是一分鐘內單一核心的使用比例，回合則是整個回合用掉的
 CPU 秒數，agent 的所有行程合計。
 
-| Agent | AgentAPI 記憶體 | AgentAPI CPU（閒置） | AgentAPI 每回合 CPU | Agent 記憶體 | Agent 每回合 CPU |
+| Agent | Tendyard 記憶體 | Tendyard CPU（閒置） | Tendyard 每回合 CPU | Agent 記憶體 | Agent 每回合 CPU |
 | --- | --- | --- | --- | --- | --- |
 | Claude Code | 31 MiB | 0.08% | 0.06–0.08 秒 | 230–285 MiB | 0.5–1.2 秒 |
 | Codex | 34 MiB | 0.07% | 0.09–0.13 秒 | 190–265 MiB | 0.3–0.8 秒 |
@@ -281,9 +288,9 @@ CPU 秒數，agent 的所有行程合計。
 
 - agent 自己的記憶體會在工作階段中變動：Claude Code 從閒置時的 230 MiB 在幾個回合中增加到
   265–285 MiB；Codex 在第一個回合增加到 265 MiB，之後釋放了約 70 MiB。
-- AgentAPI 的程式碼（記憶體中約 17 MiB）由同一個執行檔啟動的實例共用：同時執行四個時，
+- Tendyard 的程式碼（記憶體中約 17 MiB）由同一個執行檔啟動的實例共用：同時執行四個時，
   每個約占 17–21 MiB（PSS）。
-- 和 v0.24.0 的同樣量測（2026-10-18，執行檔 29.5 MiB）相比，AgentAPI 多用約 4 MiB（當時 27–30 MiB），
+- 和 v0.24.0 的同樣量測（2026-10-18，執行檔 29.5 MiB）相比，Tendyard 多用約 4 MiB（當時 27–30 MiB），
   CPU 不變；agent 本身的數字變化不大。
 - 沒有計入：agent 啟動的 MCP 伺服器、它執行的指令、shell 終端機（開啟時有一個 shell）以及
   瀏覽器分頁。
@@ -302,9 +309,9 @@ CPU 秒數，agent 的所有行程合計。
 算在內：2026-11-13 量測一段 1,000 個任務、內容幾乎都是 90 KB 提示詞的對話（狀態資料庫 97 MB），
 AgentAPI 5.0.0 用了 148 MiB（250 個任務時 67 MiB），而第一次重播只有最近 20 個任務，維持在 1.8 MB。
 
-規劃主機時，每個工作階段請預留約 35 MiB 給 AgentAPI，再加上 agent 本身（Claude Code 或 Codex
+規劃主機時，每個工作階段請預留約 35 MiB 給 Tendyard，再加上 agent 本身（Claude Code 或 Codex
 約 350 MiB，Pi 約 150 MiB），以及它的 MCP 伺服器和指令所需的資源。
 
-要重新量測，執行 `bun scripts/measure-resources.mjs`（僅限 Linux），它會用隔離的 AgentAPI 量測：
+要重新量測，執行 `bun scripts/measure-resources.mjs`（僅限 Linux），它會用隔離的 Tendyard 量測：
 預設只量 `native-demo`；`--agents claude,codex,pi` 指定的 agent 也會量（它們的回合會用到你的帳號）；
 加上 `--long 0,250,1000` 會量長對話。結果會印成上面這些表格。
