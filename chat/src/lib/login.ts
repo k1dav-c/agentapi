@@ -36,8 +36,8 @@ export function loginWhere(login: LoginRequired): string {
 // restarts the agent on the same session.
 export function loginNote(agentStarting: boolean): string {
   return agentStarting
-    ? "AgentAPI notices the login by itself within a few seconds, or press Check again."
-    : "Then press Check again: AgentAPI restarts the agent, which resumes this session.";
+    ? "Tendyard notices the login by itself within a few seconds, or press Check again."
+    : "Then press Check again: Tendyard restarts the agent, which resumes this session.";
 }
 
 // What a Check again (POST /login/retry) did. "not-waiting" (409): the
@@ -47,7 +47,7 @@ export type LoginRetryOutcome = "checking" | "not-waiting";
 // The notice the server also reports as an agent_error when the agent needs
 // a login, for clients without the card: "<message> Run `<command>` in a
 // terminal[ on <host> as <user>]; AgentAPI picks up the login by itself."
-const LOGIN_NOTICE = /Run `[^`]+` in a terminal[^;]*; AgentAPI picks up the login by itself\.$/;
+const LOGIN_NOTICE = /Run `[^`]+` in a terminal[^;]*; (?:AgentAPI|Tendyard) picks up the login by itself\.$/;
 
 // Whether an agent_error is a login notice the chat doesn't show: while the
 // agent waits for the login the card says the same, and the server replays

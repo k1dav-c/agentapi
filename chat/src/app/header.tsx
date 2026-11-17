@@ -148,7 +148,7 @@ export function Header() {
               <SessionDetail icon={Bot} label="Agent" value={agentDisplayName(agentType, "Unknown")} />
               {sessionName && <SessionDetail icon={MessageSquareText} label="Session" value={sessionName} />}
               {agentSessionId && <AgentSessionDetail id={agentSessionId} />}
-              {agentapiVersion && <SessionDetail icon={Tag} label="Version" value={`AgentAPI v${agentapiVersion}`} />}
+              {agentapiVersion && <SessionDetail icon={Tag} label="Version" value={`Tendyard v${agentapiVersion}`} />}
               <SessionDetail icon={Activity} label="Activity" value={activityDetail} />
               <SessionDetail
                 icon={CircleCheck}
@@ -193,7 +193,7 @@ export function Header() {
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={joinHubFromMenu.onSelect}>
               <LayoutGrid />
-              Add to an AgentAPI hub…
+              Add to a Tendyard hub…
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

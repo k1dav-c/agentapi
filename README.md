@@ -20,14 +20,15 @@ workspaces and servers.
 Tendyard is the product name. It currently ships as the `agentapi` binary: `agentapi server`
 runs one agent, `agentapi hub serve` provides the central workspace, and `agentapi host` runs the
 launcher on each machine. Existing configuration uses `~/.agentapi/`; the API and repository
-links below retain their current names. Historical release names and text shown by the current
-interface still use AgentAPI.
+links below retain their current names. The chat, the hub and what the hub posts on GitHub say
+Tendyard; earlier releases, the command line's help and messages, and the API's descriptions still
+say AgentAPI.
 
 [![A 90-second overview of Tendyard: the hub, Issues, the chat, a phone, the queue and the API](docs/videos/tendyard-overview.png)](docs/videos/tendyard-overview.mp4)
 
-The [overview video](docs/videos/tendyard-overview.mp4) (1 min 34 s, also with
+The [overview video](docs/videos/tendyard-overview.mp4) (1 min 33 s, also with
 [Traditional Chinese captions](docs/videos/tendyard-overview.zh-TW.mp4)) and the screenshots show
-AgentAPI v5.6 running the built-in `native-demo` agent. Its replies, tool results, models and usage
+Tendyard v5.7.0 running the built-in `native-demo` agent. Its replies, tool results, models and usage
 are simulated. See the [chat UI guide](docs/chat-ui.md) for features and
 animations, or the [screenshot guide](docs/screenshots/README.md) to reproduce the captures.
 

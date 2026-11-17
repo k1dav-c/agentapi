@@ -157,7 +157,7 @@ jobs:
           message="${message:-the hub answered $status}"
           echo "::error::The hub refused the dispatch: $message"
           if [ -n "$number" ]; then
-            jq -n --arg m "agentapi hub 沒有接受這次派工（$status）：$message" '{body: $m}' \
+            jq -n --arg m "Tendyard hub 沒有接受這次派工（$status）：$message" '{body: $m}' \
               | curl -fsS --max-time 30 -o /dev/null -X POST -H "Authorization: Bearer $GITHUB_TOKEN" \
                   -H "Accept: application/vnd.github+json" --data-binary @- \
                   "$api/repos/$repo/issues/$number/comments" || true

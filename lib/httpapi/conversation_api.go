@@ -42,9 +42,9 @@ func (s *Server) getTitle(ctx context.Context, input *struct{}) (*TitleResponse,
 	if status == instanceapi.AgentStatusRunning {
 		state = "Running"
 	}
-	title := state + " · AgentAPI"
+	title := state + " · Tendyard"
 	if task != "" {
-		title = state + " · " + task + " — AgentAPI"
+		title = state + " · " + task + " — Tendyard"
 	}
 
 	resp := &TitleResponse{}

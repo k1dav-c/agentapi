@@ -11,7 +11,7 @@
 - **檢查工作區：**開啟檔案、差異、先前工作階段與共用 shell 終端機。
 - **保持連線：**透過提醒、對話快取與 hub 跨主機追蹤 agent。
 
-截圖和動畫是 AgentAPI v5.6.0 搭配內建 `native-demo` agent 處理一個小型範例網站的畫面；
+截圖和動畫是 Tendyard v5.7.0 搭配內建 `native-demo` agent 處理一個小型範例網站的畫面；
 demo 的回覆、工具結果、模型和用量都是模擬的。動畫會
 在滑鼠指標所在及點擊的位置畫上藍點。[scripts/capture-docs.mjs](../scripts/capture-docs.mjs)
 可以重新擷取所有截圖和動畫（見[截圖說明](screenshots/README.md)）。
@@ -527,7 +527,7 @@ ID（前幾個字元，附複製按鈕）、Tendyard 版本、agent 正在做什
 完成時是下降的兩個音；純 http 也能用。hub 的鈴鐺也有這兩個選項。在 hub 開啟的聊天介面裡，agent 需要你時由 hub 發出提示音，聊天介面只在
 完成時發出。
 
-**Add to an AgentAPI hub…** 列出可以直接複製的步驟：啟動 hub、讓這台主機加入、打開 hub。輸入
+**Add to a Tendyard hub…** 列出可以直接複製的步驟：啟動 hub、讓這台主機加入、打開 hub。輸入
 hub 的位址後，指令會自動帶入。這個實例已經回報給某個 hub 時，會顯示是哪一個。
 
 ![把這個實例加入 hub：hub 的位址和可以複製的指令](screenshots/join-hub.png)

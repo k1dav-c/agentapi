@@ -136,8 +136,8 @@ describe("the chip", () => {
     expect(labels({state: "restarting"})).toEqual(["Restarting", "Restarting", "working"]);
     expect(labels({state: "failed", error: "no network"})).toEqual(["Update failed", "Update failed", "fault"]);
     expect(labels({state: "verifying"})).toEqual(["Updating", "Updating", "working"]);
-    expect(updateBadge(update({state: "failed", error: "no network"})).title).toBe("The AgentAPI update failed: no network");
-    expect(updateBadge(update({state: "waiting", target: "2.1.0"})).title).toBe("Updating AgentAPI to v2.1.0 once the agent is idle: its task finished, nothing waiting for an answer");
+    expect(updateBadge(update({state: "failed", error: "no network"})).title).toBe("The Tendyard update failed: no network");
+    expect(updateBadge(update({state: "waiting", target: "2.1.0"})).title).toBe("Updating Tendyard to v2.1.0 once the agent is idle: its task finished, nothing waiting for an answer");
   });
 });
 
@@ -226,9 +226,9 @@ describe("update the older ones", () => {
 
   test("says which it can't update, and why", () => {
     expect(cantUpdateText(olderUpdates(rows, "2.1.0"))).toBe(
-      "Can't update from here: 1 needs a one-time setup (dev-3); 2 have updates from the hub off (dev-4, dev-5); 1 runs an AgentAPI from before updates from the hub. The ⋯ menu of each agent says how to fix its machine.",
+      "Can't update from here: 1 needs a one-time setup (dev-3); 2 have updates from the hub off (dev-4, dev-5); 1 runs a version from before updates from the hub. The ⋯ menu of each agent says how to fix its machine.",
     );
-    expect(cantUpdateText(olderUpdates([instance("old", null)], "2.1.0"))).toBe("Can't update from here: 1 runs an AgentAPI from before updates from the hub.");
+    expect(cantUpdateText(olderUpdates([instance("old", null)], "2.1.0"))).toBe("Can't update from here: 1 runs a version from before updates from the hub.");
     expect(cantUpdateText(olderUpdates(rows.slice(0, 3), "2.1.0"))).toBe("");
   });
 

@@ -2,9 +2,25 @@
 
 ## Unreleased
 
+### Changes
+
+- The chat and the hub say Tendyard: the hub's header, sign-in page and tab title read Tendyard Hub,
+  the chat's tab title ends in Tendyard, and the menus and dialogs read **Update Tendyard…**,
+  **Add to a Tendyard hub…** and **Sign in to Tendyard**. Their explanations name the running
+  servers instances rather than AgentAPIs. `GET /title` ends in Tendyard too.
+- What the hub posts on GitHub says Tendyard: the cost comment's heading (**Tendyard 花費彙總**), the
+  line at the end of an issue created from the hub, and the page that creates the hub's GitHub App,
+  whose default name is now `tendyard-hub-<hex>`; an app made before keeps its name. The example
+  dispatch workflow's comment when the hub refuses a dispatch says Tendyard hub.
+- The command line, its messages and the API's descriptions still say AgentAPI, as do the `agentapi`
+  binary, `~/.agentapi/`, the `AGENTAPI_*` variables and the `X-AgentAPI-Signature-256` header.
+
 ### Documentation
 
-- The READMEs open with a 94-second overview video, with English or Traditional Chinese captions:
+- The Traditional Chinese README's four capabilities are back in their list; the paragraph on the
+  product name had taken the first one's place.
+
+- The READMEs open with a 93-second overview video, with English or Traditional Chinese captions:
   the hub, Issues, the chat, a phone, the queue and the API. `scripts/capture-video.mjs` records it
   from the same demo servers as the screenshots, which `capture-docs.mjs` now starts from the shared
   `scripts/capture-common.mjs`.

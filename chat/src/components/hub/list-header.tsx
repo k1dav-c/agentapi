@@ -75,7 +75,7 @@ export function HubListHeader({status, unreachable, hubVersion, spend, notify, o
             <HubMark className="size-8" />
           </button>
           <h1 className="min-w-0 flex-1 text-[15px] leading-tight font-semibold tracking-tight">
-            <span className="sr-only @[20rem]:not-sr-only">AgentAPI Hub</span>
+            <span className="sr-only @[20rem]:not-sr-only">Tendyard Hub</span>
           </h1>
           {/* How the hub tells you an agent needs you while you look away. */}
           <DropdownMenu>
@@ -141,7 +141,7 @@ export function HubListHeader({status, unreachable, hubVersion, spend, notify, o
           </span>
           {/* The hub's version keeps its room; the spend gives way first. */}
           {hubVersion && (
-            <span className="shrink-0 font-mono text-[11px]" title={`The hub runs AgentAPI ${hubLabel(hubVersion)}`}>
+            <span className="shrink-0 font-mono text-[11px]" title={`The hub runs Tendyard ${hubLabel(hubVersion)}`}>
               · {hubLabel(hubVersion)}
             </span>
           )}

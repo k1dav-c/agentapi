@@ -61,7 +61,7 @@ export function olderThanHub(instance: HubInstance, hubVersion: string | undefin
 // lastKnown, that it is the one an instance the hub doesn't follow now ran
 // last.
 export function versionTitle(version: string, hubVersion: string | undefined, lastKnown = false): string {
-  const name = `AgentAPI v${version}`;
+  const name = `Tendyard v${version}`;
   if (lastKnown) return `Last known: ${name}`;
   switch (versionRelation(version, hubVersion)) {
     case "older":

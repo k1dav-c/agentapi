@@ -11,7 +11,7 @@ desktop or phone, through the same [HTTP API](api.md#http-api-reference) other c
 - **Inspect the workspace:** open files, diffs, earlier sessions and the shared shell terminal.
 - **Stay connected:** use alerts, cached transcripts and the hub to follow agents across machines.
 
-Screenshots and animations show AgentAPI v5.6.0 running `native-demo` on a sample site. The demo's
+Screenshots and animations show Tendyard v5.7.0 running `native-demo` on a sample site. The demo's
 replies, tool results, models and usage are simulated. In the animations, a blue dot marks the pointer and clicks. To
 reproduce the captures, use [scripts/capture-docs.mjs](../scripts/capture-docs.mjs) as described in the
 [screenshot guide](screenshots/README.md).
@@ -578,7 +578,7 @@ sound**), a chime plays while you look away from the page, rising when the agent
 falling when it finishes; it works over plain http too. The hub's bell offers the same notifications and sound. In a chat the hub opens, the hub chimes for
 an agent that needs you, and the chat only when it finishes.
 
-**Add to an AgentAPI hub…** has the steps to copy: run a hub, join this machine to it, open it.
+**Add to a Tendyard hub…** has the steps to copy: run a hub, join this machine to it, open it.
 The hub address you type goes into the commands. When this instance already reports to a hub,
 it says which.
 

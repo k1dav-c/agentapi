@@ -40,7 +40,7 @@ export function SignIn({root, onSignedIn}: {root: string; onSignedIn: () => void
       <section className="hub-grid relative hidden flex-col justify-between overflow-hidden border-r p-12 lg:flex" aria-hidden="true">
         <div className="flex items-center gap-2.5">
           <HubMark className="size-8" />
-          <span className="text-[15px] font-semibold tracking-tight">AgentAPI Hub</span>
+          <span className="text-[15px] font-semibold tracking-tight">Tendyard Hub</span>
         </div>
         <ConstellationScene className="mx-auto w-full max-w-[460px]" />
         <div className="max-w-md">
@@ -54,7 +54,7 @@ export function SignIn({root, onSignedIn}: {root: string; onSignedIn: () => void
         <form onSubmit={submit} className="hub-rise w-full max-w-sm">
           <div className="mb-10 flex items-center gap-2.5 lg:hidden">
             <HubMark className="size-8" />
-            <span className="text-[15px] font-semibold tracking-tight">AgentAPI Hub</span>
+            <span className="text-[15px] font-semibold tracking-tight">Tendyard Hub</span>
           </div>
           <h1 className="text-2xl font-semibold tracking-tight">Sign in to your hub</h1>
           <p className="mt-2 text-sm leading-relaxed text-muted-foreground">

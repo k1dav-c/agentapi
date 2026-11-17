@@ -1,6 +1,6 @@
 {
-  "captured_at": "2026-11-16T06:05:54.112Z",
-  "agentapi_version": "5.6.0",
+  "captured_at": "2026-11-17T07:32:20.759Z",
+  "agentapi_version": "5.7.0",
   "agents": [
     "native-demo",
     "native-demo posing as Claude Code",

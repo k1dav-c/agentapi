@@ -65,7 +65,7 @@ export function UpdateMenuItems({instance, onOpen, onCancel}: {instance: HubInst
         </DropdownMenuItem>
       ) : (
         <DropdownMenuItem onSelect={onOpen}>
-          <CircleArrowUp /> <ItemText title="Update AgentAPI…" note={action.kind === "update" && action.failed ? "The last attempt failed" : notes[action.kind]} />
+          <CircleArrowUp /> <ItemText title="Update Tendyard…" note={action.kind === "update" && action.failed ? "The last attempt failed" : notes[action.kind]} />
         </DropdownMenuItem>
       )}
     </>
@@ -126,7 +126,7 @@ export function UpdateDialogBody({
           <DialogHeader>
             <DialogTitle>Update {name}?</DialogTitle>
             <DialogDescription>
-              It installs the latest AgentAPI release on {host} and restarts into it.
+              It installs the latest Tendyard release on {host} and restarts into it.
               {version && (older ? ` It runs v${version}; the hub runs v${hubVersion}.` : ` It runs v${version}.`)}
             </DialogDescription>
           </DialogHeader>
@@ -175,7 +175,7 @@ export function UpdateDialogBody({
         <>
           <DialogHeader>
             <DialogTitle>{instance.hostname ? <span data-hub-host>{instance.hostname}</span> : "Its machine"} needs a one-time setup</DialogTitle>
-            <DialogDescription className="[overflow-wrap:anywhere]">{action.reason || "This AgentAPI can't replace its binary."}</DialogDescription>
+            <DialogDescription className="[overflow-wrap:anywhere]">{action.reason || "This instance can't replace its binary."}</DialogDescription>
           </DialogHeader>
           {action.command && (
             <div className="text-sm">
@@ -191,7 +191,7 @@ export function UpdateDialogBody({
         <>
           <DialogHeader>
             <DialogTitle>Updates from the hub are off on {host}</DialogTitle>
-            <DialogDescription>An AgentAPI takes updates from the hub only on a machine that allows them.</DialogDescription>
+            <DialogDescription>An instance takes updates from the hub only on a machine that allows them.</DialogDescription>
           </DialogHeader>
           <div className="text-sm">
             <p>
@@ -200,7 +200,7 @@ export function UpdateDialogBody({
             </p>
             <CopyCommand text={ALLOW_UPDATE_LINE} />
             <p className="mt-3 text-muted-foreground">
-              Its AgentAPIs read it when they start: restart them once with <Path>agentapi restart --all</Path>.
+              Its instances read it when they start: restart them once with <Path>agentapi restart --all</Path>.
             </p>
           </div>
         </>

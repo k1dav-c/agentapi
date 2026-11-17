@@ -59,7 +59,7 @@ describe("MachineCard", () => {
     // The name alone on its line; the tabs (the picked one labelled, the
     // others their marks), then what the agents share; the directory's name,
     // which the machine's doesn't say, in the panel.
-    expect(shown).toContain(" dev-1 Claude AgentAPI v3.1.0");
+    expect(shown).toContain(" dev-1 Claude Tendyard v3.1.0");
     expect(shown).toContain("Deploy the release home $4.20");
     // The version and the spend of the machine, once: $4.20 and $1.00 in the last 24 hours.
     expect(html.match(/>v3\.1\.0</g)).toHaveLength(1);
@@ -116,7 +116,7 @@ describe("MachineCard", () => {
     const pi = agent(3286, "pi", {name: "site", agentapi_version: "3.0.0"});
     const shown = text(card([pi, claude]));
     expect(shown).not.toContain("dev-1 home");
-    expect(shown).toContain("site AgentAPI v3.0.0, older than the hub (v3.1.0) v3.0.0 older");
+    expect(shown).toContain("site Tendyard v3.0.0, older than the hub (v3.1.0) v3.0.0 older");
   });
 
   test("a name the machine's name says already shows nowhere", () => {

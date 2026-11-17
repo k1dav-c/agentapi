@@ -281,8 +281,8 @@ try {
 
   // How to add this AgentAPI to a hub, with a hub address typed in.
   await page.getByRole('button', {name: /Open session details/}).click();
-  await page.getByRole('menuitem', {name: 'Add to an AgentAPI hub…'}).click();
-  const joinHub = page.getByRole('dialog', {name: 'Add to an AgentAPI hub'});
+  await page.getByRole('menuitem', {name: 'Add to a Tendyard hub…'}).click();
+  const joinHub = page.getByRole('dialog', {name: 'Add to a Tendyard hub'});
   await joinHub.getByLabel('Hub address').fill('hub.vpn:3290');
   await elementShot(page, joinHub, 'join-hub.png');
   await page.keyboard.press('Escape');

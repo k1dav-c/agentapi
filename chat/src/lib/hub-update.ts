@@ -110,27 +110,27 @@ export function updateBadge(update: InstanceUpdate): UpdateBadge {
   const target = update.target ? `v${update.target}` : "";
   switch (update.state) {
     case "checking":
-      return {label: "Checking for update", short: "Updating", title: "Updating AgentAPI: checking for the latest release", tone: "working"};
+      return {label: "Checking for update", short: "Updating", title: "Updating Tendyard: checking for the latest release", tone: "working"};
     case "downloading":
       return {
         label: target ? `Downloading ${target}` : "Downloading update",
         short: "Updating",
-        title: `Updating AgentAPI: downloading ${target || "the latest release"}`,
+        title: `Updating Tendyard: downloading ${target || "the latest release"}`,
         tone: "working",
       };
     case "waiting":
       return {
         label: "Update waits for the task",
         short: "Update waits",
-        title: `Updating AgentAPI${target ? ` to ${target}` : ""} once the agent is idle: its task finished, nothing waiting for an answer`,
+        title: `Updating Tendyard${target ? ` to ${target}` : ""} once the agent is idle: its task finished, nothing waiting for an answer`,
         tone: "waiting",
       };
     case "restarting":
-      return {label: target ? `Restarting into ${target}` : "Restarting", short: "Restarting", title: `Updating AgentAPI: restarting into ${target || "the new release"}`, tone: "working"};
+      return {label: target ? `Restarting into ${target}` : "Restarting", short: "Restarting", title: `Updating Tendyard: restarting into ${target || "the new release"}`, tone: "working"};
     case "failed":
-      return {label: "Update failed", short: "Update failed", title: update.error ? `The AgentAPI update failed: ${update.error}` : "The AgentAPI update failed", tone: "fault"};
+      return {label: "Update failed", short: "Update failed", title: update.error ? `The Tendyard update failed: ${update.error}` : "The Tendyard update failed", tone: "fault"};
     default:
-      return {label: "Updating", short: "Updating", title: `Updating AgentAPI: ${update.state}`, tone: "working"};
+      return {label: "Updating", short: "Updating", title: `Updating Tendyard: ${update.state}`, tone: "working"};
   }
 }
 
@@ -273,7 +273,7 @@ export function cantUpdate(older: OlderUpdates): CantUpdate {
   const reasons = [
     older.blocked.length > 0 && {text: `${count(older.blocked.length, "needs", "need")} a one-time setup`, hosts: machines(older.blocked)},
     older.off.length > 0 && {text: `${count(older.off.length, "has", "have")} updates from the hub off`, hosts: machines(older.off)},
-    older.unsupported.length > 0 && {text: `${count(older.unsupported.length, "runs", "run")} an AgentAPI from before updates from the hub`, hosts: []},
+    older.unsupported.length > 0 && {text: `${count(older.unsupported.length, "runs", "run")} a version from before updates from the hub`, hosts: []},
   ].filter((reason) => reason !== false);
   const fix = older.blocked.length + older.off.length > 0 ? "The ⋯ menu of each agent says how to fix its machine." : "";
   return {reasons, fix};

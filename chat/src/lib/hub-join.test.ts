@@ -77,7 +77,7 @@ describe("joinCommand", () => {
 describe("joinPrompt", () => {
   test("the values the skill asks for, and the steps with the URL picked", () => {
     const prompt = joinPrompt(options());
-    expect(prompt).toStartWith("Join this machine's AgentAPIs to my AgentAPI hub (agentapi hub join). If the agentapi-hub-join skill is available, follow it");
+    expect(prompt).toStartWith("Join this machine's Tendyard instances to my Tendyard hub (agentapi hub join). If the agentapi-hub-join skill is available, follow it");
     expect(prompt).toContain(
       "- The hub's webhook URL: http://192.168.9.210:3290/hooks (the hub's eth0). If this machine isn't on that network, use http://100.116.90.98:3290/hooks (tailscale0) instead",
     );
@@ -90,10 +90,10 @@ describe("joinPrompt", () => {
     expect(prompt).toContain("curl -s -o /dev/null -w '%{http_code}\\n' -X POST http://192.168.9.210:3290/hooks\n");
     expect(prompt).toContain(`AGENTAPI_HUB_SECRET='${SECRET}' agentapi hub join http://192.168.9.210:3290/hooks --public-url 'http://{ip}:{port}'\n`);
     expect(prompt).toContain("It prints the address {ip} stands for now.");
-    expect(prompt).toContain("4. agentapi hub status: each running AgentAPI should report to http://192.168.9.210:3290/hooks.");
+    expect(prompt).toContain("4. agentapi hub status: each running instance should report to http://192.168.9.210:3290/hooks.");
     expect(prompt).not.toContain("allowed-hosts");
     expect(prompt).toContain("the address join printed for {ip}");
-    expect(prompt).toContain("Rules: don't restart or stop any AgentAPI");
+    expect(prompt).toContain("Rules: don't restart or stop any instance");
     expect(prompt).toContain("Don't print, log or commit the secret.");
   });
 

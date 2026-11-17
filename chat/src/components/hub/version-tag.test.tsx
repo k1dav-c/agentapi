@@ -7,8 +7,8 @@ describe("VersionTag", () => {
     const html = renderToStaticMarkup(<VersionTag version="1.6.1" hubVersion="2.1.0" />);
     expect(html).toContain(">v1.6.1</span>");
     expect(html).toContain(">older</span>");
-    expect(html).toContain('title="AgentAPI v1.6.1, older than the hub (v2.1.0)"');
-    expect(html).toContain('<span class="sr-only">AgentAPI v1.6.1, older than the hub (v2.1.0)</span>');
+    expect(html).toContain('title="Tendyard v1.6.1, older than the hub (v2.1.0)"');
+    expect(html).toContain('<span class="sr-only">Tendyard v1.6.1, older than the hub (v2.1.0)</span>');
   });
 
   test("the hub's version, a newer one or a development build isn't", () => {
@@ -21,6 +21,6 @@ describe("VersionTag", () => {
     const html = renderToStaticMarkup(<VersionTag version="1.6.1" hubVersion="2.1.0" lastKnown />);
     expect(html).toContain("opacity-55");
     expect(html).not.toContain(">older</span>");
-    expect(html).toContain('title="Last known: AgentAPI v1.6.1"');
+    expect(html).toContain('title="Last known: Tendyard v1.6.1"');
   });
 });

@@ -8,7 +8,7 @@ describe("getDocumentTitle", () => {
         agentState: "working",
         task: "Implement dynamic browser titles",
       }),
-    ).toBe("● Working · Implement dynamic browser titles — AgentAPI");
+    ).toBe("● Working · Implement dynamic browser titles — Tendyard");
   });
 
   test("leads with Needs you while the agent waits for the user", () => {
@@ -17,7 +17,7 @@ describe("getDocumentTitle", () => {
         agentState: "needs-you",
         task: "Rebuild the chat UI",
       }),
-    ).toBe("◆ Needs you · Rebuild the chat UI — AgentAPI");
+    ).toBe("◆ Needs you · Rebuild the chat UI — Tendyard");
   });
 
   test("shows the connection state", () => {
@@ -26,7 +26,7 @@ describe("getDocumentTitle", () => {
         agentState: "offline",
         task: "Current task",
       }),
-    ).toBe("○ Offline · Current task — AgentAPI");
+    ).toBe("○ Offline · Current task — Tendyard");
   });
 
   test("normalizes and truncates long tasks", () => {
@@ -36,7 +36,7 @@ describe("getDocumentTitle", () => {
     });
 
     expect(title).toStartWith("✓ Ready · task task");
-    expect(title).toContain("… — AgentAPI");
+    expect(title).toContain("… — Tendyard");
   });
 
   test("uses a default title before a task is available", () => {
@@ -44,7 +44,7 @@ describe("getDocumentTitle", () => {
       getDocumentTitle({
         agentState: "reconnecting",
       }),
-    ).toBe("↻ Reconnecting · AgentAPI — Live Agent Session");
+    ).toBe("↻ Reconnecting · Tendyard — Live Agent Session");
   });
 
   test("a custom title replaces the product name", () => {

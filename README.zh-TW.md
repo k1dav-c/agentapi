@@ -5,20 +5,26 @@
 Tendyard 讓開發者在自己的主機上執行 Claude Code、Codex 與 Pi，管理從 issue 到完成 review 的
 pull request。處理單一 agent 可用聊天介面；跨筆電、工作區與伺服器工作則使用 hub。
 
-- **跨主機派工。** Tendyard 是產品名稱，目前以 `agentapi` 執行檔提供：`agentapi server` 執行一個 agent，
+- **跨主機派工。** 在 hub 的 [Issues 頁](docs/hub.zh-TW.md#issues)指派 GitHub issue。launcher 會在
+  issue 分支的 worktree 裡啟動 agent；GitHub workflow 把 review 意見送回同一個 agent，PR 關閉時停止 job。
+  hub 會顯示進度、花費與 provider 的健康狀態。
+- **與 agent 協作。** 在桌機或手機上的內建聊天介面閱讀回覆與工具結果、檢查 diff、回覆請求。支援的 agent 有
+  [Claude Code](https://github.com/anthropics/claude-code)、[Codex](https://github.com/openai/codex)
+  與 [Pi](https://pi.dev/)。
+- **工作不會中斷。** 佇列、保存的對話、API 暫時性錯誤後的重試，以及用量限制後的恢復，支援長時間執行的任務。
+- **串接其他工具。** 腳本、機器人與其他 agent 可以透過 [HTTP API 與 webhook](docs/api.zh-TW.md)
+  控制與監看同一份工作。
+
+Tendyard 是產品名稱，目前以 `agentapi` 執行檔提供：`agentapi server` 執行一個 agent，
 `agentapi hub serve` 提供集中管理的工作介面，`agentapi host` 則是各主機上的 launcher。
-現有設定使用 `~/.agentapi/`，下方的 API 與 repo 連結沿用目前名稱。
-舊版發行名稱與目前介面顯示的文字，仍沿用 AgentAPI。
+現有設定使用 `~/.agentapi/`，下方的 API 與 repo 連結沿用目前名稱。聊天介面、hub 與 hub 在 GitHub
+上留的內容都顯示 Tendyard；舊版發行、命令列的說明與訊息，以及 API 的說明仍沿用 AgentAPI。
 
 [![Tendyard 90 秒功能導覽：hub、Issues、聊天介面、手機、佇列與 API](docs/videos/tendyard-overview.zh-TW.png)](docs/videos/tendyard-overview.zh-TW.mp4)
 
-[功能導覽影片](docs/videos/tendyard-overview.zh-TW.mp4)（1 分 34 秒，另有[英文字幕版](docs/videos/tendyard-overview.mp4)）
-與截圖都使用 AgentAPI v5.6 與內建的 `native-demo` agent；回覆、工具結果、模型和用量都是模擬的。
+[功能導覽影片](docs/videos/tendyard-overview.zh-TW.mp4)（1 分 33 秒，另有[英文字幕版](docs/videos/tendyard-overview.mp4)）
+與截圖都使用 Tendyard v5.7.0 與內建的 `native-demo` agent；回覆、工具結果、模型和用量都是模擬的。
 功能與動畫見[聊天介面導覽](docs/chat-ui.zh-TW.md)，重新擷取的方法見[截圖說明](docs/screenshots/README.md)。
-
-從 hub 的 [Issues 頁](docs/hub.zh-TW.md#issues)，把 issue 交給你選的主機與 agent。主機上的 launcher
-會在 issue 分支的 git worktree 裡啟動 agent。你可以追蹤進度、回答問題，再開啟產出的 pull request。
-設好 GitHub workflow 後，review 意見會回到同一個 agent 繼續修改，關閉 PR 時也會停止 job。
 
 請部署在你信任的環境中：存取權限以 token 管理，沒有個別使用者或角色。
 連接其他主機前，請先看[安全性](docs/security.zh-TW.md)。
