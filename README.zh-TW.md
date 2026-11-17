@@ -22,8 +22,8 @@ Tendyard 是產品名稱，目前以 `agentapi` 執行檔提供：`agentapi serv
 
 [![Tendyard 90 秒功能導覽：hub、Issues、聊天介面、手機、佇列與 API](docs/videos/tendyard-overview.zh-TW.png)](docs/videos/tendyard-overview.zh-TW.mp4)
 
-[功能導覽影片](docs/videos/tendyard-overview.zh-TW.mp4)（1 分 34 秒，另有[英文字幕版](docs/videos/tendyard-overview.mp4)）
-與截圖都使用 AgentAPI v5.6 與內建的 `native-demo` agent；回覆、工具結果、模型和用量都是模擬的。
+[功能導覽影片](docs/videos/tendyard-overview.zh-TW.mp4)（1 分 33 秒，另有[英文字幕版](docs/videos/tendyard-overview.mp4)）
+與截圖都使用 Tendyard v5.7.0 與內建的 `native-demo` agent；回覆、工具結果、模型和用量都是模擬的。
 功能與動畫見[聊天介面導覽](docs/chat-ui.zh-TW.md)，重新擷取的方法見[截圖說明](docs/screenshots/README.md)。
 
 請部署在你信任的環境中：存取權限以 token 管理，沒有個別使用者或角色。

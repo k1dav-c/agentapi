@@ -1,6 +1,6 @@
 {
-  "captured_at": "2026-11-17T07:13:19.786Z",
-  "agentapi_version": "5.6.1",
+  "captured_at": "2026-11-17T07:37:57.541Z",
+  "agentapi_version": "5.7.0",
   "agents": [
     "native-demo posing as Claude Code",
     "nine native-demo instances behind agentapi hub serve, posing as Claude Code, Codex and Pi"
@@ -12,7 +12,7 @@
     "height": 1080,
     "fps": 30
   },
-  "seconds": 94.5,
+  "seconds": 93.1,
   "scenes": [
     "title",
     "hub",

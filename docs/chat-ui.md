@@ -11,7 +11,7 @@ desktop or phone, through the same [HTTP API](api.md#http-api-reference) other c
 - **Inspect the workspace:** open files, diffs, earlier sessions and the shared shell terminal.
 - **Stay connected:** use alerts, cached transcripts and the hub to follow agents across machines.
 
-Screenshots and animations show AgentAPI v5.6.0 running `native-demo` on a sample site. The demo's
+Screenshots and animations show Tendyard v5.7.0 running `native-demo` on a sample site. The demo's
 replies, tool results, models and usage are simulated. In the animations, a blue dot marks the pointer and clicks. To
 reproduce the captures, use [scripts/capture-docs.mjs](../scripts/capture-docs.mjs) as described in the
 [screenshot guide](screenshots/README.md).

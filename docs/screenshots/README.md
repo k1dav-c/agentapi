@@ -7,13 +7,12 @@ views show real work on github.com. They support the [chat UI guide](../chat-ui.
 - **Issue dispatch and settings:** `capture-dispatch.mjs` combines real pages with fixed test data.
 - **GitHub results:** the public demo repository supplies the issue, review and merged-PR views.
 
-Chromium captured most views from AgentAPI 5.6.0, built from source with `make build` and serving
-the production chat UI and API. `capture-docs.mjs` captures the chat and the hub's list and overview.
+Chromium captured the views from Tendyard 5.7.0, built from source with `make build VERSION=5.7.0`
+and serving the production chat UI and API. `capture-docs.mjs` captures the chat and the hub's list and overview.
 `capture-dispatch.mjs` captures Issues, an issue's chat, GitHub App setup, Activity, GitHub and
 Providers settings, and the model menu with the hub's providers.
 
-`hub-activity.png`, `dispatch-chat.png` and `dispatch-github-connect.png` were captured later from
-a 5.6.1 build. The `github-*.png` images show the public demo repository on github.com; their
+The `github-*.png` images show the public demo repository on github.com; their
 capture setup is described below.
 
 [scripts/capture-docs.mjs](../../scripts/capture-docs.mjs) starts its own servers on a small sample
@@ -33,8 +32,8 @@ uncommitted changes):
   one needs a login, one hit its usage limit, one works, one finished a task, one is idle, one
   stopped and one was killed, so the hub can't reach it. Six are in two groups, and two of those
   are pinned to the top. The one that asks questions can run a binary stamped with an older
-  version (`AGENTAPI_OLDER_BINARY`), so that it shows as older than the hub: 5.5.1 beside the
-  hub's 5.6.0 in the screenshots. The hub starts on a file that says how long each instance
+  version (`AGENTAPI_OLDER_BINARY`), so that it shows as older than the hub: 5.6.1 beside the
+  hub's 5.7.0 in the screenshots. The hub starts on a file that says how long each instance
   worked over the last week, as a hub that watched them would keep it, since a demo doesn't run
   for hours. A second, empty hub shows the guide for the first agents. The instances all run on
   one machine, so the hub's page gets them as if they ran on three, named `dev-1` to `dev-3`: the
@@ -69,7 +68,8 @@ kept for them. A real hub dispatched the issue to Claude Code on a real machine;
 workflow (a public repository shouldn't run jobs on self-hosted runners), so the pull request's
 events reached the hub as the workflow sends them, through `POST /api/dispatch` with the hub's
 dispatch token. The reviewer's GitHub name and pictures, and the machine's name, which has
-a person's account in it, are blurred.
+a person's account in it, are blurred. They predate 5.7.0, so the hub's
+comments and its app there still say agentapi.
 
 <a id="gallery"></a>
 
@@ -235,13 +235,13 @@ scenes.
    ```bash
    export AGENTAPI_PLAYWRIGHT_MODULE=/tmp/agentapi-docs-browser/node_modules/playwright-core/index.mjs
    export AGENTAPI_BINARY=out/agentapi        # the default; or a downloaded release binary
-   export AGENTAPI_OLDER_BINARY=/tmp/agentapi-5.5.1  # optional: one hub instance runs it
+   export AGENTAPI_OLDER_BINARY=/tmp/agentapi-5.6.1  # optional: one hub instance runs it
    export CHROMIUM_PATH=/absolute/path/to/chromium   # optional: Playwright's own Chromium otherwise
    node scripts/capture-docs.mjs
    ```
 
    For the older binary, build the same source stamped with an earlier version:
-   `go build -ldflags "-X github.com/coder/agentapi/internal/version.Version=5.5.1" -o /tmp/agentapi-5.5.1 main.go`.
+   `go build -ldflags "-X github.com/coder/agentapi/internal/version.Version=5.6.1" -o /tmp/agentapi-5.6.1 main.go`.
 
 4. Run the second script for the Issues page and its chat, `/github/connect`, the Activity card,
    the GitHub and Providers settings and the model menu. It needs four free ports (3400 to 3403
@@ -268,7 +268,7 @@ version, browser, capture time, viewports and images. It stops the servers and r
 files even if a step fails. The run takes about 25 minutes; a chat error fails it.
 
 The binary's version shows in the chat's header. To show the version a merge will release, build
-with it: `make build VERSION=5.6.0`.
+with it: `make build VERSION=5.7.0`.
 
 Review the new images before updating the [chat UI guide](../chat-ui.md), its
 [Traditional Chinese translation](../chat-ui.zh-TW.md) and the READMEs.

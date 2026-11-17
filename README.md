@@ -26,9 +26,9 @@ say AgentAPI.
 
 [![A 90-second overview of Tendyard: the hub, Issues, the chat, a phone, the queue and the API](docs/videos/tendyard-overview.png)](docs/videos/tendyard-overview.mp4)
 
-The [overview video](docs/videos/tendyard-overview.mp4) (1 min 34 s, also with
+The [overview video](docs/videos/tendyard-overview.mp4) (1 min 33 s, also with
 [Traditional Chinese captions](docs/videos/tendyard-overview.zh-TW.mp4)) and the screenshots show
-AgentAPI v5.6 running the built-in `native-demo` agent. Its replies, tool results, models and usage
+Tendyard v5.7.0 running the built-in `native-demo` agent. Its replies, tool results, models and usage
 are simulated. See the [chat UI guide](docs/chat-ui.md) for features and
 animations, or the [screenshot guide](docs/screenshots/README.md) to reproduce the captures.
 

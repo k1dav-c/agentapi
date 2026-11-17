@@ -11,7 +11,7 @@
 - **檢查工作區：**開啟檔案、差異、先前工作階段與共用 shell 終端機。
 - **保持連線：**透過提醒、對話快取與 hub 跨主機追蹤 agent。
 
-截圖和動畫是 AgentAPI v5.6.0 搭配內建 `native-demo` agent 處理一個小型範例網站的畫面；
+截圖和動畫是 Tendyard v5.7.0 搭配內建 `native-demo` agent 處理一個小型範例網站的畫面；
 demo 的回覆、工具結果、模型和用量都是模擬的。動畫會
 在滑鼠指標所在及點擊的位置畫上藍點。[scripts/capture-docs.mjs](../scripts/capture-docs.mjs)
 可以重新擷取所有截圖和動畫（見[截圖說明](screenshots/README.md)）。

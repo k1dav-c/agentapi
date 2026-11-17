@@ -20,7 +20,7 @@
 - The Traditional Chinese README's four capabilities are back in their list; the paragraph on the
   product name had taken the first one's place.
 
-- The READMEs open with a 94-second overview video, with English or Traditional Chinese captions:
+- The READMEs open with a 93-second overview video, with English or Traditional Chinese captions:
   the hub, Issues, the chat, a phone, the queue and the API. `scripts/capture-video.mjs` records it
   from the same demo servers as the screenshots, which `capture-docs.mjs` now starts from the shared
   `scripts/capture-common.mjs`.
