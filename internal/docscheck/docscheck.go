@@ -235,7 +235,8 @@ func ReadFile(root, name string) (*Doc, error) {
 
 // CompareTwins lists how a page's zh-TW twin differs in structure from the English page: heading
 // levels in order, fenced code blocks (section by section when the headings match), images in
-// order, and the files linked to, with .zh-TW and anchors dropped.
+// order (the twin's may be a .zh-TW variant of the image, such as a poster with Chinese text), and
+// the files linked to, with .zh-TW and anchors dropped.
 func CompareTwins(en, zh *Doc) []string {
 	var problems []string
 	add := func(format string, args ...any) { problems = append(problems, fmt.Sprintf(format, args...)) }
@@ -278,7 +279,7 @@ func CompareTwins(en, zh *Doc) []string {
 			add("%s:%d: image %s has no counterpart in %s", zh.Path, ib[i].Line, ib[i].Target, en.Path)
 		case i >= len(ib):
 			add("%s:%d: image %s has no counterpart in %s", en.Path, ia[i].Line, ia[i].Target, zh.Path)
-		case ia[i].Target != ib[i].Target:
+		case ia[i].Target != strings.Replace(ib[i].Target, ".zh-TW.", ".", 1):
 			add("%s:%d and %s:%d: image %d is %s in one and %s in the other", en.Path, ia[i].Line, zh.Path, ib[i].Line, i+1, ia[i].Target, ib[i].Target)
 		default:
 			continue

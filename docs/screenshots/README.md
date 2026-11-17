@@ -181,9 +181,32 @@ The login card names the host and user to log in as; the script shows `dev-machi
 their place. The servers get a clean environment (no tokens or workspace links of the shell that
 runs the script) and a neutral shell prompt.
 
+<a id="overview-video"></a>
+
+## The overview video shows the product in about a minute and a half
+
+[docs/videos/](../videos/) holds a 1920 × 1080 video at 30 frames a second, once with English
+captions ([tendyard-overview.mp4](../videos/tendyard-overview.mp4)) and once with Traditional
+Chinese ones ([tendyard-overview.zh-TW.mp4](../videos/tendyard-overview.zh-TW.mp4)). It follows the
+README: the hub, Issues, the chat (a task, an approval, the files), the hub on a phone, the queue,
+a usage limit and the API.
+
+[scripts/capture-video.mjs](../../scripts/capture-video.mjs) starts the servers `capture-docs.mjs`
+starts, from the code both share in [scripts/capture-common.mjs](../../scripts/capture-common.mjs):
+the chat's `native-demo` posing as Claude Code on the sample project, and the hub with its nine
+instances. It records the live scenes from Chromium's screencast, a frame each time the page
+changes: desktop scenes in a 1440 × 810 window shown at 1600 × 900, phone scenes at 390 × 844 shown
+at 468 × 1013. The queue, files and approval scenes play up to 1.6 times faster. The Issues and
+usage limit scenes are `dispatch-issues.png`, `dispatch-detail.png`, `github-pr-review.png` and
+`limit-card.png` from this directory. Chromium draws the slides around them (the window bar, the
+phone's bezel, the captions, the title, API and end cards), so both languages get the same footage,
+and ffmpeg puts each scene on its slide, fades it in and out, and joins them.
+[capture.json](../videos/capture.json) records the binary version, browser, ffmpeg, length and
+scenes.
+
 <a id="capture-again"></a>
 
-## Rebuild and run both scripts to reproduce the captures
+## Rebuild and run the scripts to reproduce the captures
 
 1. Get the binary to show. Either download a release binary, or build one with the production chat
    assets (`make build` needs Go, Bun and the chat's dependencies; it stamps the version from the
@@ -226,6 +249,16 @@ runs the script) and a neutral shell prompt.
 
    ```bash
    node scripts/capture-dispatch.mjs
+   ```
+
+5. Record the overview video after the screenshots it shows. It needs ffmpeg with libx264 (set
+   `FFMPEG` to its path if it isn't on `PATH`), a font with Traditional Chinese (the slides ask for
+   Noto Sans TC), and eleven free ports (3330 to 3340 unless you set `AGENTAPI_VIDEO_PORT` to the
+   first of eleven others). It takes about two minutes; `AGENTAPI_VIDEO_KEEP=1` keeps the recorded
+   frames and slides in the temporary directory:
+
+   ```bash
+   node scripts/capture-video.mjs
    ```
 
 The script creates a temporary sample project and home directory, then starts its servers on

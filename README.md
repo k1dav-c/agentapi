@@ -23,10 +23,12 @@ launcher on each machine. Existing configuration uses `~/.agentapi/`; the API an
 links below retain their current names. Historical release names and text shown by the current
 interface still use AgentAPI.
 
-![The hub: agents across machines, what needs your attention, and one open in the chat](docs/screenshots/hub-desktop.png)
+[![A 90-second overview of Tendyard: the hub, Issues, the chat, a phone, the queue and the API](docs/videos/tendyard-overview.png)](docs/videos/tendyard-overview.mp4)
 
-The screenshots show AgentAPI v5.6.0 running the built-in `native-demo` agent. Its replies, tool
-results, models and usage are simulated. See the [chat UI guide](docs/chat-ui.md) for features and
+The [overview video](docs/videos/tendyard-overview.mp4) (1 min 34 s, also with
+[Traditional Chinese captions](docs/videos/tendyard-overview.zh-TW.mp4)) and the screenshots show
+AgentAPI v5.6 running the built-in `native-demo` agent. Its replies, tool results, models and usage
+are simulated. See the [chat UI guide](docs/chat-ui.md) for features and
 animations, or the [screenshot guide](docs/screenshots/README.md) to reproduce the captures.
 
 Deploy it in an environment you trust: access uses tokens, with no individual users or roles.
