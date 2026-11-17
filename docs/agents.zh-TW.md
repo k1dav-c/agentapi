@@ -400,13 +400,10 @@ state-db: ~/.agentapi/state/{port}.db
 - 上傳的檔案會保存在資料庫旁（`<檔案>.uploads`），因為訊息是用路徑引用它們。對話（和佇列）
   都沒有引用的檔案超過 7 天後會刪除，讓草稿的附件有時間送出；啟動時、每小時和重新啟動後會檢查。
 - 一個檔案只屬於一種 agent 類型和工作目錄；遇到屬於其他組合的檔案，Tendyard 會拒絕啟動。
-  AgentAPI 2 為 PTY agent 寫的檔案可以開啟：agent 在原本的對話下方開始新的工作階段，之後以
-  native 方式繼續。Tendyard 執行期間會鎖住檔案，所以第二個 Tendyard（或
-  `sqlite3`）無法開啟它。
+  Tendyard 執行期間會鎖住檔案，所以第二個 Tendyard（或 `sqlite3`）無法開啟它。
 - 新建立的檔案只有擁有者能讀寫（0600），缺少的目錄也會一併建立（0700）。
 - 較新的 Tendyard 寫過的檔案，較舊的 Tendyard 仍可繼續使用，除非較新的版本以舊版無法寫入的方式
-  改了檔案：這時舊版會拒絕啟動，並指出需要的版本。1.9.0 之後的版本才會這樣檢查；1.9.0 以前的
-  版本遇到結構比自己新的檔案一律拒絕（結構從 1.0 起就沒有改變）。
+  改了檔案：這時舊版會拒絕啟動，並指出需要的版本。
 - 重新啟動（Explorer → Restart 或 `DELETE /messages`）會清除保存的對話和佇列，並開始新的
   工作階段。為工作階段選擇的設定會保留。
 - 寫入會每 200 毫秒批次處理一次，所以串流不必等待磁碟。當機後最後一批寫入可能遺失，對話因此會
@@ -415,11 +412,8 @@ state-db: ~/.agentapi/state/{port}.db
 - 用 `PUT /webhook` 或 Explorer 修改的 webhook 設定在重新啟動後仍然有效，除非 Tendyard 以不同的
   webhook 參數啟動。
 - 用戶端上次顯示對話的時間（`POST /tasks/seen`）會保存下來，所以沒看過就結束的任務在重新啟動後
-  仍是[未讀](api.zh-TW.md#監看多個實例)。1.2 之前寫入的資料庫，任務會視為已讀。
+  仍是[未讀](api.zh-TW.md#監看多個實例)。
 - SIGUSR1 會寫入狀態資料庫尚未寫入的變更。
-- AgentAPI 4 不再讀取 `--state-file`，也就是 PTY transport 在 v1.0.0 之前的保存方式。AgentAPI 3
-  第一次帶著這個檔案啟動時，已把它匯入旁邊的狀態資料庫（同名、副檔名改為 `.db`）：請改用
-  `--state-db` 指定那個資料庫。從沒匯入過的檔案，請先用 AgentAPI 3.16 帶 `--state-file` 執行一次。
 - 使用 `--state-db` 的 Tendyard 經 [`agentapi restart`](cli.zh-TW.md#agentapi-restart)（SIGUSR2）或
   `agentapi update --restart` 重新啟動後，對話和 agent 的工作階段都會保留。沒有 `--state-db`
   時會保留 agent 的工作階段，對話則從它的紀錄讀回；佇列、待回覆的請求和選擇的設定會重新開始。

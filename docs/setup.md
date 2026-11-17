@@ -118,7 +118,7 @@ agentapi --version
 the user can't write, such as a root-owned `/usr/local/bin`, can't update without `sudo`, and the hub
 shows that machine as needing a one-time setup. If something must find it in `/usr/local/bin`, link
 it there: `sudo ln -sf "$HOME/.local/bin/agentapi" /usr/local/bin/agentapi`.
-[Updating by hand](hub.md#updating-by-hand) has the fix for a machine already set up the other way.
+[Updating from the hub](hub.md#updating-from-the-hub) has the fix for a machine already set up the other way.
 
 **Check:** `agentapi --version` prints the release you downloaded.
 
@@ -238,10 +238,6 @@ and the hub, so the hub can stay on a private network. The app asks for contents
 issues and workflows (write) and metadata (read). With it, the agent pushes and opens pull requests
 as `<app>[bot]`, and the hub comments on issues and pull requests.
 
-An app made by a hub before 5.4.0 lacks the workflows permission, so a job can't push changes under
-`.github/workflows/`. Add Workflows (read and write) in the app's settings on GitHub, then accept the
-new permission on each installation.
-
 **Check:** the hub's settings, GitHub tab, shows the app and its installations
 ([GitHub settings](hub.md#github-settings)), and Issues lists the repositories' open issues.
 
@@ -357,7 +353,7 @@ Issues ([Issues](hub.md#issues)). Reviews then don't come back to the agent by t
 | `hub join` says the hub didn't take the test event | Wrong secret, the hub isn't reachable, or a sign-in page answers instead | Check `HUB_SECRET`; from the worker, `curl -s -o /dev/null -w '%{http_code}' http://<hub>:3290/` should print a status at once; use a direct address |
 | Services stop when you log out | No lingering for the user | `sudo loginctl enable-linger <user>`, or a system unit |
 | `agentapi host install` says `no systemd user instance` | A container without systemd | Start `agentapi host serve` from the workspace's start script ([`agentapi host`](cli.md#agentapi-host)) |
-| The hub's Versions card asks for a one-time setup | The binary is in a directory the user can't write | Move it to `~/.local/bin` ([Updating by hand](hub.md#updating-by-hand)) |
+| The hub's Versions card asks for a one-time setup | The binary is in a directory the user can't write | Move it to `~/.local/bin` ([Updating from the hub](hub.md#updating-from-the-hub)) |
 | `agentapi update` fails with GitHub's rate limit | Many machines behind one public address | Wait an hour, or download the release with `gh release download` and check it against `checksums.txt` |
 | The runner check answers `401` | `.env` has another token, or the runner hasn't restarted since `.env` changed | Fix `.env`, then stop and start the runner service |
 | The workflow never runs | The runner's label or group doesn't match, or the central workflow isn't shared | Check the runner's labels, its group's repositories, and the central repository's Access setting |

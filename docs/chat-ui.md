@@ -69,8 +69,7 @@ agent's message. The server also assigns tool calls and thinking to tasks.
 
 A message you steer into the running task stays in that task: it shows among the agent's
 steps where it arrived, as your message marked *steered*, and the task keeps its number, state and
-cost. The numbers are the server's, as `GET /tasks`, webhooks and the hub count them. With a server
-older than tasks, every message starts one.
+cost. The numbers are the server's, as `GET /tasks`, webhooks and the hub count them.
 
 The task's start time and duration appear in the left margin on wide screens, or after its number
 in the header on narrower screens. Claude Code, Codex and Pi also show the cost of model
@@ -124,13 +123,12 @@ The transcript shows the latest five tasks; **Show *n* older tasks** shows the o
 has. On connecting it gets the latest 20 tasks from the server, so opening a months-long
 conversation doesn't require loading its whole history. Scroll to the top, or click **Show earlier
 tasks**, and the chat reads the 20 before them; what you were reading stays where it was. The task
-numbers are the server's, so they count the tasks not loaded yet. A server older than AgentAPI 4.3
-sends every task at once.
+numbers are the server's, so they count the tasks not loaded yet.
 
 A long conversation arrives in parts: the newest tasks first, each with its reply, then the older
 ones above them. Until it is all there, the top of the transcript says **Loading the
 conversation…**, and a task whose reply hasn't come yet says **Loading the reply…** under its
-prompt. An older server sends all the prompts first and the replies after them.
+prompt.
 
 <a id="the-task-menu"></a>
 

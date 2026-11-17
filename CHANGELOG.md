@@ -11,6 +11,10 @@
   runner (with a check that it reaches the hub), the workflow and labels, a first issue, updates,
   and the symptoms seen during setup. The READMEs, the hub guide and the dispatch example link to
   it; the example's runner steps moved there.
+- The guides drop what they said about releases before 5.4.0: version requirements such as `{ip}`
+  needing 2.1.2 or later, how older instances, hubs, launchers and state files behave, the PTY
+  transport of AgentAPI 2 and the flags AgentAPI 4 removed. CHANGELOG keeps that history. The
+  `agentapi-hub-join` skill no longer checks the version first.
 
 ## v5.7.0
 

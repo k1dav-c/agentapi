@@ -138,7 +138,7 @@ WantedBy=default.target
 在每台要讓 hub 監看的主機上執行一次：
 
 ```bash
-sudo agentapi update   # 每台主機的 AgentAPI 都要在 2.1.2 之後才有 {ip}
+sudo agentapi update
 agentapi hub join http://hub.vpn:3290/hooks --secret "$HUB_SECRET" \
   --public-url 'http://{ip}:{port}'
 ```
@@ -155,13 +155,12 @@ hub 的頁面已經備好這行指令，填好 hub 的位址和 secret，另附�
   同時用在 3286 的 Claude Code 和 3285 的 Codex。`{ip}` 會換成這台主機通往 hub 那條路由上的 IPv4
   位址。每個實例執行期間會重新查詢（最多每 30 秒一次），所以 DHCP 給了主機新位址時（例如
   Coder workspace 重新啟動後），下一次 heartbeat 就會帶著新位址，hub 也會跟著改用
-  （見[hub 透過事件發現實例，再讀取各自的摘要](#運作方式)）。`{ip}` 需要 2.1.2 之後的 Tendyard；固定能解析的名稱，例如
+  （見[hub 透過事件發現實例，再讀取各自的摘要](#運作方式)）。固定能解析的名稱，例如
   `http://dev-1.vpn:{port}`，也可以用。
 - 同一個檔案也能讓各實例重新啟動（更新、重新開機）後保留對話：加上
   `state-db: ~/.agentapi/state/{port}.db`，見[持久保存的工作階段](agents.zh-TW.md#持久保存的工作階段)。
 - 想讓 hub 更新這台主機的 Tendyard，加入時再加上 `--allow-update`（見[從 hub 更新](#從-hub-更新)）。
-- 正在執行的 Tendyard 會立刻套用，一秒內就出現在 hub 上。1.2 之前啟動的 Tendyard 沒有在這台主機
-  上登記，`join` 找不到它們：重新啟動它們或整個 workspace 一次。
+- 正在執行的 Tendyard 會立刻套用，一秒內就出現在 hub 上。
 - hub 轉送請求時，`Host` 標頭是實例網址裡的主機。Tendyard 預設接受 `localhost` 和任何 IP 位址，
   所以 `{ip}` 和固定位址都不必設定。用 VPN 名稱時要允許它：用 `--allowed-hosts '*'` 啟動
   （Coder module 就是這樣做），或把名稱加進設定檔：
@@ -178,7 +177,7 @@ agentapi list         # 這台主機上執行中的實例，以及各自的摘�
 ```
 
 這一步也可以交給那台主機上的 agent。[agentapi-hub-join skill](../skills/agentapi-hub-join/SKILL.md)
-會讓 Claude Code 檢查版本和 hub 是否有回應，向你詢問 hub 的網址、secret、這台主機的位址，以及要不要
+會讓 Claude Code 檢查 hub 是否有回應，向你詢問 hub 的網址、secret、這台主機的位址，以及要不要
 讓 hub 更新這台主機的 Tendyard，然後加入，並確認每個實例回報到哪裡。它不會重新啟動 Tendyard，
 也不會印出 secret；要用 `sudo` 執行的指令，都會先問過你。在那台主機上安裝：
 
@@ -239,7 +238,7 @@ hub 沒有回應時（它停了，或它前面的 proxy 回了錯誤頁），頁
 
 每個實例每分鐘從 agent 的工作階段紀錄算出工作目錄裡所有工作階段在最近 24 小時和最近
 7 天花了多少，放進摘要（`spend`）。這是換算成 API 的金額：依模型供應商的牌價計算 token，訂閱方案
-並不會實際收取。Claude Code、Codex 和 Pi 有這個數字；`native-demo` 和 AgentAPI 2 的 PTY agent
+並不會實際收取。Claude Code、Codex 和 Pi 有這個數字；`native-demo`
 不會顯示。
 
 每一列顯示它最近 24 小時的花費（`$110/24h`），群組標題顯示群組的合計，清單頂端顯示全部的合計；
@@ -269,11 +268,11 @@ scope 只算一次，取最新的數字（`updated_at`）。hub 目前沒在追�
 `spend.providers` 把同一批呼叫依[模型供應商](providers.zh-TW.md)分開：最近 7 天有呼叫的每個
 供應商各一筆，有它的 `provider`（agent 自己的是 `default`）、`day_usd`、`week_usd`、`day_tokens` 和
 `week_tokens`，這週花最多的排最前面。Codex 的呼叫算在 log 寫明的供應商；Claude Code 的呼叫算在 Tendyard
-最後記錄該 session 所用的供應商（`~/.agentapi/provider-ledger.jsonl`）。較早的版本不會送出這個欄位。
+最後記錄該 session 所用的供應商（`~/.agentapi/provider-ledger.jsonl`）。
 
 總覽在 Spend 下方有一張 **Tokens** 卡片：所有回報 token 的 agent 最近 24 小時和 7 天的合計、各類別、
 這週用最多的五個、有群組時各群組的小計，以及有多台主機時各主機的小計。
-加總方式和花費相同：每個 scope 只算一次，也只算已連線的 agent。AgentAPI 2.4.0 和更舊的版本回報的花費不含 token，卡片會寫出有幾個 agent 回報。數字以簡短的
+加總方式和花費相同：每個 scope 只算一次，也只算已連線的 agent。卡片會寫出有幾個 agent 回報。數字以簡短的
 形式顯示（`950`、`12k`、`3.4M`、`1.2B`），滑鼠移到合計上可以看到確切的數字。每一列已經放不下另一個
 數字：滑鼠移到那一列的花費上，就能看到它最近 24 小時的 token。
 
@@ -284,8 +283,8 @@ scope 只算一次，取最新的數字（`updated_at`）。hub 目前沒在追�
 其他的用 hub 保存的名稱，找不到時（只定義在某台主機設定檔裡的供應商）用 ID。每格上面是金額、下面是
 token；gateway 的模型常常沒有已知價格，所以呼叫沒有金額卻用了 token 的供應商會寫 **no price**，而不是
 `$0`。這週花最多的排前面，其次是 token 最多的。卡片的合計是用在 agent 自己以外的供應商上的 token；
-每個 scope 只算一次，也只算已連線的 agent，並寫出有幾個 agent 回報。這個版本之前的 Tendyard，以及最近
-7 天沒有呼叫的，都不會回報。
+每個 scope 只算一次，也只算已連線的 agent，並寫出有幾個 agent 回報：最近 7 天沒有呼叫的
+不會回報。
 
 ### 工作時間
 
@@ -319,9 +318,9 @@ hub 把最近 7 天的工作區段存在檔案裡，送出的是它們的合計�
 hub 從執行有這項功能的版本那天開始逐小時記錄，在實例檔案旁的 `activity.json` 保留一年（366 天）。
 在那之前的日子是空白的，卡片會寫出從哪天開始記錄。工作時間把每個 agent 的區段加起來，算法和 Work
 time 卡片相同；第一次啟動時，hub 會補上實例檔案裡已有的 7 天。花費和 token 來自 agent 的摘要：
-從 4.2 起，Tendyard 的 `spend` 會列出所屬 scope 最近 25 小時每小時的花費（`hours`）。hub 把每個
+Tendyard 的 `spend` 會列出所屬 scope 最近 25 小時每小時的花費（`hours`）。hub 把每個
 scope 的這些小時設成最新的數字，所以同一個 scope 不論有幾個 Tendyard 回報都只算一次，還在進行中的
-那一小時也會跟著增加。較舊的 Tendyard 要更新後，花費才會計入。過了 48 小時的那一小時就不再變動：
+那一小時也會跟著增加。過了 48 小時的那一小時就不再變動：
 摘要不會再列出，hub 把它併進那一天的合計。
 
 ### 版本
@@ -348,9 +347,7 @@ hub 舊。
 共用一個 binary：第一個負責替換，其他的只要重新啟動。
 
 重新啟動之前，Tendyard 會用自己的設定以 `agentapi server --validate` 執行新程式。新程式用這些設定
-無法啟動時（有它不接受的旗標或 agent），Tendyard 會繼續服務，更新則以失敗結束並說明原因。AgentAPI 3
-只執行 Claude Code、Codex 和 Pi：執行其他 agent、或任何以 `--transport pty` 執行的 AgentAPI 2 都會
-這樣失敗，但它的主機上已經換成新版本。請在那個實例重新啟動之前，把 v2.5.1 裝回去。
+無法啟動時（有它不接受的旗標或 agent），Tendyard 會繼續服務，更新則以失敗結束並說明原因。
 
 更新期間，那一列會顯示進度：檢查中、下載中、等任務結束、重新啟動中。還在等任務結束時，可以用
 **⋯** 選單的 **Cancel the update**，或開啟的 agent 上方那一列的 **Cancel** 取消。更新失敗時會標示
@@ -380,20 +377,16 @@ hub 舊。
 - **狀態資料庫，才能保留完整的對話。** 使用狀態資料庫的 Tendyard 重新啟動後會保留對話和 agent 的
   工作階段，並接著送出佇列中的訊息。沒有的話，agent 會接續自己的工作階段（Claude Code、Codex 和
   Pi），對話從工作階段的紀錄讀回，但佇列中的訊息和在聊天介面選擇的設定會重新開始，對話框會說明。
-  較早版本的 Tendyard 會開始新的工作階段，確認時也會提醒。在設定檔加上
+  在設定檔加上
   `state-db: ~/.agentapi/state/{port}.db`（見[步驟 3](#3-讓每台主機的-agentapi-加入)）。
 
 #### 手動更新
 
-還不支援從 hub 更新的舊版 Tendyard，選單裡不會多出這個項目；卡片會說明怎麼更新。在那台主機上：
+在那台主機上：
 
-- 2.1.0 以後的 Tendyard 能原地重新啟動：執行 `sudo agentapi update --restart`，更新 binary 後，
-  這台主機的 Tendyard 會原地重新啟動到新版（binary 屬於你自己時不必加 `sudo`）。
-- 想讓之後都能從 hub 更新，就加上 `--allow-update`（3.8.0 起），它會先把 `allow-update: true`
-  寫進設定檔。舊版的 `agentapi` 沒有這個旗標：先自己把這一行加進 `~/.agentapi/config.yaml`，
-  再執行 `sudo agentapi update --restart`。
-- 2.1.0 之前的版本：先執行 `sudo agentapi update`，再把每個實例（或它的 workspace）重新啟動
-  一次。
+- 執行 `sudo agentapi update --restart`，更新 binary 後，這台主機的 Tendyard 會原地重新啟動到
+  新版（binary 屬於你自己時不必加 `sudo`）。
+- 想讓之後都能從 hub 更新，就加上 `--allow-update`，它會先把 `allow-update: true` 寫進設定檔。
 
 <a id="清單"></a>
 
@@ -426,8 +419,7 @@ hub 舊。
 
 搜尋（**/**）會比對名稱、群組、標題、主機、agent 或版本中的任何字詞。搜尋框下方的標籤可以顯示
 全部，或只顯示需要你、工作中、已完成未讀、離線的 agent。hub 監看的 agent 不只一種時，下面會多一排
-標籤用來挑 agent：Claude Code、Codex、Pi，其他的歸在 **Other**（AgentAPI 2 的 agent，例如
-aider、`native-demo`，或還沒回報是哪種 agent 的實例），hub 有監看的種類才會出現。可以同時選好幾個，
+標籤用來挑 agent：Claude Code、Codex、Pi，其他的歸在 **Other**（`native-demo`，或還沒回報是哪種 agent 的實例），hub 有監看的種類才會出現。可以同時選好幾個，
 符合任一個就顯示；再點一次取消，或點 **Any agent** 全部清掉。agent 要同時符合搜尋、狀態和其中一個
 選取的 agent 才會顯示。每個標籤
 的數量是另一排篩選後的結果，也就是點下去會看到的筆數；搜尋不影響這些數量。清單篩到沒東西時，
@@ -478,8 +470,7 @@ aider、`native-demo`，或還沒回報是哪種 agent 的實例），hub 有監
 訊息，以及斷線後 10 秒內又接回的摘要串流。
 
 hub 會記錄每個實例最近一次變動的時間（`changed_at`）並保存在檔案中，所以重新啟動 hub 不會打亂清單的
-順序。新實例的這個時間，就是 hub 第一次看到它的時候。從舊版更新上來的 hub 還沒有這項紀錄：實例下一次
-變動之前，清單依這一列顯示的時間排列，沒有的話就依 hub 最後一次聽到它的時間。
+順序。新實例的這個時間，就是 hub 第一次看到它的時候。
 
 ### 依主機
 
@@ -607,9 +598,8 @@ hub 保存的金鑰。結果會顯示花了多久、列出幾個模型，失敗�
 
 每個向 hub 回報的實例會在啟動時和之後每分鐘向 hub 取得供應商，請求以 hub 的 secret 簽章；
 回應含有金鑰，以從 secret 衍生的金鑰加密（AES-256-GCM），所以即使透過一般 HTTP 連線，金鑰也不會以
-明文在網路上傳送。另有證明會把回應綁定到這次請求的 nonce，避免觀察者重播舊的供應商清單。新版 Tendyard 會拒絕
-沒有綁定的回應；請先升級 hub，再升級回報的主機。變更會在一分鐘內出現在聊天介面。在主機上，自己設定檔裡的
-供應商和 hub 的 ID 相同時，以設定檔的為準。
+明文在網路上傳送。另有證明會把回應綁定到這次請求的 nonce，避免觀察者重播舊的供應商清單。變更會在
+一分鐘內出現在聊天介面。在主機上，自己設定檔裡的供應商和 hub 的 ID 相同時，以設定檔的為準。
 
 有 agent 回報供應商之後，分頁裡每個供應商都會多一行，寫出 agent 用了它多少：最近 24 小時和 7 天的
 token 與金額（或 **no price**），算法和 [Providers 卡片](#供應商用量)相同；沒有用到時寫
@@ -642,16 +632,14 @@ hub 的頁面重新顯示時，這個分頁和 Issues 頁都會再讀一次，�
 
 App 要求 Contents、Pull requests、Issues 和 Workflows 的讀寫權限。GitHub App 沒有 Workflows 時，
 GitHub 會拒絕它推送修改 `.github/workflows/` 的提交，所以 job 也能修改 CI：合併前請先檢查這類修改，
-因為從 repo 自己的分支開的 PR，會帶著 repo 的 secret 執行 workflow。在要求 Workflows 之前建立的 App
-只有另外三項：它的 job 拿到的 token 沒有 Workflows，hub 會在 log 裡為每個 repo 提醒一次，這類推送也會被拒絕。
+因為從 repo 自己的分支開的 PR，會帶著 repo 的 secret 執行 workflow。App 沒有 Workflows 時，
+它的 job 拿到的 token 也沒有，hub 會在 log 裡為每個 repo 提醒一次，這類推送也會被拒絕。
 請在 **App settings on GitHub**（Permissions & events、Repository permissions）加上
 **Workflows: Read and write**，再到每個安裝處接受新的權限；hub 一小時內會再次要求這項權限。
 
 - **Choose repositories** 在新分頁開啟 GitHub，可以把 App 裝到其他帳號，或改選已安裝帳號的 repo。帳號旁的
   **Change** 直接開到那個帳號的安裝設定。
-- **App settings on GitHub** 開啟 App 的設定：名稱、權限，以及 **Delete GitHub App**。3.14 以前建立
-  App 的 hub，要等 GitHub 從安裝頁導回一次（按 **Choose repositories** 再按 **Save**）才知道設定在誰底下；
-  在那之前，這個連結開的是 App 的公開頁面。
+- **App settings on GitHub** 開啟 App 的設定：名稱、權限，以及 **Delete GitHub App**。
 - **Reconnect…** 從 hub 的 `/github/connect` 建立新的 App，可以建在你的帳號或組織底下（目前的 App
   屬於組織時，預設就是那個組織）。GitHub 把新 App 交回來之前，hub 照常使用目前的 App，所以在 GitHub
   上取消不會有任何改變。接著要安裝新 App；裝好之前，job 拿不到 repo 的 token，Issues 也列不出 issue。
@@ -730,9 +718,7 @@ chat**、**Review #…**、**Open chat**；再下面是 **Switch agent**（保�
 agent 還在工作時，可以從最下面的輸入框傳訊息給它（⌘/Ctrl+Enter 送出）。
 
 每次 run 只採計自己那個實例程序的任務事件（launcher 回報的 `server_id`），所以前一次 run
-晚到的事件不會改變目前 run 的狀態或花費。比這個 hub 舊的 launcher 不會回報 `server_id`，hub 會忽略
-它的 job 的任務事件，狀態和花費就停在原處。升級 hub 時請一併升級 launcher；升級後的 launcher 會在
-下一次回報時帶上它接手的 job 的身分。
+晚到的事件不會改變目前 run 的狀態或花費。
 
 hub 也要自己讀得到那個實例：只有在 hub 正從 job 所在主機的位址（launcher 網址的主機，或解析到
 同一個位址的名稱）讀到事件所指的實例、而且是同一次執行時，才採計它的任務事件。在 hub 連上實例之前
@@ -873,8 +859,7 @@ secret 預設遮住，按 **Show the secret** 才會顯示；複製按鈕複製�
 ### 用網址加入實例，移除不再需要的項目
 
 新增對話框最下方的 **Add one by its URL** 可以用網址加入 Tendyard，適用於無法執行
-`agentapi hub join` 的實例（舊版，或你不會登入的主機）。hub 會先向它要摘要，所以它必須連得到，而且是
-AgentAPI 1.1 以上。在這裡輸入的 token 會為這個實例保存，取代 `--instance-token` 送出。這樣加入的實例
+`agentapi hub join` 的實例（你不會登入的主機）。hub 會先向它要摘要，所以它必須連得到。在這裡輸入的 token 會為這個實例保存，取代 `--instance-token` 送出。這樣加入的實例
 不會回報啟動或停止；hub 只會發現它連得到或連不到。
 
 已停止或連不到的那一列，**⋯** 選單裡有 **Forget**，可以把它從 hub 移除。用 webhook 加入的實例，
@@ -906,7 +891,7 @@ AgentAPI 1.1 以上。在這裡輸入的 token 會為這個實例保存，取代
   Unreachable、錯過 heartbeat 而視為已停止，或那裡回應的是另一個實例）改到事件裡的網址。hub
   已連上或還在連線中的實例，不論事件寫的是哪一次執行，事件都改不了它的網址；手動加入的實例也一樣。
   `instance.stopped` 不代表網址已失效：hub 會先回舊網址試一次。`instance.*` 事件必須寫明是哪一次
-  執行（`server_id`，AgentAPI 1.0 以後都會送）。實例換了網址後，hub 不再送出為舊網址設定的
+  執行（`server_id`）。實例換了網址後，hub 不再送出為舊網址設定的
   token；`--instance-token` 照常適用。
 - 每台加入的主機都有同一個 secret，存在那台主機上任何 agent 都讀得到的檔案裡（bypass 權限模式的
   agent 讀檔不會先問）。這樣的 agent 若受到讀到的內容誘導，仍然可以用新的實例 ID，或位址已經
@@ -962,8 +947,8 @@ AgentAPI 1.1 以上。在這裡輸入的 token 會為這個實例保存，取代
 
 | 看到的狀況 | 原因 | 處理方式 |
 | --- | --- | --- |
-| 實例一直沒出現 | Tendyard 在 `join` 之前、或 1.2 之前就啟動了 | 重新啟動它，或重開它的 workspace |
-| job 推送時出現「refusing to allow a GitHub App to create or update workflow … without `workflows` permission」 | hub 的 GitHub App 是在要求 Workflows 之前建立的 | 在 GitHub 上替 App 加上 Workflows（讀寫），並在安裝處接受（[GitHub 設定](#github-設定)） |
+| 實例一直沒出現 | Tendyard 在 `join` 之前就啟動了 | 重新啟動它，或重開它的 workspace |
+| job 推送時出現「refusing to allow a GitHub App to create or update workflow … without `workflows` permission」 | hub 的 GitHub App 沒有 Workflows 權限 | 在 GitHub 上替 App 加上 Workflows（讀寫），並在安裝處接受（[GitHub 設定](#github-設定)） |
 | `join` 說 hub 前面有登入頁 | hub 的網址是 Coder 的 port 網址（或其他需要登入的網址） | 改用 hub 在你的網路或 VPN 上的位址；事件是由 Tendyard 自己送出的 |
 | `join` 說 hub 在另一台主機上 | `--public-url` 寫的是 `localhost` | 改成 hub 連得到這台主機的位址 |
 | 新增對話框的指令裡是 `<hub secret>` | hub 以 `--no-token` 執行，頁面一律不顯示 secret | 填入 hub 的 `--secret` |
@@ -977,21 +962,20 @@ AgentAPI 1.1 以上。在這裡輸入的 token 會為這個實例保存，取代
 | Unreachable：`another AgentAPI answers at this URL` | 實例的位址現在屬於另一台主機（DHCP 換了位址），或 `--public-url` 指向別台主機 | 檢查 `--public-url`；搬走的實例會在下一次 heartbeat（一分鐘內）送出新位址 |
 | hub 的 log 有「Two AgentAPIs report the same instance ID」 | 兩台主機名稱相同，同一個 port 上的 Tendyard 就有相同的 ID；hub 保留它正在追蹤的那個 | 把其中一台改名，或給它的 Tendyard 設定 `--instance-id` |
 | hub 的 log 有「An instance's event names another URL」（或「… while the hub connects to its URL」） | hub 還在用舊網址追蹤它或連線時，它的 `--public-url` 改了 | 不用處理：hub 繼續用連得上的網址，等舊網址變成 Unreachable 才改用新的 |
-| 主機換了位址後，實例要顯示 Unreachable 一兩分鐘才搬過去 | 舊位址連線失敗滿 10 秒後，hub 才會在實例下一次 heartbeat（每分鐘一次）時搬動它；舊位址完全沒回應時更久：每次嘗試最多花 30 秒，串流沒有動靜 45 秒後才算斷線。3.0.1 以前的 hub 在串流一斷線後的第一次 heartbeat 就搬 | 不用處理：最多比以前晚一分鐘 |
+| 主機換了位址後，實例要顯示 Unreachable 一兩分鐘才搬過去 | 舊位址連線失敗滿 10 秒後，hub 才會在實例下一次 heartbeat（每分鐘一次）時搬動它；舊位址完全沒回應時更久：每次嘗試最多花 30 秒，串流沒有動靜 45 秒後才算斷線 | 不用處理：它會在那次 heartbeat 搬過去 |
 | hub 的 log 有「A stopped instance's event names another URL」 | 送過 `instance.stopped` 的實例在另一個網址啟動 | 不用處理：hub 先回舊網址試一次，失敗後在下一次 heartbeat 搬動它 |
 | 開啟實例時回應 `the hub isn't connected to the instance yet`（503） | hub 啟動、串流斷線或實例搬走後，還沒在它的網址讀到摘要 | 等它那一列顯示已連上 |
 | hub 的 log 有「An instance added by hand keeps its URL」 | 它是用某個網址手動加入的，它的 webhook 卻寫了另一個網址 | 把 `--public-url` 改成加入時用的網址，或在 hub 移除它，讓它的 webhook 重新加入 |
-| hub 的 log 有「Refused an instance event that names no server ID」 | 送出事件的不是 AgentAPI 1.0 以後的版本，卻有 hub 的 secret 簽章 | 更新送出事件的程式；若不知道是誰，找出是哪台有 secret 的主機送的 |
+| hub 的 log 有「Refused an instance event that names no server ID」 | 送出事件的不是 Tendyard，卻有 hub 的 secret 簽章 | 找出是哪台有 secret 的主機送的 |
 | Unreachable，而且 hub 的 VPN 用戶端以 userspace 模式執行 | hub 的連線沒有經過 VPN | 為 hub 設定 `ALL_PROXY`，指向 VPN 用戶端的 SOCKS5 proxy |
-| 加入時出現「is it AgentAPI 1.1 or later?」 | 這個實例沒有摘要 | 用 `agentapi update` 更新它 |
+| 加入時出現「is it AgentAPI 1.1 or later?」 | 這個網址回應的不是 Tendyard 的摘要 | 確認網址是那個實例的 |
 | 頁面說 hub 沒有回應 | 位址錯誤，或 hub 沒有執行 | 開啟 `http://<hub>:3290/api/session`；hub 執行中會回傳 JSON |
 | 透過 Coder 的 port 網址開啟時，先要求登入 Coder | Coder 的 port 網址需要登入 Coder | 在那個瀏覽器先登入 Coder，再登入 hub |
 | `the hub doesn't answer to <name>; add it to --allowed-hosts` | hub 設了 `--allowed-hosts`，而你用了別的名稱開啟 | 把這個名稱加進 `--allowed-hosts` |
 | **Update Tendyard…** 說更新已關閉 | 這台主機不接受 hub 的更新 | 在那台主機的 `~/.agentapi/config.yaml` 加上 `allow-update: true`，再執行 `agentapi restart --all` |
 | **Update Tendyard…** 要求一次性設定 | Tendyard 無法寫入 binary 所在的目錄，例如 root 擁有的 `/usr/local/bin` | 在那台主機上執行一次畫面上的指令 |
-| 那一列顯示 **Update failed** | 檢查或下載新版時出錯，或新版無法以這個實例的設定啟動，例如執行 PTY agent 的 AgentAPI 2 | 滑鼠移上去，或開啟 **Update Tendyard…** 查看錯誤，再試一次。AgentAPI 4.3.1 以後，磁碟上的程式會維持原樣；更舊的版本則已經把新版放到磁碟上：如果錯誤指出某個設定（例如 AgentAPI 4 移除的 `unknown flag: --transport`），請在那個實例重新啟動前，從啟動方式拿掉那個設定，否則它會起不來。AgentAPI 2 要保留原本的 agent 時，在它的主機上把 v2.5.1 裝回去（見[從 hub 更新](#從-hub-更新)） |
-| 已連線的 agent，**⋯** 選單裡沒有任何更新項目 | 它的 Tendyard 太舊，還不支援從 hub 更新 | 手動更新（見[手動更新](#手動更新)） |
-| hub 的 log 有「The hub's file of instances doesn't parse」 | 檔案損壞，例如手動改壞了；或是 2.2 以前的 hub 讀到較新 hub 寫的檔案 | hub 已把它改名放到一旁（`instances.json.corrupt-<時間>`），從空的清單開始。用 webhook 加入的實例會在下一次 heartbeat 回來。其餘的要找回來，先停掉 hub，再用 `instances.json.bak`（hub 上次啟動時看到的檔案）覆蓋 `instances.json`；2.2 以前的 hub 請見[檔案](#檔案) |
+| 那一列顯示 **Update failed** | 檢查或下載新版時出錯，或新版無法以這個實例的設定啟動 | 滑鼠移上去，或開啟 **Update Tendyard…** 查看錯誤，再試一次。實例會保留原本的程式（見[從 hub 更新](#從-hub-更新)） |
+| hub 的 log 有「The hub's file of instances doesn't parse」 | 檔案損壞，例如手動改壞了 | hub 已把它改名放到一旁（`instances.json.corrupt-<時間>`），從空的清單開始。用 webhook 加入的實例會在下一次 heartbeat 回來。其餘的要找回來，先停掉 hub，再用 `instances.json.bak`（hub 上次啟動時看到的檔案）覆蓋 `instances.json` |
 | hub 無法啟動：`instances.json is of a newer hub` | 檔案是較新的 hub 寫的 | 改用較新的 hub，或從 `instances.json.bak` 開始 |
 | Issues 裡某台主機一直離線，hub 的 log 有 "Refused a host event with another launcher's token than the machine's" | hub 會把主機名稱綁定到它第一次帶來的 launcher token。launcher 換了 token（`~/.agentapi/host.token` 被刪除，或主機重新安裝），或是另一台持有 hub secret 的機器冒用這個名稱 | 是你自己的主機時：先停掉它的 job，等它顯示離線後在 [Issues](#issues) 按它的 **×** 移除，下一次 heartbeat 就會重新加入。不是你的主機時，更換 hub 的 `--secret`，再讓你的主機重新 join |
 | 主機沒出現在 Issues，或一直離線；hub 的 log 有 "Refused a host event with a URL the hub doesn't call" | launcher 回報的網址是 hub 不會呼叫的：loopback（在 hub 這台主機上以 `localhost` 加入）、link-local，或含有帳號密碼（見 [`agentapi host`](#agentapi-host)） | 用 hub 的內網位址讓主機加入（`agentapi hub join http://<hub 的內網位址>:3290/hooks …`）再重新啟動 launcher，或設定 `host` 區段的 `public-url`；hub 這台主機上的 launcher，也可以改用 `--allow-loopback-launchers` 啟動 hub |
@@ -1068,9 +1052,8 @@ loopback（`127.0.0.1`、`::1`）、link-local 位址（`169.254.0.0/16`、`fe80
 時，它也會停下來。做這些檢查時，它會以通往 hub 的路由填入 `{ip}`，並印出這個位址。
 
 `join` 把 `webhook-url`、`webhook-secret`、`webhook-events` 和 `public-url` 寫進設定檔，並用
-`PUT /webhook` 套用到執行中的實例，保留各自的逾時和重試次數。設定檔保留 `{ip}`，會自己填入
-`{ip}` 的執行中 Tendyard（依登記資料，版本在 2.1.2 之後）也拿到原樣的 `{ip}`；較舊的則拿到當下的
-位址，在重新啟動前都用這個位址，`join` 也會註明。`join` 透過登記的網址連到各個 Tendyard，連不到
+`PUT /webhook` 套用到執行中的實例，保留各自的逾時和重試次數。設定檔保留 `{ip}`，執行中的
+Tendyard 也拿到原樣的 `{ip}`，由它們自己填入。`join` 透過登記的網址連到各個 Tendyard，連不到
 時改用 localhost 上它的 port。`leave` 移除這些設定，並關掉執行中 Tendyard 的 webhook。當下無法
 修改的 Tendyard，會在重新啟動時套用設定檔。加上 `--allow-update` 時，
 `join` 還會寫入 `allow-update: true`，Tendyard 啟動時才會讀取。
@@ -1100,7 +1083,7 @@ loopback（`127.0.0.1`、`::1`）、link-local 位址（`169.254.0.0/16`、`fe80
 | `POST /api/providers/check` | `{"id", "base_url", "anthropic_base_url", "api_key"}` 由 hub 向 `base_url` 的供應商查詢模型（`GET <base_url>/models`）：`{"models": [{"id", "name"}], "latency_ms"}`。沒有 `api_key` 時，網址沒變才用 ID 為 `id` 的供應商保存的金鑰；網址改了則不發出查詢，直接回 400。供應商沒有回傳模型時回 502，並附上原因 |
 | `POST /api/providers/prices` | 重新取得 OpenRouter 的清單，並讓沒有定義模型的供應商列出模型，再以 `GET /api/providers` 的格式回應；OpenRouter 失敗時寫在 `prices.error`。不查價格的 hub 回 409 |
 | `GET /api/providers/openrouter?q=` | hub 保存的清單裡，ID 或名稱含有 `q` 每個字的 OpenRouter 模型，最多 50 個：`{"models": [{"id", "name", "price"}], "fetched_at"}` |
-| `POST /api/providers/sync` | Tendyard 取得含金鑰和模型價格的供應商，以 hub 的 secret 加密：`{"sealed", "nonce", "proof"}`，`proof` 把 `sealed` 綁定到請求的 `nonce`。請求和事件一樣以 `--secret` 簽章，不需要 session。沒有價格功能的舊版 Tendyard 會忽略價格 |
+| `POST /api/providers/sync` | Tendyard 取得含金鑰和模型價格的供應商，以 hub 的 secret 加密：`{"sealed", "nonce", "proof"}`，`proof` 把 `sealed` 綁定到請求的 `nonce`。請求和事件一樣以 `--secret` 簽章，不需要 session |
 | `GET /api/events` | Server-sent events：先送 `instances`（全部實例和 `hub_version`，格式同 `GET /api/instances`）和 `favorites`（格式同 `GET /api/favorites`），再送 `instance`（某個實例有頁面看得到的變動，或工作時間變動滿一分鐘；最後聯絡時間只在它離線時才算）、`removed`（`{"id"}`）、`favorites`（有變動時送出全部）、`dispatch`（[issue 派工](#issues)的主機和 job，格式同 `GET /api/hosts` 和 `GET /api/jobs`，一開始和每次變動時送出），以及每 15 秒一次的 `heartbeat`。瀏覽器 30 秒沒有讀取串流，就會失去串流 |
 | `GET /api/hosts` | 有 launcher 回報的主機：能跑的 agent、有的 repo、job 與上限，以及是否在線（`online`） |
 | `DELETE /api/hosts/{name}` | 移除主機，以及 hub 為這個主機名稱記下的 launcher token，讓換了 token 的 launcher 能以同一個名稱重新加入。主機在線（`host_online`）或還有進行中的 job（`host_busy`）時回 409，請先停掉它的 job；hub 沒有這台主機時回 404 |
@@ -1119,7 +1102,7 @@ loopback（`127.0.0.1`、`::1`）、link-local 位址（`169.254.0.0/16`、`fe80
 還需要 launcher 的 host token。`/api/dispatch` 也接受 dispatch token。任何回應裡都不會出現實例 token。
 請求被拒或失敗時回
 `{"code": …, "message": …, "error": …}`：`code` 是端點自己的代碼（例如 `host_online`），或 snake
-case 的 HTTP 狀態（例如 `not_found`）；`error` 和 `message` 相同，較舊的 hub 只回這個欄位。
+case 的 HTTP 狀態（例如 `not_found`）；`error` 和 `message` 相同。
 
 ### 檔案
 
@@ -1137,32 +1120,18 @@ case 的 HTTP 狀態（例如 `not_found`）；`error` 和 `message` 相同，�
 | `~/.agentapi/hub/openrouter.json` | `agentapi hub serve` | hub 最後一次取得的 OpenRouter 模型與價格，以及沒有定義模型的供應商列出的模型 |
 | `~/.agentapi/hub-providers.json` | `agentapi server` | 每台主機上、設定檔旁邊：hub 上次回應的供應商，以 hub 的 secret 加密；下次啟動時在 hub 回應前先拿來用 |
 
-`instances.json` 的格式是 `{"version": 1, "instances": [...]}`。2.2 以前的 hub 只寫、也只讀陣列：
-現在的 hub 讀得懂舊格式，但舊 hub 會把新格式當成損壞的檔案放到一旁，從空的清單開始。要改回舊
-hub，先停掉 hub，只留下陣列：
-
-```sh
-cd ~/.agentapi/hub && jq .instances instances.json > instances.json.new && mv instances.json.new instances.json
-```
-
-每個實例的工作時間是同一個 version 1 裡多出來的欄位（`work`）。2.3 和 2.4 的 hub 會略過它，下次寫入
-檔案時就把它丟掉。3.0.1 以前的 hub 對 `confirmed_url`（hub 最後一次讀到實例摘要的網址）也一樣，
-3.5 以前的 hub 對我的最愛（和 `instances` 並列的 `"favorites": [...]`）也一樣。改回這種 hub 之後，
-它啟動時留下的 `.bak` 仍保有這些資料。hub 把我的最愛存在 `"settings": {"favorites": [...]}`；
-沒有 `settings` 時，讀 3.5 到 3.7 的 hub 寫在最上層的 `"favorites"`。3.8 到 3.15.1 的 hub 也會在最上層
-多寫一份，現在不寫了，所以用 3.5 到 3.7 的 hub 開這個檔案時沒有我的最愛；它啟動時留下的 `.bak` 仍保有，可以給新版 hub 用。
+`instances.json` 的格式是 `{"version": 1, "instances": [...], "settings": {"favorites": [...]}}`。
 
 <a id="限制"></a>
 
 ## hub 的能力受實例連線與共用權限限制
 
 - hub 對所有實例都提供它自己版本的聊天介面。hub 和各實例請使用相同的 Tendyard 版本；哪些不同，
-  見[版本](#版本)。AgentAPI 2 的 PTY agent 在終端機裡等你回覆對話框時，hub 不會標示出來，那一列
-  只顯示閒置或工作中。請到那個實例自己的聊天介面（它的網址）回覆。
+  見[版本](#版本)。
 - 所有人共用一個 hub token：沒有個別帳號或權限，登入的人也共用同一份[我的最愛](#我的最愛)。
 - [工作時間](#工作時間)只有 hub 看到的部分：hub 還沒有這項功能之前、hub 停機或連不到 agent 的期間都
   不算。一個 hub 也不知道另一個 hub 算了多少。
-- [活動](#活動)從 hub 執行有這項功能的版本那天開始，花費和 token 只計入 AgentAPI 4.2 以後的版本。
+- [活動](#活動)從 hub 執行有這項功能的版本那天開始。
   hub 沒聽到的小時（hub 停機或連不到 agent 超過一天）的花費不會計入。
 - 實例清單會監看手動啟動的實例、開啟它們的聊天介面，也能在主機允許時更新，但不能啟動或停止它們。
   Issues 頁則透過各主機的 launcher 啟動或停止 issue job。

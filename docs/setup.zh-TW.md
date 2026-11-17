@@ -110,7 +110,7 @@ agentapi --version
 （例如 root 擁有的 `/usr/local/bin`）時，沒有 `sudo` 就無法更新，hub 也會把那台主機標成需要一次性
 設定。如果有程式非得從 `/usr/local/bin` 找到它，就建立連結：
 `sudo ln -sf "$HOME/.local/bin/agentapi" /usr/local/bin/agentapi`。已經用另一種方式裝好的主機，修正
-方法見[手動更新](hub.zh-TW.md#手動更新)。
+方法見[從 hub 更新](hub.zh-TW.md#從-hub-更新)。
 
 **檢查：**`agentapi --version` 印出你下載的版本。
 
@@ -224,9 +224,6 @@ http://<hub>:3290/github/connect?org=<組織>   # 個人帳號就不加 ?org=
 可以留在內網。App 要求的權限是 contents、pull requests、issues、workflows（寫入）與 metadata（讀取）。
 有了它，agent 以 `<app>[bot]` 的身分 push 並開 pull request，hub 也會在 issue 與 pull request 上留言。
 
-5.4.0 以前的 hub 建立的 App 沒有 workflows 權限，job 無法 push `.github/workflows/` 底下的變更。請在
-GitHub 上 App 的設定加上 Workflows（讀寫），再到每個安裝處接受新權限。
-
 **檢查：**hub 設定的 GitHub 分頁顯示這個 App 與它的安裝處（[GitHub 設定](hub.zh-TW.md#github-設定)），
 Issues 頁也列出這些 repo 的 open issue。
 
@@ -331,7 +328,7 @@ GitHub 的 Settings → Actions → Runners 會顯示這台 runner 為 Idle。�
 | `hub join` 說 hub 沒有接受測試事件 | secret 不對、連不到 hub，或回應的是登入頁 | 確認 `HUB_SECRET`；在工作主機上 `curl -s -o /dev/null -w '%{http_code}' http://<hub>:3290/` 應該立即印出狀態碼；改用能直接連到的位址 |
 | 登出後服務就停了 | 這個使用者沒有啟用 lingering | `sudo loginctl enable-linger <user>`，或改用 system unit |
 | `agentapi host install` 說 `no systemd user instance` | 沒有 systemd 的容器 | 從工作區的啟動腳本執行 `agentapi host serve`（[`agentapi host`](cli.zh-TW.md#agentapi-host)） |
-| hub 的 Versions 卡片要求一次性設定 | 執行檔所在的目錄使用者無法寫入 | 移到 `~/.local/bin`（[手動更新](hub.zh-TW.md#手動更新)） |
+| hub 的 Versions 卡片要求一次性設定 | 執行檔所在的目錄使用者無法寫入 | 移到 `~/.local/bin`（[從 hub 更新](hub.zh-TW.md#從-hub-更新)） |
 | `agentapi update` 因 GitHub 的 rate limit 失敗 | 多台主機共用一個對外 IP | 等一小時，或用 `gh release download` 下載 release，再對照 `checksums.txt` 檢查 |
 | runner 的檢查回 `401` | `.env` 裡是別的 token，或改了 `.env` 後 runner 還沒重啟 | 修正 `.env`，再停止並啟動 runner 服務 |
 | workflow 從來沒有執行 | runner 的 label 或 group 對不上，或中央 workflow 沒有開放使用 | 檢查 runner 的 label、group 開放的 repo，以及中央 repo 的 Access 設定 |

@@ -149,7 +149,7 @@ machine allows it.
 On every machine whose Tendyard instances the hub should watch, once:
 
 ```bash
-sudo agentapi update   # {ip} needs AgentAPI newer than 2.1.2 on each machine
+sudo agentapi update
 agentapi hub join http://hub.vpn:3290/hooks --secret "$HUB_SECRET" \
   --public-url 'http://{ip}:{port}'
 ```
@@ -168,16 +168,14 @@ for an agent on the machine: [The Add dialog prepares commands for joining a mac
   machine's IPv4 address on the route to the hub. Each Tendyard looks it up again while it runs (at
   most every 30 seconds), so when DHCP gives the machine another address, as after a Coder
   workspace restarts, its next heartbeat names the new one and the hub follows it
-  ([The hub discovers instances through events and reads their summaries](#how-it-works)). `{ip}` needs Tendyard newer than 2.1.2; a name that
-  always resolves, such as `http://dev-1.vpn:{port}`, works too.
+  ([The hub discovers instances through events and reads their summaries](#how-it-works)). A name
+  that always resolves, such as `http://dev-1.vpn:{port}`, works too.
 - The same file can keep each instance's conversation when it restarts (an update, a reboot): add
   `state-db: ~/.agentapi/state/{port}.db` to it; see
   [Persistent sessions](agents.md#persistent-sessions).
 - Add `--allow-update` to let the hub update this machine's Tendyard instances
   ([Updating from the hub](#updating-from-the-hub)).
 - Tendyard instances that are running now get the change at once and appear in the hub within a second.
-  Ones that started before 1.2 aren't registered on the machine, so `join` can't reach them:
-  restart them, or the workspace, once.
 - The hub forwards requests with the host of the instance's URL as the `Host` header. By default a
   Tendyard accepts `localhost` and any IP address, so `{ip}` and a fixed address need nothing. For
   a VPN name, start it with `--allowed-hosts '*'` (the Coder module does), or add the name
@@ -195,8 +193,8 @@ agentapi list         # the instances running here and what each one's summary s
 ```
 
 An agent on the machine can do this step for you. The
-[agentapi-hub-join skill](../skills/agentapi-hub-join/SKILL.md) has Claude Code check the version
-and that the hub answers, and ask you for the hub's URL, its secret, this machine's address and
+[agentapi-hub-join skill](../skills/agentapi-hub-join/SKILL.md) has Claude Code check that the hub
+answers, and ask you for the hub's URL, its secret, this machine's address and
 whether the hub may update this machine's Tendyard instances. It then joins and checks where each instance
 reports. It never
 restarts a Tendyard instance or prints the secret, and asks before it runs anything with `sudo`. Install it
@@ -267,8 +265,8 @@ the year's); the browser remembers which cards you folded.
 Once a minute, each instance works out from its agent's session logs what the agent's sessions in
 its working directory cost over the last 24 hours and the last 7 days, and puts it in its summary
 (`spend`). It is the API-equivalent cost: the tokens at the model providers' list prices, which a
-subscription doesn't charge. Claude Code, Codex and Pi have it; `native-demo` and an AgentAPI 2's
-PTY agents show none.
+subscription doesn't charge. Claude Code, Codex and Pi have it; `native-demo` shows
+none.
 
 A row shows its agent's last 24 hours (`$110/24h`), a group header its group's, and the top of the
 list all of them; hover for the 7 days too. On a desktop the overview has a **Spend** card: the 24
@@ -303,12 +301,12 @@ by call (compacting the context) counts with the tokens its own count gives it.
 provider with calls in the last 7 days, its `provider` (`default` for the agent's own), `day_usd`,
 `week_usd`, `day_tokens` and `week_tokens`, the most expensive this week first. A Codex call counts
 toward the provider its log names; a Claude Code call toward the provider Tendyard last recorded
-its session on (`~/.agentapi/provider-ledger.jsonl`). Tendyard instances before 5.0 don't send it.
+its session on (`~/.agentapi/provider-ledger.jsonl`).
 
 Below Spend, the overview's **Tokens** card has the 24 hours and 7 days of every agent that reports
 them, by kind, the five that used the most this week, each group's when there are groups, and each
-machine's when there are several. They add up as the spend does: each scope once, connected agents only. AgentAPI 2.4.0 and older send
-their spend without tokens; the card says how many agents report them. Counts are short (`950`,
+machine's when there are several. They add up as the spend does: each scope once, connected agents only. The
+card says how many agents report them. Counts are short (`950`,
 `12k`, `3.4M`, `1.2B`); hover a total for the exact number. Rows have no room for another figure:
 hover a row's spend for its last 24 hours of tokens.
 
@@ -321,8 +319,8 @@ them, else by ID (one defined only in a machine's config file). Each figure is t
 tokens; a gateway's models often have no known price, so a provider whose calls cost nothing but
 used tokens says **no price** rather than `$0`. The most spent this week comes first, then the most
 tokens. The card's totals are the tokens that went to providers other than the agents' own; it
-counts each scope once, connected agents only, and says how many agents report it. Tendyard instances
-before 5.0, and those without calls in the last 7 days, don't.
+counts each scope once, connected agents only, and says how many agents report it: those without
+calls in the last 7 days don't.
 
 ### Work time
 
@@ -357,15 +355,14 @@ four that each take a quarter of the days with any, so one busy day doesn't wash
 focus the grid and move with the arrow keys, for that day's three figures. The days are those of
 your browser's time zone; the page reads them again every 10 minutes and when you come back to it.
 
-The hub records the activity from the day it first runs 4.2 or later, hour by hour, and keeps a year
-(366 days) in `activity.json` next to its file of instances. Days before that are blank, and the
-card says since when it keeps them. Work time adds up each agent's spans, as the Work time card
+The hub records the activity from the day it first ran a release with it, hour by hour, and keeps
+a year (366 days) in `activity.json` next to its file of instances. Days before that are blank, and
+the card says since when it keeps them. Work time adds up each agent's spans, as the Work time card
 counts them; at the first start, the hub adds the 7 days its file of instances has. Spend and
-tokens come from the agents' summaries: from 4.2 on, a Tendyard instance's `spend` lists what its scope
-spent in each of the last 25 hours (`hours`). The hub sets each scope's hours to the latest
-figures, so a scope counts once however many Tendyard instances report it, and an hour still under way keeps
-growing. An older Tendyard's spend doesn't count until you update it. An hour more than 48 hours
-old is final: no summary lists it any more, and the hub adds it into the day's totals.
+tokens come from the agents' summaries: a Tendyard instance's `spend` lists what its scope spent in
+each of the last 25 hours (`hours`). The hub sets each scope's hours to the latest figures, so a
+scope counts once however many Tendyard instances report it, and an hour still under way keeps
+growing. An hour more than 48 hours old is final: no summary lists it any more, and the hub adds it into the day's totals.
 
 ### Versions
 
@@ -395,10 +392,7 @@ binary: the first one replaces it, the others only restart.
 
 Before it restarts, the instance runs the new program with its own settings under
 `agentapi server --validate`. If the new program wouldn't start with them (a flag or an agent it
-doesn't take), the instance keeps serving and the update fails, saying why. AgentAPI 3 runs only
-Claude Code, Codex and Pi: an AgentAPI 2 that runs another agent, or any agent with
-`--transport pty`, fails this way, but its machine already has the new version on disk. Put v2.5.1 back
-there before that instance restarts.
+doesn't take), the instance keeps serving and the update fails, saying why.
 
 The row shows how far the update got: checking, downloading, waiting for the task, restarting.
 While it waits for the task, **Cancel the update** in the **⋯** menu, or **Cancel** in the bar above
@@ -433,20 +427,17 @@ Each machine needs:
   and the agent's session across the restart, and sends its queued messages after it. Without one
   the agent resumes its session (Claude Code, Codex and Pi), and its conversation is read back from
   the session's log, but queued messages and the settings chosen in the chat start fresh; the dialog
-  says so. A Tendyard instance of an earlier release starts a new session, and the confirmation says so. Add
+  says so. Add
   `state-db: ~/.agentapi/state/{port}.db` to the config file ([step 3](#3-join-each-machines-agentapis)).
 
 #### Updating by hand
 
-Older Tendyard instances that can't update from the hub show nothing new in the menu; the card says how to
-update them. On the machine:
+On the machine:
 
-- From 2.1.0 on, Tendyard restarts in place: `sudo agentapi update --restart` updates the binary
-  and restarts the machine's Tendyard instances into it (without `sudo` when the binary is yours).
-- To let the hub update them from then on, add `--allow-update` (from 3.8.0), which writes
-  `allow-update: true` into the config file first. With an older `agentapi`, add that line to
-  `~/.agentapi/config.yaml` yourself, then run `sudo agentapi update --restart`.
-- Before 2.1.0, run `sudo agentapi update`, then restart each instance once, or its workspace.
+- `sudo agentapi update --restart` updates the binary and restarts the machine's Tendyard
+  instances into it in place (without `sudo` when the binary is yours).
+- To let the hub update them from then on, add `--allow-update`, which writes
+  `allow-update: true` into the config file first.
 
 <a id="the-list"></a>
 
@@ -483,8 +474,7 @@ shape of its own, so it reads without its color:
 Search (**/**) matches any word of a name, group, title, machine, agent or version. The chips under
 it show all agents or only those that need you, work, finished unseen, or are offline. Once the hub
 watches more than one kind of agent, a second row picks agents, with a chip for each kind it
-watches: Claude Code, Codex, Pi, and **Other** for the rest (an AgentAPI 2's agent such as aider,
-`native-demo`, or one that hasn't reported its agent yet). Pick several to see any of them; pick one
+watches: Claude Code, Codex, Pi, and **Other** for the rest (`native-demo`, or one that hasn't reported its agent yet). Pick several to see any of them; pick one
 again to take it out, or **Any agent** to clear them all. An agent shows when it matches the search,
 the state and one of the agents picked. Each chip counts what the other row lets through, so its number is what picking it
 shows; the search doesn't change the counts. **Show all** on an empty list clears all three. Each
@@ -546,8 +536,6 @@ within 10 s.
 
 The hub records when each instance last changed (`changed_at`) and keeps it in its file, so
 restarting the hub doesn't reorder the list. For a new instance, that is when the hub first saw it.
-A hub updated from an earlier version has no record yet: until an instance changes, the list places
-it by the time its row shows, else by when the hub last heard of it.
 
 ### By machine
 
@@ -703,9 +691,8 @@ Each Tendyard that reports to the hub asks it for the providers when it starts a
 after, in a request signed with the hub's secret. The answer has their keys, encrypted with a key
 derived from the secret (AES-256-GCM), so they don't cross the network in the clear over plain
 HTTP. A separate proof binds that answer to the request's nonce, so an observer can't replay an old
-provider list. New Tendyard instances refuse an unbound answer; upgrade the hub before the machines reporting
-to it. A change reaches the chats within a minute. On a machine, a provider of its own config file
-wins over the hub's with the same ID.
+provider list. A change reaches the chats within a minute. On a machine, a provider of its own
+config file wins over the hub's with the same ID.
 
 Once some agent reports its providers, each provider in the tab has a line of what the agents used
 it for: its tokens and their cost (or **no price**) in the last 24 hours and 7 days, counted as the
@@ -746,19 +733,17 @@ the hub's page shows again, so coming back from GitHub is enough to see a change
 The app asks for read and write on Contents, Pull requests, Issues and Workflows. GitHub refuses a
 GitHub App's push that changes `.github/workflows/` without Workflows, so a job can change CI too:
 review such a change before you merge it, as a pull request from a branch of the repository runs
-its workflows with the repository's secrets. An app registered before Workflows was asked for has
-the other three only. Its jobs' tokens come without Workflows, the hub logs that once for each
-repository, and such a push is refused. Add **Workflows: Read and write** in **App settings on
-GitHub** (Permissions & events, Repository permissions), then accept the new permissions on each
-installation; the hub asks for it again within the hour.
+its workflows with the repository's secrets. An app without Workflows gets its jobs' tokens
+without it, the hub logs that once for each repository, and such a push is refused. Add
+**Workflows: Read and write** in **App settings on GitHub** (Permissions & events, Repository
+permissions), then accept the new permissions on each installation; the hub asks for it again
+within the hour.
 
 - **Choose repositories** opens GitHub in a new tab, where you install the app on another account
   or pick the repositories of one it is on. **Change** beside an account goes straight to its
   installation.
 - **App settings on GitHub** opens the app's settings: its name, permissions, and **Delete GitHub
-  App**. A hub that registered its app before 3.14 knows whose settings they are under only once
-  GitHub sends you back from an installation (after **Choose repositories** and **Save**); until
-  then the link opens the app's public page.
+  App**.
 - **Reconnect…** registers a new app, for your account or an organization (the current one when
   the app is an organization's), from the hub's `/github/connect`. The hub keeps its current app
   until GitHub hands the new one back, so leaving the flow on GitHub changes nothing. Then install
@@ -858,10 +843,7 @@ last 50 messages of each job. **On the machine** has the branch and the worktree
 the agent works, the box at the bottom sends it a message (⌘/Ctrl+Enter).
 
 A run counts the task events of its own Tendyard process only (the `server_id` the launcher reported
-for it), so a late event from an earlier run can't move or charge the current one. A launcher older
-than this hub reports no `server_id`: the hub then ignores its jobs' task events, which leaves their
-state and cost where they were. Upgrade the launchers along with the hub; an upgraded launcher reports
-the identity of the jobs it takes over on its next report.
+for it), so a late event from an earlier run can't move or charge the current one.
 
 The hub also needs to read that instance itself: it takes a task event only while it reads the
 instance the event names, as that run, at an address of the job's machine (the host of its launcher's
@@ -1020,8 +1002,8 @@ agent ask you for it.
 ### Add instances by URL and forget those no longer needed
 
 **Add one by its URL**, at the bottom of the Add dialog, adds a Tendyard instance that can't run
-`agentapi hub join` (an older version, or one you don't log in to). The hub asks it for its summary
-first, so it must be reachable and run AgentAPI 1.1 or later. A token given here is kept for that
+`agentapi hub join` (one you don't log in to). The hub asks it for its summary first, so it must
+be reachable. A token given here is kept for that
 instance and sent instead of `--instance-token`. An instance added this way doesn't report starting
 or stopping; the hub just finds it reachable or not.
 
@@ -1058,8 +1040,7 @@ right is forgotten, it closes.
   hub (unreachable past the 10 s grace, stopped after missed heartbeats, or another Tendyard
   answers there) to the event's URL. It never moves an instance the hub is connected or connecting
   to, whatever run it names, or one added by hand. An `instance.stopped` is no sign the URL is
-  dead: the hub tries the old URL first. An `instance.*` event must name its run (`server_id`,
-  which AgentAPI 1.0 and later send). An instance that moves leaves the token given for its old URL
+  dead: the hub tries the old URL first. An `instance.*` event must name its run (`server_id`). An instance that moves leaves the token given for its old URL
   behind; `--instance-token` still applies.
 - Every joined machine has the same secret, in a file any agent there can read (one in the bypass
   permission mode reads files without asking). Such an agent, steered by something it read, can
@@ -1127,8 +1108,8 @@ right is forgotten, it closes.
 
 | What you see | Why | What to do |
 | --- | --- | --- |
-| An instance never appears | Its Tendyard started before `join`, or before 1.2 | Restart it, or its workspace |
-| A job's push fails with "refusing to allow a GitHub App to create or update workflow … without `workflows` permission" | The hub's GitHub App was registered before it asked for Workflows | Add Workflows (read and write) to the app on GitHub and accept it on the installation ([GitHub settings](#github-settings)) |
+| An instance never appears | Its Tendyard started before `join` | Restart it, or its workspace |
+| A job's push fails with "refusing to allow a GitHub App to create or update workflow … without `workflows` permission" | The hub's GitHub App lacks the Workflows permission | Add Workflows (read and write) to the app on GitHub and accept it on the installation ([GitHub settings](#github-settings)) |
 | `join` says a sign-in page is in front of the hub | The hub's URL is a Coder port URL (or another behind a login) | Join with the hub's address on your network or VPN; the Tendyard instances send events themselves |
 | `join` says the hub is on another machine | `--public-url` names `localhost` | Give the address the hub reaches this machine at |
 | The Add dialog's command has `<hub secret>` | The hub runs with `--no-token`, so its page never shows the secret | Put in the hub's `--secret` |
@@ -1142,21 +1123,20 @@ right is forgotten, it closes.
 | Unreachable: `another AgentAPI answers at this URL` | The instance's address now belongs to another machine (a new DHCP lease), or `--public-url` names another machine | Check `--public-url`; an instance that moved sends its new address with its next heartbeat, within a minute |
 | The hub logs "Two AgentAPIs report the same instance ID" | Two machines have the same name, so their Tendyard instances on the same port have the same ID; the hub keeps the one it follows | Rename one machine, or give its Tendyard instances `--instance-id` |
 | The hub logs "An instance's event names another URL" (or "… while the hub connects to its URL") | Its `--public-url` changed while the hub follows it, or still connects to it, at the old one | Nothing: the hub keeps the URL that works, and takes the new one once the old one is unreachable |
-| An instance whose machine got a new address stays unreachable for a minute or two before it moves | The hub moves it only once the old address failed for 10 s (more when it doesn't answer at all: each try then takes up to 30 s, and a stream that goes silent counts as lost after 45 s), at the instance's next heartbeat, every minute. A hub before 3.0.1 moved it at the first heartbeat after the stream dropped | Nothing: it moves at most a minute later than it did |
+| An instance whose machine got a new address stays unreachable for a minute or two before it moves | The hub moves it only once the old address failed for 10 s (more when it doesn't answer at all: each try then takes up to 30 s, and a stream that goes silent counts as lost after 45 s), at the instance's next heartbeat, every minute | Nothing: it moves at that heartbeat |
 | The hub logs "A stopped instance's event names another URL" | An instance that sent `instance.stopped` started at another URL | Nothing: the hub tries the old URL first, and moves it with the next heartbeat once that fails |
 | Opening an instance answers `the hub isn't connected to the instance yet` (503) | The hub hasn't read its summary at its URL since the hub started, the stream dropped, or the instance moved | Wait until its row shows it connected |
 | The hub logs "An instance added by hand keeps its URL" | It was added by one URL, and its webhook names another | Make `--public-url` the URL it was added by, or forget it and let its webhook add it |
-| The hub logs "Refused an instance event that names no server ID" | Something that isn't AgentAPI 1.0 or later sent it, signed with the hub's secret | Update the sender; if you don't know it, find which machine with the secret sends it |
+| The hub logs "Refused an instance event that names no server ID" | Something that isn't Tendyard sent it, signed with the hub's secret | Find which machine with the secret sends it |
 | Unreachable, and the hub's VPN client runs in userspace | The hub's connections don't go through the VPN | Set `ALL_PROXY` to the VPN client's SOCKS5 proxy for the hub |
-| "is it AgentAPI 1.1 or later?" when adding | The instance has no summary | Update it with `agentapi update` |
+| "is it AgentAPI 1.1 or later?" when adding | The URL answers without a Tendyard summary | Check that the URL is the instance's |
 | The page says the hub didn't answer | Wrong address, or the hub isn't running | Open `http://<hub>:3290/api/session`; it answers JSON when the hub runs |
 | Behind Coder's port URL, the page asks for Coder first | Coder's port URLs need a Coder login | Sign in to Coder in that browser, then to the hub |
 | `the hub doesn't answer to <name>; add it to --allowed-hosts` | The hub runs with `--allowed-hosts` and you opened it by another name | Add the name to `--allowed-hosts` |
 | **Update Tendyard…** says updates are off | The machine doesn't allow updates from the hub | Add `allow-update: true` to `~/.agentapi/config.yaml` there, then run `agentapi restart --all` |
 | **Update Tendyard…** asks for a one-time setup | The Tendyard can't write its binary's directory, such as a root-owned `/usr/local/bin` | Run the command it shows on that machine, once |
-| A row says **Update failed** | Checking or downloading the release failed, or the new version wouldn't start with this instance's settings, such as an AgentAPI 2 that runs a PTY agent | Hover it, or open **Update Tendyard…**, for the error; then try again. An AgentAPI 4.3.1 or later then keeps its program. An older one already has the new version on disk: if the error names a setting (`unknown flag: --transport`, say, which AgentAPI 4 removed), drop it from how that instance starts before it restarts, or it won't start. For an AgentAPI 2 that must keep its agent, put v2.5.1 back on its machine ([Updating from the hub](#updating-from-the-hub)) |
-| A connected agent's **⋯** menu has nothing about updating it | Its Tendyard is too old to update from the hub | Update it by hand ([Updating by hand](#updating-by-hand)) |
-| The hub logs "The hub's file of instances doesn't parse" | The file was damaged, such as by an edit by hand, or a hub of 2.2 or earlier started on a newer hub's file | The hub moved it aside (`instances.json.corrupt-<time>`) and started empty. Joined instances come back with their next heartbeat. To get the rest back, stop the hub and copy `instances.json.bak` (the file as the hub's previous start found it) over `instances.json`; for a hub of 2.2 or earlier, see [Files](#files) |
+| A row says **Update failed** | Checking or downloading the release failed, or the new version wouldn't start with this instance's settings | Hover it, or open **Update Tendyard…**, for the error; then try again. The instance keeps its program meanwhile ([Updating from the hub](#updating-from-the-hub)) |
+| The hub logs "The hub's file of instances doesn't parse" | The file was damaged, such as by an edit by hand | The hub moved it aside (`instances.json.corrupt-<time>`) and started empty. Joined instances come back with their next heartbeat. To get the rest back, stop the hub and copy `instances.json.bak` (the file as the hub's previous start found it) over `instances.json` |
 | The hub doesn't start: `instances.json is of a newer hub` | A newer hub wrote the file | Run the newer hub, or start from `instances.json.bak` |
 | A machine stays offline in Issues; the hub logs "Refused a host event with another launcher's token than the machine's" | The hub pins a machine's name to the launcher token it first came with. The launcher has a new token (its `~/.agentapi/host.token` was deleted, or the machine was set up again), or another machine with the hub's secret uses the name | If it is your machine: stop its jobs, and once it shows offline, forget it with its **×** in Issues ([Issues](#issues)); it joins with its next heartbeat. If it isn't, change the hub's `--secret` and join your machines again |
 | A machine doesn't show in Issues, or stays offline; the hub logs "Refused a host event with a URL the hub doesn't call" | The launcher reports a URL the hub doesn't call a launcher at: on loopback (it joined the hub by `localhost` on the hub's machine), link-local, or with a user and password in it ([`agentapi host`](#agentapi-host)) | Join the machine with the hub's LAN address (`agentapi hub join http://<hub's LAN address>:3290/hooks …`) and restart the launcher, or set the `host` section's `public-url`; for a launcher on the hub's machine, starting the hub with `--allow-loopback-launchers` also works |
@@ -1274,7 +1254,7 @@ running Tendyard instances, which then no longer follow their conversation for t
 | `POST /api/providers/check` | `{"id", "base_url", "anthropic_base_url", "api_key"}` asks the provider at `base_url` for its models (`GET <base_url>/models`) from the hub: `{"models": [{"id", "name"}], "latency_ms"}`. Without `api_key`, with the key the provider with `id` has, if its URLs are unchanged; 400 without asking when they changed. 502 with the reason when the provider doesn't answer with its models |
 | `POST /api/providers/prices` | Gets OpenRouter's list again and has the providers without models list theirs, then answers as `GET /api/providers`; OpenRouter failing is in `prices.error`. 409 for a hub that doesn't look prices up |
 | `GET /api/providers/openrouter?q=` | The OpenRouter models of the hub's copy whose ID or name has every word of `q`, at most 50: `{"models": [{"id", "name", "price"}], "fetched_at"}` |
-| `POST /api/providers/sync` | A Tendyard instance gets the providers with their keys and their models' prices, sealed with the hub's secret: `{"sealed", "nonce", "proof"}`, `proof` binding `sealed` to the request's `nonce`. Signed with `--secret` as events are, no session needed. Tendyard instances before the prices ignore them |
+| `POST /api/providers/sync` | A Tendyard instance gets the providers with their keys and their models' prices, sealed with the hub's secret: `{"sealed", "nonce", "proof"}`, `proof` binding `sealed` to the request's `nonce`. Signed with `--secret` as events are, no session needed |
 | `GET /api/events` | Server-sent events: `instances` (all of them and `hub_version`, as `GET /api/instances` has them) and `favorites` (as `GET /api/favorites` has them), then `instance` (one changed what the page shows, or its work time moved by a minute; when it was last heard of counts only while it is offline), `removed` (`{"id"}`), `favorites` (all of them, after a change), `dispatch` (the [issue dispatch's](#issues) machines and jobs, as `GET /api/hosts` and `GET /api/jobs` have them, at first and after each change) and a `heartbeat` every 15 s. A browser that stops reading the stream for 30 s loses it |
 | `GET /api/hosts` | The machines whose launchers report: their agents, repositories, jobs and room, and whether each is `online` |
 | `DELETE /api/hosts/{name}` | Forgets a machine and the launcher token the hub pinned its name to, so a launcher with a new token can join under the name. 409 while the machine is online (`host_online`) or has a job that works (`host_busy`): stop its jobs first; 404 for a machine the hub doesn't have |
@@ -1294,7 +1274,7 @@ Browser API routes need the session cookie or `Authorization: Bearer <hub token>
 `/api/dispatch` also accepts the dispatch token. Instance tokens never appear in any response.
 A refused or failed request answers `{"code": …, "message": …, "error": …}`: `code` is the route's own (such as
 `host_online`) or the HTTP status in snake case (such as `not_found`), and `error` repeats
-`message`, the only field older hubs answered on their own routes.
+`message`.
 
 ### Files
 
@@ -1312,37 +1292,19 @@ A refused or failed request answers `{"code": …, "message": …, "error": …}
 | `~/.agentapi/hub/openrouter.json` | `agentapi hub serve` | The hub's copy of OpenRouter's models and their prices, as it last got them, and the models the providers without models listed |
 | `~/.agentapi/hub-providers.json` | `agentapi server` | On each machine, beside its config file: the providers the hub last answered, sealed with the hub's secret, which stand in at the next start until the hub answers |
 
-`instances.json` is `{"version": 1, "instances": [...]}`. Hubs of 2.2 and earlier wrote, and read,
-only the array: the hub reads that too, but such a hub sets the newer file aside as damaged and
-starts empty. To go back to one, stop the hub and keep only the array first:
-
-```sh
-cd ~/.agentapi/hub && jq .instances instances.json > instances.json.new && mv instances.json.new instances.json
-```
-
-Each instance's work time is an extra field (`work`) inside the same version 1. A hub of 2.3 or 2.4
-ignores it, and drops it the next time it writes the file. So does a hub before 3.0.1 with
-`confirmed_url`, the URL where the hub last read the instance's summary, and a hub before 3.5 with
-the favorites (`"favorites": [...]` next to `instances`). After going back to such a hub, the
-`.bak` it made as it started still has them. The hub keeps the favorites in `"settings":
-{"favorites": [...]}`, and reads the top-level `"favorites"` of a hub of 3.5 to 3.7 when there are
-no settings. Hubs of 3.8 to 3.15.1 wrote that copy too; this one doesn't, so a hub of 3.5 to 3.7 run
-on its file starts without favorites; the `.bak` it makes as it starts keeps them for this one.
+`instances.json` is `{"version": 1, "instances": [...], "settings": {"favorites": [...]}}`.
 
 <a id="limits"></a>
 
 ## The hub depends on reachable instances and shared permissions
 
 - The hub serves the chat of its own version to every instance. Run the same Tendyard version on
-  the hub and the instances; [Versions](#versions) shows the ones that differ. The hub doesn't
-  show an AgentAPI 2's PTY agent waiting on a dialog in its terminal: the row shows it idle or
-  working. Answer the dialog in that instance's own chat, at its URL.
+  the hub and the instances; [Versions](#versions) shows the ones that differ.
 - One hub token for everyone: there are no per-user accounts or permissions, and everyone signed
   in shares the [favorites](#favorites).
 - [Work time](#work-time) is what the hub saw: not before it had the feature, nor while it was down
   or couldn't reach an agent. One hub doesn't know what another counted.
-- The [Activity](#activity) card starts on the day the hub runs a release with it, and its spend
-  and tokens count only AgentAPI 4.2 and later. An agent's spend in hours the hub didn't hear of
+- The [Activity](#activity) card starts on the day the hub first ran a release with it. An agent's spend in hours the hub didn't hear of
   (it was down, or couldn't reach the agent, for more than a day) is missing.
 - The instance list monitors manually started instances, opens their chat and updates them when
   their machine allows it; it cannot start or stop them. The Issues page starts and stops issue

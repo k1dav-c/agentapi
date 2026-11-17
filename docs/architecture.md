@@ -157,8 +157,7 @@ The internal imports point one way, from the commands to the leaves:
    `instance.started`, after a configuration change, before each heartbeat
    and every 30 s. The events only read the last address found.
    The agent type is `--type`, else the agent command's name (`claude`,
-   `codex`, `pi` or `native-demo`); any other agent is refused with a
-   pointer to v2.5.1, the last release with the PTY transport.
+   `codex`, `pi` or `native-demo`); any other agent is refused.
 2. `nativeFactory` builds a `native.Factory` for the agent type (Claude
    Code, Codex, Pi or `native-demo`). Each adapter checks the agent's
    arguments first and refuses the ones that conflict with its protocol.
@@ -550,10 +549,8 @@ flowchart LR
 - **The hub's.** `HubSync` posts `/api/providers/sync` to the hub of the webhook's URL, signed
   with its secret as events are, and opens the answer with the same secret. The answer also proves
   that the sealed provider list belongs to that request's nonce, so a network observer can't replay
-  an earlier list over HTTP. An unbound answer from an older hub is refused; upgrade the hub before
-  the machines that report to it. The server syncs once (5 s at most) before the agent starts, which
-  may start on one of the hub's, then every minute; a hub that answers 404 (older than the route) has
-  none. Each answer is kept, sealed, in `hub-providers.json` beside the config file (`HubCachePath`),
+  an earlier list over HTTP; an answer without that proof is refused. The server syncs once (5 s at
+  most) before the agent starts, which may start on one of the hub's, then every minute. Each answer is kept, sealed, in `hub-providers.json` beside the config file (`HubCachePath`),
   and `Restore` puts it back before the first sync: until the hub answers, `Source.HubSettled` is false.
 - **Model lists.** `Source.Models` keeps what a provider listed for 10 minutes, then answers with it
   while it lists again in the background; a failed list isn't made again for a minute. Each list waits
@@ -634,8 +631,7 @@ flowchart LR
   calls are attributed to its own provider.
 - **Prices.** A provider carries prices of its models (`Provider.Prices`, by model ID, per million
   tokens, with their `source`): the config file's `prices`, or the hub's, which travel sealed with
-  the providers (`wireProvider.prices`, which Tendyard instances before them ignore; a hub before them sends
-  none). `sessions.Config.ProviderPrices` (`Source.Prices`) gives the cost reading a
+  the providers (`wireProvider.prices`). `sessions.Config.ProviderPrices` (`Source.Prices`) gives the cost reading a
   `provider.PriceTable`; once the calls are attributed, `atProviderPrices` prices a call to a provider
   with a price of its model at that price, and a call it priced so before at `lib/pricing`'s again when
   the provider's price is gone (on a copy, as attributing does). The reading keeps a digest of the table (`pricesKey`): when it
@@ -859,11 +855,7 @@ The queue is persisted with the conversation, on every change (`storeQueue`, fro
   Tendyard can use it, and is created with mode 0600.
 - On startup the server restores the conversation, the queue and the session
   reference, which the conversation passes to the factory so the agent
-  resumes its own session. A file AgentAPI 2 kept for the same agent with
-  the PTY transport opens too: it has no session to resume, so the agent
-  starts a new one below its conversation, and `meta` says native from then
-  on (its `initial_prompt` isn't read). Requests that were open come back
-  expired.
+  resumes its own session. Requests that were open come back expired.
 - Unreadable rows are logged and skipped so the server can start. Numbered
   migrations update the schema; `PRAGMA user_version` records its version.
 - Each migration names the oldest schema that may write the file once it
@@ -873,8 +865,7 @@ The queue is persisted with the conversation, on every change (`storeQueue`, fro
   and records it in `meta` (`min_writer_schema`, with the release that
   brought it); an older Tendyard then refuses the file and names the
   version it needs. `meta` also records the instance that last closed the
-  file (`writer_version`). Releases up to 1.9.0 read neither and refuse any
-  schema newer than theirs; the schema hasn't changed since 1.0.
+  file (`writer_version`).
 - `conversation_state` holds the settings chosen for the session, a usage
   limit stop and a retry wait as one JSON object,
   `{"version": 2, "settings": {...}, "limit_stop": {...}, "retry_wait": {...}}`;
@@ -883,13 +874,7 @@ The queue is persisted with the conversation, on every change (`storeQueue`, fro
   version. Version 2 carries the provider/model pair together because restoring only the model can
   select it on the wrong endpoint. A
   Tendyard that finds a higher version starts without stored state, and preserves the unknown envelope
-  through later status changes and a clean close instead of replacing it with defaults. Up to 3.7.2 the three had a key each
-  (`settings`, `limit_stop`, `retry_wait`), which AgentAPI 3.7.3 to 3.16
-  moved into the object on the first open; AgentAPI 4 doesn't read them, so
-  on a file only 3.7.2 or earlier opened it starts without the stored
-  settings, limit stop and retry wait (the conversation is kept). AgentAPI
-  3.7.2 or earlier opened on a newer file starts without them too, and what
-  it stores there is ignored.
+  through later status changes and a clean close instead of replacing it with defaults.
 - What an older Tendyard doesn't know, its resets and truncations don't
   clear. A restored task whose message is gone or is another one now is
   dropped, as is one whose message row couldn't be read.
@@ -908,19 +893,15 @@ The queue is persisted with the conversation, on every change (`storeQueue`, fro
   removed something logs the count and bytes at Info.
 
 The hub (`lib/hub`, `persist.go`) keeps its instances in a JSON file,
-`{"version": 1, "instances": [...]}`; it also reads the bare array of hubs of 2.2 and earlier. A
-change marks the file behind, and a background writer writes it at most once a second, and on
+`{"version": 1, "instances": [...]}`. A change marks the file behind, and a background writer writes it at most once a second, and on
 `Hub.Close`, through a temporary file it syncs and renames. On startup the hub copies the file it
 read to `instances.json.bak`. A file that doesn't parse is moved aside (`.corrupt-<time>`) and the
-hub starts empty; one of a newer version stops the hub instead. An older hub moves the envelope aside
-as damaged, so going back to one takes `jq .instances` first ([hub.md](hub.md#files)). Fields added
-inside version 1, such as each instance's work time (`work`: the spans of the last 7 days, written
-only when a span starts or ends), are ones an older hub of the envelope ignores. So are the hub's
+hub starts empty; one of a newer version stops the hub instead. Fields added inside version 1, such
+as each instance's work time (`work`: the spans of the last 7 days, written only when a span starts
+or ends), are ones an older hub ignores. So are the hub's
 settings, `"settings": {"favorites": [...]}` next to `instances` (`hubSettings`, changed through
 `store.updateSettings`); such a hub drops them at its next write, and the `.bak` it made keeps them. A new version
-instead would make every older hub refuse the file.
-Hubs of 3.5 to 3.7 kept the favorites at the top level, `"favorites": [...]`, which the hub reads
-when `settings` is missing; 3.8 to 3.15.1 wrote that copy too, and later hubs don't. The delivery
+instead would make every older hub refuse the file. The delivery
 IDs of the webhook events it took, each until its signature no longer holds, go the same way into
 `instances.deliveries.json`, so a copy replayed after a restart is refused too.
 
@@ -946,9 +927,7 @@ start when it shrank or the line where it stopped is gone (a rewrite). A call wh
 was dropped counts as the agent's own; each start of the agent records a new entry, so only a
 session that ran on a provider for 90 days without a restart or switch loses its entry.
 
-SIGUSR1 flushes the state database. `--state-file`, the PTY transport's persistence before 1.0
-(JSON written on shutdown), which AgentAPI 3 imported into a state database next to it, is gone
-in AgentAPI 4.
+SIGUSR1 flushes the state database.
 
 <a id="restarts-and-updates"></a>
 
@@ -1289,8 +1268,7 @@ chat and `parseFromFrame` in the hub.
   put back in the conversation's order whatever its batches
   (`PendingEvents`: a message with a lower ID than the one before it starts
   an earlier task, and each rich message goes with the task it came with,
-  `richOrder`); a replay in that order already, from an older server,
-  applies as it comes. `EventSourceConnection`
+  `richOrder`). `EventSourceConnection`
   (`lib/event-source.ts`, and the `use-event-source.ts` hook) keeps it, the
   hub page's stream and the shell terminal's open: a stream that ends is opened
   again at once, without a notice, unless that keeps failing; one that fails
