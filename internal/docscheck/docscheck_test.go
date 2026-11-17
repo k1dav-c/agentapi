@@ -207,6 +207,9 @@ func TestCompareTwins(t *testing.T) {
 	en := docscheck.Parse("x.md", "# A\n## B\n![s](s.png)\n[c](c.md#one)\n```\nx\n```\n")
 	zh := docscheck.Parse("x.zh-TW.md", "# 甲\n## 乙\n![s](s.png)\n[丙](c.zh-TW.md#一)\n```\nx\n```\n")
 	assert.Empty(t, docscheck.CompareTwins(en, zh))
+	// The twin may show a zh-TW variant of the image.
+	zh = docscheck.Parse("x.zh-TW.md", "# 甲\n## 乙\n![s](s.zh-TW.png)\n[丙](c.zh-TW.md#一)\n```\nx\n```\n")
+	assert.Empty(t, docscheck.CompareTwins(en, zh))
 
 	zh = docscheck.Parse("x.zh-TW.md", "# 甲\n### 乙\n![s](t.png)\n[丁](d.zh-TW.md)\n")
 	problems := docscheck.CompareTwins(en, zh)

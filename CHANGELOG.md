@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Documentation
+
+- The READMEs open with a 94-second overview video, with English or Traditional Chinese captions:
+  the hub, Issues, the chat, a phone, the queue and the API. `scripts/capture-video.mjs` records it
+  from the same demo servers as the screenshots, which `capture-docs.mjs` now starts from the shared
+  `scripts/capture-common.mjs`.
+
 ### Bug fixes
 
 - An issue's detail fits its totals in a narrow panel: Spend, Runs, Agent time, Elapsed and Tokens

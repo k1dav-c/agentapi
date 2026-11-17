@@ -10,9 +10,10 @@ pull request。處理單一 agent 可用聊天介面；跨筆電、工作區與�
 現有設定使用 `~/.agentapi/`，下方的 API 與 repo 連結沿用目前名稱。
 舊版發行名稱與目前介面顯示的文字，仍沿用 AgentAPI。
 
-![Hub：各台主機上的 agent、需要你處理的事，以及其中一個 agent 的聊天介面](docs/screenshots/hub-desktop.png)
+[![Tendyard 90 秒功能導覽：hub、Issues、聊天介面、手機、佇列與 API](docs/videos/tendyard-overview.zh-TW.png)](docs/videos/tendyard-overview.zh-TW.mp4)
 
-截圖使用 AgentAPI v5.6.0 與內建的 `native-demo` agent；回覆、工具結果、模型和用量都是模擬的。
+[功能導覽影片](docs/videos/tendyard-overview.zh-TW.mp4)（1 分 34 秒，另有[英文字幕版](docs/videos/tendyard-overview.mp4)）
+與截圖都使用 AgentAPI v5.6 與內建的 `native-demo` agent；回覆、工具結果、模型和用量都是模擬的。
 功能與動畫見[聊天介面導覽](docs/chat-ui.zh-TW.md)，重新擷取的方法見[截圖說明](docs/screenshots/README.md)。
 
 從 hub 的 [Issues 頁](docs/hub.zh-TW.md#issues)，把 issue 交給你選的主機與 agent。主機上的 launcher

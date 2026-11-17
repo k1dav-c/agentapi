@@ -1,0 +1,39 @@
+{
+  "captured_at": "2026-11-17T07:13:19.786Z",
+  "agentapi_version": "5.6.1",
+  "agents": [
+    "native-demo posing as Claude Code",
+    "nine native-demo instances behind agentapi hub serve, posing as Claude Code, Codex and Pi"
+  ],
+  "browser": "153.0.8010.12",
+  "ffmpeg": "ffmpeg version 7.0.2-static https://johnvansickle.com/ffmpeg/  Copyright (c) 2000-2024 the FFmpeg developers",
+  "size": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30
+  },
+  "seconds": 94.5,
+  "scenes": [
+    "title",
+    "hub",
+    "issues",
+    "issue-detail",
+    "review",
+    "task",
+    "approval",
+    "files",
+    "phone",
+    "queue",
+    "limit",
+    "api",
+    "end"
+  ],
+  "videos": [
+    "tendyard-overview.mp4",
+    "tendyard-overview.zh-TW.mp4"
+  ],
+  "posters": [
+    "tendyard-overview.png",
+    "tendyard-overview.zh-TW.png"
+  ]
+}
