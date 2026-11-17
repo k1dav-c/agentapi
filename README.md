@@ -46,9 +46,9 @@ issues involving its added features in [this repository](https://github.com/k1da
 Upstream changes should be reviewed and tested against the native transports, chat UI and hub
 before integration; upstream and fork version numbers are separate release lines.
 
-This fork builds on upstream v0.12.2. Since 3.0 it drives only Claude Code, Codex and Pi, through
-their own protocols (the [native transport](docs/agents.md)); the PTY transport, which emulated
-a terminal for other agents, ended with v2.5.1 (see [Current releases run Claude Code, Codex and Pi natively](#agents)). Session management and
+This fork builds on upstream v0.12.2. It drives Claude Code, Codex and Pi through their own
+protocols (the [native transport](docs/agents.md); see
+[Current releases run Claude Code, Codex and Pi natively](#agents)). Session management and
 chat features support long-running tasks, and [webhooks](docs/api.md#webhooks) report them to a central
 platform. [CHANGELOG.md](CHANGELOG.md) lists what
 changed, [docs/architecture.md](docs/architecture.md) describes how it is built,
@@ -187,7 +187,8 @@ See [persistent sessions](docs/agents.md#persistent-sessions).
 You need a hub reachable from your browser and the machines that will run agents, a launcher on
 each of those machines, and a GitHub App to list your repositories' issues. To send GitHub reviews
 back to agents and stop jobs when pull requests close, also set up the dispatch workflow on a
-self-hosted GitHub Actions runner that can reach the hub.
+self-hosted GitHub Actions runner that can reach the hub. [Setting up Tendyard](docs/setup.md)
+walks through all of it in order, with a check after each step.
 
 1. [Set up the hub](docs/hub.md#setting-it-up) on a machine that stays on, and join the machines
    that will run agents. Use an address those machines can reach; the loopback address in the
@@ -222,7 +223,7 @@ Read its conversation with `GET /messages`, or follow structured events over SSE
 
 ## Current releases run Claude Code, Codex and Pi natively
 
-Since 3.0, Tendyard runs Claude Code, Codex and Pi through their own protocols, the
+Tendyard runs Claude Code, Codex and Pi through their own protocols, the
 [native transport](docs/agents.md):
 
 | Agent | Type | Protocol |
@@ -241,23 +242,15 @@ agentapi server --state-db ~/.agentapi/myproject.db -- codex
 agentapi server --type pi -- ./my-pi-wrapper
 ```
 
-Any other agent stops Tendyard at startup with an error that names v2.5.1. To run Aider, Goose,
-Gemini CLI, Amp, Cursor CLI, Auggie, Amazon Q, Opencode, Copilot, Kimi Code or another terminal
-program, use AgentAPI v2.5.1, the last release with the PTY transport:
-download its binary from the [v2.5.1 release](https://github.com/k1dav-c/agentapi/releases/tag/v2.5.1)
-and keep it. `agentapi update` only installs the latest release. An AgentAPI 2 that runs such an
-agent with `--allow-update` checks the new program before it restarts into it, refuses AgentAPI 3
-or later and keeps serving; but the update already replaced the program on disk, so put v2.5.1
-back before that instance restarts some other way.
-
-AgentAPI 4 has no `--transport` flag: drop it from command lines and config files. The
-experimental ACP transport (`--experimental-acp`) was removed earlier; that flag stops Tendyard with
-an error.
+Any other agent stops Tendyard at startup with an error; Aider, Goose, Gemini CLI and other
+terminal programs aren't supported.
 
 <a id="documentation"></a>
 
 ## Choose a guide for the work you need to do
 
+- [Setting up Tendyard](docs/setup.md): from empty machines to a dispatched issue: the hub, the
+  workers and their launchers, the GitHub App, the runner and the workflow, with a check per step.
 - [Chat UI](docs/chat-ui.md): the chat at `/chat`, on a desktop and a phone.
 - [Agents and the native transport](docs/agents.md): logging in, requests, steering and the queue,
   settings, limits, the terminal, sessions and their costs, and what Claude Code, Codex and Pi each

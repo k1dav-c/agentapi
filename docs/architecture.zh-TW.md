@@ -148,8 +148,7 @@ flowchart TB
    webhook 網址那條路由的來源位址。`refreshIP` 在 emitter 的鎖之外透過 `netaddr.Resolver` 查詢這個
    位址（結果保留 30 秒，每次查詢最多等 `netaddr.DialTimeout`）：`instance.started` 之前、設定變更後、
    每次 heartbeat 之前，以及每 30 秒一次。事件只讀取最後查到的位址。agent 類型取自 `--type`；沒有指定時，
-   取自 agent 指令的名稱（`claude`、`codex`、`pi` 或 `native-demo`）。其他 agent 一律拒絕，
-   並指向最後一個提供 PTY transport 的版本 v2.5.1。
+   取自 agent 指令的名稱（`claude`、`codex`、`pi` 或 `native-demo`）。其他 agent 一律拒絕。
 2. `nativeFactory` 依 agent 類型建立 `native.Factory`（Claude Code、Codex、Pi 或
    `native-demo`）。每個 adapter 會先檢查 agent 的參數，拒絕和它的協定衝突的參數。
 3. 使用 `--state-db` 時，`statedb.Open` 會開啟檔案、取得它的獨占鎖，並執行資料表結構的 migration。
@@ -437,9 +436,8 @@ flowchart LR
   未知的設定；有這個區段的設定檔若其他人讀得到，會發出警告。
 - **hub 的供應商。** `HubSync` 向 webhook 網址所屬的 hub 送出 `/api/providers/sync`，和事件一樣以
   secret 簽章，再用同一個 secret 解開回應。回應也會證明這份加密的供應商清單屬於這次請求的 nonce，
-  避免網路觀察者透過一般 HTTP 重播舊清單。新版 Tendyard 會拒絕舊 hub 沒有綁定的回應，因此要先升級 hub，
-  再升級向它回報的主機。伺服器在 agent 啟動前先同步一次（最多 5 秒），因為 agent 可能一開始就用 hub 的供應商，
-  之後每分鐘一次；回 404 的 hub（比這個路由舊）沒有供應商。每次的回應都會加密存進設定檔旁的
+  避免網路觀察者透過一般 HTTP 重播舊清單；沒有這項證明的回應會被拒絕。伺服器在 agent 啟動前先同步一次
+  （最多 5 秒），因為 agent 可能一開始就用 hub 的供應商，之後每分鐘一次。每次的回應都會加密存進設定檔旁的
   `hub-providers.json`（`HubCachePath`），`Restore` 在第一次同步前先放回去；hub 回應之前，
   `Source.HubSettled` 為 false。
 - **模型清單。** `Source.Models` 會把供應商列出的模型保留 10 分鐘，之後先回傳舊的清單，同時在背景重新查詢；
@@ -503,8 +501,8 @@ flowchart LR
   一筆紀錄的供應商；在第一筆之前或沒有紀錄時，算 agent 自己的。
   Pi 不支援 Tendyard 的供應商切換，呼叫都歸到它自己的供應商。
 - **價格。** 供應商帶有自己模型的價格（`Provider.Prices`，以模型 ID 為鍵，每百萬 token，附上 `source`）：
-  設定檔的 `prices`，或 hub 的價格，跟供應商一起加密傳送（`wireProvider.prices`，舊版 Tendyard 會忽略；
-  舊版 hub 不送）。`sessions.Config.ProviderPrices`（`Source.Prices`）把 `provider.PriceTable` 交給花費的
+  設定檔的 `prices`，或 hub 的價格，跟供應商一起加密傳送（`wireProvider.prices`）。
+  `sessions.Config.ProviderPrices`（`Source.Prices`）把 `provider.PriceTable` 交給花費的
   計算；呼叫歸屬完成後，`atProviderPrices` 用供應商對該模型的價格替送往該供應商的呼叫計價，價格拿掉後，先前這樣
   計價的呼叫改回 `lib/pricing` 的價格（和歸屬一樣做成副本）。計算會保留價格表的摘要（`pricesKey`）：摘要
   改變時，即使沒有紀錄檔改變，所有工作階段都會重新計價。在 hub 上，`lib/hub/prices.go` 把 OpenRouter 的
@@ -657,26 +655,19 @@ context 結束，避免不再讀取的 agent 佔住 `s.mu`。
   清理在伺服器的鎖之外讀取較早的結構化訊息和事件。
 - 檔案以獨占鎖定模式搭配 WAL 開啟，所以第二個 Tendyard 無法使用它；新建立的檔案權限為 0600。
 - 啟動時伺服器會還原對話、佇列和工作階段參照；對話會把參照交給 factory，讓 agent
-  接續它自己的工作階段。AgentAPI 2 以 PTY transport 為同一個 agent 保存的檔案也能開啟：它沒有
-  可接續的工作階段，所以 agent 會在對話下方開始新的工作階段，之後 `meta` 記為 native（不讀取它的
-  `initial_prompt`）。還原後，先前待處理的請求會標示為已過期。
+  接續它自己的工作階段。還原後，先前待處理的請求會標示為已過期。
 - 無法讀取的資料列會記錄後略過，讓伺服器仍能啟動。編號的 migration 負責更新資料表結構，
   `PRAGMA user_version` 記錄版本。
 - 每個 migration 都標明執行後最舊可以寫入檔案的結構版本。只新增資料表或欄位的 migration 沿用
   先前的值，所以較舊的 Tendyard 可以繼續使用較新版本 migrate 過的檔案，並維持檔案的結構版本不變。
   改變較舊 Tendyard 寫入內容的 migration 會提高這個值，並記錄在 `meta`（`min_writer_schema`，
   附上帶來它的版本）；較舊的 Tendyard 遇到這種檔案會拒絕啟動，並指出需要的版本。`meta` 也記錄
-  最後關閉檔案的 Tendyard（`writer_version`）。1.9.0 以前的版本不讀這些值，遇到結構比自己新的
-  檔案一律拒絕；結構從 1.0 起就沒有改變。
+  最後關閉檔案的 Tendyard（`writer_version`）。
 - `conversation_state` 把為工作階段選擇的設定、用量限制造成的停止和等待重試的失敗回合存成一個
   JSON 物件：`{"version": 2, "settings": {...}, "limit_stop": {...}, "retry_wait": {...}}`；
   重設時保留。新增欄位不改版本，較舊的 Tendyard 讀它認得的部分；會誤導舊版的改變才提高版本。第 2 版把
   供應商與模型存成一組：第 1 版的讀取端只認得模型，而只還原模型可能在錯誤的端點上使用它。遇到更高版本的 Tendyard 啟動時不帶保存的狀態，之後的狀態
-  變更與正常關閉也會保留這個未知的 envelope，不會用預設值覆寫。3.7.2 以前這三項各有一個 key
-  （`settings`、`limit_stop`、`retry_wait`），AgentAPI 3.7.3 到 3.16 第一次開啟時會把它們搬進物件；
-  AgentAPI 4 不讀這些 key，所以只有 3.7.2 以前版本開啟過的檔案，啟動時不會帶保存的設定、用量限制
-  停止和重試等待（對話仍在）。用 3.7.2 以前的 Tendyard 開啟較新的檔案也一樣讀不到，它存下的這些
-  也不會被讀取。
+  變更與正常關閉也會保留這個未知的 envelope，不會用預設值覆寫。
 - 較舊的 Tendyard 不認得的資料，它重設或移除訊息時也不會清掉。還原時，訊息已不存在或已換成
   另一則的任務會被丟棄；訊息資料列無法讀取的任務也一樣。
 - 上傳的檔案放在 `<state-db>.uploads`，與資料庫一起保留（沒有狀態資料庫時放在暫存目錄，停止時
@@ -688,16 +679,13 @@ context 結束，避免不再讀取的 agent 佔住 `s.mu`。
   都不會動。有刪除檔案時，會以 Info 記錄刪除的數量和 bytes。
 
 hub（`lib/hub`，`persist.go`）把實例保存在 JSON 檔案裡，格式是
-`{"version": 1, "instances": [...]}`；2.2 以前的 hub 寫的純陣列也讀得懂。有變動時只標記檔案落後，
+`{"version": 1, "instances": [...]}`。有變動時只標記檔案落後，
 由背景的寫入者每秒最多寫一次、`Hub.Close` 時再寫一次，經由先 sync 再改名的暫存檔寫入。hub 啟動時
 把讀到的檔案複製成 `instances.json.bak`。無法解析的檔案會改名放到一旁（`.corrupt-<時間>`），hub
-從空的清單開始；版本較新的檔案則讓 hub 停止啟動。舊 hub 會把新格式當成損壞的檔案放到一旁，所以
-改回舊 hub 前要先用 `jq .instances` 轉換（見 [hub.zh-TW.md](hub.zh-TW.md#檔案)）。version 1 裡後來
-加上的欄位，例如每個實例的工作時間（`work`：最近 7 天的區段，只在區段開始或結束時寫入），讀得懂這個
-格式的舊 hub 會略過。hub 的設定（和 `instances` 並列的 `"settings": {"favorites": [...]}`，即
+從空的清單開始；版本較新的檔案則讓 hub 停止啟動。version 1 裡後來加上的欄位，例如每個實例的工作時間
+（`work`：最近 7 天的區段，只在區段開始或結束時寫入），舊 hub 會略過。hub 的設定（和 `instances` 並列的 `"settings": {"favorites": [...]}`，即
 `hubSettings`，經由 `store.updateSettings` 修改）也一樣：這種 hub 下次寫入時會丟掉它，它留下的 `.bak`
-則還保有。改用新的版本號反而會讓所有舊 hub 拒絕這個檔案。3.5 到 3.7 的 hub 把我的最愛放在最上層（`"favorites": [...]`），沒有 `settings` 時 hub 會讀它；
-3.8 到 3.15.1 也會在最上層多寫一份，之後的版本不再寫。hub 處理過的
+則還保有。改用新的版本號反而會讓所有舊 hub 拒絕這個檔案。hub 處理過的
 webhook 事件的 delivery ID 也以同樣方式寫入 `instances.deliveries.json`，保留到各自的簽章失效，所以
 重新啟動後重送的事件同樣會被拒絕。
 
@@ -717,8 +705,7 @@ webhook 事件的 delivery ID 也以同樣方式寫入 `instances.deliveries.jso
 從頭重新讀取。工作階段的紀錄被丟掉後，它的呼叫算 agent 自己的；agent 每次啟動都會記一筆新的，所以只有
 在同一個供應商上連續跑了 90 天、中間沒有重新啟動或切換的工作階段，才會失去它的紀錄。
 
-SIGUSR1 會把排隊中的變更寫入狀態資料庫。`--state-file` 是 1.0 之前 PTY transport 的保存機制
-（關閉時寫出 JSON），AgentAPI 3 會把它匯入旁邊的狀態資料庫；AgentAPI 4 已移除。
+SIGUSR1 會把排隊中的變更寫入狀態資料庫。
 
 <a id="重新啟動與更新"></a>
 
@@ -962,7 +949,7 @@ Tendyard 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
   才取代；屬於別的對話的會立刻拿掉：重播送來的同 ID 訊息已是另一則的任務，以及在重播最早一則
   訊息之前就提出的請求。從最新任務開始送的重播，不論分成幾批套用，都會排回對話原本的順序
   （`PendingEvents`：ID 比前一則小的訊息代表較早的任務開始了，每則結構化訊息跟著它所屬的任務，
-  即 `richOrder`）；舊版伺服器的重播本來就是這個順序，會照收到的樣子套用。
+  即 `richOrder`）。
   `EventSourceConnection`（`lib/event-source.ts`，以及 hook `use-event-source.ts`）讓它、hub 頁面
   的串流和 shell 終端機的串流保持連線：結束的串流會立刻重新開啟、不顯示提示，除非一直失敗；失敗的串流
   （401、proxy 的 502）在退避後重試；有心跳的串流沒了動靜，由 watchdog 重新連線；瀏覽器恢復連網

@@ -175,8 +175,7 @@ their output, the timeline). Tendyard keeps that bounded:
 - The chat loads the latest tasks and reads earlier ones as you scroll up; see the
   [chat guide](chat-ui.md#long-conversations).
 
-AgentAPI 4.2 and earlier returned every message, rich message, event and task from these lists.
-A client that wants all of them reads the pages until `has_more` is false.
+A client that wants every task reads the pages until `has_more` is false.
 
 <a id="integrations"></a>
 
@@ -202,7 +201,7 @@ instance:
   sessions in the working directory over the last 24 hours (`day_usd`) and 7 days (`week_usd`),
   worked out from its logs once a minute, the tokens of the same calls (`day_tokens` and
   `week_tokens`: `input`, `output`, `cache_write`, `cache_read` and their `total`), when the amounts
-  last changed (`updated_at`), a `scope`, and from 4.2 the hours behind them (`hours`: each of the
+  last changed (`updated_at`), a `scope`, and the hours behind them (`hours`: each of the
   last 25 hours with calls, its start in UTC, `usd` and `tokens`; the hub's
   [activity](hub.md#activity) keeps them for a year). Tendyard instances of one agent in one directory
   of a machine report the same sessions, with the same `scope`: a client that adds up many counts each scope
@@ -328,11 +327,10 @@ once. After a restart (of the workspace, for example), the Tendyard instances se
 the file. `--public-url` is where the hub reaches them; `{port}` and `{hostname}` are filled in for
 each, and `{ip}` with the machine's IPv4 address on the route to the hub, which each instance looks
 up again while it runs: when DHCP gives the machine another address, the next heartbeat names it and
-the hub follows. Tendyard instances that started before 1.2 aren't registered: restart them once. `agentapi hub status`
-shows the hub and where each running Tendyard reports; `agentapi hub leave` removes the hub. With
-`--allow-update`, the hub can also [update them](#updating-through-the-api). `join`
-first sends the hub a signed test event and stops if the hub doesn't take it (not reached, a sign-in
-page in front of it, or another secret); `--no-check` skips that for a hub that doesn't run yet. The
+the hub follows. `agentapi hub status` shows the hub and where each running Tendyard reports;
+`agentapi hub leave` removes the hub. With `--allow-update`, the hub can also
+[update them](#updating-through-the-api). `join` first sends the hub a signed test event and stops
+if the hub doesn't take it (not reached, a sign-in page in front of it, or another secret); `--no-check` skips that for a hub that doesn't run yet. The
 hub's page has the command ready: `+` fills in the hub's address and, on a hub with a token, its
 secret, next to a prompt that has an agent on the machine join it. The hub also logs the command for
 each of its addresses when it starts, without the secret. An agent can do it for you with the
@@ -358,9 +356,7 @@ curl -X POST localhost:3284/update -H 'Content-Type: application/json' -d '{"whe
   does: the same PID, a new `server_id` and version. The download must match the release's
   `checksums.txt` and run as that version. The request can't choose a version or a URL. A release
   that wouldn't start with this instance's settings or state database fails the update before it
-  replaces the program, which stays as it was, and Tendyard goes on serving. (Before 4.3.1 the
-  update replaced the program before this check. The instance keeps serving, but its next start
-  uses the release that rejects the setting; remove that setting before restarting.)
+  replaces the program, which stays as it was, and Tendyard goes on serving.
 - `"when": "idle"`, the default, installs at once and restarts once the agent is idle: no turn
   runs and no request (approval, question or plan) is open. An agent that exited and isn't started
   again counts as idle. Queued messages stay queued and go out after the restart, and so does a
@@ -378,8 +374,7 @@ curl -X POST localhost:3284/update -H 'Content-Type: application/json' -d '{"whe
 - The [summary](#watching-many-instances)'s `update` follows it: `allowed`, `blocked`, the `state`
   (`idle`, `checking`, `downloading`, `waiting`, `restarting`, or `failed` with an `error`), the
   `target`, `keeps_conversation` (it runs with `--state-db`), and `keeps_session` (the agent resumes
-  its session after the restart; earlier releases don't send it). Every change sends
-  `summary_update`. Earlier releases have no `update`.
+  its session after the restart). Every change sends `summary_update`.
 - Tendyard instances that share a binary replace it one at a time, under a lock file next to it
   (`.agentapi.lock`). One that finds the binary on disk newer than the one it runs, because another
   updated it, only restarts.
@@ -493,8 +488,8 @@ An optional Go `text/template` (`--webhook-payload-template`) reshapes the body 
 such as a chat service's incoming webhook. Available fields are `.ID`, `.Type`, `.CreatedAt`,
 `.Instance` and `.Data` (the event's data with its JSON field names, such as `{{.Data.prompt}}`), and
 for `run.status_changed` `.ServerID`, `.Status`, `.PreviousStatus`, `.AgentType` and `.Transport`.
-A template that uses another field (such as `.RunID`, named `.ServerID` since 1.0) is refused at
-startup and by `PUT /webhook`, since it would fail every delivery.
+A template that uses another field is refused at startup and by `PUT /webhook`, since it would fail
+every delivery.
 
 All flags have `AGENTAPI_` environment variables (`AGENTAPI_WEBHOOK_URL`, `AGENTAPI_WEBHOOK_EVENTS`
 with the events separated by spaces, `AGENTAPI_WEBHOOK_SECRET`, and so on). `GET /webhook` shows the

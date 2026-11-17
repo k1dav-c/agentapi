@@ -119,8 +119,7 @@ registry. The hub isn't one of them: restart it with its service manager, such a
 `~/.agentapi/config.yaml` of the user who ran `sudo`, which stays theirs), before `--restart`, so
 the restarted Tendyard instances take updates from a [hub](hub.md#updating-from-the-hub) from then on.
 It keeps the rest of the file, as `agentapi hub join --allow-update` does. With `--check` it writes
-nothing. An older `agentapi` has no such flag: add the line to the file, then run
-`agentapi update --restart`.
+nothing.
 
 ## `agentapi restart`
 
@@ -150,13 +149,10 @@ answers on its port again with a new `server_id`, and prints its new version.
   [earlier sessions](agents.md#earlier-sessions). Claude Code, Codex and Pi only. The
   queue, open requests, chosen settings and a usage-limit stop or retry wait
   start anew, and the `--initial-prompt` isn't sent again. A session whose
-  log is gone starts anew, with a warning in the chat. The restart that
-  updates from an earlier release starts a new session: the earlier release
-  doesn't carry it.
+  log is gone starts anew, with a warning in the chat.
 - Only your own Tendyard instances restart, and only when the registry entry names a
   running `agentapi server`. Under `sudo`, they are those of the user who ran
-  `sudo`. A Tendyard instance of an earlier release can't restart in place:
-  `agentapi restart` says so, and you restart that one yourself, once.
+  `sudo`.
 - The instance this command runs under, if any (an agent that runs
   `agentapi update --restart`), restarts last. Restarting it closes the
   agent, which can end the command.
@@ -209,7 +205,7 @@ by default it calls launchers at other machines' addresses only.
 Tendyard instances running now. `--secret` (or `AGENTAPI_HUB_SECRET`) signs the events, `--events` picks them
 (default `instance.*`, all the hub needs: it follows the rest from each summary), `--public-url`
 is where the hub reaches them (`{ip}` follows the machine's address; the config file and the
-Tendyard instances newer than 2.1.2 keep it, older ones get the address now), `--api-token` (or `AGENTAPI_API_TOKEN`) is sent to the ones that need
+Tendyard instances keep it), `--api-token` (or `AGENTAPI_API_TOKEN`) is sent to the ones that need
 a token, and `--config` and `--registry-dir` name other files. A Tendyard instance that `join` can't
 change now applies the file when it restarts. `--allow-update` also writes `allow-update: true`, so
 the hub can [update the Tendyard instances through their API](api.md#updating-through-the-api) once they restart;

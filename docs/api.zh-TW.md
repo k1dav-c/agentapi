@@ -144,8 +144,7 @@ Tendyard 會把這些控制在一定範圍內：
 - 沒有 `--state-db` 時，伺服器和以前一樣把整段對話放在記憶體，清單一樣分頁回傳。
 - 聊天介面先載入最近的任務，往上捲動時再讀較早的；見[聊天介面指南](chat-ui.zh-TW.md#長對話)。
 
-AgentAPI 4.2 以前，這些清單會回傳所有訊息、結構化訊息、事件和任務。需要全部內容的用戶端，
-就一頁一頁讀到 `has_more` 為 false。
+需要全部任務的用戶端，就一頁一頁讀到 `has_more` 為 false。
 
 <a id="整合"></a>
 
@@ -168,7 +167,7 @@ Tendyard，用[Handoff 把待處理請求交給其他用戶端回覆](#人工回
   Claude Code、Codex 和 Pi 另有 `spend`：agent 在工作目錄裡所有工作階段最近 24 小時（`day_usd`）
   和 7 天（`week_usd`）換算成 API 價格的金額，每分鐘從紀錄檔重新計算一次，並附上同一批呼叫的 token
   （`day_tokens` 和 `week_tokens`：`input`、`output`、`cache_write`、`cache_read` 和合計 `total`）、
-  金額最後變動的時間（`updated_at`）、`scope`，以及從 4.2 起這些金額的每小時明細（`hours`：最近
+  金額最後變動的時間（`updated_at`）、`scope`，以及這些金額的每小時明細（`hours`：最近
   25 小時中有呼叫的每一小時，含 UTC 的開始時間、`usd` 和 `tokens`；hub 的[活動](hub.zh-TW.md#活動)
   會保留一年）。同一台主機上，同一個 agent 在同一個目錄的 Tendyard 回報的是同一批
   工作階段，`scope` 也相同：加總多個實例的用戶端每個 scope 只算一次。`update` 則說明用戶端
@@ -273,7 +272,7 @@ agentapi hub join http://hub.vpn:3290/hooks --secret "$HUB_SECRET" --public-url 
 已登記的 Tendyard：它們會立刻送 `instance.heartbeat` 給 hub。重新啟動（例如 workspace 重開）後，
 Tendyard 會依設定檔送出 `instance.started`。`--public-url` 是 hub 連回它們的網址，`{port}` 和
 `{hostname}` 會替每個實例填入；`{ip}` 則是這台主機通往 hub 那條路由上的 IPv4 位址，每個實例
-執行期間會重新查詢：DHCP 給了主機新位址時，下一次 heartbeat 就會帶著它，hub 也會跟著改用。1.2 之前啟動的 Tendyard 沒有登記，需要重新啟動一次。
+執行期間會重新查詢：DHCP 給了主機新位址時，下一次 heartbeat 就會帶著它，hub 也會跟著改用。
 `agentapi hub status` 顯示 hub 以及每個執行中的實例回報到哪裡；`agentapi hub leave` 會移除 hub。
 加上 `--allow-update` 時，hub 也能[更新它們](#透過-api-更新)。
 `join` 會先送給 hub 一個有簽章的測試事件，hub 沒收下就停止（連不到、被登入頁擋住，或 secret 不同）；
@@ -300,8 +299,7 @@ curl -X POST localhost:3284/update -H 'Content-Type: application/json' -d '{"whe
   [`agentapi restart`](cli.zh-TW.md#agentapi-restart) 一樣原地重新啟動成新版本：PID 不變，`server_id` 和版本
   換新。下載的檔案必須符合發行版的 `checksums.txt`，執行起來也必須是那個版本。請求無法指定版本或網址。
   新發行版若無法以這個實例的設定或狀態資料庫啟動，更新會在替換程式之前失敗，磁碟上的程式維持原樣，
-  Tendyard 繼續提供服務。（4.3.1 以前會先替換程式：這樣的 Tendyard 雖然繼續服務，下次啟動時卻會執行那個不接受
-  該設定的版本；請在它重新啟動前拿掉那個設定。）
+  Tendyard 繼續提供服務。
 - 預設的 `"when": "idle"` 會立刻安裝，等 agent 閒置再重新啟動，也就是沒有進行中的回合，也沒有待回覆的
   請求（核准、提問或計畫）。已經結束、不會再啟動的 agent 也算閒置。佇列中的訊息會留在佇列，重新
   啟動後再送出；這段期間到期的繼續（用量限制後）或重試（失敗的回合）也一樣。`"now"` 會立刻
@@ -316,7 +314,7 @@ curl -X POST localhost:3284/update -H 'Content-Type: application/json' -d '{"whe
 - [摘要](#監看多個實例)的 `update` 會跟著更新變化：`allowed`、`blocked`、`state`（`idle`、`checking`、
   `downloading`、`waiting`、`restarting`，或附上 `error` 的 `failed`）、`target`、
   `keeps_conversation`（有使用 `--state-db`），以及 `keeps_session`（agent 重新啟動後會接續自己的
-  工作階段；較早的版本不會送出）。每次變化都會送出 `summary_update`。較早的版本沒有 `update`。
+  工作階段）。每次變化都會送出 `summary_update`。
 - 共用同一個執行檔的多個實例，會以執行檔旁的鎖定檔（`.agentapi.lock`）輪流取代它。發現磁碟上的
   執行檔比自己正在執行的版本新（另一個實例已經更新過）時，就只重新啟動。
 
@@ -422,8 +420,8 @@ valid = hmac.compare_digest(expected, signature) and abs(time.time() - int(times
 可以用 Go `text/template`（`--webhook-payload-template`）改寫 body 的格式以符合接收端，例如聊天
 服務的 incoming webhook。可用欄位有 `.ID`、`.Type`、`.CreatedAt`、`.Instance` 和 `.Data`（事件的
 data，欄位名稱同 JSON，例如 `{{.Data.prompt}}`），`run.status_changed` 另有 `.ServerID`、`.Status`、
-`.PreviousStatus`、`.AgentType` 和 `.Transport`。用到其他欄位的範本（例如 1.0 起改名為 `.ServerID` 的
-`.RunID`）每次送出都會失敗，所以啟動時和 `PUT /webhook` 會直接拒絕。
+`.PreviousStatus`、`.AgentType` 和 `.Transport`。用到其他欄位的範本每次送出都會失敗，所以啟動時和
+`PUT /webhook` 會直接拒絕。
 
 每個參數都有對應的 `AGENTAPI_` 環境變數（`AGENTAPI_WEBHOOK_URL`、以空白分隔事件的
 `AGENTAPI_WEBHOOK_EVENTS`、`AGENTAPI_WEBHOOK_SECRET` 等）。`GET /webhook` 顯示目前設定（只顯示

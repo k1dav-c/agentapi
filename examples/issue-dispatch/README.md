@@ -8,7 +8,8 @@
 3. **GitHub App 提供身分：**授權 repo，讓 job 能 push 與開 PR。
 4. **runner 傳回事件：**在內網執行 workflow，把 issue 與 PR 事件送到 hub。
 
-設計細節見 [docs/specs/issue-dispatch.zh-TW.md](../../docs/specs/issue-dispatch.zh-TW.md)。
+從空白主機開始、每一步附上檢查方式的完整流程，見[架設 Tendyard](../../docs/setup.zh-TW.md)；這份說明
+著重派工本身。設計細節見 [docs/specs/issue-dispatch.zh-TW.md](../../docs/specs/issue-dispatch.zh-TW.md)。
 
 ```
 GitHub ──(runner 主動拉 job)──► 內網 runner ──POST /api/dispatch──► hub ──► 各主機的 launcher ──► 每個 issue 一個實例
@@ -85,23 +86,10 @@ http://<hub>:3290/github/connect?org=<組織>     # 個人帳號就不加 ?org=
 
 ### runner 必須連得到 hub
 
-找一台連得到 hub 的機器，用一個**專用的使用者**（不要用跑 agent 的使用者）裝 GitHub Actions runner：
-
-1. **組織**：Settings → Actions → Runner groups 建一個 group，只開放給要派工的 **private** repo
-   （不要勾 Allow public repositories：公開 repo 的 fork PR 能在 runner 上執行任意程式）。
-   Runner group 只有組織有；**個人帳號**的 repo 要在每個 repo 各自加 runner（repo 的 Settings → Actions → Runners）。
-   也確認 Settings → Actions → General 的「Run workflows from fork pull requests」是關的。
-2. Settings → Actions → Runners → New self-hosted runner，照畫面下載與設定；
-   `./config.sh` 時加上 `--labels agent-dispatch`（組織另加 `--runnergroup <上一步的 group>`）。
-3. 在 runner 目錄的 `.env` 寫入 hub 的位址與 dispatch token（runner 會把它們帶進 job 的環境）：
-
-   ```
-   HUB_URL=http://<hub>:3290
-   HUB_DISPATCH_TOKEN=<hub 的 --dispatch-token>
-   ```
-
-   `chmod 600 .env`。之後改了 `.env` 要重啟 runner 服務（`sudo ./svc.sh stop && sudo ./svc.sh start`）才會生效。
-4. `sudo ./svc.sh install <使用者> && sudo ./svc.sh start`。
+找一台連得到 hub 的機器，用一個**專用的使用者**（不要用跑 agent 的使用者）裝 GitHub Actions runner，
+label 設為 `agent-dispatch`，並在 runner 目錄的 `.env` 寫入 `HUB_URL` 與 `HUB_DISPATCH_TOKEN`。
+runner group、fork PR 的設定、服務安裝，以及確認 runner 連得到 hub 的指令，見
+[架設 Tendyard 的 runner 一節](../../docs/setup.zh-TW.md#runner)。
 
 注意：能用這個 runner 的 repo，它的 workflow 都讀得到 `HUB_DISPATCH_TOKEN`。這組 token 只能呼叫
 `/api/dispatch`，但仍請只把 runner 開放給你信任的 repo。

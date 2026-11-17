@@ -10,7 +10,7 @@ Join this machine once to connect this user's Tendyard instances to the hub (`ag
 the change to
 instances already running.
 
-1. **Check:** use the supplied addresses and secret, confirm the version and verify that the hub answers.
+1. **Check:** use the supplied addresses and secret and verify that the hub answers.
 2. **Join:** apply the webhook settings, with optional updates only when the user authorizes them.
 3. **Verify:** check where the instances report, without restarting them or printing the secret.
 
@@ -43,25 +43,14 @@ send requests, not browsers.
 Don't look up this machine's address: `{ip}` is the address it sends to the hub from, which is the
 one the hub reaches it at on a shared network or VPN. Only when the hub reaches it at another
 address (NAT, a port forward) does `--public-url` need that address or a name instead, and the
-user has to say which. If the user gave several hub URLs, use the one whose check in step 2
+user has to say which. If the user gave several hub URLs, use the one whose check in step 1
 answers 401.
 
 <a id="steps"></a>
 
 ## Check, join and verify without restarting instances
 
-1. **Check the version.** `{ip}` in `--public-url` needs AgentAPI 2.2.0 or later,
-   whose `join` also takes `--allow-update`, and checks that the hub takes this machine's events
-   before it writes anything:
-
-   ```bash
-   agentapi --version
-   ```
-
-   If it is 2.1.2 or older, it needs `sudo agentapi update` first. Run that only if the user asked
-   for it (the hub page's prompt does); otherwise ask.
-
-2. **Check that this machine reaches the hub.** An unsigned event is refused with 401, which shows
+1. **Check that this machine reaches the hub.** An unsigned event is refused with 401, which shows
    the hub is there:
 
    ```bash
@@ -72,7 +61,7 @@ answers 401.
    other URLs, if the user gave any. `302`, `303` or an HTML page: a sign-in page is in the way.
    Stop and tell the user; joining won't work.
 
-3. **Join.** Give the secret through the environment, so it doesn't show in the command line or
+2. **Join.** Give the secret through the environment, so it doesn't show in the command line or
    the shell history, and never print it:
 
    ```bash
@@ -84,7 +73,7 @@ answers 401.
    or pass the value they give you as `AGENTAPI_HUB_SECRET=… agentapi hub join …` without echoing
    it. If this machine's Tendyard instances need an API token (`--api-token`), add `--api-token` (or set
    `AGENTAPI_API_TOKEN`); the hub then needs the same token as its `--instance-token`. Add
-   `--allow-update` only if the user said yes to updates from the hub (step 4).
+   `--allow-update` only if the user said yes to updates from the hub (step 3).
 
    `join` prints the address `{ip}` stands for now (`{ip} is 192.168.1.31 now`), then sends the hub
    a signed test event. `The hub at … took a signed test event` means the
@@ -104,13 +93,9 @@ answers 401.
 
    Then it prints one line per running Tendyard:
    - `applied`: it reports to the hub now.
-   - `applied; too old for {ip}, it reports http://… until it restarts`: a Tendyard instance of 2.1.2 or
-     older got today's address, and follows the machine's address only after a restart. Tell the
-     user; don't restart it.
    - `needs an API token`: give `--api-token` and run `join` again.
-   - Any Tendyard that isn't listed started before 1.2: it joins when it next starts.
 
-4. **Updates from the hub,** only with `--allow-update`. `join` writes `allow-update: true` and says
+3. **Updates from the hub,** only with `--allow-update`. `join` writes `allow-update: true` and says
    the Tendyard instances take it up when they start: `restart the running ones to let it update them too`.
    Don't restart them; tell the user which ones run.
 
@@ -135,7 +120,7 @@ answers 401.
    state-db: ~/.agentapi/state/{port}.db
    ```
 
-5. **Check it.**
+4. **Check it.**
 
    ```bash
    agentapi hub status
@@ -145,7 +130,7 @@ answers 401.
    should report to the hub's `/hooks` URL. Then ask the user to look at the hub's page: the
    agents appear within a second, as Connecting and then in their state.
 
-6. **Make sure the hub can open them.** The hub sends the host of `--public-url` as the `Host`
+5. **Make sure the hub can open them.** The hub sends the host of `--public-url` as the `Host`
    header. A Tendyard instance accepts `localhost` and any IP address, unless it runs with `--allowed-hosts '*'`
    (as the Coder module starts it) or lists more. With a name in `--public-url` (a VPN's, such as
    `dev-1.vpn`), if the hub shows the instance as unreachable with `400 Bad Request`, add it to
@@ -194,8 +179,7 @@ once the old address stops answering, within about two minutes.
 | The instance never appears; `agentapi hub status` shows no hub | `join` ran as another user, or with another `--config`, than the instance | Run `join` as the user the instance runs as |
 | Unreachable (`no route to host`, or timed out) after the machine got a new IP address | It joined with a fixed IP, which DHCP changed | Join again with `--public-url 'http://{ip}:{port}'` ([Rejoin with the IP placeholder to follow address changes](#a-machine-joined-with-a-fixed-ip)) |
 | Unreachable: connection refused or timed out | The hub can't reach the `--public-url` | Have the user run `curl <public-url>/summary` on the hub's machine; join again with an address that answers |
-| Unreachable: `400 Bad Request` | The Tendyard refuses the name as `Host` | Step 6 |
+| Unreachable: `400 Bad Request` | The Tendyard refuses the name as `Host` | Step 5 |
 | Unreachable: `needs an API token` | The Tendyard requires a token the hub doesn't send | The hub needs `--instance-token` with the instance's token |
-| `unknown flag: --allow-update`, or `--public-url: … not "http://{ip}:1"` | Tendyard is 2.1.2 or older | Update it first (step 1) |
-| `The hub can't update them yet: AgentAPI can't replace …` | The binary is in a directory this user can't write, such as `/usr/local/bin` | The one-time setup it prints, once the user agrees (step 4) |
+| `The hub can't update them yet: AgentAPI can't replace …` | The binary is in a directory this user can't write, such as `/usr/local/bin` | The one-time setup it prints, once the user agrees (step 3) |
 | The hub's page says updates are off on this machine | No `allow-update: true`, or the instance started before it was written | Join with `--allow-update`; the Tendyard instances take it up when they restart |

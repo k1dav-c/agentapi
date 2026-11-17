@@ -473,17 +473,13 @@ state-db: ~/.agentapi/state/{port}.db
   to is removed once it is 7 days old, which leaves time for a draft's
   attachments; this is checked on start, hourly and after a restart.
 - A file belongs to one agent type and working directory; Tendyard refuses to
-  start with another one's file. A file AgentAPI 2 wrote for a PTY agent
-  opens: the agent starts a new session below its conversation, which goes
-  on natively. The file is locked while Tendyard runs,
+  start with another one's file. The file is locked while Tendyard runs,
   so a second Tendyard (or `sqlite3`) can't open it.
 - A new file is created readable and writable by its owner only (0600), and missing
   directories are created (0700).
 - An older Tendyard keeps using a file a newer one wrote, unless the newer one
   changed the file in a way the older can't write: then the older refuses to
-  start and names the version it needs. Releases after 1.9.0 check this;
-  1.9.0 and earlier refuse any file whose schema is newer than theirs (the
-  schema hasn't changed since 1.0).
+  start and names the version it needs.
 - Restart (Explorer → Restart or `DELETE /messages`) clears the stored
   conversation and the queue and starts a new session. The settings chosen for
   the session are kept.
@@ -496,13 +492,8 @@ state-db: ~/.agentapi/state/{port}.db
   a restart, unless Tendyard starts with other webhook flags.
 - The time a client last showed the conversation (`POST /tasks/seen`) is
   kept, so a task that ended unseen is still [unread](api.md#watching-many-instances)
-  after a restart. A database written before 1.2 treats its tasks as seen.
+  after a restart.
 - SIGUSR1 writes what the state database hasn't written yet.
-- AgentAPI 4 no longer reads `--state-file`, the PTY transport's persistence
-  before v1.0.0. AgentAPI 3 imported such a file into a state database next to
-  it (the same name with `.db`) the first time it started with it: start with
-  `--state-db` on that database. To import a file that never was imported, run AgentAPI
-  3.16 once with `--state-file`.
 - [`agentapi restart`](cli.md#agentapi-restart) (SIGUSR2) and
   `agentapi update --restart` keep the conversation, and the agent's
   session, of a Tendyard instance with `--state-db`. Without it they keep the

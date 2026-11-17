@@ -39,9 +39,9 @@ Tendyard 在 [`k1dav-c/agentapi`](https://github.com/k1dav-c/agentapi) 開發；
 新增功能的問題請回報至[此 repo](https://github.com/k1dav-c/agentapi/issues)。
 整合上游變更前，應先驗證 native transports、聊天介面與 hub；上游與此 fork 的版本號分開管理。
 
-此 fork 以上游 v0.12.2 為基礎。從 3.0 起只透過 Claude Code、Codex 和 Pi 自己的協定
-（[native transport](docs/agents.zh-TW.md)）驅動這三個 agent；給其他 agent 用的終端機模擬方式（PTY transport）到 v2.5.1
-為止（見 [目前版本透過原生協定執行 Claude Code、Codex 與 Pi](#agent)）。工作階段管理與聊天功能可用來處理長時間執行的任務；
+此 fork 以上游 v0.12.2 為基礎，透過 Claude Code、Codex 和 Pi 自己的協定
+（[native transport](docs/agents.zh-TW.md)）驅動這三個 agent（見
+[目前版本透過原生協定執行 Claude Code、Codex 與 Pi](#agent)）。工作階段管理與聊天功能可用來處理長時間執行的任務；
 [webhook](docs/api.zh-TW.md#webhook) 會把任務狀態回報給中控平台。[CHANGELOG.md](CHANGELOG.md) 列出變更，
 [docs/architecture.zh-TW.md](docs/architecture.zh-TW.md) 說明架構，
 [docs/hub.zh-TW.md](docs/hub.zh-TW.md) 說明怎麼在一個頁面監看多個實例，完整的 commit 歷史
@@ -167,7 +167,8 @@ agentapi server --bind 127.0.0.1 -- claude
 
 你需要一個瀏覽器與各台 agent 主機都連得到的 hub、各主機上的 launcher，以及用來列出 repo issue 的
 GitHub App。若要把 GitHub review 傳回 agent，並在 PR 關閉時停止 job，還要在連得到 hub 的
-self-hosted GitHub Actions runner 上設好派工 workflow。
+self-hosted GitHub Actions runner 上設好派工 workflow。[架設 Tendyard](docs/setup.zh-TW.md)
+依序說明全部步驟，每一步後面都附上檢查方式。
 
 1. 在一台會持續開機的主機上[架設 hub](docs/hub.zh-TW.md#架設)，再讓各台 agent 主機加入。
    請使用這些主機連得到的位址；上方單一 agent 範例中的 loopback 位址只供本機使用。
@@ -200,7 +201,7 @@ curl -X POST localhost:3284/message \
 
 ## 目前版本透過原生協定執行 Claude Code、Codex 與 Pi
 
-從 3.0 起，Tendyard 透過 Claude Code、Codex 和 Pi 自己的協定驅動它們，也就是
+Tendyard 透過 Claude Code、Codex 和 Pi 自己的協定驅動它們，也就是
 [native transport](docs/agents.zh-TW.md)：
 
 | Agent | 類型 | 協定 |
@@ -219,21 +220,14 @@ agentapi server --state-db ~/.agentapi/myproject.db -- codex
 agentapi server --type pi -- ./my-pi-wrapper
 ```
 
-其他 agent 會讓 Tendyard 在啟動時停止，錯誤訊息會指出 v2.5.1。要執行
-Aider、Goose、Gemini CLI、Amp、Cursor CLI、Auggie、Amazon Q、Opencode、Copilot、Kimi Code 或其他
-終端機程式，請使用最後一個有 PTY transport 的版本 AgentAPI v2.5.1：從
-[v2.5.1 release](https://github.com/k1dav-c/agentapi/releases/tag/v2.5.1) 下載執行檔並保留它。
-`agentapi update` 只會安裝最新版。以 `--allow-update` 執行這類 agent 的 AgentAPI 2，重新啟動
-成新程式前會先檢查它，所以會拒絕 AgentAPI 3 以後的版本，繼續提供服務。但更新已經換掉磁碟上的程式：
-那個實例以其他方式重新啟動之前，請把 v2.5.1 放回去。
-
-AgentAPI 4 沒有 `--transport` 旗標：請從指令和設定檔中拿掉。實驗性的 ACP transport
-（`--experimental-acp`）先前已移除，使用這個旗標時 Tendyard 會停止並顯示錯誤。
+其他 agent 會讓 Tendyard 在啟動時停止並顯示錯誤；不支援 Aider、Goose、Gemini CLI 等其他終端機程式。
 
 <a id="文件"></a>
 
 ## 依照要完成的工作選擇指南
 
+- [架設 Tendyard](docs/setup.zh-TW.md)：從空白主機到派出 issue：hub、工作主機與 launcher、GitHub App、
+  runner 與 workflow，每一步都附上檢查方式。
 - [聊天介面](docs/chat-ui.zh-TW.md)：`/chat` 的聊天介面，桌面與手機都適用。
 - [Agent 與 native transport](docs/agents.zh-TW.md)：登入、請求、steer 與佇列、設定、用量限制、終端機、
   工作階段與花費，以及 Claude Code、Codex 和 Pi 各自的行為。

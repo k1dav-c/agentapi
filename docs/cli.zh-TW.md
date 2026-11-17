@@ -112,8 +112,7 @@ agentapi update --restart --allow-update  # 之後也讓 hub 可以更新它們
 `--allow-update` 會在 `--restart` 之前，先把 `allow-update: true` 寫進設定檔（`--config`，預設是
 執行 `sudo` 那位使用者的 `~/.agentapi/config.yaml`，檔案擁有者仍是該使用者），重新啟動後的
 Tendyard 從此就能由 [hub](hub.zh-TW.md#從-hub-更新) 更新。設定檔裡的其他設定都會保留，
-和 `agentapi hub join --allow-update` 一樣。搭配 `--check` 時不會寫入任何東西。舊版的 `agentapi`
-沒有這個旗標：先自己把這一行加進設定檔，再執行 `agentapi update --restart`。
+和 `agentapi hub join --allow-update` 一樣。搭配 `--check` 時不會寫入任何東西。
 
 ## `agentapi restart`
 
@@ -138,11 +137,9 @@ workspace 的啟動腳本）仍然有效，輸出也照舊寫到原本的地方�
   工作階段：重新啟動會把工作階段的 ID 交給新程式，新程式再從工作階段的紀錄讀回對話，就像從
   [先前的工作階段](agents.zh-TW.md#先前的工作階段)開啟它一樣。僅限 Claude Code、Codex 和 Pi。佇列、待回覆的
   請求、選擇的設定，以及用量限制的停止或重試等待都會重新開始，先前送過的 `--initial-prompt`
-  也不會再送出。紀錄已經不在的工作階段會重新開始，聊天介面會顯示警告。從較早的版本更新時，
-  那一次重新啟動仍是新的工作階段：較早的版本不會交出工作階段。
+  也不會再送出。紀錄已經不在的工作階段會重新開始，聊天介面會顯示警告。
 - 只會重新啟動你自己的 Tendyard，而且登記檔必須對應到執行中的 `agentapi server`。透過 `sudo`
-  執行時，指的是執行 `sudo` 那位使用者的 Tendyard。較早的版本無法原地重新啟動，
-  `agentapi restart` 會指出來：這一次請自行重新啟動。
+  執行時，指的是執行 `sudo` 那位使用者的 Tendyard。
 - 這個指令若是在某個 Tendyard 底下執行（例如 agent 執行 `agentapi update --restart`），那個
   Tendyard 會最後才重新啟動；重新啟動會關閉 agent，這個指令也可能隨之結束。
 - `--registry-dir` 可讀取其他登記目錄，`--timeout`（預設 `1m`）限制等待每個實例的時間。
@@ -189,7 +186,7 @@ hub 的 GitHub App 存放的檔案（預設是 `--state` 旁的 `github-app.json
 `join` 把 hub 的 webhook 寫進 `~/.agentapi/config.yaml`，並套用到正在執行、已登記的 Tendyard。
 `--secret`（或 `AGENTAPI_HUB_SECRET`）為事件簽章，`--events` 選擇事件（預設 `instance.*`，hub 只需要
 這些，其餘都從摘要得知），`--public-url` 是 hub 連回它們的網址（`{ip}` 會跟著主機的位址走；
-設定檔和 2.1.2 之後的 Tendyard 保留 `{ip}`，較舊的則拿到當下的位址），
+設定檔和 Tendyard 都保留 `{ip}`），
 `--api-token`（或 `AGENTAPI_API_TOKEN`）會送給需要 token 的實例，`--config` 和 `--registry-dir`
 可指定其他檔案。當下無法修改的 Tendyard，會在重新啟動時套用設定檔。`--allow-update` 會另外寫入
 `allow-update: true`，Tendyard 重新啟動後，hub 就能[透過 API 更新它們](api.zh-TW.md#透過-api-更新)；`leave` 會保留這個設定。
