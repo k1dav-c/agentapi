@@ -123,7 +123,8 @@ device scale factor of 1.
 | [composer-favorites.png](composer-favorites.png) | An idle agent open from the hub, the composer's ☆ menu of favorites over a draft |
 | [hub-empty.png](hub-empty.png) | The guide an empty hub shows: the hub's address, the join command and a prompt for an agent on the machine, the secret masked |
 | [hub-sign-in.png](hub-sign-in.png) | Signing in to the hub, beside its picture of agents in their states |
-| [hub-push.png](hub-push.png) | The bell's menu with push on this device: Notifications and Sound, then Push to this device, Also when a task finishes and Send a test |
+| [hub-push.png](hub-push.png) | The bell's menu with push on this device: Notifications and Sound, then Push to this device, Send a test and Push settings… |
+| [hub-settings-push.png](hub-settings-push.png) | Hub settings at its Push tab: this device getting finished tasks, following the pinned agents and Client work, with quiet hours, and Sign out of this browser |
 | [hub-list.png](hub-list.png) | The hub's list: two pinned agents, then two groups and Ungrouped, with every state's glyph: approval, question, login, usage limit, working, finished, idle, unreachable, stopped; and each agent's Tendyard version, one older than the hub |
 | [hub-add.png](hub-add.png) | The Add dialog: joining a machine (the hub's address, updates from the hub, the command and a prompt for an agent, the secret masked), or adding an instance by its URL and token |
 | [hub-settings-favorites.png](hub-settings-favorites.png) | Hub settings at its Favorites tab: the favorites, each with its buttons to move, edit and delete it |

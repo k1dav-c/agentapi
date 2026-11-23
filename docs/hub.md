@@ -963,11 +963,11 @@ it, with only the marks of the machine's other agents, and the composer one row,
 
 **Push to this device**, in the bell's menu, has the hub send this device a notification when an
 agent starts needing you, even with the hub's page closed and the phone locked. Tapping it opens
-the hub at that agent. **Also when a task finishes** adds one for each finished task, and
-**Send a test** checks that a push arrives. Push is turned on per device, and the browser
-remembers it; a device with push gets the push instead of the open page's notification.
+the hub at that agent. **Send a test** checks that a push arrives, and **Push settings…** opens
+what each device gets. Push is turned on per device; a device with push gets the push instead of
+the open page's notification. On the Home Screen, the hub's icon shows how many agents need you.
 
-![The bell's menu with push on this device: Push to this device, Also when a task finishes and Send a test below Notifications and Sound](screenshots/hub-push.png)
+![The bell's menu with push on this device: Push to this device, Send a test and Push settings… below Notifications and Sound](screenshots/hub-push.png)
 
 Push needs the hub's page on https, such as through your Coder workspace or a reverse proxy; a
 page at `http://<address>:3290` can't subscribe. Then, on each device:
@@ -983,6 +983,25 @@ approval answered at once, or a muted agent, sends nothing. The same request see
 reconnect isn't pushed again. A finished task is pushed only while it is unread, so one you watched finish
 isn't. While the hub's page is open and in front, its own alerts tell you instead; Safari shows
 the push anyway.
+
+The **Push** tab of **Hub settings** lists the devices the hub pushes to, this one
+first, with when each last got a push and why the last one failed. Each device has its own settings,
+kept on the hub, so a laptop can change the phone's:
+
+- **Finished tasks**: a push for each task that finishes, besides what needs you.
+- **Issues**: a push when an [issue's](#issues) pull request opens, and when its job fails or is
+  done. A tap opens the issue in Issues.
+- **Agents**: the groups whose agents it gets, **Pinned** for the pinned ones, and **Ungrouped**;
+  with none picked, every agent. Issues don't depend on them.
+- **Quiet hours**: the hours when nothing is pushed to it, in the browser's time zone when they
+  are turned on. A push that falls in them is dropped, not held.
+
+The trash button stops pushing to a device. A device also stops when its sign-in ends: **Sign out
+of this browser**, at the bottom of the settings, stops this one before signing out, and the hub
+forgets a device whose session (30 days from signing in) ran out, or that subscribed under another
+hub token. Signing in again and opening the hub renews it.
+
+![Hub settings at its Push tab: this device getting finished tasks, following the pinned agents and Client work, with quiet hours](screenshots/hub-settings-push.png)
 
 The hub sends each push through the device's push service (Google's for Chrome on Android,
 Apple's for Safari, Mozilla's for Firefox), so the hub must reach the internet, through
@@ -1302,7 +1321,10 @@ running Tendyard instances, which then no longer follow their conversation for t
 | `POST /api/dispatch` | Starts, messages, links and stops the work on an issue (`action`: `start`, `send`, `link_pr`, `stop`); also takes `--dispatch-token`. A start answers once its job is `starting` on a machine; the job's state then follows on the stream and in `GET /api/jobs` |
 | `GET /api/activity?tz=&days=` | The [activity](#activity) of each of the last `days` days (1 to 371, 371 by default: 53 weeks), the earliest first, in the time zone `tz` names (an IANA name such as `Asia/Taipei`; UTC by default): `{"days": [{"date": "2026-11-10", "work_seconds", "usd", "tokens": {"input", "output", "cache_write", "cache_read", "total"}}, …], "since", "time_zone"}`. `since` is the first day the hub kept, in that zone; an hour counts in the day it starts in there. 400 for a time zone or a count it doesn't take |
 | `GET /api/push` | The hub's [push](#push) key, which a browser subscribes with: `{"public_key"}` (VAPID, base64url) |
-| `PUT /api/push/subscription` | `{"endpoint", "keys": {"p256dh", "auth"}, "finished"}` (a browser's `PushSubscription.toJSON()`, with `finished` for the finished tasks too) adds the browser to those the hub pushes to, or updates it; 204. The endpoint is https. At most 50: a new one past them replaces the oldest |
+| `PUT /api/push/subscription` | `{"endpoint", "keys": {"p256dh", "auth"}, "label"}` (a browser's `PushSubscription.toJSON()`, and what the device is) adds the browser to the devices the hub pushes to, or renews it, keeping its settings, and answers the device as `GET /api/push/devices` lists it. The endpoint is https. With the session cookie, the device stays until that session ends; the page sends it again on each load. At most 50: a new one past them replaces the oldest |
+| `GET /api/push/devices` | The devices the hub pushes to, without their endpoints and keys: `{"devices": [{"id", "label", "created_at", "renewed_at", "expires_at", "last_sent_at", "last_error", "last_error_at", "finished", "issues", "groups", "pinned", "quiet_hours"}]}`. `id` is the start of the endpoint's SHA-256 in hex; `quiet_hours` is `{"start", "end", "time_zone"}` (`HH:MM`, an IANA zone), missing for none |
+| `PATCH /api/push/devices/{id}` | Changes a device's settings, those sent: `finished`, `issues`, `groups` (`""` for the ungrouped agents; none, with `pinned` false, is every agent), `pinned`, `quiet_hours` (`{}` removes them). Answers the device; 400 for a time or zone it doesn't take, 404 for a device it doesn't have |
+| `DELETE /api/push/devices/{id}` | Stops pushing to a device; 204, 404 for a device it doesn't have |
 | `DELETE /api/push/subscription` | `{"endpoint"}` stops pushing to that browser; 204 |
 | `POST /api/push/test` | `{"endpoint"}` pushes a test notification to that browser, and answers 204 once its push service took it; 404 for a browser the hub doesn't push to, 410 when the push service ended the subscription (the hub forgets it), 502 for another refusal |
 | `GET /api/join` | Where machines join the hub: `urls`, each a webhook URL (`url`) with the interface of its address (`interface`; none for `--bind`'s), in the order the startup log has them; and the secret (`secret`, with `secret_shown: true`) only on a hub with a token |
@@ -1329,7 +1351,7 @@ A refused or failed request answers `{"code": …, "message": …, "error": …}
 | `~/.agentapi/hub/dispatch.json` | `agentapi hub serve` | The [issue dispatch's](#issues) machines with their launchers' tokens, and the jobs: their runs, costs and last 50 messages |
 | `~/.agentapi/hub/github-app.json` | `agentapi hub serve` | The hub's GitHub App and its private key |
 | `~/.agentapi/hub/providers.json` | `agentapi hub serve` | The [model providers](#model-providers), their keys and their price picks (0600) |
-| `~/.agentapi/hub/push.json` | `agentapi hub serve` | The hub's [push](#push) key (VAPID) and the browsers it pushes to (0600); without it the hub makes a new key, and each device turns push on again |
+| `~/.agentapi/hub/push.json` | `agentapi hub serve` | The hub's [push](#push) key (VAPID) and the devices it pushes to, with their settings and when their sessions end (0600); without it the hub makes a new key, and each device turns push on again |
 | `~/.agentapi/hub/openrouter.json` | `agentapi hub serve` | The hub's copy of OpenRouter's models and their prices, as it last got them, and the models the providers without models listed |
 | `~/.agentapi/hub-providers.json` | `agentapi server` | On each machine, beside its config file: the providers the hub last answered, sealed with the hub's secret, which stand in at the next start until the hub answers |
 

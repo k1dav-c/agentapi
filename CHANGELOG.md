@@ -4,6 +4,25 @@
 
 ### Features
 
+- Hub settings get a **Push** tab: the devices the hub pushes to, each with when it last got a
+  push and why the last failed. Each has its own settings, kept on the hub: **Finished tasks**,
+  **Issues**, the groups whose agents it gets (and **Pinned**, **Ungrouped**), and quiet hours in
+  its time zone. The trash button stops pushing to a device. The bell's menu trades **Also when a
+  task finishes** for **Push settings…**.
+- The hub pushes the issues' work to the devices that want it: a pull request opened, a job that
+  failed or is done. A tap opens the issue in Issues.
+- The hub's icon on the Home Screen shows how many agents need you: each push carries the count,
+  and the open page keeps it current.
+- **Sign out of this browser**, at the bottom of Hub settings, stops the pushes to this browser,
+  then signs out. The hub stops pushing to a device whose session ended (30 days after signing
+  in; the page renews the device each time it opens) and forgets the devices of another hub token.
+- `GET /api/push/devices`, `PATCH` and `DELETE /api/push/devices/{id}`; `PUT
+  /api/push/subscription` takes the device's `label` and answers the device.
+
+## v5.8.0
+
+### Features
+
 - The hub pushes what needs you to a phone with its page closed ([Push](docs/hub.md#push)). The
   bell's **Push to this device** subscribes the browser through Web Push; **Also when a task
   finishes** adds the finished tasks, and **Send a test** checks that one arrives. The hub sends a
