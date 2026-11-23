@@ -100,9 +100,55 @@ export class PushPermissionError extends Error {
   }
 }
 
+// PushDevice is a device the hub pushes to, as the Devices settings show
+// it; PushPrefsChange, what they change of one.
+export type PushDevice = HubWire["PushDevice"];
+export type PushPrefsChange = HubWire["PushPrefsChange"];
+export type QuietHours = HubWire["QuietHours"];
+
+// deviceLabel names this browser's device for the hub's list of them:
+// the platform, then the browser or, for an app on the home screen, that.
+export function deviceLabel(userAgent: string, standalone: boolean, touch = 0): string {
+  const platform = /iPhone|iPod/.test(userAgent)
+    ? "iPhone"
+    : /iPad/.test(userAgent) || (/Macintosh/.test(userAgent) && touch > 1)
+      ? "iPad"
+      : /Android/.test(userAgent)
+        ? "Android"
+        : /Macintosh|Mac OS X/.test(userAgent)
+          ? "Mac"
+          : /Windows/.test(userAgent)
+            ? "Windows"
+            : /CrOS/.test(userAgent)
+              ? "ChromeOS"
+              : /Linux/.test(userAgent)
+                ? "Linux"
+                : "";
+  const browser = standalone
+    ? "Home Screen"
+    : /Edg\//.test(userAgent)
+      ? "Edge"
+      : /Firefox\/|FxiOS/.test(userAgent)
+        ? "Firefox"
+        : /Chrome\/|CriOS|Chromium/.test(userAgent)
+          ? "Chrome"
+          : /Safari\//.test(userAgent)
+            ? "Safari"
+            : "Browser";
+  return platform ? `${platform} · ${browser}` : browser;
+}
+
+// deviceID is the hub's ID of the device with the endpoint (pushDeviceID
+// in lib/hub/push.go): the first 8 bytes of its SHA-256, in hex.
+export async function deviceID(endpoint: string): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(endpoint)));
+  return [...digest.slice(0, 8)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 // createHubPush is the page's push: subscribe this browser to the hub,
-// keep the hub's copy current, stop, and test.
-export function createHubPush(root: string, browser: PushBrowser, fetcher: Fetcher = (url, init) => fetch(url, init)) {
+// keep the hub's copy current, stop and test, and the devices the hub
+// pushes to with their settings.
+export function createHubPush(root: string, browser: PushBrowser, label: string, fetcher: Fetcher = (url, init) => fetch(url, init)) {
   const call = hubCall(root, fetcher);
   const json = (method: string, body: unknown): RequestInit => ({method, headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
   const publicKey = async (): Promise<string> => {
@@ -111,8 +157,9 @@ export function createHubPush(root: string, browser: PushBrowser, fetcher: Fetch
     return info.public_key;
   };
   // subscribe subscribes with the hub's key (again, if the browser's
-  // subscription is another key's) and tells the hub.
-  const subscribe = async (manager: PushManager, finished: boolean): Promise<void> => {
+  // subscription is another key's) and tells the hub, which keeps the
+  // device's settings.
+  const subscribe = async (manager: PushManager): Promise<void> => {
     const key = await publicKey();
     let subscription = await manager.getSubscription();
     if (subscription && !sameKey(subscription.options.applicationServerKey, key)) {
@@ -121,22 +168,24 @@ export function createHubPush(root: string, browser: PushBrowser, fetcher: Fetch
     }
     subscription ??= await manager.subscribe({userVisibleOnly: true, applicationServerKey: applicationServerKey(key)});
     const {endpoint, keys} = subscription.toJSON();
-    await call("/api/push/subscription", json("PUT", {endpoint: endpoint ?? "", keys: {p256dh: keys?.p256dh ?? "", auth: keys?.auth ?? ""}, finished} satisfies HubWire["PushSubscribeBody"]));
+    await call("/api/push/subscription", json("PUT", {endpoint: endpoint ?? "", keys: {p256dh: keys?.p256dh ?? "", auth: keys?.auth ?? ""}, label} satisfies HubWire["PushSubscribeBody"]));
   };
   const endpoint = async (): Promise<string | undefined> => (await (await browser.existing())?.getSubscription())?.endpoint;
+  const device = (id: string) => `/api/push/devices/${encodeURIComponent(id)}`;
   return {
     // enable asks for permission and subscribes; it throws
     // PushPermissionError when the browser won't notify.
-    enable: async (finished: boolean): Promise<void> => {
+    enable: async (): Promise<void> => {
       if ((await browser.requestPermission()) !== "granted") throw new PushPermissionError();
-      await subscribe(await browser.register(), finished);
+      await subscribe(await browser.register());
     },
-    // sync tells the hub this browser's subscription again (the hub
-    // forgets one its push service ended, or a new key replaced), with
-    // what to push; one the browser dropped is made again.
-    sync: async (finished: boolean): Promise<void> => {
+    // sync tells the hub this browser's subscription again: the hub keeps
+    // a device while the session of the page that last told it holds, and
+    // forgets one its push service ended or a new key replaced. One the
+    // browser dropped is made again.
+    sync: async (): Promise<void> => {
       if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
-      await subscribe(await browser.register(), finished);
+      await subscribe(await browser.register());
     },
     // disable unsubscribes, and tells the hub.
     disable: async (): Promise<void> => {
@@ -154,20 +203,45 @@ export function createHubPush(root: string, browser: PushBrowser, fetcher: Fetch
       if (!at) throw new Error("This browser isn't subscribed.");
       await call("/api/push/test", json("POST", {endpoint: at} satisfies HubWire["PushEndpointBody"]));
     },
+    // thisDevice is this browser's device ID, when it is subscribed.
+    thisDevice: async (): Promise<string | undefined> => {
+      const at = await endpoint();
+      return at ? deviceID(at) : undefined;
+    },
+    // devices lists the devices the hub pushes to.
+    devices: async (): Promise<PushDevice[]> => {
+      const body = (await (await call("/api/push/devices")).json()) as Partial<HubWire["PushDevicesBody"]>;
+      if (!Array.isArray(body.devices)) throw new Error("The hub's answer has no devices.");
+      return body.devices;
+    },
+    // change changes a device's settings, and returns the device.
+    change: async (id: string, change: PushPrefsChange): Promise<PushDevice> => (await (await call(device(id), json("PATCH", change))).json()) as PushDevice,
+    // remove stops pushing to a device.
+    remove: async (id: string): Promise<void> => {
+      await call(device(id), {method: "DELETE"});
+    },
   };
 }
 
 export type HubPush = ReturnType<typeof createHubPush>;
 
-// openMessage is the service worker's message to the page that a click
-// on a notification focused: open the agent.
-export interface OpenMessage {
-  type: "agentapi-hub-open";
-  id: string;
+// The service worker's messages to the page that a click on a
+// notification focused: open the agent, or the issue in Issues.
+export type OpenTarget = {agent: string} | {issue: string};
+
+export function parseOpenMessage(data: unknown): OpenTarget | undefined {
+  if (typeof data !== "object" || data === null) return undefined;
+  const message = data as {type?: unknown; id?: unknown; key?: unknown};
+  if (message.type === "agentapi-hub-open" && typeof message.id === "string" && message.id) return {agent: message.id};
+  if (message.type === "agentapi-hub-issue" && typeof message.key === "string" && message.key) return {issue: message.key};
+  return undefined;
 }
 
-export function parseOpenMessage(data: unknown): string | undefined {
-  if (typeof data !== "object" || data === null) return undefined;
-  const message = data as Partial<OpenMessage>;
-  return message.type === "agentapi-hub-open" && typeof message.id === "string" && message.id ? message.id : undefined;
+// setAppBadge shows count on the app's icon (an app on the home screen,
+// or an installed one), or clears it at 0, where the browser can.
+export function setAppBadge(count: number, nav: Partial<Pick<Navigator, "setAppBadge" | "clearAppBadge">> = typeof navigator === "undefined" ? {} : navigator) {
+  const done = count > 0 ? nav.setAppBadge?.(count) : nav.clearAppBadge?.();
+  done?.catch(() => {
+    // No permission, or no badge here.
+  });
 }

@@ -8,7 +8,6 @@ const stored: Record<string, string> = {
   "agentapi.hub.activity-metric": "tokens",
   "agentapi.hub.notify": JSON.stringify(true),
   "agentapi.hub.push": JSON.stringify(true),
-  "agentapi.hub.push-finished": JSON.stringify(true),
   "agentapi.hub.agents": JSON.stringify(["codex", "claude"]),
   "agentapi.hub.machine-tabs": JSON.stringify([
     ["Group\nhost dev-1", "dev-1:3285"],
@@ -27,7 +26,6 @@ const read: HubSettings = {
   activityMetric: "tokens",
   notify: true,
   push: true,
-  pushFinished: true,
   agents: new Set(["claude", "codex"]),
   tabPicks: new Map([
     ["Group\nhost dev-1", {id: "dev-1:3285", at: undefined}],
@@ -46,7 +44,6 @@ const defaults: HubSettings = {
   activityMetric: "work",
   notify: false,
   push: false,
-  pushFinished: false,
   agents: new Set(),
   tabPicks: new Map(),
   listOrder: "groups",

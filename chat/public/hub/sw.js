@@ -22,6 +22,11 @@ self.addEventListener("push", (event) => {
 });
 
 async function show(data) {
+  // The app icon's badge: how many agents need you, as the hub sent it.
+  if (typeof data.badge === "number") {
+    const badge = data.badge > 0 ? self.navigator.setAppBadge?.(data.badge) : self.navigator.clearAppBadge?.();
+    await badge?.catch(() => {});
+  }
   if (data.kind !== "test" && !mustShow) {
     // Someone looking at the hub's page sees it there (an agent's chat in
     // a tab of its own is no hub page).
@@ -32,25 +37,28 @@ async function show(data) {
     tag: data.tag || "agentapi-hub",
     renotify: true,
     icon: "icon-192.png",
-    data: {id: typeof data.id === "string" ? data.id : ""},
+    data: {id: typeof data.id === "string" ? data.id : "", issue: typeof data.issue === "string" ? data.issue : ""},
   });
 }
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const id = event.notification.data?.id || "";
+  const issue = event.notification.data?.issue || "";
   const url = new URL(self.registration.scope);
   if (id) url.hash = encodeURIComponent(id);
-  event.waitUntil(open(url, id));
+  else if (issue) url.searchParams.set("issue", issue);
+  const message = id ? {type: "agentapi-hub-open", id} : issue ? {type: "agentapi-hub-issue", key: issue} : null;
+  event.waitUntil(open(url, message));
 });
 
-// open focuses the hub's page and has it open the agent, or opens the page
-// at the agent.
-async function open(url, id) {
+// open focuses the hub's page and has it open the agent or the issue, or
+// opens the page at it.
+async function open(url, message) {
   const page = (await hubPages())[0];
   if (page) {
     await page.focus();
-    if (id) page.postMessage({type: "agentapi-hub-open", id});
+    if (message) page.postMessage(message);
     return;
   }
   await self.clients.openWindow(url.href);

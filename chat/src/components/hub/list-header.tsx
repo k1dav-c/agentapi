@@ -1,6 +1,6 @@
 "use client";
 
-import {Bell, BellOff, CircleCheck, CircleDot, Plus, Search, Send, Settings, Smartphone, Volume2, X} from "lucide-react";
+import {Bell, BellOff, CircleDot, Plus, Search, Send, Settings, SlidersHorizontal, Smartphone, Volume2, X} from "lucide-react";
 import {ModeToggle} from "@/components/mode-toggle";
 import {Button} from "@/components/ui/button";
 import {DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger} from "@/components/ui/dropdown-menu";
@@ -30,6 +30,8 @@ export interface HubListHeaderProps {
   onToggleSound: () => void;
   // push is whether the hub pushes to this device (use-push).
   push: HubPushState;
+  // onPushSettings opens the settings at the devices the hub pushes to.
+  onPushSettings: () => void;
   onSettings: () => void;
   // onHome is the hub's mark: the list and its overview, past an agent open
   // and Issues.
@@ -55,7 +57,7 @@ export function hubLabel(version: string): string {
 // live, what the agents spent today, notifications, the theme, the
 // settings and Add; the search, the list's order and By machine; and the
 // state and agent chips.
-export function HubListHeader({status, unreachable, hubVersion, spend, notify, onToggleNotify, sound, onToggleSound, push, onSettings, onHome, onAdd, issuesOpen, issuesNeedYou, onIssues, search, filters, view}: HubListHeaderProps) {
+export function HubListHeader({status, unreachable, hubVersion, spend, notify, onToggleNotify, sound, onToggleSound, push, onPushSettings, onSettings, onHome, onAdd, issuesOpen, issuesNeedYou, onIssues, search, filters, view}: HubListHeaderProps) {
   const connected = status === "connected";
   const {counts, query, setQuery} = filters;
   return (
@@ -108,14 +110,15 @@ export function HubListHeader({status, unreachable, hubVersion, spend, notify, o
               </DropdownMenuCheckboxItem>
               {push.push && (
                 <>
-                  <DropdownMenuCheckboxItem checked={push.pushFinished} onCheckedChange={() => void push.togglePushFinished()} onSelect={(event) => event.preventDefault()}>
-                    <CircleCheck /> Also when a task finishes
-                  </DropdownMenuCheckboxItem>
                   <DropdownMenuItem inset onSelect={() => void push.testPush()}>
                     <Send /> Send a test
                   </DropdownMenuItem>
                 </>
               )}
+              {/* What each device gets: tasks, issues, quiet hours, groups. */}
+              <DropdownMenuItem inset onSelect={onPushSettings}>
+                <SlidersHorizontal /> Push settings…
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
           <ModeToggle />

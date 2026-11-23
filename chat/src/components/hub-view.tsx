@@ -1,8 +1,11 @@
 "use client";
 
-import {useMemo, useRef, useState} from "react";
+import {useEffect, useMemo, useRef, useState} from "react";
+import {toast} from "sonner";
 import {Button} from "@/components/ui/button";
 import {hubRoot, type HubInstance} from "@/lib/hub";
+import {createHubAPI, hubErrorText} from "@/lib/hub-api";
+import type {OpenTarget} from "@/lib/hub-push";
 import {active, rowJobs, type RowJob} from "@/lib/hub-dispatch";
 import {stoppedOf} from "@/lib/hub-filter";
 import {needsYou} from "@/lib/hub-issues";
@@ -44,7 +47,7 @@ import {useSound, useSoundUnlock} from "@/lib/alert-sound";
 // the one picked. On a narrow screen the list and the chat take turns.
 export function HubView() {
   const root = useMemo(() => (typeof window === "undefined" ? "" : hubRoot(basePath, window.location.origin)), []);
-  const {session, signedIn, retrySession, instances, hubVersion, favorites, setFavorites, dispatch, unreachable, status} = useHubStream(root);
+  const {session, signedIn, signedOut, retrySession, instances, hubVersion, favorites, setFavorites, dispatch, unreachable, status} = useHubStream(root);
   // The agent open beside the list, and whether the Issues view is open
   // there instead of the overview (or below the agent, opened from it).
   const route = useHubRoute();
@@ -91,7 +94,37 @@ export function HubView() {
 
   // Tell people who aren't looking: a screen reader, the tab, a notification.
   // A device the hub pushes to gets the push instead of the page's own.
-  const push = usePush(root, session === "signed-in", select);
+  // A notification clicked opens its agent, or its issue in Issues.
+  const openTarget = useStableCallback((target: OpenTarget) => {
+    if ("agent" in target) {
+      select(target.agent);
+      return;
+    }
+    setIssueKey(target.issue);
+    route.openIssues();
+  });
+  const push = usePush(root, session === "signed-in", openTarget, counts["needs-you"]);
+  // The page an issue's notification opened (?issue=), once.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const issue = url.searchParams.get("issue");
+    if (!issue) return;
+    url.searchParams.delete("issue");
+    window.history.replaceState(window.history.state, "", url);
+    openTarget({issue});
+  }, [openTarget]);
+  // Signing out stops the pushes to this browser first.
+  const signOut = async () => {
+    await push.signOut();
+    try {
+      await createHubAPI(root).signOut();
+    } catch (error) {
+      toast.error("Couldn't sign out", {description: hubErrorText(error)});
+      return;
+    }
+    setSettings(null);
+    signedOut();
+  };
   const announcement = useNeedsYou(all, notify && !push.push, select);
   useHubTab(counts["needs-you"], counts.working > 0);
 
@@ -201,6 +234,7 @@ export function HubView() {
             sound={sound}
             onToggleSound={toggleSound}
             push={push}
+            onPushSettings={() => setSettings("devices")}
             onSettings={() => setSettings("favorites")}
             onHome={route.home}
             onAdd={() => setAdding(true)}
@@ -296,6 +330,9 @@ export function HubView() {
           onFavoritesSaved={setFavorites}
           activeJobs={activeJobs}
           instances={all}
+          push={push}
+          groups={names}
+          onSignOut={signOut}
         />
         <ForgetStopped instances={forgetting} onClose={() => setForgetting(null)} onForget={forgetStopped} />
         <GroupName

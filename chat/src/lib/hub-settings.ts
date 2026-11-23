@@ -67,7 +67,6 @@ export type HubSettings = {
   activityMetric: ActivityMetric;
   notify: boolean;
   push: boolean;
-  pushFinished: boolean;
   agents: ReadonlySet<HubAgent>;
   tabPicks: ReadonlyMap<string, TabPick>;
   listOrder: ListOrder;
@@ -90,8 +89,6 @@ export const hubSettings: {readonly [N in HubSettingName]: Setting<HubSettings[N
   notify: {key: "agentapi.hub.notify", parse: fromJSON((value) => value === true), serialize: (value) => JSON.stringify(value)},
   // Whether the hub pushes to this browser, as JSON.
   push: {key: "agentapi.hub.push", parse: fromJSON((value) => value === true), serialize: (value) => JSON.stringify(value)},
-  // Whether it pushes the finished tasks too, as JSON.
-  pushFinished: {key: "agentapi.hub.push-finished", parse: fromJSON((value) => value === true), serialize: (value) => JSON.stringify(value)},
   // The agents picked, as JSON; none is every agent.
   agents: {key: "agentapi.hub.agents", parse: fromJSON(parseAgents), serialize: (value) => JSON.stringify([...value])},
   // The tab picked on each card, by the card, as JSON.
