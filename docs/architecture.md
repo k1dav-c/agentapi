@@ -907,12 +907,17 @@ IDs of the webhook events it took, each until its signature no longer holds, go 
 `instances.deliveries.json`, so a copy replayed after a restart is refused too.
 
 Push keeps `push.json` next to `instances.json` (0600, `push_store.go`): the VAPID private key, made and
-written when the hub first starts so a browser's subscription outlives a restart, and the devices,
-written through `atomicfile` on each change. A device is a subscription with its label, its settings
+written when the hub first starts so a browser's subscription outlives a restart, the devices, and
+the IDs of those removed from the settings (`revoked`, the last 200), written by a `persister`
+within a second of a change and on `Close`, so a push's answer costs no write of its own. A device is a subscription with its label, its settings
 (`PushPrefs`, `push_prefs.go`), when its push service last took a push or refused one, and
 `expires_at`. A page renews it on each load (`PUT /api/push/subscription`), and with the session
 cookie it ends with that session (issued + 30 days). `token_id`, an HMAC of the hub token, makes a
-hub started with another token forget it. The API names a device by the first 8 bytes of its
+hub started with another token forget it; a device of 5.8, kept without one, takes the hub's.
+Removing a device from the settings (`revoke`) makes its page's renewals 410 until that page turns
+push on again (`enable`), and its page then turns push off; signing out with the endpoint
+(`DELETE /api/session`) removes the device on the hub, whatever the browser's own unsubscribe does.
+Past 50 devices, a new one replaces those whose session ended, then the oldest. The API names a device by the first 8 bytes of its
 endpoint's SHA-256, so the endpoint, which lets whoever holds it push, never leaves the hub.
 
 The notifiers are in `push_notify.go`. One subscribes to the store like a browser's stream and
@@ -922,10 +927,13 @@ ending without one, arms a timer of 5 seconds (`pushDelay`, on the hub's clock);
 instance is pushed only if that still holds: needing you for the same thing and not muted, or the
 same task ended and unread. The other follows the dispatch (`Subscribe`, `Board`) and pushes a job
 whose pull request appears, or that turns `failed` or `done`, at once. Each device that wants the
-push (`PushPrefs.wants`: its kind, the agent's group or pin, its quiet hours in its time zone) gets
+push (`PushPrefs.wants`: its kind, the agent's group or pin, counting only the groups agents are in
+now, its quiet hours in its time zone) gets
 the payload (`{"kind", "title", "body", "id", "issue", "tag", "badge"}`, `badge` the number of
 agents that need you then) encrypted for it, with a `Topic` per instance or issue so a push service still
-holding an older one replaces it; one whose push service answers 404 or 410 is removed. The page's
+holding an older one replaces it, and a VAPID token per push service kept until an hour before it
+expires; one whose push service answers 404 or 410 is removed. The pushes go out in the background
+through the pusher (`goSendAll`), which `Run` waits for (`stop`) before it returns. The page's
 service worker (`chat/public/hub/sw.js`) sets the app icon's badge, and shows the push unless a
 window of the hub's page is focused (Safari always shows it, since it ends a subscription whose
 pushes show nothing). A click focuses a window of the hub's page, which opens the agent or the
@@ -1145,6 +1153,13 @@ of the content's SHA-256, so a path never changes; unused ones are removed after
   `newLauncherClient`, which uses no proxy and follows no redirect,
   `launcher.go`). LAN addresses stay allowed, so a machine with the secret
   can still point the hub's launcher calls at another machine there.
+
+  A push endpoint is a URL a signed-in page gives the hub to POST to, so the
+  hub takes only those of the browsers' push services (`checkPushService`:
+  `pushServiceHosts`, `*.googleapis.com`, `*.push.apple.com`,
+  `*.push.services.mozilla.com`, `*.notify.windows.com`, and
+  `--push-service-hosts`), when a page subscribes and again before each push,
+  and its push client follows no redirect (`newPushClient`).
 
   Browsers sign in with the hub token for an HttpOnly, SameSite=Lax cookie
   that holds its issue time, signed with the token, which the hub refuses

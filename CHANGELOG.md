@@ -17,7 +17,25 @@
   then signs out. The hub stops pushing to a device whose session ended (30 days after signing
   in; the page renews the device each time it opens) and forgets the devices of another hub token.
 - `GET /api/push/devices`, `PATCH` and `DELETE /api/push/devices/{id}`; `PUT
-  /api/push/subscription` takes the device's `label` and answers the device.
+  /api/push/subscription` takes the device's `label` and `enable` and answers the device;
+  `DELETE /api/session` takes the browser's push `endpoint`.
+- `agentapi hub serve --push-service-hosts` adds hosts the hub pushes to.
+
+### Fixes
+
+- The hub pushes only to the browsers' push services (Google's, Apple's, Mozilla's, Microsoft's)
+  and follows no redirect: in 5.8 a signed-in page, or anyone on a hub with `--no-token`, could
+  have it send requests to any https address and read the answer through **Send a test**.
+- The devices of 5.8 stay after the update, with their settings.
+- Signing out stops the pushes on the hub too, even when the browser's own unsubscribe fails.
+- A device removed from another device's settings stays removed: its page turns push off rather
+  than subscribe again.
+- **Notifications** on the hub's page no longer turn off with push: the hub may not push this
+  device an agent (its groups, its quiet hours).
+- A group renamed or emptied no longer stops a device's pushes: one left following only such
+  groups gets every agent.
+- Past 50 devices, those whose session ended go before the oldest; a push's answer no longer
+  writes `push.json` each time; the hub waits for the pushes under way when it stops.
 
 ## v5.8.0
 

@@ -691,10 +691,14 @@ webhook 事件的 delivery ID 也以同樣方式寫入 `instances.deliveries.jso
 重新啟動後重送的事件同樣會被拒絕。
 
 推播把 `push.json` 放在 `instances.json` 旁（0600，`push_store.go`）：VAPID 私鑰在 hub 第一次啟動時產生並寫入，
-讓瀏覽器的訂閱在重新啟動後仍然有效；裝置則在每次變動時經由 `atomicfile` 寫入。一台裝置就是一個訂閱，加上它的
+讓瀏覽器的訂閱在重新啟動後仍然有效；裝置，以及從設定中移除的裝置 ID（`revoked`，最近 200 個），由 `persister`
+在變動後一秒內和 `Close` 時寫入，所以推播服務的回應不必各自寫一次檔。一台裝置就是一個訂閱，加上它的
 名稱、設定（`PushPrefs`，`push_prefs.go`）、它的推播服務最近一次收下和拒絕推播的時間，以及 `expires_at`：
 頁面每次載入都會為它續期（`PUT /api/push/subscription`），帶著 session cookie 時，它隨那個 session 結束
-（簽發時間 + 30 天）；`token_id` 是 hub token 的 HMAC，換了 token 啟動的 hub 會忘掉這台裝置。API 以 endpoint
+（簽發時間 + 30 天）；`token_id` 是 hub token 的 HMAC，換了 token 啟動的 hub 會忘掉這台裝置；5.8 版留下、沒有 `token_id` 的裝置，會取用 hub 的。
+從設定中移除裝置（`revoke`）後，它的頁面續期會回 410，直到那個頁面重新開啟推播（`enable`），頁面接著會關掉推播；
+帶著 endpoint 登出（`DELETE /api/session`）會在 hub 上移除這台裝置，不論瀏覽器自己的取消訂閱結果如何。
+超過 50 台裝置時，新的裝置先取代 session 已結束的，再取代最舊的。API 以 endpoint
 的 SHA-256 前 8 個位元組指稱裝置：持有 endpoint 就能推播，所以它不會離開 hub。
 
 notifier 在 `push_notify.go`。其中一個像瀏覽器的串流一樣訂閱 store，為每個實例記住它在等什麼
@@ -702,9 +706,10 @@ notifier 在 `push_notify.go`。其中一個像瀏覽器的串流一樣訂閱 st
 執行的任務結束、沒有在等什麼時，啟動 5 秒的計時器（`pushDelay`，用 hub 的時鐘）；時間到時，實例仍是那個狀態
 才推播：為同一件事需要你且沒有靜音，或同一個任務已結束且未讀。另一個跟著派工（`Subscribe`、`Board`），job 的
 pull request 出現，或 job 變成 `failed` 或 `done` 時，立刻推播。每台要收這則推播的裝置（`PushPrefs.wants`：
-推播的種類、agent 的群組或釘選，以及裝置時區裡的勿擾時段）各自拿到為它加密的 payload（`{"kind", "title",
+推播的種類、agent 的群組或釘選（只算目前有 agent 的群組），以及裝置時區裡的勿擾時段）各自拿到為它加密的 payload（`{"kind", "title",
 "body", "id", "issue", "tag", "badge"}`，`badge` 是當下需要你的 agent 數），每個實例或 issue 一個 `Topic`，
-讓還留著舊推播的推播服務以新的取代；推播服務回 404 或 410 的裝置會移除。頁面的 service worker
+讓還留著舊推播的推播服務以新的取代，每個推播服務一個 VAPID token，用到到期前一小時；推播服務回 404 或 410
+的裝置會移除。推播由 pusher 在背景送出（`goSendAll`），`Run` 返回前會等它們送完（`stop`）。頁面的 service worker
 （`chat/public/hub/sw.js`）設定 app 圖示的徽章，並顯示推播，除非 hub 頁面有某個視窗位於焦點（Safari 一律
 顯示，因為推播沒顯示任何東西的訂閱，Safari 會結束它）。點通知時，聚焦 hub 頁面的一個視窗並由它開啟 agent 或
 issue（`usePush`）；沒有開著的頁面時，以 `#<id>` 或 `?issue=<key>` 開啟頁面。頁面開著時，由它自己設定徽章。
@@ -853,7 +858,14 @@ Content-Security-Policy。
   launcher 網址，而且位址必須通過 `checkLauncherAddr`（沒有 `--allow-loopback-launchers` 時不能是
   loopback，也不能是 link-local 或未指定位址）：`HostEvent` 檢查一次，名稱解析後每次連線再檢查一次
   （`newLauncherClient` 裡 dialer 的 `Control`，不經 proxy、不跟隨重新導向，`launcher.go`）。內網位址
-  照常允許，所以持有 secret 的機器仍可讓 hub 對內網的其他機器呼叫 launcher API。瀏覽器以 hub token 登入，換取
+  照常允許，所以持有 secret 的機器仍可讓 hub 對內網的其他機器呼叫 launcher API。
+
+  推播 endpoint 是已登入的頁面交給 hub、讓 hub POST 過去的網址，所以 hub 只接受瀏覽器推播服務的
+  endpoint（`checkPushService`：`pushServiceHosts`、`*.googleapis.com`、`*.push.apple.com`、
+  `*.push.services.mozilla.com`、`*.notify.windows.com`，以及 `--push-service-hosts`），在頁面訂閱時
+  檢查一次，每次推播前再檢查一次；它的推播 client 不跟隨重新導向（`newPushClient`）。
+
+  瀏覽器以 hub token 登入，換取
   帶有簽發時間、以 token 簽章的 HttpOnly、SameSite=Lax cookie，30 天後 hub 不再接受；代理會移除瀏覽器的 cookie 以及 `Authorization`、
   `Origin`、`Referer`、`Sec-Fetch-*` 標頭，也會移除實例的 `Set-Cookie`，雙方的憑證都不會傳到另一邊。
   hub 和 Tendyard 一樣，拒絕其他來源的網頁送出會造成改動的請求；設定 `--allowed-hosts` 時，只回應
