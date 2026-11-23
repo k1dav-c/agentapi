@@ -8,6 +8,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {mkdtemp, mkdir, writeFile, rm, utimes} from 'node:fs/promises';
 import {pathToFileURL} from 'node:url';
+import crypto from 'node:crypto';
 import {
   chromium, requireBeside, repo, notes, createProject, portFree, servers, startServer, startProcess, poll, client,
   pointerScript, tap, typeSlowly, contextOptions, hubToken, hubSecret, startDemoHub, hubMachines, machinesScript,
@@ -694,11 +695,12 @@ try {
     '--token', hubToken, '--secret', hubSecret, '--state', path.join(hub.home, 'empty.json')]);
   await poll(async () => (await fetch(`http://127.0.0.1:${emptyPort}/api/session`)).ok, 'the empty hub');
 
-  const openHub = async (options, {signIn = true, pointer = false, theme = 'light', url = hubAPI} = {}) => {
+  const openHub = async (options, {signIn = true, pointer = false, theme = 'light', url = hubAPI, init} = {}) => {
     const context = await browser.newContext({...contextOptions, colorScheme: theme, ...options});
     context.on('weberror', event => errors.push(event.error().message));
     await context.addInitScript(value => { try { localStorage.setItem('theme', value); } catch {} }, theme);
     if (pointer) await context.addInitScript(pointerScript);
+    if (init) await context.addInitScript(...init);
     await context.addInitScript(machinesScript, hubMachines);
     const page = await context.newPage();
     page.setDefaultTimeout(20_000);
@@ -720,6 +722,37 @@ try {
   await signIn.getByLabel('Hub token').fill(hubToken);
   await shot(signIn, 'hub-sign-in.png');
   await signIn.context().close();
+
+  // The bell's menu with push on this device. Chromium here has no push service, so the page gets
+  // a stand-in subscription (with real keys, as the hub checks them) and notifications allowed.
+  {
+    const browserKey = crypto.createECDH('prime256v1');
+    browserKey.generateKeys();
+    const keys = {p256dh: browserKey.getPublicKey().toString('base64url'), auth: crypto.randomBytes(16).toString('base64url')};
+    const standIn = ({endpoint, keys}) => {
+      Object.defineProperty(Notification, 'permission', {get: () => 'granted'});
+      Notification.requestPermission = async () => 'granted';
+      let current = null;
+      PushManager.prototype.getSubscription = async () => current;
+      PushManager.prototype.subscribe = async options => (current = {
+        endpoint, options: {applicationServerKey: options.applicationServerKey.buffer},
+        toJSON: () => ({endpoint, keys}), unsubscribe: async () => ((current = null), true),
+      });
+    };
+    const page = await openHub(desktop, {init: [standIn, {endpoint: 'https://push.invalid/demo', keys}]});
+    await page.getByRole('button', {name: 'Alerts off'}).click();
+    await page.getByRole('menuitemcheckbox', {name: 'Push to this device'}).click();
+    await page.getByRole('menuitemcheckbox', {name: 'Also when a task finishes'}).click();
+    await page.getByRole('menuitemcheckbox', {name: 'Also when a task finishes', checked: true}).waitFor();
+    await page.waitForTimeout(300);
+    // The open menu hides the rest of the page from roles.
+    await regionShot(page, 'hub-push.png', [page.locator('button[aria-label="Alerts on"]'), page.getByRole('menu')]);
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', {name: 'Alerts on'}).click();
+    await page.getByRole('menuitemcheckbox', {name: 'Push to this device'}).click();
+    await page.locator('button[aria-label="Alerts off"]').waitFor();
+    await page.context().close();
+  }
 
   // The overview, light and dark, while one agent works.
   await hub.startWork();

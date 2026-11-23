@@ -95,10 +95,11 @@ emitter. Handlers call the conversation and read state from the emitter.
 | `lib/native/procutil` | Child process groups and graceful shutdown |
 | `lib/statedb/` | SQLite persistence for `--state-db` |
 | `lib/instanceapi/` | The contract between a Tendyard instance and the clients that watch many: who it is (`WebhookInstance`, in its webhook events, summary and registry entry, with its `AgentType`), its summary, the webhook envelope with its signature (`Sign`, `Verify`), and the state a hub shows of each instance (`StateOf`). It imports only `lib/agentstate` and `lib/util` |
-| `lib/hub/` | `agentapi hub serve`, over `lib/instanceapi` and `lib/httpmw` rather than the server: the instances, the groups and pins set on its page, when each last changed what its row shows and when the hub saw each working (`store.go`, `work.go`, kept in a file by `persist.go`), the activity of the last year hour by hour (`activity.go`, `activity.json`, `GET /api/activity`: the work, and each scope's spend from the summaries' `spend.hours`), the favorite prompts (`favorites.go`, `GET`/`PUT /api/favorites`, among the hub's settings in the same file), the model providers (`providers.go`, `providers.json`, `GET`/`PUT /api/providers`, `POST /api/providers/check` for the editor's Check connection, and `POST /api/providers/sync` for the Tendyard instances) and their models' prices from OpenRouter (`prices.go`, `openrouter.go`, `openrouter.json`, `POST /api/providers/prices`, `GET /api/providers/openrouter`), the schema of its wire types (`schema.go`, `hub-schema.json`, for the page's types), the signed webhook receiver (`webhook.go`), each instance's summary stream (`watch.go`), sign-in, the browser's event stream and the proxy to the instances (`hub.go`, `proxy.go`), where machines join it (`join.go`: its addresses for `GET /api/join` and the startup log); the user guide is [hub.md](hub.md) |
+| `lib/hub/` | `agentapi hub serve`, over `lib/instanceapi` and `lib/httpmw` rather than the server: the instances, the groups and pins set on its page, when each last changed what its row shows and when the hub saw each working (`store.go`, `work.go`, kept in a file by `persist.go`), the activity of the last year hour by hour (`activity.go`, `activity.json`, `GET /api/activity`: the work, and each scope's spend from the summaries' `spend.hours`), the favorite prompts (`favorites.go`, `GET`/`PUT /api/favorites`, among the hub's settings in the same file), the model providers (`providers.go`, `providers.json`, `GET`/`PUT /api/providers`, `POST /api/providers/check` for the editor's Check connection, and `POST /api/providers/sync` for the Tendyard instances) and their models' prices from OpenRouter (`prices.go`, `openrouter.go`, `openrouter.json`, `POST /api/providers/prices`, `GET /api/providers/openrouter`), the schema of its wire types (`schema.go`, `hub-schema.json`, for the page's types), the signed webhook receiver (`webhook.go`), each instance's summary stream (`watch.go`), sign-in, the browser's event stream and the proxy to the instances (`hub.go`, `proxy.go`), where machines join it (`join.go`: its addresses for `GET /api/join` and the startup log), and Web Push to the browsers that subscribed (`push.go`, `push.json`, `/api/push`: what needs you and the finished tasks, from the store's changes); the user guide is [hub.md](hub.md) |
 | `lib/dispatch/` | The hub's issue dispatch, which `lib/hub` mounts: the machines whose launchers report (`host.*` events; each name pinned to the launcher token it first came with), the jobs with their runs' costs (the tasks from `task.*` events; the spend and work time from what the hub reads of the run's Tendyard, `Saw`) and the last 50 messages their agents were sent (`send`, from the hub's page, a review or an `/agent` comment), `POST /api/dispatch` (a start answers once its job is `starting`; the hub calls the launcher in the background and keeps the start until it ends, adopting it from the machine's next report if the answer was lost), the GitHub App, kept in `dispatch.json` and `github-app.json`. `Subscribe` and `Board` give the hub's stream the machines and jobs after each change (its `dispatch` event); the spec is [issue-dispatch.zh-TW.md](specs/issue-dispatch.zh-TW.md) |
 | `lib/host/` | `agentapi host`, the launcher on each machine: its settings (the `host` section of the config file), the repositories it has or clones, a git worktree and a Tendyard instance for each job the hub starts (restarted after it exits, kept in `jobs.json`), its API for the hub behind its token (`server.go`), its `host.*` events and heartbeats to the hub (`hub.go`), and each job's GitHub token over a unix socket for its `git` and `gh` (`credentials.go`) |
 | `lib/github/` | The hub's GitHub App, with no dependency beyond the standard library: registering it from a manifest, its JWT, installation tokens for one repository (kept until five minutes before they expire) or all, and the REST calls the dispatch makes as the app |
+| `lib/webpush/` | Web Push with the standard library only: a subscription's check, the payload encrypted for the browser (RFC 8291, `aes128gcm`), the VAPID key and its ES256 token (RFC 8292), and `Sender.Send`, which posts to the push service and tells an ended subscription (404, 410: `ErrGone`) from another refusal; `Decrypt` is the browser's side, for tests |
 | `lib/jsonapi/` | The JSON plumbing the hub, the dispatch and the launcher share: reading a body (1 MiB at most), writing an answer, and `Error`, a refusal with its status and a code, answered as `{"code", "message", "error"}` |
 | `lib/hub/schemagen` | The command `go generate` runs to write `lib/hub/hub-schema.json` from `hub.Schema` |
 | `lib/sse/` | Server-sent events as the HTML standard defines them: a reader (data: lines joined, comments skipped, CR, LF or CRLF line ends) and a writer, used by the hub for the instances' summary streams and the browser's stream. `lib/httpapi` writes its streams with huma's `sse` |
@@ -905,6 +906,21 @@ instead would make every older hub refuse the file. The delivery
 IDs of the webhook events it took, each until its signature no longer holds, go the same way into
 `instances.deliveries.json`, so a copy replayed after a restart is refused too.
 
+Push (`push.go`) keeps `push.json` next to `instances.json` (0600): the VAPID private key, made and
+written when the hub first starts so a browser's subscription outlives a restart, and the
+subscriptions, written through `atomicfile` on each change. The notifier subscribes to the store
+like a browser's stream and remembers, per instance, what it waits for (`instanceapi.AttentionKey`)
+and its latest task. The first time it sees an instance it only records that. A new attention, or
+the task it saw running ending without one, arms a timer of 5 seconds (`pushDelay`, on the hub's
+clock); when it fires, the instance is pushed only if that still holds: needing you for the same
+thing and not muted, or the same task ended and unread. Each subscription gets the payload
+(`{"kind", "title", "body", "id", "tag"}`) encrypted for it, with a `Topic` per instance so a push
+service still holding an older one replaces it; one whose push service answers 404 or 410 is
+removed. The page's service worker (`chat/public/hub/sw.js`) shows it unless a window of the hub's
+page is focused (Safari always shows it, since it ends a subscription whose pushes show nothing),
+and a click focuses a window of the hub's page, which opens the agent (`usePush`), or, with none open, opens the
+page at `#<id>`.
+
 The activity (`activity.go`) is a file of its own, `activity.json` next to `instances.json`,
 written the same way but at most every 15 seconds: up to a year of hours, each its start in Unix
 seconds and its figures as an array of numbers. Work goes in as each span ends, split across the
@@ -1225,7 +1241,9 @@ requests (`back`, `open`, …) only from the frame shown.
 props in `HubListContext`; its logic in `lib/hub.ts`, the instance, its state and the stream's
 events, and beside it `lib/hub-groups.ts`, `hub-machines.ts`, `hub-filter.ts`, `hub-format.ts`,
 `hub-spend.ts`, `hub-work.ts`, `hub-version.ts` and `hub-order.ts`; the changes it makes through
-`lib/hub-api.ts`; what the browser keeps through `lib/hub-settings.ts`), which `agentapi hub serve`
+`lib/hub-api.ts`; what the browser keeps through `lib/hub-settings.ts`; push through
+`lib/hub-push.ts` and `components/hub/use-push.ts`, with the service worker, the web app manifest
+and its icons in `public/hub/`, drawn by `scripts/hub-icons.mjs`), which `agentapi hub serve`
 serves with the same build. Each agent opened, and the Issues page, is a page of its own in the
 browser's history (`lib/hub-route.ts`, `useHubRoute`). Its Issues page
 (`components/hub/issues/`: the view, its cards, the detail with its status and the runs' timeline,

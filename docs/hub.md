@@ -939,7 +939,8 @@ the issues again. Inside an open chat, keys go to the chat. The bell's menu turn
 that starts needing you: **Notifications**, which the browser shows while the hub's tab is in the
 background (on an https page only), and **Sound**, a short chime while you look away from the
 page (its tab in the background, or another window in front), which works over plain http too. The
-browser keeps both choices. A screen reader hears the same as it happens.
+browser keeps both choices. A screen reader hears the same as it happens. With the page closed,
+only [push](#push) reaches you.
 
 <a id="on-a-phone"></a>
 
@@ -955,6 +956,41 @@ it, with only the marks of the machine's other agents, and the composer one row,
 [favorites](#favorites) beside ⋯. Answering an approval from the phone:
 
 ![Answering an approval from the hub on a phone](screenshots/demo-hub.gif)
+
+<a id="push"></a>
+
+### Push reaches a phone with the page closed
+
+**Push to this device**, in the bell's menu, has the hub send this device a notification when an
+agent starts needing you, even with the hub's page closed and the phone locked. Tapping it opens
+the hub at that agent. **Also when a task finishes** adds one for each finished task, and
+**Send a test** checks that a push arrives. Push is turned on per device, and the browser
+remembers it; a device with push gets the push instead of the open page's notification.
+
+![The bell's menu with push on this device: Push to this device, Also when a task finishes and Send a test below Notifications and Sound](screenshots/hub-push.png)
+
+Push needs the hub's page on https, such as through your Coder workspace or a reverse proxy; a
+page at `http://<address>:3290` can't subscribe. Then, on each device:
+
+- **Android, or a desktop browser:** open the hub, sign in, then turn on **Push to this device** and
+  allow notifications.
+- **iPhone or iPad (iOS 16.4 or later):** in Safari, choose Share → **Add to Home Screen**, open the
+  hub from the Home Screen, sign in again (the app keeps its own cookies, so a Coder login is asked
+  for again too), then turn on **Push to this device**. Safari in a tab can't get pushes.
+
+The hub pushes an agent 5 seconds after it starts needing you, and only if it still waits then: an
+approval answered at once, or a muted agent, sends nothing. The same request seen again after a
+reconnect isn't pushed again. A finished task is pushed only while it is unread, so one you watched finish
+isn't. While the hub's page is open and in front, its own alerts tell you instead; Safari shows
+the push anyway.
+
+The hub sends each push through the device's push service (Google's for Chrome on Android,
+Apple's for Safari, Mozilla's for Firefox), so the hub must reach the internet, through
+`HTTPS_PROXY` if set; the phone doesn't need to reach the hub. A push carries the agent's name and
+what it waits for, encrypted for the device: the push service can't read it. The hub keeps its
+key and the devices in `push.json` (see [Files](#files)); a device whose push service ended the
+subscription (the app removed, the browser data cleared) is forgotten, and turning push on again
+there subscribes it anew.
 
 <a id="connecting-the-first-agents"></a>
 
@@ -1166,7 +1202,7 @@ failed.
 | `--github-app-file` | `github-app.json` next to `--state` | The hub's GitHub App, which `/github/connect` registers |
 | `--allow-loopback-launchers` | `false` | Calls a launcher at a loopback address, such as one on the hub's machine that joined it by `localhost` ([`agentapi host`](#agentapi-host)) |
 
-The hub reaches the instances through the proxy of the environment (`HTTP_PROXY`, `HTTPS_PROXY`,
+The hub reaches the instances, and the browsers' push services, through the proxy of the environment (`HTTP_PROXY`, `HTTPS_PROXY`,
 `ALL_PROXY`). It gives up connecting after 30 seconds (10 for the TLS handshake) and waiting for an
 answer's headers after 15; the summary streams and the pages it proxies stay open. It reaches the
 launchers directly, without the proxy, and follows no redirect of theirs.
@@ -1265,6 +1301,10 @@ running Tendyard instances, which then no longer follow their conversation for t
 | `GET /api/github/issues?repo=` | A repository's open issues; `POST` opens one, and with `assign`, starts work on it |
 | `POST /api/dispatch` | Starts, messages, links and stops the work on an issue (`action`: `start`, `send`, `link_pr`, `stop`); also takes `--dispatch-token`. A start answers once its job is `starting` on a machine; the job's state then follows on the stream and in `GET /api/jobs` |
 | `GET /api/activity?tz=&days=` | The [activity](#activity) of each of the last `days` days (1 to 371, 371 by default: 53 weeks), the earliest first, in the time zone `tz` names (an IANA name such as `Asia/Taipei`; UTC by default): `{"days": [{"date": "2026-11-10", "work_seconds", "usd", "tokens": {"input", "output", "cache_write", "cache_read", "total"}}, …], "since", "time_zone"}`. `since` is the first day the hub kept, in that zone; an hour counts in the day it starts in there. 400 for a time zone or a count it doesn't take |
+| `GET /api/push` | The hub's [push](#push) key, which a browser subscribes with: `{"public_key"}` (VAPID, base64url) |
+| `PUT /api/push/subscription` | `{"endpoint", "keys": {"p256dh", "auth"}, "finished"}` (a browser's `PushSubscription.toJSON()`, with `finished` for the finished tasks too) adds the browser to those the hub pushes to, or updates it; 204. The endpoint is https. At most 50: a new one past them replaces the oldest |
+| `DELETE /api/push/subscription` | `{"endpoint"}` stops pushing to that browser; 204 |
+| `POST /api/push/test` | `{"endpoint"}` pushes a test notification to that browser, and answers 204 once its push service took it; 404 for a browser the hub doesn't push to, 410 when the push service ended the subscription (the hub forgets it), 502 for another refusal |
 | `GET /api/join` | Where machines join the hub: `urls`, each a webhook URL (`url`) with the interface of its address (`interface`; none for `--bind`'s), in the order the startup log has them; and the secret (`secret`, with `secret_shown: true`) only on a hub with a token |
 | `/i/{id}/…` | The instance's own API and chat, through the hub; the page updates an instance with `POST /i/{id}/update` and cancels with `DELETE` |
 
@@ -1289,6 +1329,7 @@ A refused or failed request answers `{"code": …, "message": …, "error": …}
 | `~/.agentapi/hub/dispatch.json` | `agentapi hub serve` | The [issue dispatch's](#issues) machines with their launchers' tokens, and the jobs: their runs, costs and last 50 messages |
 | `~/.agentapi/hub/github-app.json` | `agentapi hub serve` | The hub's GitHub App and its private key |
 | `~/.agentapi/hub/providers.json` | `agentapi hub serve` | The [model providers](#model-providers), their keys and their price picks (0600) |
+| `~/.agentapi/hub/push.json` | `agentapi hub serve` | The hub's [push](#push) key (VAPID) and the browsers it pushes to (0600); without it the hub makes a new key, and each device turns push on again |
 | `~/.agentapi/hub/openrouter.json` | `agentapi hub serve` | The hub's copy of OpenRouter's models and their prices, as it last got them, and the models the providers without models listed |
 | `~/.agentapi/hub-providers.json` | `agentapi server` | On each machine, beside its config file: the providers the hub last answered, sealed with the hub's secret, which stand in at the next start until the hub answers |
 
@@ -1309,5 +1350,5 @@ A refused or failed request answers `{"code": …, "message": …, "error": …}
 - The instance list monitors manually started instances, opens their chat and updates them when
   their machine allows it; it cannot start or stop them. The Issues page starts and stops issue
   jobs through the machines' launchers.
-- Nothing reaches your phone while the hub's page is closed: the hub doesn't send push
-  notifications yet. Each Tendyard has one webhook, and the hub uses it.
+- [Push](#push) needs the hub's page on https and the hub able to reach the internet, and an
+  iPhone gets it only from the hub added to its Home Screen. Each Tendyard has one webhook, and the hub uses it.

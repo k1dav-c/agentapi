@@ -97,7 +97,8 @@ has the complete commit history.
   [terminal](docs/agents.md#terminal) handles logins and commands, on phones too.
 - Follow each subagent's steps in [Lineage](docs/chat-ui.md#lineage), including while it works.
 - Use [background alerts](docs/chat-ui.md#session-details-and-alerts), browser notifications and
-  cached transcripts to follow work through tab changes and dropped connections.
+  cached transcripts to follow work through tab changes and dropped connections; the hub
+  [pushes](docs/hub.md#push) what needs you to a phone with the page closed.
 
 **Queues and recovery mechanisms support long-running work**
 

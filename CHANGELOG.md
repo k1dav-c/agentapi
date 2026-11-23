@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Features
+
+- The hub pushes what needs you to a phone with its page closed ([Push](docs/hub.md#push)). The
+  bell's **Push to this device** subscribes the browser through Web Push; **Also when a task
+  finishes** adds the finished tasks, and **Send a test** checks that one arrives. The hub sends a
+  push 5 seconds after an agent starts needing you, only if it still waits then and isn't muted.
+  The push is encrypted for the device, so the push service can't read it. On an iPhone or iPad, add the hub
+  to the Home Screen first. Push needs the hub's page on https.
+- The hub's page installs as an app: it has a web app manifest and icons, so **Add to Home Screen**
+  opens it on its own, without the browser's bars.
+- The hub keeps its push key and the subscribed browsers in `push.json` next to `instances.json`,
+  and serves `GET /api/push`, `PUT` and `DELETE /api/push/subscription` and `POST /api/push/test`.
+  The new `lib/webpush` encrypts and sends pushes with the standard library only.
+
 ### Documentation
 
 - A new guide, [Setting up Tendyard](docs/setup.md), goes from empty machines to a dispatched issue

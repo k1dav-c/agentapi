@@ -84,7 +84,7 @@ Tendyard 在 [`k1dav-c/agentapi`](https://github.com/k1dav-c/agentapi) 開發；
 - 在[檔案檢視器](docs/chat-ui.zh-TW.md#檔案)查看原始內容、git 差異，以及 HTML、Markdown 與圖片預覽。
   它能尋找工作目錄下其他 repo 中的路徑；共用[終端機](docs/agents.zh-TW.md#終端機)處理登入與指令，手機也能用。
 - 用 [Lineage](docs/chat-ui.zh-TW.md#lineage) 追蹤各 subagent 的步驟，執行中也能查看。
-- 用[背景提醒](docs/chat-ui.zh-TW.md#工作階段詳細資訊與提醒)、瀏覽器通知與對話快取，在切換分頁或連線中斷後繼續追蹤工作。
+- 用[背景提醒](docs/chat-ui.zh-TW.md#工作階段詳細資訊與提醒)、瀏覽器通知與對話快取，在切換分頁或連線中斷後繼續追蹤工作；頁面關著時，hub 也會把需要你處理的事[推播](docs/hub.zh-TW.md#推播)到手機。
 
 **佇列與恢復機制支援長時間工作**
 
