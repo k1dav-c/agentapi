@@ -2,16 +2,13 @@ package hub
 
 import (
 	"context"
-	"errors"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 	"unicode/utf8"
 
 	"github.com/coder/agentapi/lib/dispatch"
 	"github.com/coder/agentapi/lib/instanceapi"
-	"github.com/coder/agentapi/lib/webpush"
 )
 
 // The notifiers: what needs you and the finished tasks, from the store's
@@ -26,45 +23,6 @@ const pushDelay = 5 * time.Second
 
 // maxPushText is the most characters of a notification's text.
 const maxPushText = 200
-
-// pushAll sends payload to every device that wants it now; i is the
-// agent it is about, nil for an issue's.
-func (h *Hub) pushAll(ctx context.Context, payload pushPayload, i *Instance) {
-	urgency := webpush.UrgencyNormal
-	if payload.Kind == pushNeedsYou {
-		urgency = webpush.UrgencyHigh
-	}
-	now := h.clock.Now()
-	subs, err := h.push.list(now)
-	if err != nil {
-		h.logger.Error("Couldn't forget the push devices whose session ended", "error", err)
-	}
-	payload.Badge = h.needingYou()
-	var wg sync.WaitGroup
-	for _, sub := range subs {
-		if !sub.wants(payload, i, now) {
-			continue
-		}
-		wg.Go(func() {
-			err := h.sendPush(ctx, sub, payload, urgency)
-			if err != nil && !errors.Is(err, webpush.ErrGone) {
-				h.logger.Warn("Couldn't push a notification", "push_service", pushService(sub.Endpoint), "error", err)
-			}
-		})
-	}
-	wg.Wait()
-}
-
-// needingYou counts the agents that need you, for the app icon's badge.
-func (h *Hub) needingYou() int {
-	n := 0
-	for _, i := range h.store.list() {
-		if i.State == instanceapi.StateNeedsYou {
-			n++
-		}
-	}
-	return n
-}
 
 // pushSeen is what the notifier last saw of an instance.
 type pushSeen struct {
@@ -149,7 +107,7 @@ func (h *Hub) followPush(ctx context.Context, ch chan storeEvent, seen map[strin
 // pushLater pushes kind for the instance id after pushDelay, if what it
 // says still holds then.
 func (h *Hub) pushLater(ctx context.Context, id string, kind pushKind, seen pushSeen) {
-	if !h.push.any() {
+	if !h.push.devices.any() {
 		return
 	}
 	h.clock.AfterFunc(pushDelay, func() {
@@ -164,7 +122,7 @@ func (h *Hub) pushLater(ctx context.Context, id string, kind pushKind, seen push
 		if !ok {
 			return
 		}
-		go h.pushAll(ctx, payload, &i)
+		go h.push.sendAll(ctx, payload, &i)
 	}, "hub", "push")
 }
 
@@ -266,8 +224,8 @@ func (h *Hub) notifyIssues(ctx context.Context, d *dispatch.Service) {
 			if !known {
 				continue
 			}
-			if payload, ok := issuePush(job, before, now); ok && h.push.any() {
-				go h.pushAll(ctx, payload, nil)
+			if payload, ok := issuePush(job, before, now); ok && h.push.devices.any() {
+				go h.push.sendAll(ctx, payload, nil)
 			}
 		}
 		seen = next
@@ -294,4 +252,15 @@ func issuePush(job dispatch.Job, before, now jobSeen) (pushPayload, bool) {
 	payload.Body = clip(strings.Join(strings.Fields(payload.Body), " "), maxPushText)
 	payload.Title = clip(payload.Title, maxPushText)
 	return payload, true
+}
+
+// needingYou counts the agents that need you, for the app icon's badge.
+func (h *Hub) needingYou() int {
+	n := 0
+	for _, i := range h.store.list() {
+		if i.State == instanceapi.StateNeedsYou {
+			n++
+		}
+	}
+	return n
 }

@@ -60,7 +60,7 @@ func TestPushDevicesEndWithTheHubToken(t *testing.T) {
 	state := filepath.Join(t.TempDir(), "instances.json")
 	h, err := New(Config{Token: "t", Secret: "s", StatePath: state})
 	require.NoError(t, err)
-	_, err = h.push.renew(pushSubscription{Subscription: b.subscription("/a"), TokenID: pushTokenID("t")})
+	_, err = h.push.devices.renew(pushSubscription{Subscription: b.subscription("/a"), TokenID: pushTokenID("t")})
 	require.NoError(t, err)
 
 	same, err := New(Config{Token: "t", Secret: "s", StatePath: state})
@@ -69,7 +69,7 @@ func TestPushDevicesEndWithTheHubToken(t *testing.T) {
 	other, err := New(Config{Token: "u", Secret: "s", StatePath: state})
 	require.NoError(t, err)
 	assert.Empty(t, listed(t, other))
-	assert.True(t, h.push.key.Equal(other.push.key), "the key stays")
+	assert.True(t, h.push.devices.key.Equal(other.push.devices.key), "the key stays")
 	again, err := New(Config{Token: "t", Secret: "s", StatePath: state})
 	require.NoError(t, err)
 	assert.Empty(t, listed(t, again), "forgotten for good")
@@ -179,7 +179,7 @@ func TestPushPrefsWants(t *testing.T) {
 func TestPushFollowsTheDevicesGroups(t *testing.T) {
 	b := newBrowser(t)
 	h, clock := pushHub(t, b, false)
-	_, _, err := h.push.update(pushDeviceID(b.server.URL+"/p"), func(sub *pushSubscription) { sub.Groups = []string{"Client work"} })
+	_, _, err := h.push.devices.update(pushDeviceID(b.server.URL+"/p"), func(sub *pushSubscription) { sub.Groups = []string{"Client work"} })
 	require.NoError(t, err)
 
 	setSummary(h, instanceapi.SummaryBody{})

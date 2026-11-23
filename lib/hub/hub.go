@@ -35,7 +35,6 @@ import (
 	"github.com/coder/agentapi/lib/netaddr"
 	"github.com/coder/agentapi/lib/provider"
 	"github.com/coder/agentapi/lib/sse"
-	"github.com/coder/agentapi/lib/webpush"
 )
 
 // Config is how the hub runs.
@@ -94,8 +93,7 @@ type Hub struct {
 	store      *store
 	providers  *providerStore
 	prices     *priceBook
-	push       *pushStore
-	pushSender *webpush.Sender
+	push       *pusher
 	client     *http.Client
 	deliveries *deliveries
 	// badSignatures limits the log of events refused for their signature.
@@ -148,7 +146,7 @@ func New(config Config) (*Hub, error) {
 	if err != nil {
 		return nil, err
 	}
-	push, err := newPushStore(config.StatePath, pushTokenID(config.Token))
+	devices, err := newPushStore(config.StatePath, pushTokenID(config.Token))
 	if err != nil {
 		return nil, err
 	}
@@ -161,13 +159,15 @@ func New(config Config) (*Hub, error) {
 	if config.StatePath != "" {
 		deliveriesFile = deliveriesPath(config.StatePath)
 	}
-	return &Hub{
+	h := &Hub{
 		config: config, logger: config.Logger, store: st, providers: providers, prices: prices, client: client,
-		push: push, pushSender: &webpush.Sender{Key: push.key, Subject: pushSubject, Client: pushClient, Now: func() time.Time { return config.Clock.Now() }}, clock: config.Clock,
+		clock:      config.Clock,
 		deliveries: newDeliveries(deliveriesFile, config.Logger, config.Clock.Now()),
 		interfaces: netaddr.Interfaces, watchers: map[string]context.CancelFunc{},
 		streamWriteTimeout: streamWriteTimeout,
-	}, nil
+	}
+	h.push = newPusher(devices, pushClient, config.Clock, config.Logger, h.needingYou)
+	return h, nil
 }
 
 // newTransport is how the hub reaches the instances by default: the

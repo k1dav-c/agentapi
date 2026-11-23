@@ -119,7 +119,7 @@ func TestPushRoutes(t *testing.T) {
 	require.Equal(t, http.StatusOK, code)
 	var info pushInfo
 	require.NoError(t, json.Unmarshal(body, &info))
-	assert.Equal(t, webpush.PublicKey(h.push.key), info.PublicKey)
+	assert.Equal(t, webpush.PublicKey(h.push.devices.key), info.PublicKey)
 	stat, err := os.Stat(filepath.Join(filepath.Dir(state), "push.json"))
 	require.NoError(t, err, "the key is kept at once")
 	assert.Equal(t, os.FileMode(0o600), stat.Mode().Perm())
@@ -154,7 +154,7 @@ func TestPushRoutes(t *testing.T) {
 	// A restarted hub keeps its key and the subscriptions.
 	again, err := New(Config{Token: "t", Secret: "s", StatePath: state})
 	require.NoError(t, err)
-	assert.True(t, h.push.key.Equal(again.push.key))
+	assert.True(t, h.push.devices.key.Equal(again.push.devices.key))
 	require.Len(t, listed(t, again), 1)
 	assert.Equal(t, sub, listed(t, again)[0].Subscription)
 	assert.True(t, listed(t, again)[0].Finished)
@@ -206,7 +206,7 @@ func pushHub(t *testing.T, b *browser, finished bool) (*Hub, *quartz.Mock) {
 	clock := quartz.NewMock(t)
 	h, err := New(Config{Token: "t", Secret: "s", Clock: clock, PushClient: b.server.Client()})
 	require.NoError(t, err)
-	_, err = h.push.renew(pushSubscription{Subscription: b.subscription("/p"), PushPrefs: PushPrefs{Finished: finished}})
+	_, err = h.push.devices.renew(pushSubscription{Subscription: b.subscription("/p"), PushPrefs: PushPrefs{Finished: finished}})
 	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -357,7 +357,7 @@ func TestPushForClips(t *testing.T) {
 
 func listed(t *testing.T, h *Hub) []pushSubscription {
 	t.Helper()
-	subs, err := h.push.list(h.clock.Now())
+	subs, err := h.push.devices.list(h.clock.Now())
 	require.NoError(t, err)
 	return subs
 }
