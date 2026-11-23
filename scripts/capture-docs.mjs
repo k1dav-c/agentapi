@@ -742,15 +742,27 @@ try {
     const page = await openHub(desktop, {init: [standIn, {endpoint: 'https://push.invalid/demo', keys}]});
     await page.getByRole('button', {name: 'Alerts off'}).click();
     await page.getByRole('menuitemcheckbox', {name: 'Push to this device'}).click();
-    await page.getByRole('menuitemcheckbox', {name: 'Also when a task finishes'}).click();
-    await page.getByRole('menuitemcheckbox', {name: 'Also when a task finishes', checked: true}).waitFor();
+    await page.getByRole('menuitem', {name: 'Send a test'}).waitFor();
     await page.waitForTimeout(300);
     // The open menu hides the rest of the page from roles.
     await regionShot(page, 'hub-push.png', [page.locator('button[aria-label="Alerts on"]'), page.getByRole('menu')]);
-    await page.keyboard.press('Escape');
-    await page.getByRole('button', {name: 'Alerts on'}).click();
-    await page.getByRole('menuitemcheckbox', {name: 'Push to this device'}).click();
-    await page.locator('button[aria-label="Alerts off"]').waitFor();
+    // The Push settings: this device following one group and the pinned agents, with quiet hours.
+    await page.getByRole('menuitem', {name: 'Push settings…'}).click();
+    const settings = page.getByRole('dialog');
+    const card = settings.getByRole('listitem').first();
+    await card.getByText('This device').waitFor();
+    await card.getByRole('checkbox', {name: /Finished tasks/}).click();
+    await card.getByRole('checkbox', {name: /Finished tasks/, checked: true}).waitFor();
+    await card.getByRole('button', {name: /Pinned/}).click();
+    await card.getByRole('button', {name: 'Client work'}).click();
+    await card.getByRole('button', {name: 'Client work', pressed: true}).waitFor();
+    await card.getByRole('checkbox', {name: /Quiet hours/}).click();
+    await card.getByLabel('Quiet from').waitFor();
+    await page.waitForTimeout(300);
+    await elementShot(page, settings, 'hub-settings-push.png');
+    // Off again, so no later page pushes.
+    await card.getByRole('button', {name: /^Remove /}).click();
+    await card.waitFor({state: 'detached'});
     await page.context().close();
   }
 

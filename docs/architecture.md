@@ -95,7 +95,7 @@ emitter. Handlers call the conversation and read state from the emitter.
 | `lib/native/procutil` | Child process groups and graceful shutdown |
 | `lib/statedb/` | SQLite persistence for `--state-db` |
 | `lib/instanceapi/` | The contract between a Tendyard instance and the clients that watch many: who it is (`WebhookInstance`, in its webhook events, summary and registry entry, with its `AgentType`), its summary, the webhook envelope with its signature (`Sign`, `Verify`), and the state a hub shows of each instance (`StateOf`). It imports only `lib/agentstate` and `lib/util` |
-| `lib/hub/` | `agentapi hub serve`, over `lib/instanceapi` and `lib/httpmw` rather than the server: the instances, the groups and pins set on its page, when each last changed what its row shows and when the hub saw each working (`store.go`, `work.go`, kept in a file by `persist.go`), the activity of the last year hour by hour (`activity.go`, `activity.json`, `GET /api/activity`: the work, and each scope's spend from the summaries' `spend.hours`), the favorite prompts (`favorites.go`, `GET`/`PUT /api/favorites`, among the hub's settings in the same file), the model providers (`providers.go`, `providers.json`, `GET`/`PUT /api/providers`, `POST /api/providers/check` for the editor's Check connection, and `POST /api/providers/sync` for the Tendyard instances) and their models' prices from OpenRouter (`prices.go`, `openrouter.go`, `openrouter.json`, `POST /api/providers/prices`, `GET /api/providers/openrouter`), the schema of its wire types (`schema.go`, `hub-schema.json`, for the page's types), the signed webhook receiver (`webhook.go`), each instance's summary stream (`watch.go`), sign-in, the browser's event stream and the proxy to the instances (`hub.go`, `proxy.go`), where machines join it (`join.go`: its addresses for `GET /api/join` and the startup log), and Web Push to the browsers that subscribed (`push.go`, `push.json`, `/api/push`: what needs you and the finished tasks, from the store's changes); the user guide is [hub.md](hub.md) |
+| `lib/hub/` | `agentapi hub serve`, over `lib/instanceapi` and `lib/httpmw` rather than the server: the instances, the groups and pins set on its page, when each last changed what its row shows and when the hub saw each working (`store.go`, `work.go`, kept in a file by `persist.go`), the activity of the last year hour by hour (`activity.go`, `activity.json`, `GET /api/activity`: the work, and each scope's spend from the summaries' `spend.hours`), the favorite prompts (`favorites.go`, `GET`/`PUT /api/favorites`, among the hub's settings in the same file), the model providers (`providers.go`, `providers.json`, `GET`/`PUT /api/providers`, `POST /api/providers/check` for the editor's Check connection, and `POST /api/providers/sync` for the Tendyard instances) and their models' prices from OpenRouter (`prices.go`, `openrouter.go`, `openrouter.json`, `POST /api/providers/prices`, `GET /api/providers/openrouter`), the schema of its wire types (`schema.go`, `hub-schema.json`, for the page's types), the signed webhook receiver (`webhook.go`), each instance's summary stream (`watch.go`), sign-in, the browser's event stream and the proxy to the instances (`hub.go`, `proxy.go`), where machines join it (`join.go`: its addresses for `GET /api/join` and the startup log), and Web Push to the devices that subscribed (`push.go`, the pusher that sends; `push_store.go`, the devices in `push.json`; `push_api.go`, `/api/push` and `/api/push/devices`; each device's settings in `push_prefs.go`; the notifiers in `push_notify.go`: what needs you and the finished tasks from the store's changes, the issues' work from the dispatch's); the user guide is [hub.md](hub.md) |
 | `lib/dispatch/` | The hub's issue dispatch, which `lib/hub` mounts: the machines whose launchers report (`host.*` events; each name pinned to the launcher token it first came with), the jobs with their runs' costs (the tasks from `task.*` events; the spend and work time from what the hub reads of the run's Tendyard, `Saw`) and the last 50 messages their agents were sent (`send`, from the hub's page, a review or an `/agent` comment), `POST /api/dispatch` (a start answers once its job is `starting`; the hub calls the launcher in the background and keeps the start until it ends, adopting it from the machine's next report if the answer was lost), the GitHub App, kept in `dispatch.json` and `github-app.json`. `Subscribe` and `Board` give the hub's stream the machines and jobs after each change (its `dispatch` event); the spec is [issue-dispatch.zh-TW.md](specs/issue-dispatch.zh-TW.md) |
 | `lib/host/` | `agentapi host`, the launcher on each machine: its settings (the `host` section of the config file), the repositories it has or clones, a git worktree and a Tendyard instance for each job the hub starts (restarted after it exits, kept in `jobs.json`), its API for the hub behind its token (`server.go`), its `host.*` events and heartbeats to the hub (`hub.go`), and each job's GitHub token over a unix socket for its `git` and `gh` (`credentials.go`) |
 | `lib/github/` | The hub's GitHub App, with no dependency beyond the standard library: registering it from a manifest, its JWT, installation tokens for one repository (kept until five minutes before they expire) or all, and the REST calls the dispatch makes as the app |
@@ -906,20 +906,39 @@ instead would make every older hub refuse the file. The delivery
 IDs of the webhook events it took, each until its signature no longer holds, go the same way into
 `instances.deliveries.json`, so a copy replayed after a restart is refused too.
 
-Push (`push.go`) keeps `push.json` next to `instances.json` (0600): the VAPID private key, made and
-written when the hub first starts so a browser's subscription outlives a restart, and the
-subscriptions, written through `atomicfile` on each change. The notifier subscribes to the store
-like a browser's stream and remembers, per instance, what it waits for (`instanceapi.AttentionKey`)
-and its latest task. The first time it sees an instance it only records that. A new attention, or
-the task it saw running ending without one, arms a timer of 5 seconds (`pushDelay`, on the hub's
-clock); when it fires, the instance is pushed only if that still holds: needing you for the same
-thing and not muted, or the same task ended and unread. Each subscription gets the payload
-(`{"kind", "title", "body", "id", "tag"}`) encrypted for it, with a `Topic` per instance so a push
-service still holding an older one replaces it; one whose push service answers 404 or 410 is
-removed. The page's service worker (`chat/public/hub/sw.js`) shows it unless a window of the hub's
-page is focused (Safari always shows it, since it ends a subscription whose pushes show nothing),
-and a click focuses a window of the hub's page, which opens the agent (`usePush`), or, with none open, opens the
-page at `#<id>`.
+Push keeps `push.json` next to `instances.json` (0600, `push_store.go`): the VAPID private key, made and
+written when the hub first starts so a browser's subscription outlives a restart, the devices, and
+the IDs of those removed from the settings (`revoked`, the last 200), written by a `persister`
+within a second of a change and on `Close`, so a push's answer costs no write of its own. A device is a subscription with its label, its settings
+(`PushPrefs`, `push_prefs.go`), when its push service last took a push or refused one, and
+`expires_at`. A page renews it on each load (`PUT /api/push/subscription`), and with the session
+cookie it ends with that session (issued + 30 days). `token_id`, an HMAC of the hub token, makes a
+hub started with another token forget it; a device of 5.8, kept without one, takes the hub's.
+Removing a device from the settings (`revoke`) makes its page's renewals 410 until that page turns
+push on again (`enable`), and its page then turns push off; signing out with the endpoint
+(`DELETE /api/session`) removes the device on the hub, whatever the browser's own unsubscribe does.
+Past 50 devices, a new one replaces those whose session ended, then the oldest. The API names a device by the first 8 bytes of its
+endpoint's SHA-256, so the endpoint, which lets whoever holds it push, never leaves the hub.
+
+The notifiers are in `push_notify.go`. One subscribes to the store like a browser's stream and
+remembers, per instance, what it waits for (`instanceapi.AttentionKey`) and its latest task. The
+first time it sees an instance it only records that. A new attention, or the task it saw running
+ending without one, arms a timer of 5 seconds (`pushDelay`, on the hub's clock); when it fires, the
+instance is pushed only if that still holds: needing you for the same thing and not muted, or the
+same task ended and unread. The other follows the dispatch (`Subscribe`, `Board`) and pushes a job
+whose pull request appears, or that turns `failed` or `done`, at once. Each device that wants the
+push (`PushPrefs.wants`: its kind, the agent's group or pin, counting only the groups agents are in
+now, its quiet hours in its time zone) gets
+the payload (`{"kind", "title", "body", "id", "issue", "tag", "badge"}`, `badge` the number of
+agents that need you then) encrypted for it, with a `Topic` per instance or issue so a push service still
+holding an older one replaces it, and a VAPID token per push service kept until an hour before it
+expires; one whose push service answers 404 or 410 is removed. The pushes go out in the background
+through the pusher (`goSendAll`), which `Run` waits for (`stop`) before it returns. The page's
+service worker (`chat/public/hub/sw.js`) sets the app icon's badge, and shows the push unless a
+window of the hub's page is focused (Safari always shows it, since it ends a subscription whose
+pushes show nothing). A click focuses a window of the hub's page, which opens the agent or the
+issue (`usePush`), or, with none open, opens the page at `#<id>` or `?issue=<key>`. The page sets
+the badge itself while it is open.
 
 The activity (`activity.go`) is a file of its own, `activity.json` next to `instances.json`,
 written the same way but at most every 15 seconds: up to a year of hours, each its start in Unix
@@ -1135,6 +1154,13 @@ of the content's SHA-256, so a path never changes; unused ones are removed after
   `launcher.go`). LAN addresses stay allowed, so a machine with the secret
   can still point the hub's launcher calls at another machine there.
 
+  A push endpoint is a URL a signed-in page gives the hub to POST to, so the
+  hub takes only those of the browsers' push services (`checkPushService`:
+  `pushServiceHosts`, `*.googleapis.com`, `*.push.apple.com`,
+  `*.push.services.mozilla.com`, `*.notify.windows.com`, and
+  `--push-service-hosts`), when a page subscribes and again before each push,
+  and its push client follows no redirect (`newPushClient`).
+
   Browsers sign in with the hub token for an HttpOnly, SameSite=Lax cookie
   that holds its issue time, signed with the token, which the hub refuses
   after 30 days. The proxy drops their cookies and `Authorization`, `Origin`,
@@ -1242,7 +1268,9 @@ props in `HubListContext`; its logic in `lib/hub.ts`, the instance, its state an
 events, and beside it `lib/hub-groups.ts`, `hub-machines.ts`, `hub-filter.ts`, `hub-format.ts`,
 `hub-spend.ts`, `hub-work.ts`, `hub-version.ts` and `hub-order.ts`; the changes it makes through
 `lib/hub-api.ts`; what the browser keeps through `lib/hub-settings.ts`; push through
-`lib/hub-push.ts` and `components/hub/use-push.ts`, with the service worker, the web app manifest
+`lib/hub-push.ts` (the hub's side) and `lib/hub-push-browser.ts` (the browser's), and the
+alerts, the bell's menu among them, through `components/hub/use-hub-alerts.ts`
+(`alerts-menu.tsx`, `use-push.ts`, `push-settings.tsx`), with the service worker, the web app manifest
 and its icons in `public/hub/`, drawn by `scripts/hub-icons.mjs`), which `agentapi hub serve`
 serves with the same build. Each agent opened, and the Issues page, is a page of its own in the
 browser's history (`lib/hub-route.ts`, `useHubRoute`). Its Issues page

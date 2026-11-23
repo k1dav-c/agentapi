@@ -87,6 +87,7 @@ export function useHubStream(root: string) {
   return {
     session,
     signedIn: () => setSession("signed-in"),
+    signedOut: () => setSession("signed-out"),
     // Asks the hub again now, as the user asked.
     retrySession: () => setSessionAttempt((n) => n + 1),
     instances,

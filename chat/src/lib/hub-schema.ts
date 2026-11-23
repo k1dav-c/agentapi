@@ -591,6 +591,45 @@ export interface components {
             /** @description The revision returned by the client's latest provider-list read. */
             revision: string;
         };
+        PushDevice: {
+            /** Format: date-time */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description When the device's session ends, and the hub stops pushing to it; missing for none.
+             */
+            expires_at?: string;
+            /** @description Push when an agent finishes a task, not only when it needs you. */
+            finished: boolean;
+            /** @description The groups whose agents are pushed ("" for the ungrouped ones); with pinned false, none is every agent. */
+            groups: string[];
+            /** @description The device's ID: the start of its endpoint's SHA-256, in hex. */
+            id: string;
+            /** @description Push the issues' work: a pull request opened, a job failed, a job done. */
+            issues: boolean;
+            label?: string;
+            /** @description Why its push service last refused one, until it takes the next. */
+            last_error?: string;
+            /** Format: date-time */
+            last_error_at?: string;
+            /**
+             * Format: date-time
+             * @description When its push service last took a push.
+             */
+            last_sent_at?: string;
+            /** @description Push the pinned agents, besides those of groups. */
+            pinned: boolean;
+            /** @description When nothing is pushed to the device; missing for never. */
+            quiet_hours?: components["schemas"]["QuietHours"];
+            /**
+             * Format: date-time
+             * @description When a signed-in page on the device last told the hub.
+             */
+            renewed_at?: string;
+        };
+        PushDevicesBody: {
+            devices: components["schemas"]["PushDevice"][];
+        };
         PushEndpointBody: {
             endpoint: string;
         };
@@ -598,12 +637,41 @@ export interface components {
             /** @description The hub's VAPID public key, base64url: the applicationServerKey a browser subscribes with. */
             public_key: string;
         };
+        PushPrefsChange: {
+            finished?: boolean;
+            groups?: string[];
+            issues?: boolean;
+            pinned?: boolean;
+            /** @description The quiet hours; {} removes them. */
+            quiet_hours?: components["schemas"]["QuietHours"];
+        };
         PushSubscribeBody: {
+            /** @description Push is being turned on here: a device removed from the settings (DELETE /api/push/devices/{id}) is added again; without it, its renewal is 410. */
+            enable?: boolean;
             /** @description The push service's URL for this browser (https). */
             endpoint: string;
-            /** @description Push when an agent finishes a task too, not only when it needs you. */
+            /** @description For a new device: push the finished tasks too. Its settings are changed with PATCH /api/push/devices/{id}. */
             finished?: boolean;
             keys: components["schemas"]["WebPushKeys"];
+            /** @description What the device is, as the page names it (such as iPhone · Home Screen); at most 60 characters. */
+            label?: string;
+        };
+        QuietHours: {
+            /**
+             * @description When it ends, HH:MM.
+             * @example 08:00
+             */
+            end: string;
+            /**
+             * @description When the quiet starts, HH:MM.
+             * @example 22:00
+             */
+            start: string;
+            /**
+             * @description The IANA time zone the times are in, such as Asia/Taipei.
+             * @example Asia/Taipei
+             */
+            time_zone: string;
         };
         RemovedEvent: {
             id: string;
@@ -613,6 +681,10 @@ export interface components {
         };
         SignInBody: {
             token: string;
+        };
+        SignOutBody: {
+            /** @description This browser's push endpoint: the hub stops pushing to it. */
+            endpoint?: string;
         };
         /**
          * Source

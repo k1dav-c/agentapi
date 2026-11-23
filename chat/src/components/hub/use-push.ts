@@ -1,60 +1,100 @@
 "use client";
 
-import {useEffect, useMemo, useRef, useState} from "react";
+import {useEffect, useMemo, useState} from "react";
 import {toast} from "sonner";
-import {HubAPIError} from "@/lib/hub-api";
-import {browserPush, browserPushEnvironment, createHubPush, parseOpenMessage, PushPermissionError, pushSupport, type PushSupport} from "@/lib/hub-push";
+import {createHubAPI, HubAPIError} from "@/lib/hub-api";
+import {createHubPush, type HubPush} from "@/lib/hub-push";
+import {
+  browserPush,
+  browserPushEnvironment,
+  deviceLabel,
+  parseOpenMessage,
+  PushPermissionError,
+  pushSupport,
+  setAppBadge,
+  type OpenTarget,
+  type PushSupport,
+} from "@/lib/hub-push-browser";
 import {useHubSetting} from "@/lib/hub-settings";
 import {basePath} from "./instance-bar";
 
 export interface HubPushState {
   // This browser gets the hub's pushes.
   push: boolean;
-  // ...of the finished tasks too.
-  pushFinished: boolean;
   support: PushSupport;
+  api: HubPush;
   togglePush: () => Promise<void>;
-  togglePushFinished: () => Promise<void>;
   testPush: () => Promise<void>;
+  // signOut signs this browser out of the hub, which stops pushing to it
+  // with it; it throws what the hub answered when it didn't sign out.
+  signOut: () => Promise<void>;
 }
 
 // usePush is whether the hub pushes to this browser (the browser keeps
-// it), and the menu's actions: turn it on or off, push the finished tasks
-// too, send a test. While it is on, the page tells the hub its
-// subscription again once signed in; a click on a notification of a page
-// already open opens the agent here (open).
-export function usePush(root: string, signedIn: boolean, open: (id: string) => void): HubPushState {
+// it), and the menu's actions: turn it on or off, send a test. What a
+// device gets is kept on the hub (the settings' Devices). While it is on,
+// the page tells the hub its subscription again once signed in, which
+// keeps the device for that session; a click on a notification of a page
+// already open, or the page it opened, opens the agent or the issue here
+// (open). needYou is how many agents need you, for the app icon's badge.
+export function usePush(root: string, signedIn: boolean, open: (target: OpenTarget) => void, needYou: number): HubPushState {
   const [push, setPush] = useHubSetting("push");
-  const [pushFinished, setPushFinished] = useHubSetting("pushFinished");
   // Known after the first render: the page is rendered ahead without a
   // browser.
   const [support, setSupport] = useState<PushSupport>("unsupported");
-  useEffect(() => setSupport(pushSupport(browserPushEnvironment())), []);
-  const api = useMemo(() => createHubPush(root, browserPush(basePath)), [root]);
-  const finished = useRef(pushFinished);
-  finished.current = pushFinished;
+  const [label, setLabel] = useState("");
+  useEffect(() => {
+    const env = browserPushEnvironment();
+    setSupport(pushSupport(env));
+    setLabel(deviceLabel(navigator.userAgent, env.standalone, navigator.maxTouchPoints));
+  }, []);
+  const api = useMemo(() => createHubPush(root, browserPush(basePath), label), [root, label]);
 
   useEffect(() => {
-    if (!push || !signedIn || support !== "supported") return;
-    api.sync(finished.current).catch(() => {
-      // The menu's Send a test says what is wrong.
+    if (!push || !signedIn || support !== "supported" || !label) return;
+    api.sync().catch(async (error: unknown) => {
+      // Removed in another device's Push settings: off here too.
+      if (error instanceof HubAPIError && error.status === 410) {
+        await api.forget().catch(() => {});
+        setPush(false);
+        toast("Push is off on this device", {description: "It was removed in the hub's Push settings."});
+      }
+      // Otherwise the menu's Send a test says what is wrong.
     });
-  }, [push, signedIn, support, api]);
+  }, [push, signedIn, support, label, api, setPush]);
 
   useEffect(() => {
     if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
     const onMessage = (event: MessageEvent) => {
-      const id = parseOpenMessage(event.data);
-      if (id) open(id);
+      const target = parseOpenMessage(event.data);
+      if (target) open(target);
     };
     navigator.serviceWorker.addEventListener("message", onMessage);
     return () => navigator.serviceWorker.removeEventListener("message", onMessage);
   }, [open]);
 
+  // The page a click on an issue's notification opened, with none open
+  // (?issue=): that issue, once.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const issue = url.searchParams.get("issue");
+    if (!issue) return;
+    url.searchParams.delete("issue");
+    window.history.replaceState(window.history.state, "", url);
+    open({issue});
+  }, [open]);
+
+  // The badge says what the page does while it is open; the pushes, while
+  // it is closed.
+  useEffect(() => {
+    if (signedIn) setAppBadge(needYou);
+  }, [signedIn, needYou]);
+
   const togglePush = async () => {
     if (push) {
-      setPush(false);
+      // Off once the hub forgot it: what reads the devices then sees it gone.
       await api.disable().catch((error: unknown) => toast.error("Couldn't turn push off on the hub", {description: messageOf(error)}));
+      setPush(false);
       return;
     }
     switch (support) {
@@ -70,9 +110,9 @@ export function usePush(root: string, signedIn: boolean, open: (id: string) => v
       case "supported":
     }
     try {
-      await api.enable(pushFinished);
+      await api.enable();
       setPush(true);
-      toast.success("Push is on for this device", {description: "Send a test from this menu to check that it arrives."});
+      toast.success("Push is on for this device", {description: "Send a test from this menu to check that it arrives; Push settings choose what it gets."});
     } catch (error) {
       if (error instanceof PushPermissionError) {
         toast.error("Notifications are blocked for this site", {description: "Allow them in the browser's site settings, then try again."});
@@ -82,22 +122,16 @@ export function usePush(root: string, signedIn: boolean, open: (id: string) => v
     }
   };
 
-  const togglePushFinished = async () => {
-    const next = !pushFinished;
-    setPushFinished(next);
-    if (push) await api.sync(next).catch((error: unknown) => toast.error("Couldn't tell the hub", {description: messageOf(error)}));
-  };
-
   const testPush = async () => {
     try {
       await api.test();
       toast.success("The hub sent a test notification");
     } catch (error) {
       // The hub forgot this browser (its push service ended the
-      // subscription): subscribe again.
+      // subscription, or its session did): subscribe again.
       if (error instanceof HubAPIError && (error.status === 404 || error.status === 410)) {
         try {
-          await api.enable(pushFinished);
+          await api.enable();
           await api.test();
           toast.success("The hub sent a test notification");
           return;
@@ -109,7 +143,16 @@ export function usePush(root: string, signedIn: boolean, open: (id: string) => v
     }
   };
 
-  return {push, pushFinished, support, togglePush, togglePushFinished, testPush};
+  const signOut = async () => {
+    const endpoint = push ? await api.endpoint().catch(() => undefined) : undefined;
+    await createHubAPI(root).signOut(endpoint);
+    setAppBadge(0);
+    if (!push) return;
+    await api.forget().catch(() => {});
+    setPush(false);
+  };
+
+  return {push, support, api, togglePush, testPush, signOut};
 }
 
 function messageOf(error: unknown): string {

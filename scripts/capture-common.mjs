@@ -289,7 +289,9 @@ export async function startDemoHub({root, env, hubPort, instancePort}) {
       last_seen: new Date(seededAt * 1000).toISOString(), changed_at: new Date(seededAt * 1000).toISOString(), work: {spans}};
   })}), {mode: 0o600});
   startProcess('hub', root, hubEnv, ['hub', 'serve', '--bind', '127.0.0.1', '--port', String(hubPort),
-    '--token', hubToken, '--secret', hubSecret, '--state', path.join(hubHome, 'instances.json')]);
+    '--token', hubToken, '--secret', hubSecret, '--state', path.join(hubHome, 'instances.json'),
+    // The push settings' shots subscribe a stand-in browser at push.invalid, which takes nothing.
+    '--push-service-hosts', 'push.invalid']);
   await poll(async () => (await fetch(`http://127.0.0.1:${hubPort}/api/session`)).ok, 'the hub');
   // After the hub runs: join checks that it takes the events.
   execFileSync(binary, ['hub', 'join', `http://127.0.0.1:${hubPort}/hooks`, '--secret', hubSecret,

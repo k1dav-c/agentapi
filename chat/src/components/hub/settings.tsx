@@ -2,22 +2,26 @@
 
 import {useRef, useState} from "react";
 import * as TabsPrimitive from "@radix-ui/react-tabs";
-import {Cloud, Github, Star} from "lucide-react";
+import {Cloud, Github, LogOut, Smartphone, Star} from "lucide-react";
+import {Button} from "@/components/ui/button";
 import {Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle} from "@/components/ui/dialog";
 import type {HubInstance} from "@/lib/hub";
 import type {Favorite} from "@/lib/hub-favorites";
 import {FavoritesSettings} from "./favorites-settings";
 import {GitHubSettings} from "./github-settings";
 import {ProvidersSettings} from "./providers-settings";
+import {PushSettings} from "./push-settings";
+import type {HubPushState} from "./use-push";
 
 // The sections of the hub's settings, each a tab of the dialog; opening it
 // at one shows that one.
-export type SettingsSection = "favorites" | "providers" | "github";
+export type SettingsSection = "favorites" | "providers" | "github" | "devices";
 
 const sections: {id: SettingsSection; label: string; icon: React.ReactNode}[] = [
   {id: "favorites", label: "Favorites", icon: <Star />},
   {id: "providers", label: "Providers", icon: <Cloud />},
   {id: "github", label: "GitHub", icon: <Github />},
+  {id: "devices", label: "Push", icon: <Smartphone />},
 ];
 
 // An editor of a section: whether it is open, and what closes it.
@@ -28,7 +32,9 @@ type Editor = {open: boolean; cancel: () => void};
 // AgentAPIs that report to it get, and the hub's GitHub App. section is the
 // one it opens at; null is closed. activeJobs is how many jobs at work push
 // with the app's tokens; instances, the agents whose use of each provider
-// the Providers section shows.
+// the Providers section shows; push, the devices the hub pushes to, with
+// groups, the hub's group names they may follow. onSignOut signs this
+// browser out.
 export function HubSettings({
   root,
   section,
@@ -37,6 +43,9 @@ export function HubSettings({
   onFavoritesSaved,
   activeJobs,
   instances,
+  push,
+  groups = [],
+  onSignOut,
 }: {
   root: string;
   section: SettingsSection | null;
@@ -45,6 +54,9 @@ export function HubSettings({
   onFavoritesSaved: (favorites: Favorite[]) => void;
   activeJobs?: number;
   instances?: HubInstance[];
+  push?: HubPushState;
+  groups?: string[];
+  onSignOut?: () => void;
 }) {
   // The favorites' and the providers' editors: Escape closes the one of the
   // section shown.
@@ -81,7 +93,7 @@ export function HubSettings({
         // Escape closes the editor first, then the dialog; a click outside
         // leaves an open editor be.
         onEscapeKeyDown={(event) => {
-          const editor = shown === "github" ? null : editors[shown].current;
+          const editor = shown === "github" || shown === "devices" ? null : editors[shown].current;
           if (!editor?.open) return;
           event.preventDefault();
           editor.cancel();
@@ -142,7 +154,26 @@ export function HubSettings({
               />
             )}
           </TabsPrimitive.Content>
+          <TabsPrimitive.Content value="devices" forceMount className="outline-none data-[state=inactive]:hidden">
+            {seen.has("devices") && push && (
+              <PushSettings
+                push={push}
+                groups={groups}
+                headingRef={(heading) => {
+                  headings.current.devices = heading;
+                }}
+              />
+            )}
+          </TabsPrimitive.Content>
         </TabsPrimitive.Root>
+        {onSignOut && (
+          // Signing out stops the pushes to this browser too.
+          <div className="flex justify-end border-t pt-4">
+            <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={onSignOut}>
+              <LogOut /> Sign out of this browser
+            </Button>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );

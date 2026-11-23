@@ -199,7 +199,8 @@ open it by (any without it), and `--log-level` (or
 runner) calls `POST /api/dispatch` with, and nothing else, and `--github-app-file` the file of the
 hub's GitHub App (default `github-app.json` next to `--state`). `--allow-loopback-launchers` lets
 the hub call a launcher at a loopback address, one on its own machine that joined it by `localhost`;
-by default it calls launchers at other machines' addresses only.
+by default it calls launchers at other machines' addresses only. `--push-service-hosts` adds hosts
+the hub sends [push](hub.md#push) to besides the browsers' push services (a name, or `.domain`).
 
 `join` writes the hub's webhook into `~/.agentapi/config.yaml` and applies it to the registered
 Tendyard instances running now. `--secret` (or `AGENTAPI_HUB_SECRET`) signs the events, `--events` picks them

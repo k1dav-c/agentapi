@@ -95,7 +95,7 @@ flowchart TB
 | `lib/native/procutil` | 子行程：行程群組（process group）與正常關閉流程 |
 | `lib/statedb/` | `--state-db` 的 SQLite 持久保存 |
 | `lib/instanceapi/` | Tendyard 和同時監看多個實例的用戶端之間的約定：它是誰（`WebhookInstance`，出現在 webhook 事件、摘要和登記檔中，含它的 `AgentType`）、它的摘要、webhook 的外層格式和簽章（`Sign`、`Verify`），以及 hub 對每個實例顯示的狀態（`StateOf`）。它只匯入 `lib/agentstate` 和 `lib/util` |
-| `lib/hub/` | `agentapi hub serve`，建立在 `lib/instanceapi` 和 `lib/httpmw` 上，不經過伺服器：實例、頁面上設定的群組和釘選、每個實例這一列顯示的內容最近一次變動的時間，以及 hub 看到它工作的區段（`store.go`、`work.go`，由 `persist.go` 保存在檔案中）、最近一年逐小時的活動（`activity.go`、`activity.json`、`GET /api/activity`：工作時間，以及摘要 `spend.hours` 裡每個 scope 的花費）、我的最愛提示（`favorites.go`，`GET`／`PUT /api/favorites`，屬於 hub 的設定，保存在同一個檔案）、模型供應商（`providers.go`、`providers.json`、`GET`／`PUT /api/providers`、給編輯器 Check connection 用的 `POST /api/providers/check`，以及給 Tendyard 用的 `POST /api/providers/sync`）和來自 OpenRouter 的模型價格（`prices.go`、`openrouter.go`、`openrouter.json`、`POST /api/providers/prices`、`GET /api/providers/openrouter`）、傳輸型別的 schema（`schema.go`、`hub-schema.json`，給頁面的型別用）、有簽章的 webhook 接收端（`webhook.go`）、每個實例的摘要串流（`watch.go`）、登入、瀏覽器的事件串流，以及到實例的代理（`hub.go`、`proxy.go`），主機怎麼加入（`join.go`：`GET /api/join` 和啟動 log 列出的位址），以及對已訂閱瀏覽器的 Web Push（`push.go`、`push.json`、`/api/push`：依 store 的變動，推播需要你處理的事和完成的任務）；使用說明見 [hub.zh-TW.md](hub.zh-TW.md) |
+| `lib/hub/` | `agentapi hub serve`，建立在 `lib/instanceapi` 和 `lib/httpmw` 上，不經過伺服器：實例、頁面上設定的群組和釘選、每個實例這一列顯示的內容最近一次變動的時間，以及 hub 看到它工作的區段（`store.go`、`work.go`，由 `persist.go` 保存在檔案中）、最近一年逐小時的活動（`activity.go`、`activity.json`、`GET /api/activity`：工作時間，以及摘要 `spend.hours` 裡每個 scope 的花費）、我的最愛提示（`favorites.go`，`GET`／`PUT /api/favorites`，屬於 hub 的設定，保存在同一個檔案）、模型供應商（`providers.go`、`providers.json`、`GET`／`PUT /api/providers`、給編輯器 Check connection 用的 `POST /api/providers/check`，以及給 Tendyard 用的 `POST /api/providers/sync`）和來自 OpenRouter 的模型價格（`prices.go`、`openrouter.go`、`openrouter.json`、`POST /api/providers/prices`、`GET /api/providers/openrouter`）、傳輸型別的 schema（`schema.go`、`hub-schema.json`，給頁面的型別用）、有簽章的 webhook 接收端（`webhook.go`）、每個實例的摘要串流（`watch.go`）、登入、瀏覽器的事件串流，以及到實例的代理（`hub.go`、`proxy.go`），主機怎麼加入（`join.go`：`GET /api/join` 和啟動 log 列出的位址），以及對已訂閱裝置的 Web Push（`push.go`，負責送出的 pusher；`push_store.go`，`push.json` 裡的裝置；`push_api.go`，`/api/push` 和 `/api/push/devices`；每台裝置的設定在 `push_prefs.go`；notifier 在 `push_notify.go`：依 store 的變動推播需要你處理的事和完成的任務，依派工的變動推播 issue 的工作）；使用說明見 [hub.zh-TW.md](hub.zh-TW.md) |
 | `lib/dispatch/` | hub 的 issue 派工，由 `lib/hub` 掛上：有 launcher 回報的主機（`host.*` 事件；主機名稱綁定第一次帶來的 launcher token）、job 與各次 run 的花費（任務數來自 `task.*` 事件；金額與工作時間來自 hub 讀到的 run 的 Tendyard，`Saw`）和最近 50 則送給 agent 的訊息（`send`，來自 hub 的頁面、review 或 `/agent` 留言）、`POST /api/dispatch`（`start` 在 job 進入 `starting` 時就回應，hub 在背景呼叫 launcher，並記下這次啟動直到有結果；沒收到回應時從主機下一次回報接回）、GitHub App，保存在 `dispatch.json` 和 `github-app.json`。`Subscribe` 與 `Board` 讓 hub 的串流在每次變動後送出主機和 job（`dispatch` 事件）；規格見 [issue-dispatch.zh-TW.md](specs/issue-dispatch.zh-TW.md) |
 | `lib/host/` | `agentapi host`，每台主機上的 launcher：設定（設定檔的 `host` 區段）、它有或會 clone 的 repo、hub 每啟動一個 job 就建一個 git worktree 和一個實例（結束後重新啟動，記在 `jobs.json`）、給 hub 呼叫且需要 token 的 API（`server.go`）、送給 hub 的 `host.*` 事件與 heartbeat（`hub.go`），以及經由 unix socket 交給 job 的 `git`、`gh` 的 GitHub token（`credentials.go`） |
 | `lib/github/` | hub 的 GitHub App，只依賴標準函式庫：以 manifest 註冊、App 的 JWT、限單一 repo（快取到到期前 5 分鐘）或整個安裝的 installation token，以及派工以 App 身分呼叫的 REST API |
@@ -690,15 +690,29 @@ hub（`lib/hub`，`persist.go`）把實例保存在 JSON 檔案裡，格式是
 webhook 事件的 delivery ID 也以同樣方式寫入 `instances.deliveries.json`，保留到各自的簽章失效，所以
 重新啟動後重送的事件同樣會被拒絕。
 
-推播（`push.go`）把 `push.json` 放在 `instances.json` 旁（0600）：VAPID 私鑰在 hub 第一次啟動時產生並寫入，
-讓瀏覽器的訂閱在重新啟動後仍然有效；訂閱則在每次變動時經由 `atomicfile` 寫入。notifier 像瀏覽器的串流一樣
-訂閱 store，為每個實例記住它在等什麼（`instanceapi.AttentionKey`）和最近的任務。看到某個實例的第一筆狀態時，
-只記下這些。出現新的等待，或看過正在執行的任務結束、沒有在等什麼時，啟動 5 秒的計時器（`pushDelay`，用 hub
-的時鐘）；時間到時，實例仍是那個狀態才推播：為同一件事需要你且沒有靜音，或同一個任務已結束且未讀。每個訂閱各自
-拿到為它加密的 payload（`{"kind", "title", "body", "id", "tag"}`），每個實例一個 `Topic`，讓還留著舊推播的
-推播服務以新的取代；推播服務回 404 或 410 的訂閱會移除。頁面的 service worker（`chat/public/hub/sw.js`）
-顯示推播，除非 hub 頁面有某個視窗位於焦點（Safari 一律顯示，因為推播沒顯示任何東西的訂閱，Safari 會結束它）；
-點通知時，聚焦 hub 頁面的一個視窗並由它開啟 agent（`usePush`）；沒有開著的頁面時，以 `#<id>` 開啟頁面。
+推播把 `push.json` 放在 `instances.json` 旁（0600，`push_store.go`）：VAPID 私鑰在 hub 第一次啟動時產生並寫入，
+讓瀏覽器的訂閱在重新啟動後仍然有效；裝置，以及從設定中移除的裝置 ID（`revoked`，最近 200 個），由 `persister`
+在變動後一秒內和 `Close` 時寫入，所以推播服務的回應不必各自寫一次檔。一台裝置就是一個訂閱，加上它的
+名稱、設定（`PushPrefs`，`push_prefs.go`）、它的推播服務最近一次收下和拒絕推播的時間，以及 `expires_at`：
+頁面每次載入都會為它續期（`PUT /api/push/subscription`），帶著 session cookie 時，它隨那個 session 結束
+（簽發時間 + 30 天）；`token_id` 是 hub token 的 HMAC，換了 token 啟動的 hub 會忘掉這台裝置；5.8 版留下、沒有 `token_id` 的裝置，會取用 hub 的。
+從設定中移除裝置（`revoke`）後，它的頁面續期會回 410，直到那個頁面重新開啟推播（`enable`），頁面接著會關掉推播；
+帶著 endpoint 登出（`DELETE /api/session`）會在 hub 上移除這台裝置，不論瀏覽器自己的取消訂閱結果如何。
+超過 50 台裝置時，新的裝置先取代 session 已結束的，再取代最舊的。API 以 endpoint
+的 SHA-256 前 8 個位元組指稱裝置：持有 endpoint 就能推播，所以它不會離開 hub。
+
+notifier 在 `push_notify.go`。其中一個像瀏覽器的串流一樣訂閱 store，為每個實例記住它在等什麼
+（`instanceapi.AttentionKey`）和最近的任務。看到某個實例的第一筆狀態時，只記下這些。出現新的等待，或看過正在
+執行的任務結束、沒有在等什麼時，啟動 5 秒的計時器（`pushDelay`，用 hub 的時鐘）；時間到時，實例仍是那個狀態
+才推播：為同一件事需要你且沒有靜音，或同一個任務已結束且未讀。另一個跟著派工（`Subscribe`、`Board`），job 的
+pull request 出現，或 job 變成 `failed` 或 `done` 時，立刻推播。每台要收這則推播的裝置（`PushPrefs.wants`：
+推播的種類、agent 的群組或釘選（只算目前有 agent 的群組），以及裝置時區裡的勿擾時段）各自拿到為它加密的 payload（`{"kind", "title",
+"body", "id", "issue", "tag", "badge"}`，`badge` 是當下需要你的 agent 數），每個實例或 issue 一個 `Topic`，
+讓還留著舊推播的推播服務以新的取代，每個推播服務一個 VAPID token，用到到期前一小時；推播服務回 404 或 410
+的裝置會移除。推播由 pusher 在背景送出（`goSendAll`），`Run` 返回前會等它們送完（`stop`）。頁面的 service worker
+（`chat/public/hub/sw.js`）設定 app 圖示的徽章，並顯示推播，除非 hub 頁面有某個視窗位於焦點（Safari 一律
+顯示，因為推播沒顯示任何東西的訂閱，Safari 會結束它）。點通知時，聚焦 hub 頁面的一個視窗並由它開啟 agent 或
+issue（`usePush`）；沒有開著的頁面時，以 `#<id>` 或 `?issue=<key>` 開啟頁面。頁面開著時，由它自己設定徽章。
 
 活動（`activity.go`）是獨立的檔案，放在 `instances.json` 旁的 `activity.json`，寫法相同，但最多每
 15 秒寫一次：最多存一年，每小時一個數字陣列，開頭是以 Unix 秒表示的開始時間。工作時間在每個
@@ -844,7 +858,14 @@ Content-Security-Policy。
   launcher 網址，而且位址必須通過 `checkLauncherAddr`（沒有 `--allow-loopback-launchers` 時不能是
   loopback，也不能是 link-local 或未指定位址）：`HostEvent` 檢查一次，名稱解析後每次連線再檢查一次
   （`newLauncherClient` 裡 dialer 的 `Control`，不經 proxy、不跟隨重新導向，`launcher.go`）。內網位址
-  照常允許，所以持有 secret 的機器仍可讓 hub 對內網的其他機器呼叫 launcher API。瀏覽器以 hub token 登入，換取
+  照常允許，所以持有 secret 的機器仍可讓 hub 對內網的其他機器呼叫 launcher API。
+
+  推播 endpoint 是已登入的頁面交給 hub、讓 hub POST 過去的網址，所以 hub 只接受瀏覽器推播服務的
+  endpoint（`checkPushService`：`pushServiceHosts`、`*.googleapis.com`、`*.push.apple.com`、
+  `*.push.services.mozilla.com`、`*.notify.windows.com`，以及 `--push-service-hosts`），在頁面訂閱時
+  檢查一次，每次推播前再檢查一次；它的推播 client 不跟隨重新導向（`newPushClient`）。
+
+  瀏覽器以 hub token 登入，換取
   帶有簽發時間、以 token 簽章的 HttpOnly、SameSite=Lax cookie，30 天後 hub 不再接受；代理會移除瀏覽器的 cookie 以及 `Authorization`、
   `Origin`、`Referer`、`Sec-Fetch-*` 標頭，也會移除實例的 `Set-Cookie`，雙方的憑證都不會傳到另一邊。
   hub 和 Tendyard 一樣，拒絕其他來源的網頁送出會造成改動的請求；設定 `--allowed-hosts` 時，只回應
@@ -934,7 +955,7 @@ Tendyard 從另一個 agent 工作階段中啟動時，會先清除繼承的工�
 是 hub 的頁面（`components/hub-view.tsx`，各部分與 hook 在 `components/hub/`，各列共用的 props 在
 `HubListContext`；邏輯在 `lib/hub.ts`，也就是實例、它的狀態和串流的事件，旁邊還有 `lib/hub-groups.ts`、
 `hub-machines.ts`、`hub-filter.ts`、`hub-format.ts`、`hub-spend.ts`、`hub-work.ts`、`hub-version.ts`
-和 `hub-order.ts`；所做的變更經由 `lib/hub-api.ts`；瀏覽器保存的設定經由 `lib/hub-settings.ts`；推播經由 `lib/hub-push.ts` 和 `components/hub/use-push.ts`，
+和 `hub-order.ts`；所做的變更經由 `lib/hub-api.ts`；瀏覽器保存的設定經由 `lib/hub-settings.ts`；推播經由 `lib/hub-push.ts`（hub 端）和 `lib/hub-push-browser.ts`（瀏覽器端），提醒（含鈴鐺選單）經由 `components/hub/use-hub-alerts.ts`（`alerts-menu.tsx`、`use-push.ts`、`push-settings.tsx`），
 service worker、web app manifest 和圖示在 `public/hub/`，由 `scripts/hub-icons.mjs` 繪製），由
 `agentapi hub serve` 以同一份建置提供。頁面目前的位置（開著的 agent，以及它下面是否開著 Issues）各是
 瀏覽器歷史紀錄中的一頁（`lib/hub-route.ts`、`useHubRoute`）。它的 Issues 頁（`components/hub/issues/`：

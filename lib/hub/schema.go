@@ -53,11 +53,15 @@ var wireTypes = []reflect.Type{
 	reflect.TypeFor[forgetBody](),
 	reflect.TypeFor[sessionBody](),
 	reflect.TypeFor[signInBody](),
+	reflect.TypeFor[signOutBody](),
 	reflect.TypeFor[joinInfo](),
 	reflect.TypeFor[activityBody](),
 	reflect.TypeFor[pushInfo](),
 	reflect.TypeFor[pushSubscribeBody](),
 	reflect.TypeFor[pushEndpointBody](),
+	reflect.TypeFor[pushDevice](),
+	reflect.TypeFor[pushDevicesBody](),
+	reflect.TypeFor[pushPrefsChange](),
 	reflect.TypeFor[jsonapi.ErrorBody](),
 	// The issue dispatch's (lib/dispatch), named Dispatch*, Launcher* and
 	// GitHub* by the package they come from (schemaNamer).

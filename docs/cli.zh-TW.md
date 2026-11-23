@@ -181,7 +181,8 @@ agentapi hub leave
 用戶端（GitHub workflow 的 runner）只能拿它呼叫 `POST /api/dispatch`；以及 `--github-app-file`：
 hub 的 GitHub App 存放的檔案（預設是 `--state` 旁的 `github-app.json`）。`--allow-loopback-launchers`
 讓 hub 可以呼叫 loopback 位址上的 launcher，也就是在 hub 這台主機上、以 `localhost` 加入的 launcher；
-預設只呼叫其他主機位址上的 launcher。
+預設只呼叫其他主機位址上的 launcher。`--push-service-hosts` 在瀏覽器的推播服務之外，加上 hub 可以送出
+[推播](hub.zh-TW.md#推播)的主機（主機名稱，或以 `.domain` 表示它的子網域）。
 
 `join` 把 hub 的 webhook 寫進 `~/.agentapi/config.yaml`，並套用到正在執行、已登記的 Tendyard。
 `--secret`（或 `AGENTAPI_HUB_SECRET`）為事件簽章，`--events` 選擇事件（預設 `instance.*`，hub 只需要

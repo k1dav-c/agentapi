@@ -119,7 +119,7 @@ func TestPushRoutes(t *testing.T) {
 	require.Equal(t, http.StatusOK, code)
 	var info pushInfo
 	require.NoError(t, json.Unmarshal(body, &info))
-	assert.Equal(t, webpush.PublicKey(h.push.key), info.PublicKey)
+	assert.Equal(t, webpush.PublicKey(h.push.devices.key), info.PublicKey)
 	stat, err := os.Stat(filepath.Join(filepath.Dir(state), "push.json"))
 	require.NoError(t, err, "the key is kept at once")
 	assert.Equal(t, os.FileMode(0o600), stat.Mode().Perm())
@@ -132,13 +132,18 @@ func TestPushRoutes(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, code)
 
 	sub := b.subscription("/a")
-	code, _ = pushRequest(t, srv, http.MethodPut, "/api/push/subscription", pushSubscribeBody{Subscription: sub})
-	require.Equal(t, http.StatusNoContent, code)
-	code, _ = pushRequest(t, srv, http.MethodPut, "/api/push/subscription", pushSubscribeBody{Subscription: sub, Finished: true})
-	require.Equal(t, http.StatusNoContent, code)
-	subs := h.push.list()
-	require.Len(t, subs, 1, "the same endpoint again replaces it")
-	assert.True(t, subs[0].Finished)
+	code, _ = pushRequest(t, srv, http.MethodPut, "/api/push/subscription", pushSubscribeBody{Subscription: sub, Label: "Pixel ·   Chrome", Finished: true})
+	require.Equal(t, http.StatusOK, code)
+	code, body = pushRequest(t, srv, http.MethodPut, "/api/push/subscription", pushSubscribeBody{Subscription: sub})
+	require.Equal(t, http.StatusOK, code)
+	var device pushDevice
+	require.NoError(t, json.Unmarshal(body, &device))
+	assert.Equal(t, pushDeviceID(sub.Endpoint), device.ID)
+	assert.Equal(t, "Pixel · Chrome", device.Label, "a renewal without a label keeps it")
+	assert.True(t, device.Finished, "a renewal keeps the settings")
+	assert.Nil(t, device.ExpiresAt, "renewed with the hub token: no session to end")
+	subs := listed(t, h)
+	require.Len(t, subs, 1, "the same endpoint again renews it")
 
 	code, _ = pushRequest(t, srv, http.MethodPost, "/api/push/test", pushEndpointBody{Endpoint: sub.Endpoint})
 	require.Equal(t, http.StatusNoContent, code)
@@ -147,25 +152,27 @@ func TestPushRoutes(t *testing.T) {
 	assert.Equal(t, "Tendyard Hub", payload.Title)
 
 	// A restarted hub keeps its key and the subscriptions.
+	require.NoError(t, h.push.devices.persist.flush())
 	again, err := New(Config{Token: "t", Secret: "s", StatePath: state})
 	require.NoError(t, err)
-	assert.True(t, h.push.key.Equal(again.push.key))
-	require.Len(t, again.push.list(), 1)
-	assert.Equal(t, sub, again.push.list()[0].Subscription)
-	assert.True(t, again.push.list()[0].Finished)
+	assert.True(t, h.push.devices.key.Equal(again.push.devices.key))
+	require.Len(t, listed(t, again), 1)
+	assert.Equal(t, sub, listed(t, again)[0].Subscription)
+	assert.True(t, listed(t, again)[0].Finished)
+	assert.False(t, listed(t, again)[0].LastSentAt.IsZero(), "the test push was recorded")
 
 	// A subscription its push service ended is forgotten.
 	b.status = http.StatusGone
 	code, _ = pushRequest(t, srv, http.MethodPost, "/api/push/test", pushEndpointBody{Endpoint: sub.Endpoint})
 	assert.Equal(t, http.StatusGone, code)
-	assert.Empty(t, h.push.list())
+	assert.Empty(t, listed(t, h))
 
 	b.status = http.StatusCreated
 	code, _ = pushRequest(t, srv, http.MethodPut, "/api/push/subscription", pushSubscribeBody{Subscription: sub})
-	require.Equal(t, http.StatusNoContent, code)
+	require.Equal(t, http.StatusOK, code)
 	code, _ = pushRequest(t, srv, http.MethodDelete, "/api/push/subscription", pushEndpointBody{Endpoint: sub.Endpoint})
 	require.Equal(t, http.StatusNoContent, code)
-	assert.Empty(t, h.push.list())
+	assert.Empty(t, listed(t, h))
 	code, _ = pushRequest(t, srv, http.MethodDelete, "/api/push/subscription", pushEndpointBody{})
 	assert.Equal(t, http.StatusBadRequest, code)
 }
@@ -182,12 +189,13 @@ func TestPushRoutesNeedSignIn(t *testing.T) {
 }
 
 func TestPushStoreKeepsTheNewest(t *testing.T) {
-	s, err := newPushStore("")
+	s, err := newPushStore("", "", nil)
 	require.NoError(t, err)
 	for i := range maxPushSubscriptions + 2 {
-		require.NoError(t, s.put(pushSubscription{Subscription: webpush.Subscription{Endpoint: "https://push.example/" + string(rune('a'+i))}}))
+		_, err = s.renew(pushSubscription{Subscription: webpush.Subscription{Endpoint: "https://push.example/" + string(rune('a'+i))}}, true)
+		require.NoError(t, err)
 	}
-	subs := s.list()
+	subs := s.list(time.Now())
 	require.Len(t, subs, maxPushSubscriptions)
 	assert.Equal(t, "https://push.example/c", subs[0].Endpoint, "the two oldest went")
 }
@@ -198,7 +206,8 @@ func pushHub(t *testing.T, b *browser, finished bool) (*Hub, *quartz.Mock) {
 	clock := quartz.NewMock(t)
 	h, err := New(Config{Token: "t", Secret: "s", Clock: clock, PushClient: b.server.Client()})
 	require.NoError(t, err)
-	require.NoError(t, h.push.put(pushSubscription{Subscription: b.subscription("/p"), Finished: finished}))
+	_, err = h.push.devices.renew(pushSubscription{Subscription: b.subscription("/p"), PushPrefs: PushPrefs{Finished: finished}}, true)
+	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -255,7 +264,7 @@ func TestPushNeedsYou(t *testing.T) {
 
 	pushAfterDelay(t, clock, func() { setSummary(h, approval("r1", "go   test\n./...")) })
 	payload := b.next()
-	assert.Equal(t, pushPayload{Kind: pushNeedsYou, Title: "dev needs you", Body: "go test ./...", ID: "dev:1", Tag: "agentapi-hub-dev:1"}, payload)
+	assert.Equal(t, pushPayload{Kind: pushNeedsYou, Title: "dev needs you", Body: "go test ./...", ID: "dev:1", Tag: "agentapi-hub-dev:1", Badge: 1}, payload)
 	headers := <-b.headers
 	assert.Equal(t, "high", headers.Get("Urgency"))
 	assert.Equal(t, pushTopic("agentapi-hub-dev:1"), headers.Get("Topic"))
@@ -296,7 +305,7 @@ func TestPushFinished(t *testing.T) {
 		setSummary(h, running)
 		pushAfterDelay(t, clock, func() { setSummary(h, done) })
 		payload := b.next()
-		assert.Equal(t, pushPayload{Kind: pushFinished, Title: "dev finished", Body: "Fix the build", ID: "dev:1", Tag: "agentapi-hub-dev:1"}, payload)
+		assert.Equal(t, pushPayload{Kind: pushFinished, Title: "dev finished", Body: "Fix the build", ID: "dev:1", Tag: "agentapi-hub-dev:1", Badge: 0}, payload)
 		assert.Equal(t, "normal", (<-b.headers).Get("Urgency"))
 	})
 
@@ -344,4 +353,9 @@ func TestPushForClips(t *testing.T) {
 	data, err := json.Marshal(payload)
 	require.NoError(t, err)
 	assert.Less(t, len(data), webpush.MaxPayload)
+}
+
+func listed(t *testing.T, h *Hub) []pushSubscription {
+	t.Helper()
+	return h.push.devices.list(h.clock.Now())
 }

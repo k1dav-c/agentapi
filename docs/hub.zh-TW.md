@@ -823,11 +823,11 @@ PR 合併或關閉時，hub 留言列出這個 job 的花費：各次 run、任�
 ### 頁面關著時，推播仍會送到手機
 
 鈴鐺選單裡的 **Push to this device** 開啟後，agent 開始需要你時，hub 會送通知到這台裝置，即使 hub 的
-頁面關著、手機已鎖定也一樣。點通知會打開 hub 並開啟那個 agent。**Also when a task finishes** 讓每個完成的
-任務也送一則，**Send a test** 則確認推播送得到。每台裝置各自開啟，由瀏覽器記住；開了推播的裝置，開著的頁面
-就不再另外跳通知。
+頁面關著、手機已鎖定也一樣。點通知會打開 hub 並開啟那個 agent。**Send a test** 確認推播送得到，
+**Push settings…** 則開啟每台裝置要收哪些推播的設定。推播由每台裝置各自開啟，和 **Notifications** 互不相干：
+兩個都開時，背景的分頁可能在推播之外再跳一則自己的通知。在主畫面上，hub 的圖示會顯示有幾個 agent 需要你。
 
-![鈴鐺選單開啟這台裝置的推播：Notifications 和 Sound 下方是 Push to this device、Also when a task finishes 和 Send a test](screenshots/hub-push.png)
+![鈴鐺選單開啟這台裝置的推播：Notifications 和 Sound 下方是 Push to this device、Send a test 和 Push settings…](screenshots/hub-push.png)
 
 推播需要以 https 開啟 hub 的頁面，例如透過你的 Coder workspace 或反向代理；`http://<address>:3290` 的頁面
 無法訂閱。接著在每台裝置上：
@@ -841,8 +841,28 @@ agent 開始需要你 5 秒後，hub 才推播，而且那時它還在等才送�
 重新連線後再讀到同一個請求，不會再推播一次。完成的任務只在未讀時推播，所以你看著它完成的就不會送。hub 的頁面
 開著且在最前面時，改由頁面自己的提醒通知你；Safari 仍會顯示推播。
 
+**Hub settings** 的 **Push** 分頁列出 hub 推播的裝置，這台排在最前面，並顯示每台最近一次收到推播的時間，
+以及上一次失敗的原因。每台裝置有自己的設定，保存在 hub 上，所以在筆電上也能改手機的設定：
+
+- **Finished tasks**：除了需要你的事，每個完成的任務也送一則。
+- **Issues**：[issue](#issues) 的 PR 開出時，以及它的 job 失敗或完成時，各送一則。點通知會在 Issues
+  開啟那個 issue。
+- **Agents**：要收哪些群組的 agent，**Pinned** 是釘選的 agent，**Ungrouped** 是沒有群組的；都沒選時，
+  收所有 agent。已經沒有 agent 的群組（改了名或清空了）不算數，所以只剩這種群組的裝置，又會收所有
+  agent。Issues 的推播不受它影響。
+- **Quiet hours**：一天中的一段時間，這段時間不推播到這台裝置，時區是開啟時瀏覽器的時區。落在這段時間的
+  推播會直接捨棄，不會留到之後再送。
+
+垃圾桶按鈕停止推播到某台裝置。從別台裝置移除的裝置會一直保持移除：它的頁面下次打開時，會在那台裝置上關掉
+推播，只有在那台裝置上重新開啟推播才會恢復。裝置的登入結束時，推播也會停止：設定最下方的
+**Sign out of this browser** 會在登出時讓 hub 停止推播到這台裝置；session 到期（登入起 30 天）或在另一個 hub token 下訂閱的裝置，hub 會忘掉它。
+重新登入並打開 hub，就會續期。
+
+![Hub settings 的 Push 分頁：這台裝置收完成的任務，只收釘選的 agent 和 Client work 群組，並設了 Quiet hours](screenshots/hub-settings-push.png)
+
 hub 透過裝置的推播服務送出每則推播（Android 上的 Chrome 用 Google 的，Safari 用 Apple 的，Firefox 用
-Mozilla 的），所以 hub 必須連得到網際網路，有設定 `HTTPS_PROXY` 時經由它；手機不需要連得到 hub。推播內容是
+Mozilla 的，Edge 用 Microsoft 的），不會送到其他主機，也不跟隨重新導向：頁面沒辦法讓 hub 把請求送到別處。
+`--push-service-hosts` 可以加入其他主機。hub 必須連得到網際網路，有設定 `HTTPS_PROXY` 時經由它；手機不需要連得到 hub。推播內容是
 agent 的名稱和它在等什麼，針對這台裝置加密，推播服務讀不到。hub 把金鑰和裝置保存在 `push.json`（見
 [檔案](#檔案)）；裝置的推播服務結束訂閱時（移除了 app、清除了瀏覽器資料），hub 就忘掉這台裝置；在那台裝置上
 重新開啟推播，就會重新訂閱。
@@ -1031,6 +1051,7 @@ Tendyard 的 log 會記下傳送失敗的 webhook。
 | `--log-level` | `AGENTAPI_HUB_LOG_LEVEL`，否則 `info` | 記錄的最低層級：`debug`、`info`、`warn` 或 `error` |
 | `--dispatch-token` | `AGENTAPI_HUB_DISPATCH_TOKEN` | 用戶端（GitHub workflow 的 runner）呼叫 `POST /api/dispatch` 用的 token，不能做別的事（見 [Issues](#issues)） |
 | `--github-app-file` | `--state` 旁的 `github-app.json` | hub 的 GitHub App，由 `/github/connect` 註冊 |
+| `--push-service-hosts` | 瀏覽器的推播服務 | 除了 Google、Apple、Mozilla 和 Microsoft 的推播服務，hub 還會送[推播](#推播)到的主機：主機名稱，或以 `.domain` 表示它的子網域（以逗號分隔） |
 | `--allow-loopback-launchers` | `false` | 允許呼叫 loopback 位址上的 launcher，例如在 hub 這台主機上、以 `localhost` 加入的 launcher（[`agentapi host`](#agentapi-host)） |
 
 hub 透過環境變數中的 proxy（`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`）連到實例和瀏覽器的推播服務。連線 30 秒內沒建立（TLS
@@ -1098,7 +1119,7 @@ Tendyard 也拿到原樣的 `{ip}`，由它們自己填入。`join` 透過登記
 | `POST /hooks` | Tendyard 的 webhook 事件；以 `--secret` 簽章，不需要登入 |
 | `GET /api/session` | 請求帶有 session 或 hub token 時回傳 `{"authenticated": true}` |
 | `POST /api/session` | `{"token": …}` 登入並設定 session cookie |
-| `DELETE /api/session` | 登出 |
+| `DELETE /api/session` | 登出；帶著 `{"endpoint"}`（瀏覽器的推播 endpoint）時，hub 也會停止[推播](#推播)到它 |
 | `GET /api/instances` | 所有實例：各自是誰、摘要、連線、列表上顯示的狀態（`state`：`needs-you`、`working`、`unread`、`idle`、`muted`、`connecting`、`unreachable` 或 `stopped`）、這一列顯示的內容最近一次變動的時間（`changed_at`，RFC 3339；見[最近變動](#最近變動)），在釘選的實例中排第幾（`pin`，從 1 開始；沒有釘選就沒有這個欄位），以及 hub 看到它工作了多久（`work`：已結束區段在回應當下的 `last_24h_seconds` 和 `last_7d_seconds`，工作中時另有 `working_since`；見[工作時間](#工作時間)）；另外附上 hub 自己的版本（`hub_version`） |
 | `POST /api/instances` | `{"url": …, "token": …}` 以網址加入實例 |
 | `PATCH /api/instances/{id}` | `{"group": …}` 把實例放進群組，`""` 為不分組；`{"muted": true}` 把它目前在等的事靜音到改變為止（沒有在等時回 409），`false` 結束靜音；`{"pinned": true}` 把它釘選在已釘選的實例後面，`false` 取消釘選 |
@@ -1124,7 +1145,10 @@ Tendyard 也拿到原樣的 `{ip}`，由它們自己填入。`join` 透過登記
 | `POST /api/dispatch` | 開工、傳訊息、連結 PR、停止（`action`：`start`、`send`、`link_pr`、`stop`）；也接受 `--dispatch-token`。`start` 在 job 於主機上進入 `starting` 時就回應，之後的狀態由串流和 `GET /api/jobs` 得知 |
 | `GET /api/activity?tz=&days=` | 最近 `days` 天（1 到 371，預設 371，即 53 週）每天的[活動](#活動)，由舊到新，依 `tz` 指定的時區（IANA 名稱，例如 `Asia/Taipei`；預設 UTC）劃分：`{"days": [{"date": "2026-11-10", "work_seconds", "usd", "tokens": {"input", "output", "cache_write", "cache_read", "total"}}, …], "since", "time_zone"}`。`since` 是 hub 開始記錄的那一天（同一時區）；每一小時算在它開始的那一天。不接受的時區或天數回 400 |
 | `GET /api/push` | hub 的[推播](#推播)金鑰，瀏覽器以它訂閱：`{"public_key"}`（VAPID，base64url） |
-| `PUT /api/push/subscription` | `{"endpoint", "keys": {"p256dh", "auth"}, "finished"}`，即瀏覽器的 `PushSubscription.toJSON()` 加上 `finished`（完成的任務也要推播），把這個瀏覽器加進 hub 推播的對象，或更新它；回 204。endpoint 必須是 https。最多 50 個：超過時，新的取代最舊的 |
+| `PUT /api/push/subscription` | `{"endpoint", "keys": {"p256dh", "auth"}, "label", "enable"}`，即瀏覽器的 `PushSubscription.toJSON()` 加上 `label`（這是什麼裝置）和 `enable`（正在這台裝置上開啟推播時），把這個瀏覽器加進 hub 推播的裝置，或為它續期並保留它的設定，回傳這台裝置，格式同 `GET /api/push/devices` 列出的。endpoint 必須是 https，而且位在瀏覽器的推播服務（或 `--push-service-hosts`），否則回 400。以 `DELETE /api/push/devices/{id}` 移除的裝置，除非 `enable` 為 true，否則回 410。帶著 session cookie 時，裝置會保留到那個 session 結束；頁面每次載入都會再送一次。最多 50 個：超過時，新的取代最舊的 |
+| `GET /api/push/devices` | hub 推播的裝置，不含 endpoint 和金鑰：`{"devices": [{"id", "label", "created_at", "renewed_at", "expires_at", "last_sent_at", "last_error", "last_error_at", "finished", "issues", "groups", "pinned", "quiet_hours"}]}`。`id` 是 endpoint 的 SHA-256 開頭，以十六進位表示；`quiet_hours` 是 `{"start", "end", "time_zone"}`（`HH:MM` 和 IANA 時區），沒有設定時省略 |
+| `PATCH /api/push/devices/{id}` | 修改裝置的設定，只改有送的欄位：`finished`、`issues`、`groups`（`""` 代表沒有群組的 agent；空的且 `pinned` 為 false 時，代表所有 agent）、`pinned`、`quiet_hours`（`{}` 會移除）。回傳這台裝置；不接受的時間或時區回 400，沒有這台裝置時回 404 |
+| `DELETE /api/push/devices/{id}` | 停止推播到某台裝置，並拒絕它的頁面續期，直到那台裝置重新開啟推播（`enable`）；回 204，沒有這台裝置時回 404 |
 | `DELETE /api/push/subscription` | `{"endpoint"}`，停止推播到這個瀏覽器；回 204 |
 | `POST /api/push/test` | `{"endpoint"}`，送一則測試通知到這個瀏覽器，推播服務收下後回 204；hub 沒在推播的瀏覽器回 404，推播服務已結束訂閱時回 410（hub 隨即忘掉它），其他拒絕回 502 |
 | `GET /api/join` | 主機加入 hub 用的資訊：`urls` 的每一項是一個 webhook 網址（`url`）和這個位址所在的網路介面（`interface`；`--bind` 的位址沒有），順序和啟動時的 log 相同；只有設了 token 的 hub 才會附上 secret（`secret`，並帶 `secret_shown: true`） |
@@ -1150,7 +1174,7 @@ case 的 HTTP 狀態（例如 `not_found`）；`error` 和 `message` 相同。
 | `~/.agentapi/hub/dispatch.json` | `agentapi hub serve` | [issue 派工](#issues)的主機（含 launcher 的 token）和 job：各次 run、花費與最近 50 則訊息 |
 | `~/.agentapi/hub/github-app.json` | `agentapi hub serve` | hub 的 GitHub App 與它的私鑰 |
 | `~/.agentapi/hub/providers.json` | `agentapi hub serve` | [模型供應商](#模型供應商)，以及各供應商的金鑰和選的價格（0600） |
-| `~/.agentapi/hub/push.json` | `agentapi hub serve` | hub 的[推播](#推播)金鑰（VAPID）和推播的瀏覽器（0600）；沒有這個檔案時，hub 會產生新的金鑰，每台裝置都要重新開啟推播 |
+| `~/.agentapi/hub/push.json` | `agentapi hub serve` | hub 的[推播](#推播)金鑰（VAPID）和推播的裝置，含它們的設定和 session 何時結束，以及從設定中移除的裝置（0600；變動後一秒內寫入）；沒有這個檔案時，hub 會產生新的金鑰，每台裝置都要重新開啟推播 |
 | `~/.agentapi/hub/openrouter.json` | `agentapi hub serve` | hub 最後一次取得的 OpenRouter 模型與價格，以及沒有定義模型的供應商列出的模型 |
 | `~/.agentapi/hub-providers.json` | `agentapi server` | 每台主機上、設定檔旁邊：hub 上次回應的供應商，以 hub 的 secret 加密；下次啟動時在 hub 回應前先拿來用 |
 

@@ -35,7 +35,6 @@ import (
 	"github.com/coder/agentapi/lib/netaddr"
 	"github.com/coder/agentapi/lib/provider"
 	"github.com/coder/agentapi/lib/sse"
-	"github.com/coder/agentapi/lib/webpush"
 )
 
 // Config is how the hub runs.
@@ -85,6 +84,10 @@ type Config struct {
 	// PushClient reaches the browsers' push services; nil is a client that
 	// uses the proxy of the environment.
 	PushClient *http.Client
+	// PushServiceHosts are hosts the hub pushes to besides the browsers'
+	// push services (pushServiceHosts): a name, or .domain for its
+	// subdomains.
+	PushServiceHosts []string
 }
 
 // Hub is the server.
@@ -94,8 +97,7 @@ type Hub struct {
 	store      *store
 	providers  *providerStore
 	prices     *priceBook
-	push       *pushStore
-	pushSender *webpush.Sender
+	push       *pusher
 	client     *http.Client
 	deliveries *deliveries
 	// badSignatures limits the log of events refused for their signature.
@@ -148,26 +150,28 @@ func New(config Config) (*Hub, error) {
 	if err != nil {
 		return nil, err
 	}
-	push, err := newPushStore(config.StatePath)
+	devices, err := newPushStore(config.StatePath, pushTokenID(config.Token), config.Logger)
 	if err != nil {
 		return nil, err
 	}
 	pushClient := config.PushClient
 	if pushClient == nil {
-		pushClient = &http.Client{Transport: newTransport()}
+		pushClient = newPushClient()
 	}
 	prices := newPriceBook(config.StatePath, config.OpenRouterURL, &http.Client{Transport: newTransport()}, config.Logger, config.Clock)
 	var deliveriesFile string
 	if config.StatePath != "" {
 		deliveriesFile = deliveriesPath(config.StatePath)
 	}
-	return &Hub{
+	h := &Hub{
 		config: config, logger: config.Logger, store: st, providers: providers, prices: prices, client: client,
-		push: push, pushSender: &webpush.Sender{Key: push.key, Subject: pushSubject, Client: pushClient, Now: func() time.Time { return config.Clock.Now() }}, clock: config.Clock,
+		clock:      config.Clock,
 		deliveries: newDeliveries(deliveriesFile, config.Logger, config.Clock.Now()),
 		interfaces: netaddr.Interfaces, watchers: map[string]context.CancelFunc{},
 		streamWriteTimeout: streamWriteTimeout,
-	}, nil
+	}
+	h.push = newPusher(devices, pushClient, config.PushServiceHosts, config.Clock, config.Logger, h.needingYou, h.groupsNow)
+	return h, nil
 }
 
 // newTransport is how the hub reaches the instances by default: the
@@ -196,15 +200,19 @@ func (h *Hub) Run(ctx context.Context) {
 	}
 	h.watchWG.Go(func() { h.prices.run(ctx, h.providers.get) })
 	h.watchWG.Go(func() { h.notifyPush(ctx) })
+	if d := h.config.Dispatch; d != nil {
+		h.watchWG.Go(func() { h.notifyIssues(ctx, d) })
+	}
 	<-ctx.Done()
 	h.watchWG.Wait()
+	h.push.stop()
 }
 
 // Close writes the changes the hub's files haven't kept yet, and stops
 // writing them: it writes a change within a second, and on Close. Call it
 // once the hub stops, after Run returned.
 func (h *Hub) Close() error {
-	return errors.Join(h.store.close(), h.deliveries.close())
+	return errors.Join(h.store.close(), h.deliveries.close(), h.push.devices.close())
 }
 
 // tokenFor is the API token the hub sends to instance.
@@ -286,6 +294,9 @@ func (h *Hub) routes(r chi.Router) {
 		r.Put("/api/push/subscription", h.putPushSubscription)
 		r.Delete("/api/push/subscription", h.deletePushSubscription)
 		r.Post("/api/push/test", h.testPush)
+		r.Get("/api/push/devices", h.listPushDevices)
+		r.Patch("/api/push/devices/{id}", h.patchPushDevice)
+		r.Delete("/api/push/devices/{id}", h.deletePushDevice)
 		r.Handle("/i/{id}", http.HandlerFunc(h.proxy))
 		r.Handle("/i/{id}/*", http.HandlerFunc(h.proxy))
 	})

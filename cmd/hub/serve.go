@@ -42,6 +42,7 @@ func serveCmd() *cobra.Command {
 		dispatchToken string
 		githubApp     string
 		loopback      bool
+		pushHosts     []string
 	)
 	cmd := &cobra.Command{
 		Use:   "serve",
@@ -96,7 +97,7 @@ func serveCmd() *cobra.Command {
 			h, err := hub.New(hub.Config{
 				Token: token, NoToken: noToken, Secret: secret, InstanceToken: instanceToken, Bind: bind, Port: port,
 				StatePath: statePath, AllowedHosts: allowedHosts, Logger: logger, Dispatch: d,
-				OpenRouterURL: hub.OpenRouterModelsURL,
+				OpenRouterURL: hub.OpenRouterModelsURL, PushServiceHosts: pushHosts,
 			})
 			if err != nil {
 				_ = listener.Close()
@@ -167,6 +168,7 @@ func serveCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&loopback, "allow-loopback-launchers", false, "Call a launcher at a loopback address, such as one on this machine that joined the hub by localhost (by default the hub calls launchers on other addresses only)")
 	cmd.Flags().StringVar(&githubApp, "github-app-file", "", "The hub's GitHub App, which /github/connect registers (default github-app.json next to --state)")
 	cmd.Flags().StringVar(&logLevel, "log-level", "", "Least important level to log: "+logctx.LevelNames+" (default $AGENTAPI_HUB_LOG_LEVEL, else info)")
+	cmd.Flags().StringSliceVar(&pushHosts, "push-service-hosts", nil, "Hosts the hub sends Web Push to besides the browsers' push services (Google's, Apple's, Mozilla's, Microsoft's): a name, or .domain for its subdomains (comma-separated)")
 	cmd.Flags().StringSliceVar(&allowedHosts, "allowed-hosts", nil, "Names browsers open the hub by, besides IP addresses and localhost, which always work (hostnames only, comma-separated; '*' for any); without it the hub answers to any name")
 	return cmd
 }

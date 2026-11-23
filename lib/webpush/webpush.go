@@ -25,6 +25,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -238,6 +239,16 @@ type Sender struct {
 	Client  *http.Client
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
+
+	// tokens are the VAPID tokens made, by push service, until an hour
+	// before they expire.
+	mu     sync.Mutex
+	tokens map[string]vapidToken
+}
+
+type vapidToken struct {
+	token   string
+	expires time.Time
 }
 
 // ErrGone is the push service's answer for a subscription that ended (404
@@ -310,16 +321,22 @@ func (s *Sender) Send(ctx context.Context, sub Subscription, msg Message) error 
 const tokenLife = 12 * time.Hour
 
 // token is the VAPID JWT (ES256) for the push service at audience (RFC
-// 8292 section 2).
+// 8292 section 2), made again an hour before it expires.
 func (s *Sender) token(audience string) (string, error) {
 	now := time.Now
 	if s.Now != nil {
 		now = s.Now
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if cached, ok := s.tokens[audience]; ok && now().Before(cached.expires.Add(-time.Hour)) {
+		return cached.token, nil
+	}
+	expires := now().Add(tokenLife)
 	header := encode([]byte(`{"typ":"JWT","alg":"ES256"}`))
 	claims, err := json.Marshal(map[string]any{
 		"aud": audience,
-		"exp": now().Add(tokenLife).Unix(),
+		"exp": expires.Unix(),
 		"sub": s.Subject,
 	})
 	if err != nil {
@@ -334,7 +351,12 @@ func (s *Sender) token(audience string) (string, error) {
 	raw := make([]byte, 64)
 	r.FillBytes(raw[:32])
 	sig.FillBytes(raw[32:])
-	return signed + "." + encode(raw), nil
+	token := signed + "." + encode(raw)
+	if s.tokens == nil {
+		s.tokens = map[string]vapidToken{}
+	}
+	s.tokens[audience] = vapidToken{token: token, expires: expires}
+	return token, nil
 }
 
 // Decrypt reads a body Encrypt wrote, as the browser that holds the
