@@ -36,6 +36,7 @@ import {useHubStream} from "./hub/use-hub-stream";
 import {useListFilters} from "./hub/use-list-filters";
 import {useNeedsYou} from "./hub/use-needs-you";
 import {useNotify} from "./hub/use-notify";
+import {usePush} from "./hub/use-push";
 import {useSound, useSoundUnlock} from "@/lib/alert-sound";
 
 // HubView is the hub's page: sign in, the instances in a sidebar (what
@@ -89,7 +90,9 @@ export function HubView() {
   const current = selected ? instances.get(selected) : undefined;
 
   // Tell people who aren't looking: a screen reader, the tab, a notification.
-  const announcement = useNeedsYou(all, notify, select);
+  // A device the hub pushes to gets the push instead of the page's own.
+  const push = usePush(root, session === "signed-in", select);
+  const announcement = useNeedsYou(all, notify && !push.push, select);
   useHubTab(counts["needs-you"], counts.working > 0);
 
   const actions = useHubActions(root, instances);
@@ -197,6 +200,7 @@ export function HubView() {
             onToggleNotify={() => void toggleNotify()}
             sound={sound}
             onToggleSound={toggleSound}
+            push={push}
             onSettings={() => setSettings("favorites")}
             onHome={route.home}
             onAdd={() => setAdding(true)}

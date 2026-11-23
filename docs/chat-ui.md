@@ -573,7 +573,7 @@ While the tab is in the background, its icon shows an amber dot when the agent n
 while it works and a green dot when a task finishes. With notifications on, the browser also shows
 "*Agent* needs you" or "*Agent* finished" (on an https page only). With the sound on (**Play a
 sound**), a chime plays while you look away from the page, rising when the agent needs you and
-falling when it finishes; it works over plain http too. The hub's bell offers the same notifications and sound. In a chat the hub opens, the hub chimes for
+falling when it finishes; it works over plain http too. The hub's bell offers the same notifications and sound, and [push](hub.md#push) to a phone with the page closed. In a chat the hub opens, the hub chimes for
 an agent that needs you, and the chat only when it finishes.
 
 **Add to a Tendyard hub…** has the steps to copy: run a hub, join this machine to it, open it.
