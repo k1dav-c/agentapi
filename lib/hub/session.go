@@ -54,6 +54,21 @@ func (h *Hub) validSession(value string) bool {
 	return age < sessionMaxAge && age > -sessionSkew
 }
 
+// sessionIssued is when the session cookie r carries was issued, if it
+// carries a valid one.
+func (h *Hub) sessionIssued(r *http.Request) (time.Time, bool) {
+	if h.config.NoToken {
+		return time.Time{}, false
+	}
+	c, err := r.Cookie(sessionCookie)
+	if err != nil || !h.validSession(c.Value) {
+		return time.Time{}, false
+	}
+	unix, _, _ := strings.Cut(c.Value, ".")
+	seconds, _ := strconv.ParseInt(unix, 10, 64)
+	return time.Unix(seconds, 0), true
+}
+
 // signedIn reports whether r carries the session cookie or the hub token;
 // everyone is, on a hub without a token.
 func (h *Hub) signedIn(r *http.Request) bool {

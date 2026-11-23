@@ -3,8 +3,10 @@ package hub
 import (
 	"context"
 	"crypto/ecdsa"
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,34 +17,34 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
+
+	"github.com/go-chi/chi/v5"
 
 	"github.com/coder/agentapi/lib/atomicfile"
-	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/webpush"
 )
 
 // Web Push: the hub tells the browsers that subscribed (a phone with the
-// page closed) that an agent needs them, or finished a task, through
-// their push services. The page's service worker (chat/public/hub-sw.js)
-// shows the notification.
+// page closed) that an agent needs them, that it finished a task, or how
+// an issue's work went, through their push services. The page's service
+// worker (chat/public/hub/sw.js) shows the notification. Each browser is a
+// device with its own settings (PushPrefs, push_prefs.go); the notifiers
+// are in push_notify.go.
 
 const (
 	// maxPushSubscriptions is how many browsers the hub pushes to; a new
 	// one past it replaces the oldest.
 	maxPushSubscriptions = 50
-	// pushDelay is how long a change waits before the hub pushes it, and
-	// is pushed only if it still holds: an approval answered at once, or a
-	// finished task someone was looking at (the chat marks it read), is
-	// none.
-	pushDelay = 5 * time.Second
 	// pushTimeout bounds a push service's answer.
 	pushTimeout = 30 * time.Second
 	// pushSubject is how a push service may reach whoever sends (VAPID's
 	// sub): the project.
 	pushSubject = "https://github.com/k1dav-c/agentapi"
-	// maxPushText is the most characters of a notification's text.
-	maxPushText = 200
+	// maxPushLabel is the most characters of a device's label.
+	maxPushLabel = 60
+	// pushTokenContext is what the hub token is hashed with for
+	// pushSubscription.TokenID.
+	pushTokenContext = "agentapi-hub-push"
 )
 
 // pushKind is what a push tells.
@@ -51,15 +53,49 @@ type pushKind string
 const (
 	pushNeedsYou pushKind = "needs-you"
 	pushFinished pushKind = "finished"
+	pushIssue    pushKind = "issue"
 	pushTest     pushKind = "test"
 )
 
-// pushSubscription is a browser the hub pushes to.
+// pushSubscription is a browser the hub pushes to: a device.
 type pushSubscription struct {
 	webpush.Subscription
-	// Finished pushes the finished tasks too, besides what needs you.
-	Finished  bool      `json:"finished"`
+	PushPrefs
+	// Label names the device, as its browser says (such as iPhone ·
+	// Home Screen).
+	Label     string    `json:"label,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
+	// RenewedAt is when a signed-in page last told the hub the
+	// subscription (it does on each load).
+	RenewedAt time.Time `json:"renewed_at,omitzero"`
+	// ExpiresAt is when the session of the page that last told the hub
+	// ends: the device isn't signed in past it, and the hub stops pushing
+	// to it. Zero for one a hub token or a hub without one renewed.
+	ExpiresAt time.Time `json:"expires_at,omitzero"`
+	// TokenID stands for the hub token it was renewed under: a hub
+	// started with another token forgets it.
+	TokenID    string    `json:"token_id,omitempty"`
+	LastSentAt time.Time `json:"last_sent_at,omitzero"`
+	// LastError is why its push service last refused a push, until the
+	// next one it takes.
+	LastError   string    `json:"last_error,omitempty"`
+	LastErrorAt time.Time `json:"last_error_at,omitzero"`
+}
+
+// id is the device's ID in the hub's API: the start of its endpoint's
+// hash, since the endpoint lets whoever holds it push to the device.
+func (s pushSubscription) id() string {
+	return pushDeviceID(s.Endpoint)
+}
+
+func pushDeviceID(endpoint string) string {
+	sum := sha256.Sum256([]byte(endpoint))
+	return hex.EncodeToString(sum[:8])
+}
+
+// expired says whether the device's session ended at now.
+func (s pushSubscription) expired(now time.Time) bool {
+	return !s.ExpiresAt.IsZero() && !now.Before(s.ExpiresAt)
 }
 
 // pushInfo is GET /api/push: what a browser subscribes with.
@@ -68,10 +104,13 @@ type pushInfo struct {
 }
 
 // pushSubscribeBody is PUT /api/push/subscription: a browser's
-// subscription, as PushSubscription.toJSON() has it, and what to push.
+// subscription, as PushSubscription.toJSON() has it, and its label.
 type pushSubscribeBody struct {
 	webpush.Subscription
-	Finished bool `json:"finished,omitempty" doc:"Push when an agent finishes a task too, not only when it needs you."`
+	Label string `json:"label,omitempty" doc:"What the device is, as the page names it (such as iPhone · Home Screen); at most 60 characters."`
+	// Finished is what pages of 5.8 sent; it sets the setting of a new
+	// device only.
+	Finished bool `json:"finished,omitempty" doc:"For a new device: push the finished tasks too. Its settings are changed with PATCH /api/push/devices/{id}."`
 }
 
 // pushEndpointBody is DELETE /api/push/subscription and POST
@@ -80,20 +119,64 @@ type pushEndpointBody struct {
 	Endpoint string `json:"endpoint"`
 }
 
+// pushDevice is a device as GET /api/push/devices has it: without its
+// endpoint and keys.
+type pushDevice struct {
+	ID string `json:"id" doc:"The device's ID: the start of its endpoint's SHA-256, in hex."`
+	PushPrefs
+	Label       string     `json:"label,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	RenewedAt   *time.Time `json:"renewed_at,omitempty" doc:"When a signed-in page on the device last told the hub."`
+	ExpiresAt   *time.Time `json:"expires_at,omitempty" doc:"When the device's session ends, and the hub stops pushing to it; missing for none."`
+	LastSentAt  *time.Time `json:"last_sent_at,omitempty" doc:"When its push service last took a push."`
+	LastError   string     `json:"last_error,omitempty" doc:"Why its push service last refused one, until it takes the next."`
+	LastErrorAt *time.Time `json:"last_error_at,omitempty"`
+}
+
+// pushDevicesBody is GET /api/push/devices.
+type pushDevicesBody struct {
+	Devices []pushDevice `json:"devices" nullable:"false"`
+}
+
+func timeRef(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	return &t
+}
+
+func (s pushSubscription) device() pushDevice {
+	prefs := s.PushPrefs
+	prefs.Groups = slices.Clone(prefs.Groups)
+	if prefs.Groups == nil {
+		prefs.Groups = []string{}
+	}
+	return pushDevice{
+		ID: s.id(), PushPrefs: prefs, Label: s.Label, CreatedAt: s.CreatedAt,
+		RenewedAt: timeRef(s.RenewedAt), ExpiresAt: timeRef(s.ExpiresAt), LastSentAt: timeRef(s.LastSentAt),
+		LastError: s.LastError, LastErrorAt: timeRef(s.LastErrorAt),
+	}
+}
+
 // pushPayload is what the service worker gets, encrypted to the browser.
 type pushPayload struct {
 	Kind  pushKind `json:"kind"`
 	Title string   `json:"title"`
 	Body  string   `json:"body"`
-	// ID is the instance to open; empty for a test.
-	ID string `json:"id,omitempty"`
-	// Tag groups the notifications of an instance: a new one replaces
-	// the last.
+	// ID is the instance to open; Issue the issue's job to open in
+	// Issues. Neither, for a test.
+	ID    string `json:"id,omitempty"`
+	Issue string `json:"issue,omitempty"`
+	// Tag groups the notifications of an instance or issue: a new one
+	// replaces the last.
 	Tag string `json:"tag"`
+	// Badge is how many agents need you as the hub sends it, for the app
+	// icon's badge.
+	Badge int `json:"badge"`
 }
 
-// pushStore keeps the hub's VAPID key and the subscriptions in push.json
-// beside the instances (0600), or in memory without a state path.
+// pushStore keeps the hub's VAPID key and the devices in push.json beside
+// the instances (0600), or in memory without a state path.
 type pushStore struct {
 	path string
 	mu   sync.Mutex
@@ -107,8 +190,9 @@ type pushFile struct {
 	Subscriptions []pushSubscription `json:"subscriptions"`
 }
 
-// newPushStore reads push.json beside statePath, or makes the key.
-func newPushStore(statePath string) (*pushStore, error) {
+// newPushStore reads push.json beside statePath, or makes the key. It
+// forgets the devices renewed under another hub token than tokenID's.
+func newPushStore(statePath, tokenID string) (*pushStore, error) {
 	s := &pushStore{}
 	if statePath != "" {
 		s.path = filepath.Join(filepath.Dir(statePath), "push.json")
@@ -125,7 +209,10 @@ func newPushStore(statePath string) (*pushStore, error) {
 			if s.key, err = webpush.ParsePrivateKey(stored.VAPIDKey); err != nil {
 				return nil, fmt.Errorf("read %s: %w", s.path, err)
 			}
-			s.subs = stored.Subscriptions
+			s.subs = slices.DeleteFunc(stored.Subscriptions, func(sub pushSubscription) bool { return sub.TokenID != tokenID })
+			if len(s.subs) != len(stored.Subscriptions) {
+				return s, s.saveLocked()
+			}
 			return s, nil
 		}
 	}
@@ -157,55 +244,121 @@ func (s *pushStore) saveLocked() error {
 	return atomicfile.Write(s.path, ".push.json-*", data)
 }
 
-func (s *pushStore) list() []pushSubscription {
+// list is the devices whose session holds at now; it forgets the others.
+func (s *pushStore) list(now time.Time) ([]pushSubscription, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return slices.Clone(s.subs)
+	n := len(s.subs)
+	s.subs = slices.DeleteFunc(s.subs, func(sub pushSubscription) bool { return sub.expired(now) })
+	var err error
+	if len(s.subs) != n {
+		err = s.saveLocked()
+	}
+	return slices.Clone(s.subs), err
+}
+
+// any says whether the hub pushes to any device.
+func (s *pushStore) any() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.subs) > 0
 }
 
 func (s *pushStore) find(endpoint string) (pushSubscription, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	i := slices.IndexFunc(s.subs, func(sub pushSubscription) bool { return sub.Endpoint == endpoint })
+	i := slices.IndexFunc(s.subs, byEndpoint(endpoint))
 	if i < 0 {
 		return pushSubscription{}, false
 	}
 	return s.subs[i], true
 }
 
-// put adds sub, or replaces the one with its endpoint.
-func (s *pushStore) put(sub pushSubscription) error {
+// renew adds sub, or renews the device with its endpoint: its keys,
+// label, session and token, keeping its settings and history. It returns
+// the device as kept.
+func (s *pushStore) renew(sub pushSubscription) (pushSubscription, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if i := slices.IndexFunc(s.subs, func(o pushSubscription) bool { return o.Endpoint == sub.Endpoint }); i >= 0 {
-		sub.CreatedAt = s.subs[i].CreatedAt
-		s.subs[i] = sub
-	} else {
-		if len(s.subs) >= maxPushSubscriptions {
-			s.subs = slices.Delete(s.subs, 0, len(s.subs)-maxPushSubscriptions+1)
+	if i := slices.IndexFunc(s.subs, byEndpoint(sub.Endpoint)); i >= 0 {
+		kept := s.subs[i]
+		kept.Keys = sub.Keys
+		if sub.Label != "" {
+			kept.Label = sub.Label
 		}
-		s.subs = append(s.subs, sub)
+		kept.RenewedAt, kept.ExpiresAt, kept.TokenID = sub.RenewedAt, sub.ExpiresAt, sub.TokenID
+		s.subs[i] = kept
+		return kept, s.saveLocked()
+	}
+	if len(s.subs) >= maxPushSubscriptions {
+		s.subs = slices.Delete(s.subs, 0, len(s.subs)-maxPushSubscriptions+1)
+	}
+	s.subs = append(s.subs, sub)
+	return sub, s.saveLocked()
+}
+
+// update changes the device id; ok is false for one the hub doesn't have.
+func (s *pushStore) update(id string, change func(*pushSubscription)) (sub pushSubscription, ok bool, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	i := slices.IndexFunc(s.subs, func(o pushSubscription) bool { return o.id() == id })
+	if i < 0 {
+		return pushSubscription{}, false, nil
+	}
+	change(&s.subs[i])
+	return s.subs[i], true, s.saveLocked()
+}
+
+// sent records what the device's push service answered.
+func (s *pushStore) sent(endpoint string, at time.Time, sendErr error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	i := slices.IndexFunc(s.subs, byEndpoint(endpoint))
+	if i < 0 {
+		return nil
+	}
+	if sendErr == nil {
+		s.subs[i].LastSentAt, s.subs[i].LastError, s.subs[i].LastErrorAt = at, "", time.Time{}
+	} else {
+		s.subs[i].LastError, s.subs[i].LastErrorAt = clip(sendErr.Error(), 300), at
 	}
 	return s.saveLocked()
 }
 
-// remove forgets the subscription at endpoint; it says whether there was
-// one.
-func (s *pushStore) remove(endpoint string) (bool, error) {
+// remove forgets the devices match picks; it says whether there was one.
+func (s *pushStore) remove(match func(pushSubscription) bool) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	n := len(s.subs)
-	s.subs = slices.DeleteFunc(s.subs, func(o pushSubscription) bool { return o.Endpoint == endpoint })
+	s.subs = slices.DeleteFunc(s.subs, match)
 	if len(s.subs) == n {
 		return false, nil
 	}
 	return true, s.saveLocked()
 }
 
+func byEndpoint(endpoint string) func(pushSubscription) bool {
+	return func(o pushSubscription) bool { return o.Endpoint == endpoint }
+}
+
+// pushTokenID stands for the hub token the hub runs with; "" without one.
+func pushTokenID(token string) string {
+	if token == "" {
+		return ""
+	}
+	mac := hmac.New(sha256.New, []byte(token))
+	mac.Write([]byte(pushTokenContext))
+	return hex.EncodeToString(mac.Sum(nil))[:16]
+}
+
 func (h *Hub) getPush(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, pushInfo{PublicKey: webpush.PublicKey(h.push.key)})
 }
 
+// putPushSubscription adds the browser to the devices the hub pushes to,
+// or renews it (PUT /api/push/subscription), and answers the device. The
+// device stays as long as the session of the page that sent it: the page
+// sends it again on each load.
 func (h *Hub) putPushSubscription(w http.ResponseWriter, r *http.Request) {
 	var body pushSubscribeBody
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&body); err != nil {
@@ -216,13 +369,22 @@ func (h *Hub) putPushSubscription(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	sub := pushSubscription{Subscription: body.Subscription, Finished: body.Finished, CreatedAt: h.clock.Now()}
-	if err := h.push.put(sub); err != nil {
+	now := h.clock.Now()
+	sub := pushSubscription{
+		Subscription: body.Subscription, PushPrefs: PushPrefs{Finished: body.Finished},
+		Label: clip(strings.Join(strings.Fields(body.Label), " "), maxPushLabel), CreatedAt: now, RenewedAt: now,
+		TokenID: pushTokenID(h.config.Token),
+	}
+	if issued, ok := h.sessionIssued(r); ok {
+		sub.ExpiresAt = issued.Add(sessionMaxAge)
+	}
+	kept, err := h.push.renew(sub)
+	if err != nil {
 		h.logger.Error("Couldn't keep a push subscription", "error", err)
 		writeError(w, http.StatusInternalServerError, "couldn't keep the subscription: "+err.Error())
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	writeJSON(w, http.StatusOK, kept.device())
 }
 
 func readEndpoint(w http.ResponseWriter, r *http.Request) (string, bool) {
@@ -239,28 +401,77 @@ func (h *Hub) deletePushSubscription(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, err := h.push.remove(endpoint); err != nil {
+	if _, err := h.push.remove(byEndpoint(endpoint)); err != nil {
 		writeError(w, http.StatusInternalServerError, "couldn't forget the subscription: "+err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (h *Hub) listPushDevices(w http.ResponseWriter, _ *http.Request) {
+	subs, err := h.push.list(h.clock.Now())
+	if err != nil {
+		h.logger.Error("Couldn't forget the push devices whose session ended", "error", err)
+	}
+	body := pushDevicesBody{Devices: make([]pushDevice, 0, len(subs))}
+	for _, sub := range subs {
+		body.Devices = append(body.Devices, sub.device())
+	}
+	writeJSON(w, http.StatusOK, body)
+}
+
+// patchPushDevice changes a device's settings (PATCH
+// /api/push/devices/{id}): those sent, the rest left as they are.
+func (h *Hub) patchPushDevice(w http.ResponseWriter, r *http.Request) {
+	var change pushPrefsChange
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&change); err != nil {
+		writeError(w, http.StatusBadRequest, "send the settings to change: {\"finished\", \"issues\", \"quiet_hours\", \"groups\", \"pinned\"}")
+		return
+	}
+	if err := change.validate(); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	sub, ok, err := h.push.update(chi.URLParam(r, "id"), func(sub *pushSubscription) { change.apply(&sub.PushPrefs) })
+	switch {
+	case !ok:
+		writeError(w, http.StatusNotFound, "no such device")
+	case err != nil:
+		writeError(w, http.StatusInternalServerError, "couldn't keep the settings: "+err.Error())
+	default:
+		writeJSON(w, http.StatusOK, sub.device())
+	}
+}
+
+func (h *Hub) deletePushDevice(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	removed, err := h.push.remove(func(o pushSubscription) bool { return o.id() == id })
+	switch {
+	case err != nil:
+		writeError(w, http.StatusInternalServerError, "couldn't forget the device: "+err.Error())
+	case !removed:
+		writeError(w, http.StatusNotFound, "no such device")
+	default:
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
 // testPush sends the subscription at the endpoint a test notification
-// (POST /api/push/test) and answers once its push service took it: 404
-// for a subscription the hub doesn't have, 410 for one its push service
-// ended (the hub forgets it), 502 for another refusal.
+// (POST /api/push/test), whatever its settings, and answers once its push
+// service took it: 404 for a subscription the hub doesn't have, 410 for
+// one its push service ended (the hub forgets it), 502 for another
+// refusal.
 func (h *Hub) testPush(w http.ResponseWriter, r *http.Request) {
 	endpoint, ok := readEndpoint(w, r)
 	if !ok {
 		return
 	}
 	sub, ok := h.push.find(endpoint)
-	if !ok {
+	if !ok || sub.expired(h.clock.Now()) {
 		writeError(w, http.StatusNotFound, "the hub doesn't push to this browser")
 		return
 	}
-	payload := pushPayload{Kind: pushTest, Title: "Tendyard Hub", Body: "Notifications reach this device.", Tag: "agentapi-hub-test"}
+	payload := pushPayload{Kind: pushTest, Title: "Tendyard Hub", Body: "Notifications reach this device.", Tag: "agentapi-hub-test", Badge: h.needingYou()}
 	err := h.sendPush(r.Context(), sub, payload, webpush.UrgencyHigh)
 	var status *webpush.StatusError
 	switch {
@@ -275,8 +486,8 @@ func (h *Hub) testPush(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// sendPush sends payload to sub, and forgets sub once its push service
-// says it ended.
+// sendPush sends payload to sub and records the answer; it forgets sub
+// once its push service says it ended.
 func (h *Hub) sendPush(ctx context.Context, sub pushSubscription, payload pushPayload, urgency webpush.Urgency) error {
 	data, err := json.Marshal(payload)
 	if err != nil {
@@ -290,10 +501,14 @@ func (h *Hub) sendPush(ctx context.Context, sub pushSubscription, payload pushPa
 	}
 	err = h.pushSender.Send(ctx, sub.Subscription, webpush.Message{Payload: data, TTL: ttl, Urgency: urgency, Topic: pushTopic(payload.Tag)})
 	if errors.Is(err, webpush.ErrGone) {
-		if _, rmErr := h.push.remove(sub.Endpoint); rmErr != nil {
+		if _, rmErr := h.push.remove(byEndpoint(sub.Endpoint)); rmErr != nil {
 			h.logger.Error("Couldn't forget an ended push subscription", "error", rmErr)
 		}
 		h.logger.Info("Forgot a push subscription its push service ended", "push_service", pushService(sub.Endpoint))
+		return err
+	}
+	if saveErr := h.push.sent(sub.Endpoint, h.clock.Now(), err); saveErr != nil {
+		h.logger.Error("Couldn't keep a push's answer", "error", saveErr)
 	}
 	return err
 }
@@ -311,194 +526,4 @@ func pushService(endpoint string) string {
 	rest, _ := strings.CutPrefix(endpoint, "https://")
 	host, _, _ := strings.Cut(rest, "/")
 	return host
-}
-
-// pushAll sends payload to every subscription that wants its kind.
-func (h *Hub) pushAll(ctx context.Context, payload pushPayload) {
-	urgency := webpush.UrgencyNormal
-	if payload.Kind == pushNeedsYou {
-		urgency = webpush.UrgencyHigh
-	}
-	var wg sync.WaitGroup
-	for _, sub := range h.push.list() {
-		if payload.Kind == pushFinished && !sub.Finished {
-			continue
-		}
-		wg.Go(func() {
-			err := h.sendPush(ctx, sub, payload, urgency)
-			if err != nil && !errors.Is(err, webpush.ErrGone) {
-				h.logger.Warn("Couldn't push a notification", "push_service", pushService(sub.Endpoint), "error", err)
-			}
-		})
-	}
-	wg.Wait()
-}
-
-// pushSeen is what the notifier last saw of an instance.
-type pushSeen struct {
-	// attention is what it waited for (instanceapi.AttentionKey), "" for
-	// nothing: a push goes when that changes to something.
-	attention string
-	// task is its latest task, and whether it was running.
-	task    int
-	running bool
-}
-
-// seePush is what summary says, for pushSeen; ok is false when the hub
-// doesn't know (no summary, or it can't reach the instance), which keeps
-// what it saw before.
-func seePush(i Instance) (pushSeen, bool) {
-	if i.Summary == nil || i.Connection == instanceapi.ConnectionStopped || i.Connection == instanceapi.ConnectionUnreachable {
-		return pushSeen{}, false
-	}
-	seen := pushSeen{attention: instanceapi.AttentionKey(i.Summary)}
-	if task := i.Summary.Task; task != nil {
-		seen.task = task.ID
-		seen.running = task.EndedAt == nil
-	}
-	return seen, true
-}
-
-// notifyPush follows the instances' changes until ctx ends, and pushes
-// what needs you and the tasks that finished. What it sees first of an
-// instance (after the hub starts, or the instance comes) only tells it
-// where the instance stands.
-func (h *Hub) notifyPush(ctx context.Context) {
-	for ctx.Err() == nil {
-		instances, _, ch := h.store.subscribe()
-		seen := make(map[string]pushSeen, len(instances))
-		for _, i := range instances {
-			if s, ok := seePush(i); ok {
-				seen[i.ID] = s
-			}
-		}
-		h.followPush(ctx, ch, seen)
-		h.store.unsubscribe(ch)
-	}
-}
-
-// followPush pushes the changes of ch until it closes (it fell behind)
-// or ctx ends.
-func (h *Hub) followPush(ctx context.Context, ch chan storeEvent, seen map[string]pushSeen) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case event, ok := <-ch:
-			if !ok {
-				return
-			}
-			switch event.Kind {
-			case eventRemoved:
-				delete(seen, event.Removed)
-			case eventInstance:
-				i := event.Instance
-				now, ok := seePush(i)
-				if !ok {
-					continue
-				}
-				before, known := seen[i.ID]
-				seen[i.ID] = now
-				if !known {
-					continue
-				}
-				switch {
-				case now.attention != "" && now.attention != before.attention:
-					h.pushLater(ctx, i.ID, pushNeedsYou, now)
-				case now.attention == "" && before.running && !now.running && before.task == now.task:
-					h.pushLater(ctx, i.ID, pushFinished, now)
-				}
-			case eventSettings:
-			}
-		}
-	}
-}
-
-// pushLater pushes kind for the instance id after pushDelay, if what it
-// says still holds then.
-func (h *Hub) pushLater(ctx context.Context, id string, kind pushKind, seen pushSeen) {
-	if len(h.push.list()) == 0 {
-		return
-	}
-	h.clock.AfterFunc(pushDelay, func() {
-		if ctx.Err() != nil {
-			return
-		}
-		i, ok := h.store.get(id)
-		if !ok {
-			return
-		}
-		payload, ok := pushFor(i, kind, seen)
-		if !ok {
-			return
-		}
-		go h.pushAll(ctx, payload)
-	}, "hub", "push")
-}
-
-// pushFor is the notification of kind for i, if i still stands where the
-// notifier saw it (seen): it still waits for the same thing, and isn't
-// muted; or its task is still the one that finished, and unread.
-func pushFor(i Instance, kind pushKind, seen pushSeen) (pushPayload, bool) {
-	now, ok := seePush(i)
-	if !ok {
-		return pushPayload{}, false
-	}
-	name := i.Name
-	if name == "" {
-		name = i.ID
-	}
-	payload := pushPayload{Kind: kind, ID: i.ID, Tag: "agentapi-hub-" + i.ID}
-	switch kind {
-	case pushNeedsYou:
-		if now.attention != seen.attention || i.State != instanceapi.StateNeedsYou {
-			return pushPayload{}, false
-		}
-		payload.Title = name + " needs you"
-		payload.Body = waitsFor(i.Summary)
-	case pushFinished:
-		if now.attention != "" || now.task != seen.task || now.running || !i.Summary.Unread {
-			return pushPayload{}, false
-		}
-		payload.Title = name + " finished"
-		payload.Body = i.Summary.Title
-		if payload.Body == "" && i.Summary.Task != nil {
-			payload.Body = i.Summary.Task.Prompt
-		}
-	case pushTest:
-		return pushPayload{}, false
-	}
-	payload.Body = clip(strings.Join(strings.Fields(payload.Body), " "), maxPushText)
-	payload.Title = clip(payload.Title, maxPushText)
-	return payload, true
-}
-
-// waitsFor is what an instance that needs you waits for, as the hub's
-// page says it (waitsFor in chat/src/lib/hub-format.ts).
-func waitsFor(summary *instanceapi.SummaryBody) string {
-	switch {
-	case summary.Attention == instanceapi.AttentionLogin:
-		if summary.LoginRequired != nil && summary.LoginRequired.Message != "" {
-			return summary.LoginRequired.Message
-		}
-		return "Log in to continue"
-	case summary.Attention == instanceapi.AttentionLimit:
-		if summary.LimitStop != nil && summary.LimitStop.Message != "" {
-			return summary.LimitStop.Message
-		}
-		return "The account reached its limit"
-	case summary.Request != nil:
-		return summary.Request.Title
-	default:
-		return "Waiting for your answer"
-	}
-}
-
-// clip cuts s to max characters, with an ellipsis.
-func clip(s string, max int) string {
-	if utf8.RuneCountInString(s) <= max {
-		return s
-	}
-	runes := []rune(s)
-	return string(runes[:max-1]) + "…"
 }

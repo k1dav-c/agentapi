@@ -148,7 +148,7 @@ func New(config Config) (*Hub, error) {
 	if err != nil {
 		return nil, err
 	}
-	push, err := newPushStore(config.StatePath)
+	push, err := newPushStore(config.StatePath, pushTokenID(config.Token))
 	if err != nil {
 		return nil, err
 	}
@@ -196,6 +196,9 @@ func (h *Hub) Run(ctx context.Context) {
 	}
 	h.watchWG.Go(func() { h.prices.run(ctx, h.providers.get) })
 	h.watchWG.Go(func() { h.notifyPush(ctx) })
+	if d := h.config.Dispatch; d != nil {
+		h.watchWG.Go(func() { h.notifyIssues(ctx, d) })
+	}
 	<-ctx.Done()
 	h.watchWG.Wait()
 }
@@ -286,6 +289,9 @@ func (h *Hub) routes(r chi.Router) {
 		r.Put("/api/push/subscription", h.putPushSubscription)
 		r.Delete("/api/push/subscription", h.deletePushSubscription)
 		r.Post("/api/push/test", h.testPush)
+		r.Get("/api/push/devices", h.listPushDevices)
+		r.Patch("/api/push/devices/{id}", h.patchPushDevice)
+		r.Delete("/api/push/devices/{id}", h.deletePushDevice)
 		r.Handle("/i/{id}", http.HandlerFunc(h.proxy))
 		r.Handle("/i/{id}/*", http.HandlerFunc(h.proxy))
 	})

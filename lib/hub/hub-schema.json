@@ -1811,6 +1811,92 @@
         ],
         "type": "object"
       },
+      "PushDevice": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "expires_at": {
+            "description": "When the device's session ends, and the hub stops pushing to it; missing for none.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "finished": {
+            "description": "Push when an agent finishes a task, not only when it needs you.",
+            "type": "boolean"
+          },
+          "groups": {
+            "description": "The groups whose agents are pushed (\"\" for the ungrouped ones); with pinned false, none is every agent.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "id": {
+            "description": "The device's ID: the start of its endpoint's SHA-256, in hex.",
+            "type": "string"
+          },
+          "issues": {
+            "description": "Push the issues' work: a pull request opened, a job failed, a job done.",
+            "type": "boolean"
+          },
+          "label": {
+            "type": "string"
+          },
+          "last_error": {
+            "description": "Why its push service last refused one, until it takes the next.",
+            "type": "string"
+          },
+          "last_error_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "last_sent_at": {
+            "description": "When its push service last took a push.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "pinned": {
+            "description": "Push the pinned agents, besides those of groups.",
+            "type": "boolean"
+          },
+          "quiet_hours": {
+            "$ref": "#/components/schemas/QuietHours",
+            "description": "When nothing is pushed to the device; missing for never."
+          },
+          "renewed_at": {
+            "description": "When a signed-in page on the device last told the hub.",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "created_at",
+          "finished",
+          "issues",
+          "groups",
+          "pinned"
+        ],
+        "type": "object"
+      },
+      "PushDevicesBody": {
+        "additionalProperties": false,
+        "properties": {
+          "devices": {
+            "items": {
+              "$ref": "#/components/schemas/PushDevice"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "devices"
+        ],
+        "type": "object"
+      },
       "PushEndpointBody": {
         "additionalProperties": false,
         "properties": {
@@ -1836,6 +1922,31 @@
         ],
         "type": "object"
       },
+      "PushPrefsChange": {
+        "additionalProperties": false,
+        "properties": {
+          "finished": {
+            "type": "boolean"
+          },
+          "groups": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "issues": {
+            "type": "boolean"
+          },
+          "pinned": {
+            "type": "boolean"
+          },
+          "quiet_hours": {
+            "$ref": "#/components/schemas/QuietHours",
+            "description": "The quiet hours; {} removes them."
+          }
+        },
+        "type": "object"
+      },
       "PushSubscribeBody": {
         "additionalProperties": false,
         "properties": {
@@ -1844,16 +1955,52 @@
             "type": "string"
           },
           "finished": {
-            "description": "Push when an agent finishes a task too, not only when it needs you.",
+            "description": "For a new device: push the finished tasks too. Its settings are changed with PATCH /api/push/devices/{id}.",
             "type": "boolean"
           },
           "keys": {
             "$ref": "#/components/schemas/WebPushKeys"
+          },
+          "label": {
+            "description": "What the device is, as the page names it (such as iPhone · Home Screen); at most 60 characters.",
+            "type": "string"
           }
         },
         "required": [
           "endpoint",
           "keys"
+        ],
+        "type": "object"
+      },
+      "QuietHours": {
+        "additionalProperties": false,
+        "properties": {
+          "end": {
+            "description": "When it ends, HH:MM.",
+            "examples": [
+              "08:00"
+            ],
+            "type": "string"
+          },
+          "start": {
+            "description": "When the quiet starts, HH:MM.",
+            "examples": [
+              "22:00"
+            ],
+            "type": "string"
+          },
+          "time_zone": {
+            "description": "The IANA time zone the times are in, such as Asia/Taipei.",
+            "examples": [
+              "Asia/Taipei"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "start",
+          "end",
+          "time_zone"
         ],
         "type": "object"
       },
