@@ -8,6 +8,8 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -72,31 +74,65 @@ type pusher struct {
 	clock   quartz.Clock
 	logger  *slog.Logger
 	// needingYou counts the agents that need you, for the app icon's
-	// badge.
+	// badge; groups are the groups the agents are in now, which a device's
+	// Groups are matched against.
 	needingYou func() int
+	groups     func() map[string]bool
+	// hosts are the push services it sends to (pushServiceHosts, and
+	// Config.PushServiceHosts).
+	hosts []string
+
+	// The pushes under way in the background (goSend), which stop waits
+	// for.
+	mu      sync.Mutex
+	stopped bool
+	sending sync.WaitGroup
 }
 
-func newPusher(devices *pushStore, client *http.Client, clock quartz.Clock, logger *slog.Logger, needingYou func() int) *pusher {
+func newPusher(devices *pushStore, client *http.Client, hosts []string, clock quartz.Clock, logger *slog.Logger, needingYou func() int, groups func() map[string]bool) *pusher {
 	sender := &webpush.Sender{Key: devices.key, Subject: pushSubject, Client: client, Now: func() time.Time { return clock.Now() }}
-	return &pusher{devices: devices, sender: sender, clock: clock, logger: logger, needingYou: needingYou}
+	return &pusher{
+		devices: devices, sender: sender, clock: clock, logger: logger, needingYou: needingYou, groups: groups,
+		hosts: append(slices.Clone(pushServiceHosts), hosts...),
+	}
+}
+
+// goSendAll sends payload in the background (sendAll), unless the pusher
+// stopped.
+func (p *pusher) goSendAll(ctx context.Context, payload pushPayload, i *Instance) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.stopped {
+		return
+	}
+	p.sending.Go(func() { p.sendAll(ctx, payload, i) })
+}
+
+// stop waits for the pushes under way, and sends no more in the
+// background. Call it once ctx of those ended.
+func (p *pusher) stop() {
+	p.mu.Lock()
+	p.stopped = true
+	p.mu.Unlock()
+	p.sending.Wait()
 }
 
 // sendAll sends payload to every device that wants it now; i is the
 // agent it is about, nil for an issue's.
 func (p *pusher) sendAll(ctx context.Context, payload pushPayload, i *Instance) {
+	if ctx.Err() != nil {
+		return
+	}
 	urgency := webpush.UrgencyNormal
 	if payload.Kind == pushNeedsYou {
 		urgency = webpush.UrgencyHigh
 	}
 	now := p.clock.Now()
-	subs, err := p.devices.list(now)
-	if err != nil {
-		p.logger.Error("Couldn't forget the push devices whose session ended", "error", err)
-	}
 	payload.Badge = p.needingYou()
+	groups := p.groups()
 	var wg sync.WaitGroup
-	for _, sub := range subs {
-		if !sub.wants(payload, i, now) {
+	for _, sub := range p.devices.list(now) {
+		if !sub.wants(payload, i, now, groups) {
 			continue
 		}
 		wg.Go(func() {
@@ -112,6 +148,9 @@ func (p *pusher) sendAll(ctx context.Context, payload pushPayload, i *Instance) 
 // send sends payload to sub and records the answer; it forgets sub once
 // its push service says it ended.
 func (p *pusher) send(ctx context.Context, sub pushSubscription, payload pushPayload, urgency webpush.Urgency) error {
+	if err := checkPushService(sub.Endpoint, p.hosts); err != nil {
+		return err
+	}
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return err
@@ -124,16 +163,49 @@ func (p *pusher) send(ctx context.Context, sub pushSubscription, payload pushPay
 	}
 	err = p.sender.Send(ctx, sub.Subscription, webpush.Message{Payload: data, TTL: ttl, Urgency: urgency, Topic: pushTopic(payload.Tag)})
 	if errors.Is(err, webpush.ErrGone) {
-		if _, rmErr := p.devices.remove(byEndpoint(sub.Endpoint)); rmErr != nil {
-			p.logger.Error("Couldn't forget an ended push subscription", "error", rmErr)
-		}
+		p.devices.remove(sub.Endpoint)
 		p.logger.Info("Forgot a push subscription its push service ended", "push_service", pushService(sub.Endpoint))
 		return err
 	}
-	if saveErr := p.devices.sent(sub.Endpoint, p.clock.Now(), err); saveErr != nil {
-		p.logger.Error("Couldn't keep a push's answer", "error", saveErr)
-	}
+	p.devices.sent(sub.Endpoint, p.clock.Now(), err)
 	return err
+}
+
+// pushServiceHosts are the push services the hub sends to, by the end of
+// their host name: the browsers' own (Chrome's and the other Chromium
+// browsers', Safari's, Firefox's, Edge's). The hub refuses others, so a
+// page can't have it send requests anywhere it reaches.
+var pushServiceHosts = []string{".googleapis.com", ".push.apple.com", ".push.services.mozilla.com", ".notify.windows.com"}
+
+// checkPushService refuses an endpoint whose host isn't one of hosts: a
+// name, or .domain for its subdomains.
+func checkPushService(endpoint string, hosts []string) error {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return err
+	}
+	host := strings.ToLower(u.Hostname())
+	for _, allowed := range hosts {
+		allowed = strings.ToLower(allowed)
+		if host == strings.TrimPrefix(allowed, ".") || (strings.HasPrefix(allowed, ".") && strings.HasSuffix(host, allowed)) {
+			return nil
+		}
+	}
+	return errUnknownPushService
+}
+
+var errUnknownPushService = errors.New("the endpoint isn't a browser's push service (Google's, Apple's, Mozilla's or Microsoft's)")
+
+// newPushClient is how the hub reaches the push services by default: the
+// environment's proxy, no redirect (a push service answers where it is
+// asked), and a response's headers within 15 seconds.
+func newPushClient() *http.Client {
+	return &http.Client{
+		Transport: newTransport(),
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 }
 
 // pushTopic is the Topic header of tag: a message the push service still

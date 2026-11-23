@@ -228,3 +228,23 @@ func TestDecrypt(t *testing.T) {
 	_, err = Decrypt(body[:10], key, auth)
 	require.Error(t, err)
 }
+
+func TestTokenIsKeptUntilAnHourBeforeItExpires(t *testing.T) {
+	key, err := GenerateKey()
+	require.NoError(t, err)
+	now := time.Date(2026, 11, 23, 10, 0, 0, 0, time.UTC)
+	sender := &Sender{Key: key, Subject: "https://example.com", Now: func() time.Time { return now }}
+	first, err := sender.token("https://fcm.googleapis.com")
+	require.NoError(t, err)
+	now = now.Add(10 * time.Hour)
+	again, err := sender.token("https://fcm.googleapis.com")
+	require.NoError(t, err)
+	assert.Equal(t, first, again)
+	other, err := sender.token("https://web.push.apple.com")
+	require.NoError(t, err)
+	assert.NotEqual(t, first, other, "one per push service")
+	now = now.Add(time.Hour + time.Second)
+	renewed, err := sender.token("https://fcm.googleapis.com")
+	require.NoError(t, err)
+	assert.NotEqual(t, first, renewed)
+}

@@ -84,6 +84,10 @@ type Config struct {
 	// PushClient reaches the browsers' push services; nil is a client that
 	// uses the proxy of the environment.
 	PushClient *http.Client
+	// PushServiceHosts are hosts the hub pushes to besides the browsers'
+	// push services (pushServiceHosts): a name, or .domain for its
+	// subdomains.
+	PushServiceHosts []string
 }
 
 // Hub is the server.
@@ -146,13 +150,13 @@ func New(config Config) (*Hub, error) {
 	if err != nil {
 		return nil, err
 	}
-	devices, err := newPushStore(config.StatePath, pushTokenID(config.Token))
+	devices, err := newPushStore(config.StatePath, pushTokenID(config.Token), config.Logger)
 	if err != nil {
 		return nil, err
 	}
 	pushClient := config.PushClient
 	if pushClient == nil {
-		pushClient = &http.Client{Transport: newTransport()}
+		pushClient = newPushClient()
 	}
 	prices := newPriceBook(config.StatePath, config.OpenRouterURL, &http.Client{Transport: newTransport()}, config.Logger, config.Clock)
 	var deliveriesFile string
@@ -166,7 +170,7 @@ func New(config Config) (*Hub, error) {
 		interfaces: netaddr.Interfaces, watchers: map[string]context.CancelFunc{},
 		streamWriteTimeout: streamWriteTimeout,
 	}
-	h.push = newPusher(devices, pushClient, config.Clock, config.Logger, h.needingYou)
+	h.push = newPusher(devices, pushClient, config.PushServiceHosts, config.Clock, config.Logger, h.needingYou, h.groupsNow)
 	return h, nil
 }
 
@@ -201,13 +205,14 @@ func (h *Hub) Run(ctx context.Context) {
 	}
 	<-ctx.Done()
 	h.watchWG.Wait()
+	h.push.stop()
 }
 
 // Close writes the changes the hub's files haven't kept yet, and stops
 // writing them: it writes a change within a second, and on Close. Call it
 // once the hub stops, after Run returned.
 func (h *Hub) Close() error {
-	return errors.Join(h.store.close(), h.deliveries.close())
+	return errors.Join(h.store.close(), h.deliveries.close(), h.push.devices.close())
 }
 
 // tokenFor is the API token the hub sends to instance.

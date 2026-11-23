@@ -646,6 +646,8 @@ export interface components {
             quiet_hours?: components["schemas"]["QuietHours"];
         };
         PushSubscribeBody: {
+            /** @description Push is being turned on here: a device removed from the settings (DELETE /api/push/devices/{id}) is added again; without it, its renewal is 410. */
+            enable?: boolean;
             /** @description The push service's URL for this browser (https). */
             endpoint: string;
             /** @description For a new device: push the finished tasks too. Its settings are changed with PATCH /api/push/devices/{id}. */
@@ -679,6 +681,10 @@ export interface components {
         };
         SignInBody: {
             token: string;
+        };
+        SignOutBody: {
+            /** @description This browser's push endpoint: the hub stops pushing to it. */
+            endpoint?: string;
         };
         /**
          * Source

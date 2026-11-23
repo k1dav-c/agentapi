@@ -65,7 +65,7 @@ describe("createHubPush", () => {
     await createHubPush("https://hub", browser, "Pixel · Chrome", hub.fetcher).enable();
     expect(subscribed).toHaveLength(1);
     expect(sameKey(subscribed[0].options.applicationServerKey, hubKey)).toBe(true);
-    expect(hub.calls.at(-1)).toEqual({method: "PUT", path: "/api/push/subscription", body: {endpoint: "https://push.example/1", keys: {p256dh: "p256", auth: "auth"}, label: "Pixel · Chrome"}});
+    expect(hub.calls.at(-1)).toEqual({method: "PUT", path: "/api/push/subscription", body: {endpoint: "https://push.example/1", keys: {p256dh: "p256", auth: "auth"}, label: "Pixel · Chrome", enable: true}});
   });
 
   test("enable throws without permission", async () => {
@@ -144,5 +144,30 @@ describe("the devices", () => {
       {method: "PATCH", path: "/api/push/devices/ab", body: {finished: true}},
       {method: "DELETE", path: "/api/push/devices/ab", body: undefined},
     ]);
+  });
+});
+
+describe("renewing", () => {
+  test("sync renews without enable, and throws the hub's 410 for a removed device", async () => {
+    const kept = fakeSubscription("https://push.example/kept", applicationServerKey(hubKey));
+    const {browser} = fakeBrowser("granted", kept);
+    const gone = fakeHub(410);
+    globalThis.Notification ??= {permission: "granted"} as unknown as typeof Notification;
+    const error = await createHubPush("https://hub", browser, "Mac · Safari", gone.fetcher)
+      .sync()
+      .catch((e: unknown) => e);
+    expect(gone.calls.at(-1)?.body).toEqual({endpoint: "https://push.example/kept", keys: {p256dh: "p256", auth: "auth"}, label: "Mac · Safari", enable: false});
+    expect((error as HubAPIError).status).toBe(410);
+  });
+
+  test("forget unsubscribes without telling the hub", async () => {
+    const kept = fakeSubscription("https://push.example/kept", applicationServerKey(hubKey));
+    const {browser} = fakeBrowser("granted", kept);
+    const hub = fakeHub();
+    const push = createHubPush("https://hub", browser, "Mac · Safari", hub.fetcher);
+    expect(await push.endpoint()).toBe("https://push.example/kept");
+    await push.forget();
+    expect(kept.unsubscribed).toBe(true);
+    expect(hub.calls).toHaveLength(0);
   });
 });

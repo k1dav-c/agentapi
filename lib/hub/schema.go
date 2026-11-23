@@ -53,6 +53,7 @@ var wireTypes = []reflect.Type{
 	reflect.TypeFor[forgetBody](),
 	reflect.TypeFor[sessionBody](),
 	reflect.TypeFor[signInBody](),
+	reflect.TypeFor[signOutBody](),
 	reflect.TypeFor[joinInfo](),
 	reflect.TypeFor[activityBody](),
 	reflect.TypeFor[pushInfo](),

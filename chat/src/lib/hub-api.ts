@@ -62,8 +62,9 @@ export function createHubAPI(root: string, fetcher: Fetcher = (url, init) => fet
     // Trades the hub's token for its session cookie (POST /api/session),
     // which the other calls need; this one doesn't.
     signIn: (token: string) => done(call("/api/session", json("POST", {token} satisfies HubWire["SignInBody"]))),
-    // Ends this browser's session (DELETE /api/session).
-    signOut: () => done(call("/api/session", {method: "DELETE"})),
+    // Ends this browser's session (DELETE /api/session); with its push
+    // endpoint, the hub stops pushing to it too.
+    signOut: (endpoint?: string) => done(call("/api/session", endpoint ? json("DELETE", {endpoint} satisfies HubWire["SignOutBody"]) : {method: "DELETE"})),
     // Adds an AgentAPI by its URL (POST /api/instances), and returns its ID.
     addInstance: async (body: HubWire["AddInstanceBody"]): Promise<string> => {
       const response = await call("/api/instances", json("POST", body));

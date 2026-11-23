@@ -29,6 +29,9 @@ type pushSubscribeBody struct {
 	// Finished is what pages of 5.8 sent; it sets the setting of a new
 	// device only.
 	Finished bool `json:"finished,omitempty" doc:"For a new device: push the finished tasks too. Its settings are changed with PATCH /api/push/devices/{id}."`
+	// Enable is a page turning push on, rather than renewing it: a
+	// device removed from the settings comes back only so.
+	Enable bool `json:"enable,omitempty" doc:"Push is being turned on here: a device removed from the settings (DELETE /api/push/devices/{id}) is added again; without it, its renewal is 410."`
 }
 
 // pushEndpointBody is DELETE /api/push/subscription and POST
@@ -83,7 +86,8 @@ func (h *Hub) getPush(w http.ResponseWriter, _ *http.Request) {
 // putPushSubscription adds the browser to the devices the hub pushes to,
 // or renews it (PUT /api/push/subscription), and answers the device. The
 // device stays as long as the session of the page that sent it: the page
-// sends it again on each load.
+// sends it again on each load. A device removed from the settings is 410
+// unless the page turns push on again (enable).
 func (h *Hub) putPushSubscription(w http.ResponseWriter, r *http.Request) {
 	var body pushSubscribeBody
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&body); err != nil {
@@ -91,6 +95,10 @@ func (h *Hub) putPushSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := body.Validate(); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := checkPushService(body.Endpoint, h.push.hosts); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -103,10 +111,9 @@ func (h *Hub) putPushSubscription(w http.ResponseWriter, r *http.Request) {
 	if issued, ok := h.sessionIssued(r); ok {
 		sub.ExpiresAt = issued.Add(sessionMaxAge)
 	}
-	kept, err := h.push.devices.renew(sub)
+	kept, err := h.push.devices.renew(sub, body.Enable)
 	if err != nil {
-		h.logger.Error("Couldn't keep a push subscription", "error", err)
-		writeError(w, http.StatusInternalServerError, "couldn't keep the subscription: "+err.Error())
+		writeError(w, http.StatusGone, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, kept.device())
@@ -126,18 +133,12 @@ func (h *Hub) deletePushSubscription(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, err := h.push.devices.remove(byEndpoint(endpoint)); err != nil {
-		writeError(w, http.StatusInternalServerError, "couldn't forget the subscription: "+err.Error())
-		return
-	}
+	h.push.devices.remove(endpoint)
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Hub) listPushDevices(w http.ResponseWriter, _ *http.Request) {
-	subs, err := h.push.devices.list(h.clock.Now())
-	if err != nil {
-		h.logger.Error("Couldn't forget the push devices whose session ended", "error", err)
-	}
+	subs := h.push.devices.list(h.clock.Now())
 	body := pushDevicesBody{Devices: make([]pushDevice, 0, len(subs))}
 	for _, sub := range subs {
 		body.Devices = append(body.Devices, sub.device())
@@ -157,28 +158,23 @@ func (h *Hub) patchPushDevice(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	sub, ok, err := h.push.devices.update(chi.URLParam(r, "id"), func(sub *pushSubscription) { change.apply(&sub.PushPrefs) })
-	switch {
-	case !ok:
+	sub, ok := h.push.devices.update(chi.URLParam(r, "id"), func(sub *pushSubscription) { change.apply(&sub.PushPrefs) })
+	if !ok {
 		writeError(w, http.StatusNotFound, "no such device")
-	case err != nil:
-		writeError(w, http.StatusInternalServerError, "couldn't keep the settings: "+err.Error())
-	default:
-		writeJSON(w, http.StatusOK, sub.device())
+		return
 	}
+	writeJSON(w, http.StatusOK, sub.device())
 }
 
+// deletePushDevice stops pushing to a device (DELETE
+// /api/push/devices/{id}), from any device's settings: its page, which
+// still has push on, gets 410 when it renews it, and turns push off.
 func (h *Hub) deletePushDevice(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	removed, err := h.push.devices.remove(func(o pushSubscription) bool { return o.id() == id })
-	switch {
-	case err != nil:
-		writeError(w, http.StatusInternalServerError, "couldn't forget the device: "+err.Error())
-	case !removed:
+	if !h.push.devices.revoke(chi.URLParam(r, "id")) {
 		writeError(w, http.StatusNotFound, "no such device")
-	default:
-		w.WriteHeader(http.StatusNoContent)
+		return
 	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // testPush sends the subscription at the endpoint a test notification

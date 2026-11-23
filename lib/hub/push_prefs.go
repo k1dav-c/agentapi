@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 )
@@ -55,7 +56,7 @@ func (q quietHours) validate() error {
 	if start == end {
 		return errors.New("quiet_hours start and end are the same time")
 	}
-	if _, err := time.LoadLocation(q.TimeZone); err != nil || q.TimeZone == "" {
+	if _, err := loadLocation(q.TimeZone); err != nil || q.TimeZone == "" {
 		return fmt.Errorf("quiet_hours time_zone %q isn't an IANA time zone", q.TimeZone)
 	}
 	return nil
@@ -68,7 +69,7 @@ func (q *quietHours) quiet(at time.Time) bool {
 	}
 	start, okStart := parseClock(q.Start)
 	end, okEnd := parseClock(q.End)
-	loc, err := time.LoadLocation(q.TimeZone)
+	loc, err := loadLocation(q.TimeZone)
 	if !okStart || !okEnd || err != nil {
 		return false
 	}
@@ -81,17 +82,30 @@ func (q *quietHours) quiet(at time.Time) bool {
 }
 
 // follows says whether the device follows the agent i: its group, or its
-// pin.
-func (p PushPrefs) follows(i Instance) bool {
-	if len(p.Groups) == 0 && !p.Pinned {
+// pin. groups are the groups the agents are in now ("" for none): a group
+// followed that no agent is in any more (renamed, or emptied) counts for
+// nothing, and a device left following none of them gets every agent, as
+// one that follows none.
+func (p PushPrefs) follows(i Instance, groups map[string]bool) bool {
+	if p.Pinned && i.Pin > 0 {
 		return true
 	}
-	return (p.Pinned && i.Pin > 0) || slices.Contains(p.Groups, i.Group)
+	followed := false
+	for _, group := range p.Groups {
+		if groups[group] {
+			followed = true
+			if group == i.Group {
+				return true
+			}
+		}
+	}
+	return !followed && !p.Pinned
 }
 
 // wants says whether the device gets payload at now; i is the agent it
-// is about, nil for an issue's.
-func (p PushPrefs) wants(payload pushPayload, i *Instance, now time.Time) bool {
+// is about, nil for an issue's, and groups the agents' groups now
+// (follows).
+func (p PushPrefs) wants(payload pushPayload, i *Instance, now time.Time, groups map[string]bool) bool {
 	switch payload.Kind {
 	case pushTest:
 		return true
@@ -105,7 +119,7 @@ func (p PushPrefs) wants(payload pushPayload, i *Instance, now time.Time) bool {
 		}
 	case pushNeedsYou:
 	}
-	if i != nil && !p.follows(*i) {
+	if i != nil && !p.follows(*i, groups) {
 		return false
 	}
 	return !p.QuietHours.quiet(now)
@@ -164,4 +178,20 @@ func (c pushPrefsChange) apply(p *PushPrefs) {
 	if c.Pinned != nil {
 		p.Pinned = *c.Pinned
 	}
+}
+
+// locations keeps the time zones loaded: each push checks every device's
+// quiet hours, and time.LoadLocation reads the zone's file each time.
+var locations sync.Map
+
+func loadLocation(name string) (*time.Location, error) {
+	if loc, ok := locations.Load(name); ok {
+		return loc.(*time.Location), nil
+	}
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		return nil, err
+	}
+	locations.Store(name, loc)
+	return loc, nil
 }

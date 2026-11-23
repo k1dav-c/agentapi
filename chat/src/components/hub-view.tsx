@@ -4,7 +4,7 @@ import {useMemo, useRef, useState} from "react";
 import {toast} from "sonner";
 import {Button} from "@/components/ui/button";
 import {hubRoot, type HubInstance} from "@/lib/hub";
-import {createHubAPI, hubErrorText} from "@/lib/hub-api";
+import {hubErrorText} from "@/lib/hub-api";
 import type {OpenTarget} from "@/lib/hub-push-browser";
 import {active, rowJobs, type RowJob} from "@/lib/hub-dispatch";
 import {stoppedOf} from "@/lib/hub-filter";
@@ -99,11 +99,10 @@ export function HubView() {
   });
   const alerts = useHubAlerts({root, signedIn: session === "signed-in", instances: all, needYou: counts["needs-you"], open: openTarget});
   const {push, announcement} = alerts;
-  // Signing out stops the pushes to this browser first.
+  // Signing out stops the pushes to this browser too.
   const signOut = async () => {
-    await push.signOut();
     try {
-      await createHubAPI(root).signOut();
+      await push.signOut();
     } catch (error) {
       toast.error("Couldn't sign out", {description: hubErrorText(error)});
       return;

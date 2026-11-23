@@ -45,10 +45,11 @@ export function PushSettings({push, groups, headingRef}: {push: HubPushState; gr
   };
   const remove = async (id: string) => {
     try {
-      // This browser stops too, or its next visit would subscribe again.
+      // This browser turns push off; another stops at its next visit (the
+      // hub refuses to renew it). Read again: the hub says what stayed.
       if (id === thisDevice && push.push) await push.togglePush();
       else await api.remove(id);
-      setDevices((all) => all?.filter((device) => device.id !== id));
+      await read();
     } catch (failed) {
       toast.error("Couldn't remove the device", {description: hubErrorText(failed)});
     }

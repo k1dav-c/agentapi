@@ -11,8 +11,9 @@ import {usePush, type HubPushState} from "./use-push";
 // HubAlerts are the ways the hub's page tells you that an agent needs you
 // while you look away, which the bell's menu turns on and off (AlertsMenu):
 // a notification while the tab is hidden, a chime, and push to this device
-// with the page closed (which stands in for the page's notification); and
-// what a screen reader announces.
+// with the page closed; and what a screen reader announces. The page's
+// notification and the push are apart: the hub may not push this device
+// an agent (its groups, its quiet hours), so the page still notifies.
 export interface HubAlerts {
   notify: boolean;
   toggleNotify: () => Promise<void>;
@@ -43,6 +44,6 @@ export function useHubAlerts({
   useSoundUnlock();
   const push = usePush(root, signedIn, open, needYou);
   const openAgent = useCallback((id: string) => open({agent: id}), [open]);
-  const announcement = useNeedsYou(instances, notify && !push.push, openAgent);
+  const announcement = useNeedsYou(instances, notify, openAgent);
   return {notify, toggleNotify, sound, toggleSound, push, announcement};
 }

@@ -152,6 +152,7 @@ func TestPushRoutes(t *testing.T) {
 	assert.Equal(t, "Tendyard Hub", payload.Title)
 
 	// A restarted hub keeps its key and the subscriptions.
+	require.NoError(t, h.push.devices.persist.flush())
 	again, err := New(Config{Token: "t", Secret: "s", StatePath: state})
 	require.NoError(t, err)
 	assert.True(t, h.push.devices.key.Equal(again.push.devices.key))
@@ -188,14 +189,13 @@ func TestPushRoutesNeedSignIn(t *testing.T) {
 }
 
 func TestPushStoreKeepsTheNewest(t *testing.T) {
-	s, err := newPushStore("", "")
+	s, err := newPushStore("", "", nil)
 	require.NoError(t, err)
 	for i := range maxPushSubscriptions + 2 {
-		_, err = s.renew(pushSubscription{Subscription: webpush.Subscription{Endpoint: "https://push.example/" + string(rune('a'+i))}})
+		_, err = s.renew(pushSubscription{Subscription: webpush.Subscription{Endpoint: "https://push.example/" + string(rune('a'+i))}}, true)
 		require.NoError(t, err)
 	}
-	subs, err := s.list(time.Now())
-	require.NoError(t, err)
+	subs := s.list(time.Now())
 	require.Len(t, subs, maxPushSubscriptions)
 	assert.Equal(t, "https://push.example/c", subs[0].Endpoint, "the two oldest went")
 }
@@ -206,7 +206,7 @@ func pushHub(t *testing.T, b *browser, finished bool) (*Hub, *quartz.Mock) {
 	clock := quartz.NewMock(t)
 	h, err := New(Config{Token: "t", Secret: "s", Clock: clock, PushClient: b.server.Client()})
 	require.NoError(t, err)
-	_, err = h.push.devices.renew(pushSubscription{Subscription: b.subscription("/p"), PushPrefs: PushPrefs{Finished: finished}})
+	_, err = h.push.devices.renew(pushSubscription{Subscription: b.subscription("/p"), PushPrefs: PushPrefs{Finished: finished}}, true)
 	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -357,7 +357,5 @@ func TestPushForClips(t *testing.T) {
 
 func listed(t *testing.T, h *Hub) []pushSubscription {
 	t.Helper()
-	subs, err := h.push.devices.list(h.clock.Now())
-	require.NoError(t, err)
-	return subs
+	return h.push.devices.list(h.clock.Now())
 }

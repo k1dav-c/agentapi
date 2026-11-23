@@ -122,7 +122,7 @@ func (h *Hub) pushLater(ctx context.Context, id string, kind pushKind, seen push
 		if !ok {
 			return
 		}
-		go h.push.sendAll(ctx, payload, &i)
+		h.push.goSendAll(ctx, payload, &i)
 	}, "hub", "push")
 }
 
@@ -225,7 +225,7 @@ func (h *Hub) notifyIssues(ctx context.Context, d *dispatch.Service) {
 				continue
 			}
 			if payload, ok := issuePush(job, before, now); ok && h.push.devices.any() {
-				go h.push.sendAll(ctx, payload, nil)
+				h.push.goSendAll(ctx, payload, nil)
 			}
 		}
 		seen = next
@@ -263,4 +263,14 @@ func (h *Hub) needingYou() int {
 		}
 	}
 	return n
+}
+
+// groupsNow are the groups the agents are in now ("" for none), which the
+// devices' Groups are matched against.
+func (h *Hub) groupsNow() map[string]bool {
+	groups := map[string]bool{}
+	for _, i := range h.store.list() {
+		groups[i.Group] = true
+	}
+	return groups
 }

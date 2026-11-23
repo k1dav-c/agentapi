@@ -1950,6 +1950,10 @@
       "PushSubscribeBody": {
         "additionalProperties": false,
         "properties": {
+          "enable": {
+            "description": "Push is being turned on here: a device removed from the settings (DELETE /api/push/devices/{id}) is added again; without it, its renewal is 410.",
+            "type": "boolean"
+          },
           "endpoint": {
             "description": "The push service's URL for this browser (https).",
             "type": "string"
@@ -2038,6 +2042,16 @@
         "required": [
           "token"
         ],
+        "type": "object"
+      },
+      "SignOutBody": {
+        "additionalProperties": false,
+        "properties": {
+          "endpoint": {
+            "description": "This browser's push endpoint: the hub stops pushing to it.",
+            "type": "string"
+          }
+        },
         "type": "object"
       },
       "Source": {

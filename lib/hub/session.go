@@ -130,7 +130,20 @@ func (h *Hub) createSession(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, sessionBody{Authenticated: true})
 }
 
-func (h *Hub) deleteSession(w http.ResponseWriter, _ *http.Request) {
+// signOutBody is DELETE /api/session, optionally: the browser's push
+// subscription, which the hub stops pushing to with the sign-out.
+type signOutBody struct {
+	Endpoint string `json:"endpoint,omitempty" doc:"This browser's push endpoint: the hub stops pushing to it."`
+}
+
+// deleteSession signs the browser out; with {"endpoint"}, the hub stops
+// pushing to it too, whether or not the browser's own unsubscribe gets
+// through.
+func (h *Hub) deleteSession(w http.ResponseWriter, r *http.Request) {
+	var body signOutBody
+	if r.ContentLength != 0 && json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&body) == nil && body.Endpoint != "" && h.signedIn(r) {
+		h.push.devices.remove(body.Endpoint)
+	}
 	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
 	writeJSON(w, http.StatusOK, sessionBody{Authenticated: false})
 }

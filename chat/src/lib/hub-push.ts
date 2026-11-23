@@ -54,8 +54,10 @@ export function createHubPush(root: string, browser: PushBrowser, label: string,
   };
   // subscribe subscribes with the hub's key (again, if the browser's
   // subscription is another key's) and tells the hub, which keeps the
-  // device's settings.
-  const subscribe = async (manager: PushManager): Promise<void> => {
+  // device's settings. enable is push being turned on here: a device
+  // removed from the settings comes back only so (else the hub answers
+  // 410).
+  const subscribe = async (manager: PushManager, enable: boolean): Promise<void> => {
     const key = await publicKey();
     let subscription = await manager.getSubscription();
     if (subscription && !sameKey(subscription.options.applicationServerKey, key)) {
@@ -64,7 +66,7 @@ export function createHubPush(root: string, browser: PushBrowser, label: string,
     }
     subscription ??= await manager.subscribe({userVisibleOnly: true, applicationServerKey: applicationServerKey(key)});
     const {endpoint, keys} = subscription.toJSON();
-    await call("/api/push/subscription", json("PUT", {endpoint: endpoint ?? "", keys: {p256dh: keys?.p256dh ?? "", auth: keys?.auth ?? ""}, label} satisfies HubWire["PushSubscribeBody"]));
+    await call("/api/push/subscription", json("PUT", {endpoint: endpoint ?? "", keys: {p256dh: keys?.p256dh ?? "", auth: keys?.auth ?? ""}, label, enable} satisfies HubWire["PushSubscribeBody"]));
   };
   const endpoint = async (): Promise<string | undefined> => (await (await browser.existing())?.getSubscription())?.endpoint;
   const device = (id: string) => `/api/push/devices/${encodeURIComponent(id)}`;
@@ -73,16 +75,24 @@ export function createHubPush(root: string, browser: PushBrowser, label: string,
     // PushPermissionError when the browser won't notify.
     enable: async (): Promise<void> => {
       if ((await browser.requestPermission()) !== "granted") throw new PushPermissionError();
-      await subscribe(await browser.register());
+      await subscribe(await browser.register(), true);
     },
     // sync tells the hub this browser's subscription again: the hub keeps
     // a device while the session of the page that last told it holds, and
     // forgets one its push service ended or a new key replaced. One the
-    // browser dropped is made again.
+    // browser dropped is made again. It throws HubAPIError 410 for a
+    // device removed from the settings: forget it then.
     sync: async (): Promise<void> => {
       if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
-      await subscribe(await browser.register());
+      await subscribe(await browser.register(), false);
     },
+    // forget drops this browser's subscription without telling the hub:
+    // for one the hub forgot, or stops pushing to as it signs out.
+    forget: async (): Promise<void> => {
+      await (await (await browser.existing())?.getSubscription())?.unsubscribe();
+    },
+    // endpoint is this browser's push endpoint, when it is subscribed.
+    endpoint,
     // disable unsubscribes, and tells the hub.
     disable: async (): Promise<void> => {
       const subscription = await (await browser.existing())?.getSubscription();

@@ -8,13 +8,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
 	"sync"
 	"time"
 
-	"github.com/coder/agentapi/lib/atomicfile"
 	"github.com/coder/agentapi/lib/webpush"
 )
 
@@ -25,7 +25,14 @@ const (
 	// pushTokenContext is what the hub token is hashed with for
 	// pushSubscription.TokenID.
 	pushTokenContext = "agentapi-hub-push"
+	// maxPushRevoked is how many removed devices the hub remembers, to
+	// refuse their pages' renewals.
+	maxPushRevoked = 200
 )
+
+// errPushRevoked is a renewal of a device removed from another one: its
+// page stops pushing rather than subscribe again.
+var errPushRevoked = errors.New("this device was removed from the hub's push settings")
 
 // pushSubscription is a browser the hub pushes to: a device.
 type pushSubscription struct {
@@ -69,85 +76,119 @@ func (s pushSubscription) expired(now time.Time) bool {
 }
 
 // pushStore keeps the hub's VAPID key and the devices in push.json beside
-// the instances (0600), or in memory without a state path.
+// the instances (0600), or in memory without a state path. A change is
+// written in the background within a second (persister), and on close.
 type pushStore struct {
-	path string
-	mu   sync.Mutex
-	key  *ecdsa.PrivateKey
-	subs []pushSubscription
+	path    string
+	persist *persister
+	mu      sync.Mutex
+	key     *ecdsa.PrivateKey
+	subs    []pushSubscription
+	// revoked are the IDs of the devices removed from the settings,
+	// the latest last.
+	revoked []string
 }
 
 // pushFile is push.json.
 type pushFile struct {
 	VAPIDKey      string             `json:"vapid_private_key"`
 	Subscriptions []pushSubscription `json:"subscriptions"`
+	Revoked       []string           `json:"revoked,omitempty"`
 }
 
 // newPushStore reads push.json beside statePath, or makes the key. It
-// forgets the devices renewed under another hub token than tokenID's.
-func newPushStore(statePath, tokenID string) (*pushStore, error) {
+// forgets the devices renewed under another hub token than tokenID's;
+// those of 5.8, which kept no token, take this one.
+func newPushStore(statePath, tokenID string, logger *slog.Logger) (*pushStore, error) {
 	s := &pushStore{}
-	if statePath != "" {
-		s.path = filepath.Join(filepath.Dir(statePath), "push.json")
-		data, err := os.ReadFile(s.path)
-		switch {
-		case errors.Is(err, os.ErrNotExist):
-		case err != nil:
+	if statePath == "" {
+		key, err := webpush.GenerateKey()
+		s.key = key
+		return s, err
+	}
+	s.path = filepath.Join(filepath.Dir(statePath), "push.json")
+	data, err := os.ReadFile(s.path)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		if s.key, err = webpush.GenerateKey(); err != nil {
 			return nil, err
-		default:
-			var stored pushFile
-			if err := json.Unmarshal(data, &stored); err != nil {
-				return nil, fmt.Errorf("read %s: %w", s.path, err)
-			}
-			if s.key, err = webpush.ParsePrivateKey(stored.VAPIDKey); err != nil {
-				return nil, fmt.Errorf("read %s: %w", s.path, err)
-			}
-			s.subs = slices.DeleteFunc(stored.Subscriptions, func(sub pushSubscription) bool { return sub.TokenID != tokenID })
-			if len(s.subs) != len(stored.Subscriptions) {
-				return s, s.saveLocked()
-			}
-			return s, nil
+		}
+		// Kept now, so a browser that subscribes to it before any change
+		// still matches after a restart.
+		s.persist = newPersister(s.path, "push devices", logger, s.snapshot)
+		s.persist.mark()
+		if err := s.persist.flush(); err != nil {
+			_ = s.persist.close()
+			return nil, err
+		}
+		return s, nil
+	case err != nil:
+		return nil, err
+	}
+	var stored pushFile
+	if err := json.Unmarshal(data, &stored); err != nil {
+		return nil, fmt.Errorf("read %s: %w", s.path, err)
+	}
+	if s.key, err = webpush.ParsePrivateKey(stored.VAPIDKey); err != nil {
+		return nil, fmt.Errorf("read %s: %w", s.path, err)
+	}
+	s.revoked = stored.Revoked
+	for _, sub := range stored.Subscriptions {
+		if sub.TokenID == "" {
+			sub.TokenID = tokenID
+		}
+		if sub.TokenID == tokenID {
+			s.subs = append(s.subs, sub)
 		}
 	}
-	key, err := webpush.GenerateKey()
+	s.persist = newPersister(s.path, "push devices", logger, s.snapshot)
+	if len(s.subs) != len(stored.Subscriptions) {
+		s.persist.mark()
+	}
+	return s, nil
+}
+
+func (s *pushStore) snapshot() ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	encoded, err := webpush.EncodePrivateKey(s.key)
 	if err != nil {
 		return nil, err
 	}
-	s.key = key
-	// Kept now, so a browser that subscribes to it before any change
-	// still matches after a restart.
-	return s, s.saveLocked()
+	return json.MarshalIndent(pushFile{VAPIDKey: encoded, Subscriptions: s.subs, Revoked: s.revoked}, "", "  ")
 }
 
-func (s *pushStore) saveLocked() error {
-	if s.path == "" {
+// changedLocked has the file written. Caller holds s.mu.
+func (s *pushStore) changedLocked() {
+	if s.persist != nil {
+		s.persist.mark()
+	}
+}
+
+// close writes what the file doesn't have yet.
+func (s *pushStore) close() error {
+	if s.persist == nil {
 		return nil
 	}
-	encoded, err := webpush.EncodePrivateKey(s.key)
-	if err != nil {
-		return err
+	return s.persist.close()
+}
+
+// dropExpiredLocked forgets the devices whose session ended at now.
+// Caller holds s.mu.
+func (s *pushStore) dropExpiredLocked(now time.Time) {
+	n := len(s.subs)
+	s.subs = slices.DeleteFunc(s.subs, func(sub pushSubscription) bool { return sub.expired(now) })
+	if len(s.subs) != n {
+		s.changedLocked()
 	}
-	data, err := json.MarshalIndent(pushFile{VAPIDKey: encoded, Subscriptions: s.subs}, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
-		return err
-	}
-	return atomicfile.Write(s.path, ".push.json-*", data)
 }
 
 // list is the devices whose session holds at now; it forgets the others.
-func (s *pushStore) list(now time.Time) ([]pushSubscription, error) {
+func (s *pushStore) list(now time.Time) []pushSubscription {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	n := len(s.subs)
-	s.subs = slices.DeleteFunc(s.subs, func(sub pushSubscription) bool { return sub.expired(now) })
-	var err error
-	if len(s.subs) != n {
-		err = s.saveLocked()
-	}
-	return slices.Clone(s.subs), err
+	s.dropExpiredLocked(now)
+	return slices.Clone(s.subs)
 }
 
 // any says whether the hub pushes to any device.
@@ -169,10 +210,21 @@ func (s *pushStore) find(endpoint string) (pushSubscription, bool) {
 
 // renew adds sub, or renews the device with its endpoint: its keys,
 // label, session and token, keeping its settings and history. It returns
-// the device as kept.
-func (s *pushStore) renew(sub pushSubscription) (pushSubscription, error) {
+// the device as kept. A device removed from the settings comes back only
+// when its page turns push on (enable): a renewal of it is errPushRevoked.
+// Past maxPushSubscriptions, the devices whose session ended go first,
+// then the oldest.
+func (s *pushStore) renew(sub pushSubscription, enable bool) (pushSubscription, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	id := sub.id()
+	if i := slices.Index(s.revoked, id); i >= 0 {
+		if !enable {
+			return pushSubscription{}, errPushRevoked
+		}
+		s.revoked = slices.Delete(s.revoked, i, i+1)
+	}
+	defer s.changedLocked()
 	if i := slices.IndexFunc(s.subs, byEndpoint(sub.Endpoint)); i >= 0 {
 		kept := s.subs[i]
 		kept.Keys = sub.Keys
@@ -181,53 +233,77 @@ func (s *pushStore) renew(sub pushSubscription) (pushSubscription, error) {
 		}
 		kept.RenewedAt, kept.ExpiresAt, kept.TokenID = sub.RenewedAt, sub.ExpiresAt, sub.TokenID
 		s.subs[i] = kept
-		return kept, s.saveLocked()
+		return kept, nil
+	}
+	if len(s.subs) >= maxPushSubscriptions {
+		s.dropExpiredLocked(sub.RenewedAt)
 	}
 	if len(s.subs) >= maxPushSubscriptions {
 		s.subs = slices.Delete(s.subs, 0, len(s.subs)-maxPushSubscriptions+1)
 	}
 	s.subs = append(s.subs, sub)
-	return sub, s.saveLocked()
+	return sub, nil
 }
 
 // update changes the device id; ok is false for one the hub doesn't have.
-func (s *pushStore) update(id string, change func(*pushSubscription)) (sub pushSubscription, ok bool, err error) {
+func (s *pushStore) update(id string, change func(*pushSubscription)) (pushSubscription, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	i := slices.IndexFunc(s.subs, func(o pushSubscription) bool { return o.id() == id })
 	if i < 0 {
-		return pushSubscription{}, false, nil
+		return pushSubscription{}, false
 	}
 	change(&s.subs[i])
-	return s.subs[i], true, s.saveLocked()
+	s.changedLocked()
+	return s.subs[i], true
 }
 
 // sent records what the device's push service answered.
-func (s *pushStore) sent(endpoint string, at time.Time, sendErr error) error {
+func (s *pushStore) sent(endpoint string, at time.Time, sendErr error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	i := slices.IndexFunc(s.subs, byEndpoint(endpoint))
 	if i < 0 {
-		return nil
+		return
 	}
 	if sendErr == nil {
 		s.subs[i].LastSentAt, s.subs[i].LastError, s.subs[i].LastErrorAt = at, "", time.Time{}
 	} else {
 		s.subs[i].LastError, s.subs[i].LastErrorAt = clip(sendErr.Error(), 300), at
 	}
-	return s.saveLocked()
+	s.changedLocked()
 }
 
-// remove forgets the devices match picks; it says whether there was one.
-func (s *pushStore) remove(match func(pushSubscription) bool) (bool, error) {
+// remove forgets the device at endpoint, its page's or its push
+// service's doing; it says whether there was one.
+func (s *pushStore) remove(endpoint string) bool {
+	return s.removeWhere(byEndpoint(endpoint), false)
+}
+
+// revoke forgets the device id, removed from another device's settings,
+// and refuses its page's renewals; it says whether there was one.
+func (s *pushStore) revoke(id string) bool {
+	return s.removeWhere(func(o pushSubscription) bool { return o.id() == id }, true)
+}
+
+func (s *pushStore) removeWhere(match func(pushSubscription) bool, revoke bool) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	n := len(s.subs)
+	for _, sub := range s.subs {
+		if revoke && match(sub) && !slices.Contains(s.revoked, sub.id()) {
+			s.revoked = append(s.revoked, sub.id())
+		}
+	}
+	if len(s.revoked) > maxPushRevoked {
+		s.revoked = slices.Delete(s.revoked, 0, len(s.revoked)-maxPushRevoked)
+	}
 	s.subs = slices.DeleteFunc(s.subs, match)
 	if len(s.subs) == n {
-		return false, nil
+		return false
 	}
-	return true, s.saveLocked()
+	s.changedLocked()
+	return true
 }
 
 func byEndpoint(endpoint string) func(pushSubscription) bool {

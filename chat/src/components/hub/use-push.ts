@@ -2,7 +2,7 @@
 
 import {useEffect, useMemo, useState} from "react";
 import {toast} from "sonner";
-import {HubAPIError} from "@/lib/hub-api";
+import {createHubAPI, HubAPIError} from "@/lib/hub-api";
 import {createHubPush, type HubPush} from "@/lib/hub-push";
 import {
   browserPush,
@@ -25,7 +25,8 @@ export interface HubPushState {
   api: HubPush;
   togglePush: () => Promise<void>;
   testPush: () => Promise<void>;
-  // signOut stops pushing to this browser before the page signs out.
+  // signOut signs this browser out of the hub, which stops pushing to it
+  // with it; it throws what the hub answered when it didn't sign out.
   signOut: () => Promise<void>;
 }
 
@@ -51,10 +52,16 @@ export function usePush(root: string, signedIn: boolean, open: (target: OpenTarg
 
   useEffect(() => {
     if (!push || !signedIn || support !== "supported" || !label) return;
-    api.sync().catch(() => {
-      // The menu's Send a test says what is wrong.
+    api.sync().catch(async (error: unknown) => {
+      // Removed in another device's Push settings: off here too.
+      if (error instanceof HubAPIError && error.status === 410) {
+        await api.forget().catch(() => {});
+        setPush(false);
+        toast("Push is off on this device", {description: "It was removed in the hub's Push settings."});
+      }
+      // Otherwise the menu's Send a test says what is wrong.
     });
-  }, [push, signedIn, support, label, api]);
+  }, [push, signedIn, support, label, api, setPush]);
 
   useEffect(() => {
     if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
@@ -137,11 +144,11 @@ export function usePush(root: string, signedIn: boolean, open: (target: OpenTarg
   };
 
   const signOut = async () => {
+    const endpoint = push ? await api.endpoint().catch(() => undefined) : undefined;
+    await createHubAPI(root).signOut(endpoint);
     setAppBadge(0);
     if (!push) return;
-    await api.disable().catch(() => {
-      // The hub forgets it when the session ends anyway.
-    });
+    await api.forget().catch(() => {});
     setPush(false);
   };
 
