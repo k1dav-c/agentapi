@@ -1,11 +1,11 @@
 "use client";
 
-import {useEffect, useMemo, useRef, useState} from "react";
+import {useMemo, useRef, useState} from "react";
 import {toast} from "sonner";
 import {Button} from "@/components/ui/button";
 import {hubRoot, type HubInstance} from "@/lib/hub";
 import {createHubAPI, hubErrorText} from "@/lib/hub-api";
-import type {OpenTarget} from "@/lib/hub-push";
+import type {OpenTarget} from "@/lib/hub-push-browser";
 import {active, rowJobs, type RowJob} from "@/lib/hub-dispatch";
 import {stoppedOf} from "@/lib/hub-filter";
 import {needsYou} from "@/lib/hub-issues";
@@ -37,10 +37,7 @@ import {useHubKeys} from "./hub/use-hub-keys";
 import {useHubRoute} from "./hub/use-hub-route";
 import {useHubStream} from "./hub/use-hub-stream";
 import {useListFilters} from "./hub/use-list-filters";
-import {useNeedsYou} from "./hub/use-needs-you";
-import {useNotify} from "./hub/use-notify";
-import {usePush} from "./hub/use-push";
-import {useSound, useSoundUnlock} from "@/lib/alert-sound";
+import {useHubAlerts} from "./hub/use-hub-alerts";
 
 // HubView is the hub's page: sign in, the instances in a sidebar (what
 // needs you first), and on the right either the overview or the chat of
@@ -70,9 +67,6 @@ export function HubView() {
   const search = useRef<HTMLInputElement>(null);
   const listWidth = useListWidth();
   const view = useListView();
-  const {notify, toggleNotify} = useNotify();
-  const {sound, toggleSound} = useSound();
-  useSoundUnlock();
   const collapsed = useCollapsedGroups();
 
   const all = useMemo(() => [...instances.values()], [instances]);
@@ -92,9 +86,9 @@ export function HubView() {
   // The agent open beside the list.
   const current = selected ? instances.get(selected) : undefined;
 
-  // Tell people who aren't looking: a screen reader, the tab, a notification.
-  // A device the hub pushes to gets the push instead of the page's own.
-  // A notification clicked opens its agent, or its issue in Issues.
+  // Tell people who aren't looking: a screen reader, the tab, a
+  // notification, a push; one clicked opens its agent, or its issue in
+  // Issues.
   const openTarget = useStableCallback((target: OpenTarget) => {
     if ("agent" in target) {
       select(target.agent);
@@ -103,16 +97,8 @@ export function HubView() {
     setIssueKey(target.issue);
     route.openIssues();
   });
-  const push = usePush(root, session === "signed-in", openTarget, counts["needs-you"]);
-  // The page an issue's notification opened (?issue=), once.
-  useEffect(() => {
-    const url = new URL(window.location.href);
-    const issue = url.searchParams.get("issue");
-    if (!issue) return;
-    url.searchParams.delete("issue");
-    window.history.replaceState(window.history.state, "", url);
-    openTarget({issue});
-  }, [openTarget]);
+  const alerts = useHubAlerts({root, signedIn: session === "signed-in", instances: all, needYou: counts["needs-you"], open: openTarget});
+  const {push, announcement} = alerts;
   // Signing out stops the pushes to this browser first.
   const signOut = async () => {
     await push.signOut();
@@ -125,7 +111,6 @@ export function HubView() {
     setSettings(null);
     signedOut();
   };
-  const announcement = useNeedsYou(all, notify && !push.push, select);
   useHubTab(counts["needs-you"], counts.working > 0);
 
   const actions = useHubActions(root, instances);
@@ -229,11 +214,7 @@ export function HubView() {
             unreachable={unreachable}
             hubVersion={hubVersion}
             spend={spend}
-            notify={notify}
-            onToggleNotify={() => void toggleNotify()}
-            sound={sound}
-            onToggleSound={toggleSound}
-            push={push}
+            alerts={alerts}
             onPushSettings={() => setSettings("devices")}
             onSettings={() => setSettings("favorites")}
             onHome={route.home}

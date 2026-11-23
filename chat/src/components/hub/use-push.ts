@@ -3,19 +3,18 @@
 import {useEffect, useMemo, useState} from "react";
 import {toast} from "sonner";
 import {HubAPIError} from "@/lib/hub-api";
+import {createHubPush, type HubPush} from "@/lib/hub-push";
 import {
   browserPush,
   browserPushEnvironment,
-  createHubPush,
   deviceLabel,
   parseOpenMessage,
   PushPermissionError,
   pushSupport,
   setAppBadge,
-  type HubPush,
   type OpenTarget,
   type PushSupport,
-} from "@/lib/hub-push";
+} from "@/lib/hub-push-browser";
 import {useHubSetting} from "@/lib/hub-settings";
 import {basePath} from "./instance-bar";
 
@@ -35,8 +34,8 @@ export interface HubPushState {
 // device gets is kept on the hub (the settings' Devices). While it is on,
 // the page tells the hub its subscription again once signed in, which
 // keeps the device for that session; a click on a notification of a page
-// already open opens the agent or the issue here (open). needYou is how
-// many agents need you, for the app icon's badge.
+// already open, or the page it opened, opens the agent or the issue here
+// (open). needYou is how many agents need you, for the app icon's badge.
 export function usePush(root: string, signedIn: boolean, open: (target: OpenTarget) => void, needYou: number): HubPushState {
   const [push, setPush] = useHubSetting("push");
   // Known after the first render: the page is rendered ahead without a
@@ -65,6 +64,17 @@ export function usePush(root: string, signedIn: boolean, open: (target: OpenTarg
     };
     navigator.serviceWorker.addEventListener("message", onMessage);
     return () => navigator.serviceWorker.removeEventListener("message", onMessage);
+  }, [open]);
+
+  // The page a click on an issue's notification opened, with none open
+  // (?issue=): that issue, once.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const issue = url.searchParams.get("issue");
+    if (!issue) return;
+    url.searchParams.delete("issue");
+    window.history.replaceState(window.history.state, "", url);
+    open({issue});
   }, [open]);
 
   // The badge says what the page does while it is open; the pushes, while
