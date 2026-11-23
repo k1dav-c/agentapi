@@ -1811,6 +1811,52 @@
         ],
         "type": "object"
       },
+      "PushEndpointBody": {
+        "additionalProperties": false,
+        "properties": {
+          "endpoint": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "endpoint"
+        ],
+        "type": "object"
+      },
+      "PushInfo": {
+        "additionalProperties": false,
+        "properties": {
+          "public_key": {
+            "description": "The hub's VAPID public key, base64url: the applicationServerKey a browser subscribes with.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "public_key"
+        ],
+        "type": "object"
+      },
+      "PushSubscribeBody": {
+        "additionalProperties": false,
+        "properties": {
+          "endpoint": {
+            "description": "The push service's URL for this browser (https).",
+            "type": "string"
+          },
+          "finished": {
+            "description": "Push when an agent finishes a task too, not only when it needs you.",
+            "type": "boolean"
+          },
+          "keys": {
+            "$ref": "#/components/schemas/WebPushKeys"
+          }
+        },
+        "required": [
+          "endpoint",
+          "keys"
+        ],
+        "type": "object"
+      },
       "RemovedEvent": {
         "additionalProperties": false,
         "properties": {
@@ -1922,6 +1968,24 @@
         ],
         "title": "Transport",
         "type": "string"
+      },
+      "WebPushKeys": {
+        "additionalProperties": false,
+        "properties": {
+          "auth": {
+            "description": "The browser's 16-byte authentication secret, base64url.",
+            "type": "string"
+          },
+          "p256dh": {
+            "description": "The browser's P-256 public key, uncompressed, base64url.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "p256dh",
+          "auth"
+        ],
+        "type": "object"
       },
       "WorkTime": {
         "additionalProperties": false,

@@ -591,6 +591,20 @@ export interface components {
             /** @description The revision returned by the client's latest provider-list read. */
             revision: string;
         };
+        PushEndpointBody: {
+            endpoint: string;
+        };
+        PushInfo: {
+            /** @description The hub's VAPID public key, base64url: the applicationServerKey a browser subscribes with. */
+            public_key: string;
+        };
+        PushSubscribeBody: {
+            /** @description The push service's URL for this browser (https). */
+            endpoint: string;
+            /** @description Push when an agent finishes a task too, not only when it needs you. */
+            finished?: boolean;
+            keys: components["schemas"]["WebPushKeys"];
+        };
         RemovedEvent: {
             id: string;
         };
@@ -645,6 +659,12 @@ export interface components {
          * @enum {string}
          */
         Transport: "native";
+        WebPushKeys: {
+            /** @description The browser's 16-byte authentication secret, base64url. */
+            auth: string;
+            /** @description The browser's P-256 public key, uncompressed, base64url. */
+            p256dh: string;
+        };
         WorkTime: {
             /** Format: int64 */
             last_24h_seconds: number;

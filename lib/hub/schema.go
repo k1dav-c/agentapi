@@ -14,6 +14,7 @@ import (
 	"github.com/coder/agentapi/lib/host"
 	"github.com/coder/agentapi/lib/instanceapi"
 	"github.com/coder/agentapi/lib/jsonapi"
+	"github.com/coder/agentapi/lib/webpush"
 )
 
 // The hub's API isn't huma's (it serves it with chi), so openapi.json
@@ -54,6 +55,9 @@ var wireTypes = []reflect.Type{
 	reflect.TypeFor[signInBody](),
 	reflect.TypeFor[joinInfo](),
 	reflect.TypeFor[activityBody](),
+	reflect.TypeFor[pushInfo](),
+	reflect.TypeFor[pushSubscribeBody](),
+	reflect.TypeFor[pushEndpointBody](),
 	reflect.TypeFor[jsonapi.ErrorBody](),
 	// The issue dispatch's (lib/dispatch), named Dispatch*, Launcher* and
 	// GitHub* by the package they come from (schemaNamer).
@@ -70,12 +74,14 @@ var wireTypes = []reflect.Type{
 	reflect.TypeFor[dispatch.CreateIssueResponse](),
 }
 
-// schemaPrefixes name the types of the dispatch's packages apart from the
-// hub's, whose names they share (host.Job and dispatch.Job).
+// schemaPrefixes name the types of the dispatch's packages, and Web
+// Push's, apart from the hub's, whose names they share (host.Job and
+// dispatch.Job) or would say too little alone (webpush.Keys).
 var schemaPrefixes = map[string]string{
 	reflect.TypeFor[dispatch.Job]().PkgPath(): "Dispatch",
 	reflect.TypeFor[host.Job]().PkgPath():     "Launcher",
 	reflect.TypeFor[github.Issue]().PkgPath(): "GitHub",
+	reflect.TypeFor[webpush.Keys]().PkgPath(): "WebPush",
 }
 
 // schemaNamer is huma's namer, with the prefix of the type's package.

@@ -35,6 +35,7 @@ import (
 	"github.com/coder/agentapi/lib/netaddr"
 	"github.com/coder/agentapi/lib/provider"
 	"github.com/coder/agentapi/lib/sse"
+	"github.com/coder/agentapi/lib/webpush"
 )
 
 // Config is how the hub runs.
@@ -81,6 +82,9 @@ type Config struct {
 	// prices (OpenRouterModelsURL), for its providers' models; empty looks
 	// no price up.
 	OpenRouterURL string
+	// PushClient reaches the browsers' push services; nil is a client that
+	// uses the proxy of the environment.
+	PushClient *http.Client
 }
 
 // Hub is the server.
@@ -90,6 +94,8 @@ type Hub struct {
 	store      *store
 	providers  *providerStore
 	prices     *priceBook
+	push       *pushStore
+	pushSender *webpush.Sender
 	client     *http.Client
 	deliveries *deliveries
 	// badSignatures limits the log of events refused for their signature.
@@ -142,13 +148,22 @@ func New(config Config) (*Hub, error) {
 	if err != nil {
 		return nil, err
 	}
+	push, err := newPushStore(config.StatePath)
+	if err != nil {
+		return nil, err
+	}
+	pushClient := config.PushClient
+	if pushClient == nil {
+		pushClient = &http.Client{Transport: newTransport()}
+	}
 	prices := newPriceBook(config.StatePath, config.OpenRouterURL, &http.Client{Transport: newTransport()}, config.Logger, config.Clock)
 	var deliveriesFile string
 	if config.StatePath != "" {
 		deliveriesFile = deliveriesPath(config.StatePath)
 	}
 	return &Hub{
-		config: config, logger: config.Logger, store: st, providers: providers, prices: prices, client: client, clock: config.Clock,
+		config: config, logger: config.Logger, store: st, providers: providers, prices: prices, client: client,
+		push: push, pushSender: &webpush.Sender{Key: push.key, Subject: pushSubject, Client: pushClient, Now: func() time.Time { return config.Clock.Now() }}, clock: config.Clock,
 		deliveries: newDeliveries(deliveriesFile, config.Logger, config.Clock.Now()),
 		interfaces: netaddr.Interfaces, watchers: map[string]context.CancelFunc{},
 		streamWriteTimeout: streamWriteTimeout,
@@ -180,6 +195,7 @@ func (h *Hub) Run(ctx context.Context) {
 		}
 	}
 	h.watchWG.Go(func() { h.prices.run(ctx, h.providers.get) })
+	h.watchWG.Go(func() { h.notifyPush(ctx) })
 	<-ctx.Done()
 	h.watchWG.Wait()
 }
@@ -266,6 +282,10 @@ func (h *Hub) routes(r chi.Router) {
 		r.Get("/api/events", h.streamEvents)
 		r.Get("/api/join", h.getJoin)
 		r.Get("/api/activity", h.getActivity)
+		r.Get("/api/push", h.getPush)
+		r.Put("/api/push/subscription", h.putPushSubscription)
+		r.Delete("/api/push/subscription", h.deletePushSubscription)
+		r.Post("/api/push/test", h.testPush)
 		r.Handle("/i/{id}", http.HandlerFunc(h.proxy))
 		r.Handle("/i/{id}/*", http.HandlerFunc(h.proxy))
 	})
