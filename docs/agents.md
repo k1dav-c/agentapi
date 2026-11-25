@@ -615,9 +615,11 @@ from its initialize response, and the model and effort it runs with from `get_se
 Claude Code supports `steer` (a steered message joins the running turn at Claude's next step),
 `interrupt` (if Claude Code doesn't end the interrupted turn within 10 s, Tendyard ends it),
 `resume` and `images`. The session name is the title Claude Code generates after the first prompt;
-after `/clear` the new session is titled too, and it is the one `--state-db` resumes. A turn ends
-when Claude Code reports it is idle, so a background subagent and the turn it wakes up when it
-finishes belong to the turn that started it. The subagent's own steps are left out of the
+after `/clear` the new session is titled too, and it is the one `--state-db` resumes. An explicit
+topic change such as “New task: Audit login timeouts”, or a standalone request for a different
+task, can update the current session's name. A turn ends when Claude Code reports it is idle, so a
+background subagent and the turn it wakes up when it finishes belong to the turn that started it.
+The subagent's own steps are left out of the
 conversation, as in the session log, and its tool call shows as running until it reports.
 
 Command line and environment:
@@ -722,8 +724,10 @@ The session reference is Codex's thread ID. Resuming it continues the thread wit
 turn that was running when the process died comes back as interrupted, approvals that were pending
 are gone, and Codex's earlier turns are not loaded into Tendyard's conversation (the chat shows them
 only from the `--state-db` file). A thread that can't be resumed is replaced by a new one, with a
-warning. Codex doesn't name threads itself; a name set elsewhere (`thread/name/updated`) becomes the
-session name.
+warning. When an unnamed thread receives a text message, Tendyard uses the first nonblank line,
+up to 60 characters, as its name and saves it in Codex. An explicit topic change or a standalone
+request for a different task can update the existing thread's name. The chat, Hub and session
+history show the saved name.
 
 Codex's own slash commands are TUI features; the chat runs `/model`, `/compact` and the others in
 [Slash commands](#slash-commands-and-compaction) itself, and `/review` isn't available. Command

@@ -519,7 +519,8 @@ Tendyard 會以 headless 模式執行 `claude -p`，stdin 和 stdout 都使用 s
 Claude Code 支援 `steer`（steer 的訊息會在 Claude 的下一步加入正在進行的回合）、
 `interrupt`（Claude Code 在 10 秒內沒有結束被中斷的回合時，Tendyard 會結束它）、`resume`
 和 `images`。工作階段名稱是 Claude Code 在第一個提示之後產生的標題；`/clear` 之後的新工作
-階段也會取得標題，而 `--state-db` 接續的就是這個新工作階段。回合會在 Claude Code 回報閒置時
+階段也會取得標題，而 `--state-db` 接續的就是這個新工作階段。明說「換個主題：檢查登入逾時」，
+或直接提出主題不同的獨立任務，都可能更新目前工作階段的名稱。回合會在 Claude Code 回報閒置時
 結束，所以背景 sub agent 以及它完成時喚醒的回合，都屬於啟動它的那個回合。sub agent 自己的步驟
 不會出現在對話中（和工作階段紀錄檔一樣），它的工具呼叫在它回報之前會顯示為執行中。
 
@@ -607,8 +608,9 @@ Codex TUI 一樣詢問「Implement this plan?」。Yes 選項（`implement_bypas
 工作階段參照是 Codex 的 thread ID。接續時會保留該 thread 和它的 context；行程結束時正在執行
 的回合還原後會標示為 interrupted，當時待處理的核准會消失，Codex 先前的回合也不會載入
 Tendyard 的對話（聊天介面只能從 `--state-db` 檔案顯示它們）。無法恢復的 thread 會換成新的
-thread，並顯示警告。Codex 不會自己替 thread 命名；在別處設定的名稱（`thread/name/updated`）
-會成為工作階段名稱。
+thread，並顯示警告。未命名的 thread 收到文字訊息時，Tendyard 會取第一個非空白行當作名稱，
+最多 60 個字元，並存回 Codex。明確轉換主題或提出主題不同的獨立任務時，可能更新同一個 thread
+的名稱。聊天介面、Hub 和工作階段歷史都會顯示存下來的名稱。
 
 Codex 自己的斜線指令是 TUI 功能；`/model`、`/compact` 以及[在聊天介面用斜線指令調整設定與壓縮 context](#斜線指令與壓縮)
 中的其他指令由聊天介面自己處理，`/review` 則無法使用。指令輸出串流時只是預覽，Codex 可能
