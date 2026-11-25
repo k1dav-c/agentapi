@@ -156,6 +156,11 @@ type modelListResponse struct {
 	NextCursor *string `json:"nextCursor"`
 }
 
+type threadSetNameParams struct {
+	ThreadID string `json:"threadId"`
+	Name     string `json:"name"`
+}
+
 type threadNameUpdatedNotification struct {
 	ThreadID   string  `json:"threadId"`
 	ThreadName *string `json:"threadName"`

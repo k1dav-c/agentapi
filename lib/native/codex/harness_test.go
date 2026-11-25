@@ -140,8 +140,10 @@ type harness struct {
 	a    *Adapter
 	proc *fakeProc
 	rec  *recorder
-	// sent receives what the adapter writes to app-server.
-	sent chan rpcMessage
+	// Naming can happen between any two requests during replay. The
+	// naming tests read those requests from their own channel.
+	sent         chan rpcMessage
+	nameRequests chan rpcMessage
 	// all keeps everything the adapter wrote.
 	allMu sync.Mutex
 	all   []rpcMessage
@@ -177,7 +179,7 @@ func newHarness(t *testing.T, resumeRef string, args []string, opts ...harnessOp
 	require.NoError(t, err)
 	h := &harness{
 		t: t, a: adapter.(*Adapter), proc: proc, rec: newRecorder(t),
-		sent: make(chan rpcMessage, 1024), errs: map[string]error{},
+		sent: make(chan rpcMessage, 1024), nameRequests: make(chan rpcMessage, 1024), errs: map[string]error{},
 	}
 	// A turn a test leaves running is interrupted at its cleanup; nobody
 	// answers for the fake app-server.
@@ -195,7 +197,11 @@ func newHarness(t *testing.T, resumeRef string, args []string, opts ...harnessOp
 				h.allMu.Lock()
 				h.all = append(h.all, msg)
 				h.allMu.Unlock()
-				h.sent <- msg
+				if msg.Method == "thread/name/set" {
+					h.nameRequests <- msg
+				} else {
+					h.sent <- msg
+				}
 			}
 			if err != nil {
 				if !proc.ignoreStdinClose {
@@ -282,8 +288,12 @@ func (h *harness) answerAccount() {
 // method ("" for a response).
 func (h *harness) expectSent(method string) rpcMessage {
 	h.t.Helper()
+	requests := h.sent
+	if method == "thread/name/set" {
+		requests = h.nameRequests
+	}
 	select {
-	case msg := <-h.sent:
+	case msg := <-requests:
 		require.Equal(h.t, method, msg.Method, "adapter wrote %+v", msg)
 		return msg
 	case <-time.After(waitTimeout):
@@ -414,8 +424,8 @@ func responseFromResult(t *testing.T, result json.RawMessage) agentstate.Respons
 
 // replay plays a capture against the adapter: it feeds what app-server
 // sent, makes the adapter calls the capture's client made, and checks that
-// the adapter writes the same requests. Requests the adapter doesn't make
-// (thread/name/set, model/list…) are skipped with their responses.
+// the adapter writes the same requests. Out-of-band requests in the
+// capture (manual thread/name/set, model/list…) and their responses are skipped.
 func (h *harness) replay(lines []fixtureLine) {
 	h.t.Helper()
 	idMap := map[string]json.RawMessage{} // capture id -> adapter id

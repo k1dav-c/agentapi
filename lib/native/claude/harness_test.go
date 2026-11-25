@@ -403,7 +403,7 @@ func (r *replay) run(recs []record, hooks replayHooks) {
 					r.proc.barrier(t)
 					request, _ := msg["request"].(map[string]any)
 					desc, _ := request["description"].(string)
-					r.a.requestTitle(desc)
+					go r.a.requestTitle(desc, r.sink.SessionName)
 				default:
 					// Runtime requests the adapter doesn't make.
 					continue

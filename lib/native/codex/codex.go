@@ -117,6 +117,7 @@ type Adapter struct {
 	// calls are the requests waiting for app-server's response.
 	calls  agentio.Calls[int64, callResult]
 	nextID atomic.Int64
+	titles agentio.TitleUpdates
 
 	mu       sync.Mutex
 	started  bool

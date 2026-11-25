@@ -25,6 +25,11 @@ type loopState struct {
 	threadID string
 	model    string
 	turn     *turnState
+	// nameFromPrompt is set until an unnamed thread receives its first
+	// text prompt or a name from another client.
+	nameFromPrompt bool
+	threadName     string
+	topic          native.TaskTopic
 	// ended lists the turns that ended last, so late notifications don't
 	// start them again.
 	ended []string
@@ -61,6 +66,9 @@ func (s *loopState) threadOpened(resumed bool) func(json.RawMessage, *rpcError) 
 		th := resp.Thread
 		s.a.drift.SetVersion(th.CLIVersion)
 		s.threadID = th.ID
+		s.nameFromPrompt = th.Name == ""
+		s.threadName = th.Name
+		s.topic.Reset(th.Name)
 		s.model = resp.Model
 		s.a.threadSettings(resp)
 		s.a.mu.Lock()
@@ -442,6 +450,8 @@ func turnErrorText(e *turnError) string {
 
 func (s *loopState) threadNameUpdated(n threadNameUpdatedNotification) {
 	if s.ours(n.ThreadID) && n.ThreadName != nil {
+		s.nameFromPrompt = false
+		s.threadName = *n.ThreadName
 		s.sink().SessionName(*n.ThreadName)
 	}
 }
@@ -559,6 +569,7 @@ func (s *loopState) itemCompleted(t *turnState, it *threadItem, at time.Time) {
 		if text == "" {
 			return
 		}
+		s.nameThreadFromPrompt(text)
 		s.sink().RichMessage(transcript.RichMessage{
 			MessageID: it.ID, Role: "user", Timestamp: s.now(),
 			Content: []transcript.RichContentBlock{{Type: "text", Text: text}},
