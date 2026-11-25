@@ -191,7 +191,10 @@ type Adapter struct {
 	// writer writes frames to the CLI's stdin, once it started.
 	writer *agentio.Writer
 	// calls are the control requests waiting for the CLI's answer.
-	calls agentio.Calls[string, controlResult]
+	calls  agentio.Calls[string, controlResult]
+	titles agentio.TitleUpdates
+	// topic tracks the current task on the read loop.
+	topic native.TaskTopic
 
 	mu      sync.Mutex
 	started bool
@@ -200,8 +203,7 @@ type Adapter struct {
 	// sessionStates: the CLI reports session_state_changed, so "idle" ends
 	// a turn (otherwise every result does).
 	sessionStates bool
-	// prompt is the text of the turn sent last, until the CLI starts a
-	// turn: a new session is titled after it.
+	// prompt is the text of the turn sent last, until the CLI starts it.
 	prompt     string
 	controlSeq int
 	requests   map[string]*pendingRequest
@@ -461,7 +463,7 @@ func (a *Adapter) StartTurn(ctx context.Context, input native.Input) error {
 
 // requestTitle asks the CLI to title a new session after its first prompt,
 // as the terminal UI does. The answer is reported from the read loop.
-func (a *Adapter) requestTitle(prompt string) {
+func (a *Adapter) requestTitle(prompt string, onTitle func(string)) {
 	if runes := []rune(prompt); len(runes) > 2000 {
 		prompt = string(runes[:2000])
 	}
@@ -470,14 +472,24 @@ func (a *Adapter) requestTitle(prompt string) {
 			Title string `json:"title"`
 		}
 		if json.Unmarshal(response, &r) == nil && r.Title != "" {
-			a.sink.SessionName(r.Title)
+			onTitle(r.Title)
 		}
 	}
-	// Nobody waits for it: a write that waits for the CLI ends when Close
-	// closes its input.
-	if _, _, err := a.sendControl(context.Background(), "generate_session_title", map[string]any{"description": prompt, "persist": true}, onResponse); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if _, err := a.request(ctx, "generate_session_title", map[string]any{"description": prompt, "persist": true}, onResponse); err != nil {
 		a.log.Debug("Failed to ask Claude Code for a session title", "error", err)
 	}
+}
+
+// renameSession asks the CLI to save the new title. The resulting
+// session_title_changed frame updates the chat and the Hub.
+func (a *Adapter) renameSession(title string) {
+	a.titles.Send(func(ctx context.Context) {
+		if _, err := a.request(ctx, "rename_session", map[string]any{"title": title, "source": "host"}, nil); err != nil {
+			a.log.Debug("Failed to rename the Claude Code session", "error", err)
+		}
+	})
 }
 
 // Steer implements native.Adapter. Without a priority the CLI adds the
@@ -792,18 +804,27 @@ func (a *Adapter) handleSystem(f *frame) {
 		prompt := a.prompt
 		a.prompt = ""
 		a.mu.Unlock()
-		if f.SessionID == "" || f.SessionID == a.reportedRef {
+		if f.SessionID == "" {
 			break
 		}
-		// A new session: the one AgentAPI started, or one /clear started.
-		// It is resumable now that it has a turn, and is titled after the
-		// prompt that started it. A resumed session keeps its id, which
-		// the conversation already has, and its title.
-		a.reportedRef = f.SessionID
-		a.sink.SessionRef(f.SessionID)
-		if prompt != "" {
-			// Not in the read loop: a write can wait for the CLI.
-			go a.requestTitle(prompt)
+		newSession := f.SessionID != a.reportedRef
+		if newSession {
+			// A session started by AgentAPI or /clear can be resumed once
+			// it has a turn.
+			a.titles.Invalidate()
+			a.topic.Reset("")
+			a.reportedRef = f.SessionID
+			a.sink.SessionRef(f.SessionID)
+		}
+		if title := a.topic.Observe(prompt); title != "" {
+			a.renameSession(title)
+		} else if newSession && prompt != "" {
+			revision := a.titles.Revision()
+			go a.requestTitle(prompt, func(title string) {
+				if a.titles.Revision() == revision {
+					a.sink.SessionName(title)
+				}
+			})
 		}
 	case "session_state_changed":
 		a.mu.Lock()
@@ -822,7 +843,7 @@ func (a *Adapter) handleSystem(f *frame) {
 			a.reportSettings()
 		}
 	case "session_title_changed":
-		if f.Title != "" {
+		if f.Title != "" && (a.reportedRef == "" || f.SessionID == "" || f.SessionID == a.reportedRef) {
 			a.sink.SessionName(f.Title)
 		}
 	case "task_started":
